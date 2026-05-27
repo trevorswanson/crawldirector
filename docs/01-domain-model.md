@@ -2,7 +2,7 @@
 
 This is the conceptual model of the DCC world. It is deliberately
 **stack-agnostic** — the concrete database tables live in
-[`07-data-schema.md`](./07-data-schema.md). When the two disagree, this document
+[`09-data-schema.md`](./09-data-schema.md). When the two disagree, this document
 describes *intent* and the schema describes *implementation*.
 
 ## Design strategy: a typed entity-relationship-event graph
@@ -284,8 +284,8 @@ To keep the world large but the database sane:
 Every entity, relationship, and event is scoped to a **Campaign**. A Campaign
 belongs to a DM (owner) and may have co-DMs and players. Nothing crosses
 campaign boundaries except optional **shared library templates** (see roadmap
-M8) — reusable canonical DCC content (the 18 canonical floors, common mob types)
+M10) — reusable canonical DCC content (the 18 canonical floors, common mob types)
 a DM can import as a starting point.
 
 See [`02-architecture.md`](./02-architecture.md) for how this maps onto auth and
-data access, and [`07-data-schema.md`](./07-data-schema.md) for tables.
+data access, and [`09-data-schema.md`](./09-data-schema.md) for tables.

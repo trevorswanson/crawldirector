@@ -1,4 +1,4 @@
-# 08 — UI / UX
+# 10 — UI / UX
 
 Two distinct surfaces share one app and one data layer but feel different:
 
@@ -15,6 +15,10 @@ Two distinct surfaces share one app and one data layer but feel different:
   screen; it is where the product's promise is felt. (See pipeline doc.)
 - **World browser** — navigate entities by type, floor/area, faction, tag, or
   full-text search. Quick-create stubs.
+- **Search & "Ask the Campaign"** — a global search box (hybrid keyword + semantic)
+  and a natural-language Q&A that answers from canon with **citations** linking to
+  the source entities/events. Read-only; never writes canon. See
+  [`07-search-retrieval.md`](./07-search-retrieval.md).
 - **Entity detail** — structured fields + markdown description, the
   **connections panel** (in/out relationships), a **timeline** of events the
   entity participated in, provenance ("authored by you" vs "AI-generated, model
@@ -38,6 +42,10 @@ Two distinct surfaces share one app and one data layer but feel different:
   mode (single act / reactive cascade / world tick / scenario), set bounds
   (depth, fan-out, spend cap) and knowledge scope, preview cost, run. Subagent
   proposals flow to the Review Queue as a batch.
+- **Session console** — run a live game: a fast capture log (freeform, `@`/`#`
+  tagging), one-click **reveal** of an entity/fact to players, **promote** log
+  entries into canonical Events (via the review pipeline), and generate session /
+  per-crawler **recaps**. See [`08-session-mode.md`](./08-session-mode.md).
 - **Sharing controls** — set entity/field visibility; manage players and
   player↔crawler links.
 - **Campaign settings** — members/roles, AI providers + keys, style guide, spend
@@ -78,7 +86,13 @@ UI a crawler "sees."
   changes, announcements, personal notifications).
 - **Known world:** only entities/relationships the DM has shared
   (`SHARED_WITH_PLAYERS`/`PLAYER_FACING`) — e.g. floors they've cleared, NPCs
-  they've met, factions they know of. Secrets and DM-only data never appear.
+  they've met, factions they know of, populated from the reveal log
+  ([`08-session-mode.md`](./08-session-mode.md)). Secrets and DM-only data never
+  appear.
+- **Recap feed:** "previously on *Dungeon Crawler World*" — session and
+  per-crawler recaps the DM publishes, in the show's voice.
+- **Ask (scoped):** the player can ask natural-language questions, answered only
+  from their player-visible canon ([`07-search-retrieval.md`](./07-search-retrieval.md)).
 - **Suggestions:** a player can propose edits (e.g. bio, notes); these enter the
   review pipeline as `PLAYER_SUGGESTION`, never write canon directly.
 

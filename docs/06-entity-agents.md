@@ -45,7 +45,7 @@ as flexible JSON; suggested schemas live in `/src/lib/agentProfiles`):
 - **Crawler (NPC)** — bravery, morality, loyalty, ambition, self-preservation,
   fame-seeking. (PCs are usually player/DM-driven; simulation is opt-in per
   crawler — handy for absent players or background rivals.)
-- **System AI** — the doc-09 dial set, plus its unique role of also driving
+- **System AI** — the doc-05 dial set, plus its unique role of also driving
   global generation prompts.
 
 Every profile also carries: **goals** (overt + secret/DM-only), **resources /
@@ -116,7 +116,7 @@ This is distinct from player visibility; it shapes *believable* behavior.
 - **Locks respected.** Agents never silently modify locked targets; such changes
   surface as *blocked* operations.
 - **Consistency.** Agents receive canon + style guide + constraints; the
-  non-mutating consistency-check generator (M8) can sweep a run for
+  non-mutating consistency-check generator (M10) can sweep a run for
   contradictions and propose fixes.
 - **Determinism/repro.** Provenance captures profile snapshot, prompt version,
   temperature/seed, and run id so a run can be understood and re-created.
@@ -141,13 +141,13 @@ causal web populating itself, under the DM's control.
 - Simulation runs use the `Job` table (`kind: AGENT_SIM | WORLD_TICK | SCENARIO`)
   and emit Change Sets; actions become `Event`s (actor via `EventParticipant`)
   with `EventCausality` links — no fundamentally new tables. See
-  [`07-data-schema.md`](./07-data-schema.md).
+  [`09-data-schema.md`](./09-data-schema.md).
 
 ## Build sequencing
 
-- **M5** lays the *generic* profile foundation (persona snapshots usable by any
+- **M6** lays the *generic* profile foundation (persona snapshots usable by any
   entity, authored in the studio), shipped alongside the System AI flagship.
-- **M9** delivers the *runtime*: agent action runs, reactive cascades, world
+- **M11** delivers the *runtime*: agent action runs, reactive cascades, world
   ticks, and fog-of-war — since it depends on events/relationships (M3), AI
-  generation (M4), profiles (M5), and pairs naturally with the event-consequence
-  generator (M8). See [`09-roadmap.md`](./09-roadmap.md).
+  generation (M4), profiles (M6), and pairs naturally with the event-consequence
+  generator (M10). See [`11-roadmap.md`](./11-roadmap.md).

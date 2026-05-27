@@ -60,6 +60,10 @@ Planned generator families (build incrementally — see roadmap):
   loot descriptions for the player-facing UI.
 - **Consistency checks (non-mutating):** scan canon for contradictions and
   propose fixes as a Change Set the DM can review.
+- **Recaps & broadcasts:** summarize a session's log + events into a "previously
+  on *Dungeon Crawler World*" recap (overall or per-crawler), optionally in a show
+  voice. Persona-aware; respects visibility for player-facing recaps. See
+  [`08-session-mode.md`](./08-session-mode.md).
 
 ### Persona-aware generators
 
@@ -87,7 +91,10 @@ confirmation). Full design in [`06-entity-agents.md`](./06-entity-agents.md).
 When assembling context for a generation:
 1. Pull relevant canon (the target entity, its neighborhood/floor, related
    entities, recent events) — respecting the player/DM scope of the requester
-   (generators run as the DM).
+   (generators run as the DM). Use the **retrieval subsystem**
+   ([`07-search-retrieval.md`](./07-search-retrieval.md)) to select the *relevant*
+   slice rather than dumping the campaign — this is the main lever on proposal
+   quality and contradiction-avoidance at scale.
 2. **Locked data is included as read-only reference** and explicitly marked "do
    not modify." The orchestrator post-filters output: any operation touching a
    locked target becomes a *blocked* operation, never an applied one.

@@ -128,9 +128,20 @@ This projection is the *only* way player-facing surfaces read data.
   graph views need composite indexes on edge `(campaignId, sourceId)` /
   `(campaignId, targetId)`. Consider materialized views later if graph traversal
   gets heavy.
+- **Search & retrieval:** a hybrid full-text + vector (pgvector) index over canon
+  powers both the search/"Ask the Campaign" UI and retrieval-augmented context
+  for generators/agents. Retrieval is campaign-scoped and visibility-filtered like
+  every other read. Embeddings are derived data (regenerable, never in
+  provenance), re-indexed asynchronously via the `Job` worker on canon change.
+  See [`07-search-retrieval.md`](./07-search-retrieval.md).
+- **Data portability:** because the DM owns canon and the hosting may be
+  ephemeral, a campaign can be **exported** (structured JSON + human-readable
+  Markdown, provenance included) and **imported** (as reviewable `IMPORT` change
+  sets). Scheduled backups in production. This is a first-class trust feature, not
+  an afterthought — hardened in M9.
 
 ## Deployment (deferred but noted)
 
 Any Node-hosting + managed Postgres (e.g. Vercel + Neon/Supabase, or a single
 container + Postgres). The first build session does not need to commit to a host;
-local Docker Postgres is enough. Revisit at M7.
+local Docker Postgres is enough. Revisit at M9.

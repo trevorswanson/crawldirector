@@ -106,6 +106,10 @@ character would "see" — plus whatever extra information the DM chooses to shar
 | **Agent profile** | A generalized persona (values, goals, voice) on any major entity. |
 | **Agent run / world tick** | A subagent role-playing an entity (or many) to propose in-character actions and events. |
 | **Fog of war** | Limiting an agent's context to what its entity plausibly knows, for believable behavior. |
+| **Ask the Campaign** | Natural-language Q&A answered from canon with citations (read-only). |
+| **Session log** | Low-friction real-time capture during live play, promoted to canon via review. |
+| **Reveal** | A DM action that shares an entity/fact with players during a session (audited). |
+| **Recap** | A "previously on…" summary of a session, optionally in the show's voice. |
 
 > Naming note: the in-fiction "System AI" is a DCC world concept and a modeled
 > entity (see [`05-system-ai-persona.md`](./05-system-ai-persona.md)). To avoid

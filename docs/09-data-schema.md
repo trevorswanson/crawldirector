@@ -1,4 +1,4 @@
-# 07 — Data Schema (draft Prisma)
+# 09 — Data Schema (draft Prisma)
 
 > **Draft, not final.** This sketches the Prisma schema implied by the domain
 > model, architecture, and review pipeline. The first build sessions will refine
@@ -319,10 +319,10 @@ model AiKey {            // encrypted at rest
   @@unique([campaignId, providerId])
 }
 
-model Job {              // async generation / bulk + simulation runs
+model Job {              // async generation / bulk + simulation + indexing runs
   id          String @id @default(cuid())
   campaignId  String
-  kind        String   // generator family: ... | AGENT_SIM | WORLD_TICK | SCENARIO
+  kind        String   // ... | AGENT_SIM | WORLD_TICK | SCENARIO | REINDEX | RECAP
   params      Json
   status      String   // QUEUED RUNNING DONE FAILED
   resultSetId String?  // -> ChangeSet
@@ -331,6 +331,50 @@ model Job {              // async generation / bulk + simulation runs
   createdAt   DateTime @default(now())
   @@index([campaignId, status])
 }
+
+// ───────────── Search & retrieval (doc 07) ─────────────
+// Hybrid full-text + vector index over canon. Derived data, regenerable,
+// never part of provenance. Requires the pgvector extension.
+model SearchDoc {
+  id          String   @id @default(cuid())
+  campaignId  String
+  targetType  String   // ENTITY | RELATIONSHIP | EVENT
+  targetId    String
+  content     String   // denormalized name + summary + salient fields
+  // tsv      Unsupported("tsvector")        // full-text (generated/maintained)
+  // embedding Unsupported("vector(1536)")   // pgvector; dims per embed model
+  visibility  Visibility @default(DM_ONLY)   // mirror of source, for scoped retrieval
+  updatedAt   DateTime @updatedAt
+  @@unique([targetType, targetId])
+  @@index([campaignId, targetType])
+}
+
+// ───────────── Live session mode (doc 08) ─────────────
+model Session {
+  id          String   @id @default(cuid())
+  campaignId  String
+  title       String
+  playedAt    DateTime?
+  focus       String?               // floor/area in focus
+  notes       String?               // prep + freeform
+  entries     SessionLogEntry[]
+  createdAt   DateTime @default(now())
+  @@index([campaignId, playedAt])
+}
+
+model SessionLogEntry {             // real-time capture; NOT canon until promoted
+  id          String   @id @default(cuid())
+  sessionId   String
+  at          DateTime @default(now())
+  text        String
+  taggedIds   String[] @default([])  // referenced entity ids (@Carl, #Floor7)
+  promotedEventId String?            // -> Event, once promoted via review pipeline
+  session     Session  @relation(fields: [sessionId], references: [id])
+  @@index([sessionId, at])
+}
+// Reveals (flipping visibility to players during a session) are recorded as
+// AuditLog rows (action: REVEAL) — the principled source for the player
+// interface's "known world" and for agent fog-of-war.
 ```
 
 ## Notes for implementers
@@ -352,3 +396,9 @@ model Job {              // async generation / bulk + simulation runs
   `APPLY_EVENT_EFFECTS`, on approval) creates/updates a `PersonaSnapshot`. This
   keeps the System AI's drift in the same reviewable causality graph as
   everything else (see doc 05).
+- `SearchDoc` mirrors its source's `visibility` so retrieval can be scoped
+  without joining back to canon; the indexer keeps it in sync on re-index.
+  Enable the `pgvector` extension in the first migration that adds it (M5).
+- **Export/import** (doc 02, M9) serializes campaign canon + provenance to
+  JSON/Markdown; import re-creates it as `IMPORT` change sets. No new tables —
+  it reads/writes the existing model.

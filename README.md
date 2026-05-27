@@ -31,6 +31,11 @@ This tool helps Game Masters:
   hosts, and crawlers their own values, goals, and voice, then let subagents
   role-play them to propose believable actions and events. Every move lands as a
   reviewable proposal, so the causal web populates itself under the DM's control.
+- **Find anything, ask anything** — hybrid search and a cited "Ask the Campaign"
+  Q&A over canon; the same retrieval feeds *relevant* context to every generator.
+- **Run the table** — a live session mode captures play as it happens, reveals
+  facts to players, promotes the good moments to canon, and generates in-voice
+  "previously on…" recaps.
 
 ## Status
 
@@ -51,10 +56,12 @@ All planning lives in [`docs/`](./docs). Read in this order:
 | [`docs/04-ai-integration.md`](./docs/04-ai-integration.md) | BYO-key, multi-provider generation pipeline |
 | [`docs/05-system-ai-persona.md`](./docs/05-system-ai-persona.md) | **Signature feature:** the evolving System AI persona that drives generation |
 | [`docs/06-entity-agents.md`](./docs/06-entity-agents.md) | **Signature feature:** agent profiles + subagent simulation for all major entities |
-| [`docs/07-data-schema.md`](./docs/07-data-schema.md) | Concrete (draft) Prisma schema for everything above |
-| [`docs/08-ui-ux.md`](./docs/08-ui-ux.md) | DM console + player crawler interface |
-| [`docs/09-roadmap.md`](./docs/09-roadmap.md) | Milestones M0–M10, sequenced and decomposable |
-| [`docs/10-working-sessions.md`](./docs/10-working-sessions.md) | How future sessions pick up and extend the work |
+| [`docs/07-search-retrieval.md`](./docs/07-search-retrieval.md) | Hybrid search, "Ask the Campaign", and retrieval-augmented AI context |
+| [`docs/08-session-mode.md`](./docs/08-session-mode.md) | Live session capture, reveals, and "previously on…" recaps |
+| [`docs/09-data-schema.md`](./docs/09-data-schema.md) | Concrete (draft) Prisma schema for everything above |
+| [`docs/10-ui-ux.md`](./docs/10-ui-ux.md) | DM console + player crawler interface |
+| [`docs/11-roadmap.md`](./docs/11-roadmap.md) | Milestones M0–M12, sequenced and decomposable |
+| [`docs/12-working-sessions.md`](./docs/12-working-sessions.md) | How future sessions pick up and extend the work |
 
 ## Decisions already made
 
