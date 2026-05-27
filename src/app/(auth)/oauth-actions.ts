@@ -2,6 +2,6 @@
 
 import { signIn } from "@/server/auth";
 
-export async function signInWithGitHub() {
-  await signIn("github", { redirectTo: "/dashboard" });
+export async function signInWithOidc() {
+  await signIn("oidc", { redirectTo: "/dashboard" });
 }

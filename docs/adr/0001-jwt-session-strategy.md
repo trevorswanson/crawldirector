@@ -21,9 +21,9 @@ exists in the schema (the adapter expects it) but is unused under JWT.
 
 ## Consequences
 
-- Credentials + OAuth (GitHub) coexist. OAuth users/accounts are still persisted
-  via the adapter; credentials users are looked up and verified (bcrypt) in the
-  provider's `authorize`.
+- Credentials + a generic OIDC provider coexist. OIDC users/accounts are still
+  persisted via the adapter; credentials users are looked up and verified
+  (bcrypt) in the provider's `authorize`.
 - No DB round-trip to read a session (stateless JWT). Server-side sign-out and
   instant revocation are weaker than DB sessions; acceptable for this app.
 - Route protection is done in server components via `requireUser()` (which calls

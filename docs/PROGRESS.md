@@ -20,9 +20,10 @@ campaign dashboard; tests + lint run in CI.
       (`Account`/`Session`/`VerificationToken`). Initial migration committed.
 - [x] `docker-compose.yml` (local Postgres), `.env.example`, `prisma/seed.ts`
       (`npm run db:seed` → `dm@example.com` / `password123`).
-- [x] Auth.js (NextAuth v5): credentials (email/password, bcrypt) + GitHub
-      OAuth (enabled when env vars are set). JWT session strategy — see
-      [ADR 0001](./adr/0001-jwt-session-strategy.md).
+- [x] Auth.js (NextAuth v5): credentials (email/password, bcrypt) + a generic
+      OIDC provider (provider id `oidc`, enabled when `AUTH_OIDC_*` env vars are
+      set; works with self-hosted Authentik/Keycloak/etc. via discovery). JWT
+      session strategy — see [ADR 0001](./adr/0001-jwt-session-strategy.md).
 - [x] Service-layer skeleton + directory structure per
       [`02-architecture.md`](./02-architecture.md): `src/server/{services,auth,
       ai,review}`, `src/lib`, `src/components/ui`.

@@ -11,12 +11,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { CredentialsForm } from "@/components/auth/credentials-form";
 import { signInAction } from "@/app/(auth)/actions";
-import { signInWithGitHub } from "@/app/(auth)/oauth-actions";
+import { signInWithOidc } from "@/app/(auth)/oauth-actions";
+import { oidcEnabled } from "@/server/auth";
 
 export default function SignInPage() {
-  const githubEnabled = Boolean(
-    process.env.AUTH_GITHUB_ID && process.env.AUTH_GITHUB_SECRET,
-  );
+  const oidcName = process.env.AUTH_OIDC_NAME ?? "SSO";
 
   return (
     <Card>
@@ -28,10 +27,10 @@ export default function SignInPage() {
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <CredentialsForm mode="sign-in" action={signInAction} />
-        {githubEnabled && (
-          <form action={signInWithGitHub}>
+        {oidcEnabled && (
+          <form action={signInWithOidc}>
             <Button type="submit" variant="outline" className="w-full">
-              Continue with GitHub
+              Continue with {oidcName}
             </Button>
           </form>
         )}

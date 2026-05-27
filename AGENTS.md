@@ -109,7 +109,9 @@ Notes:
   `schema.prisma`, and the client is imported from `@/generated/prisma/client`
   (gitignored, regenerated on install). See `docs/adr/0002`.
 - **Auth** uses the JWT session strategy (credentials needs it); see
-  `docs/adr/0001`. GitHub OAuth turns on when `AUTH_GITHUB_ID`/`SECRET` are set.
+  `docs/adr/0001`. A generic OIDC provider (id `oidc`) turns on when
+  `AUTH_OIDC_ISSUER`/`AUTH_OIDC_ID`/`AUTH_OIDC_SECRET` are set — e.g. a
+  self-hosted Authentik. Callback URL: `/api/auth/callback/oidc`.
 - Generate an `AUTH_SECRET` with `npx auth secret` or `openssl rand -base64 32`.
 
 Environment: copy `.env.example` to `.env`. Never commit secrets (`.env` is

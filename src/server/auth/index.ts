@@ -1,6 +1,6 @@
 import NextAuth, { type DefaultSession } from "next-auth";
+import type { Provider } from "next-auth/providers";
 import Credentials from "next-auth/providers/credentials";
-import GitHub from "next-auth/providers/github";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import bcrypt from "bcryptjs";
 
@@ -15,9 +15,24 @@ declare module "next-auth" {
   }
 }
 
-const githubId = process.env.AUTH_GITHUB_ID;
-const githubSecret = process.env.AUTH_GITHUB_SECRET;
-const githubEnabled = Boolean(githubId && githubSecret);
+// Generic OIDC provider (provider id "oidc"). Works with any standards-
+// compliant identity provider via discovery from AUTH_OIDC_ISSUER's
+// .well-known/openid-configuration — e.g. a self-hosted Authentik, Keycloak,
+// Auth0, etc. Enabled only when all three env vars are present.
+export const oidcEnabled = Boolean(
+  process.env.AUTH_OIDC_ISSUER &&
+    process.env.AUTH_OIDC_ID &&
+    process.env.AUTH_OIDC_SECRET,
+);
+
+const oidcProvider: Provider = {
+  id: "oidc",
+  name: process.env.AUTH_OIDC_NAME ?? "SSO",
+  type: "oidc",
+  issuer: process.env.AUTH_OIDC_ISSUER,
+  clientId: process.env.AUTH_OIDC_ID,
+  clientSecret: process.env.AUTH_OIDC_SECRET,
+};
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
@@ -47,9 +62,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         return { id: user.id, email: user.email, name: user.name };
       },
     }),
-    ...(githubEnabled
-      ? [GitHub({ clientId: githubId, clientSecret: githubSecret })]
-      : []),
+    ...(oidcEnabled ? [oidcProvider] : []),
   ],
   callbacks: {
     jwt: ({ token, user }) => {
