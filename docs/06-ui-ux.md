@@ -27,12 +27,17 @@ Two distinct surfaces share one app and one data layer but feel different:
 - **AI generation panel** — pick a generator, set params/scope, preview cost,
   run; results flow to the Review Queue. For persona-aware generators, show the
   compiled System AI persona that will flavor the run, with inline edit.
-- **System AI persona studio** — author the dungeon AI's evolving character: dial
-  sliders (sentience, compliance, volatility, benevolence, resentment,
-  theatricality), overt + secret agenda lists, voice-guide textarea, and a
-  **live-updating compiled-prompt preview** the DM can edit and lock. A snapshot
-  timeline shows the arc of drift; diff two snapshots to see what changed. See
-  [`09-system-ai-persona.md`](./09-system-ai-persona.md).
+- **Agent profile studio** — author any actor entity's profile: per-type dial
+  sliders, values, overt + secret goals, resources, knowledge-scope toggle,
+  voice-guide textarea, and (for the System AI) a **live-updating compiled-prompt
+  preview** the DM can edit and lock. A snapshot timeline shows the arc of change;
+  diff two snapshots to see what shifted. The System AI is the flagship instance.
+  See [`09-system-ai-persona.md`](./09-system-ai-persona.md) and
+  [`10-entity-agents.md`](./10-entity-agents.md).
+- **Simulation panel** — pick an actor (or a set, for a world tick), choose a run
+  mode (single act / reactive cascade / world tick / scenario), set bounds
+  (depth, fan-out, spend cap) and knowledge scope, preview cost, run. Subagent
+  proposals flow to the Review Queue as a batch.
 - **Sharing controls** — set entity/field visibility; manage players and
   player↔crawler links.
 - **Campaign settings** — members/roles, AI providers + keys, style guide, spend

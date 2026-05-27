@@ -47,6 +47,10 @@ character would "see" — plus whatever extra information the DM chooses to shar
      is modeled as an evolving entity whose persona drifts over the campaign and
      **drives the generation prompts**. This is the second signature feature; see
      [`09-system-ai-persona.md`](./09-system-ai-persona.md).
+   - **Major entities are motivated agents.** The persona machinery generalizes:
+     factions, sponsors, gods, show hosts, and crawlers carry values + goals, and
+     subagents can role-play them to **propose believable actions and events** —
+     all as reviewable proposals. See [`10-entity-agents.md`](./10-entity-agents.md).
 2. **Provenance is permanent.** Every piece of data records where it came from
    (DM-authored, AI-generated + which model/prompt, player-suggested, imported)
    and its review history. Provenance is never discarded on approval.
@@ -98,6 +102,9 @@ character would "see" — plus whatever extra information the DM chooses to shar
 | **The System / System AI** | The in-fiction AI running the dungeon — modeled as an evolving `SYSTEM_AI` entity (distinct from *our* AI generators). |
 | **Persona snapshot** | A point-in-time capture of the System AI's traits, agendas, and voice along campaign time. |
 | **Persona compiler** | Turns the active persona snapshot into a prompt fragment injected into generation. |
+| **Agent profile** | A generalized persona (values, goals, voice) on any major entity. |
+| **Agent run / world tick** | A subagent role-playing an entity (or many) to propose in-character actions and events. |
+| **Fog of war** | Limiting an agent's context to what its entity plausibly knows, for believable behavior. |
 
 > Naming note: the in-fiction "System AI" is a DCC world concept and a modeled
 > entity (see [`09-system-ai-persona.md`](./09-system-ai-persona.md)). To avoid

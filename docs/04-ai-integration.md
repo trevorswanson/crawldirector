@@ -70,6 +70,18 @@ output reflects the dungeon AI's current mood and agenda. See
 [`09-system-ai-persona.md`](./09-system-ai-persona.md). Non-voice generators
 (e.g. real-world faction relationship inference) run without the persona.
 
+### Agent simulation generators
+
+A family where the model is briefed to *be* a specific entity (its agent
+profile + scoped context) and propose in-character **actions and events**:
+single-act, reactive-cascade, and world-tick runs. With providers that support
+it (e.g. the Claude Agent SDK), multiple entity-agents run as **parallel
+subagents**, each sandboxed to one entity's perspective; otherwise the
+orchestrator runs them sequentially behind the same provider interface. Output is
+structured proposals (events + relationship/state deltas + causal links) → PENDING
+review. Cascades and ticks are **bounded** (max depth/fan-out, spend caps, DM
+confirmation). Full design in [`10-entity-agents.md`](./10-entity-agents.md).
+
 ## Context building & lock-awareness
 
 When assembling context for a generation:

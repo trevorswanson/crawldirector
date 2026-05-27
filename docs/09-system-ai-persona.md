@@ -29,6 +29,12 @@ provenance — exactly like everything else.
 
 ## The System AI as an entity
 
+> **Generalization:** the persona machinery described here is the flagship
+> instance of a general **agent profile** capability that applies to factions,
+> sponsors, gods, show hosts, and crawlers, and powers subagent simulation of
+> their actions — see [`10-entity-agents.md`](./10-entity-agents.md). The System
+> AI is special only in that its persona *also* drives global generation prompts.
+
 Modeled as an `Entity` of type `SYSTEM_AI` (typically one active per campaign,
 though the model permits more — e.g. a successor edition, or a comparison of "the
 System AI as crawlers see it" vs. "its true self"). Because it's an Entity it

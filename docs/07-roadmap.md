@@ -78,7 +78,10 @@ drives the generation prompts.
   edit/lock of the compiled prompt; provenance records which snapshot produced
   each generation.
 - Persona studio UI (dial sliders, agenda lists, voice guide, live prompt
-  preview, snapshot timeline + diff).
+  preview, snapshot timeline + diff). Build the snapshot model **generically** so
+  any actor entity can carry a profile (values/goals/resources/knowledge scope) —
+  the foundation the M7B simulation runtime builds on, even though the studio
+  ships first focused on the System AI.
 - `PERSONA_SHIFT` event-effect kind so persona drift lives in the causality graph
   (AI-proposed shifts arrive with M7's consequence generator; manual shifts work
   now).
@@ -111,6 +114,25 @@ drives the generation prompts.
 - **Done when:** a DM can seed a world from the library and let AI propose
   causal consequences of logged events.
 
+## M7B — Entity agents & multi-agent simulation (signature feature)
+**Goal:** let major entities role-play themselves to propose believable actions
+and events from their values.
+- Generalize agent profiles to all actor types (faction, sponsor, organization,
+  deity, show host, NPC crawler) with per-type value/dial schemas; `agentEnabled`
+  flag; profile studio for any entity.
+- **Agent runtime**: subagent orchestration behind the provider abstraction
+  (parallel where supported, sequential otherwise); single-act, reactive-cascade,
+  and world-tick run modes; scenario/"what-if" runs.
+- Proposals = events (entity as ACTOR) + relationship/state deltas + causal links,
+  landing as PENDING batches in the Review Queue. Fog-of-war knowledge scoping
+  (omniscient vs. in-character). Bounded cascades (depth/fan-out caps, spend caps,
+  DM confirmation); locks respected; provenance per acting agent + profile.
+- Simulation panel UI; integrates with the event-consequence generator (M7).
+- **Done when:** a DM can enable agents on entities, run a single act / reactive
+  cascade / world tick, and review a batch of in-character proposed events with
+  causal links — all bounded and provenance-tracked, nothing auto-canon.
+  See [`10-entity-agents.md`](./10-entity-agents.md).
+
 ## M8 — Advanced worldbuilding (stretch)
 **Goal:** depth features as the world grows.
 - Richer graph analytics (centrality, "who's most connected", faction-power
@@ -124,8 +146,9 @@ drives the generation prompts.
 ## Dependency graph
 
 ```
-M0 ─▶ M1 ─▶ M2 ─▶ M3 ─▶ M4 ─▶ M4B ─▶ M5 ─▶ M6 ─▶ M7 ─▶ M8
-               ▲                ▲                  │
+M0 ─▶ M1 ─▶ M2 ─▶ M3 ─▶ M4 ─▶ M4B ─▶ M5 ─▶ M6 ─▶ M7 ─▶ M7B ─▶ M8
+               ▲                ▲                         ▲
+               │                │                         └ M7B needs M3/M4/M4B
                │                └ M4B needs M2/M3/M4 (pipeline, events, generators)
                └────────── M5 also depends on M2 (visibility/pipeline)
 ```

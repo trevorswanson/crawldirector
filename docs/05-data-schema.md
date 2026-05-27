@@ -87,6 +87,7 @@ model Entity {
   locked       Boolean     @default(false)
   lockedFields String[]    @default([])
   isStub       Boolean     @default(false)
+  agentEnabled Boolean     @default(false)   // participates in agent simulation (doc 10)
 
   campaign     Campaign    @relation(fields: [campaignId], references: [id])
   crawler      Crawler?                       // satellite (if type == CRAWLER)
@@ -120,18 +121,22 @@ model Crawler {
   // class/species/items/skills/achievements modeled as Relationships
 }
 
-// ───────────── System AI persona ─────────────
-// Ordered snapshots of a SYSTEM_AI entity's evolving behavior; exactly one
-// active per entity at a given point in campaign time. See doc 09.
+// ───────────── Agent profile / persona ─────────────
+// Generalized: ordered snapshots of ANY actor entity's evolving profile
+// (System AI, factions, sponsors, gods, hosts, NPC crawlers). Exactly one
+// active per entity at a given point in campaign time. See docs 09 and 10.
 model PersonaSnapshot {
   id            String      @id @default(cuid())
   campaignId    String
-  entityId      String                     // the SYSTEM_AI entity (could generalize)
+  entityId      String                     // any agent-bearing entity
   label         String?                    // e.g. "post-court-defiance"
   inGameTime    Json        @default("{}")
   orderKey      Float?
-  dials         Json        @default("{}") // { sentience, compliance, volatility, benevolence, resentment, theatricality, ... }
-  agendas       Json        @default("[]") // [{ text, secret: bool }]
+  dials         Json        @default("{}") // per entity-type traits (System AI: sentience/compliance/...; faction: ambition/aggression/...)
+  values        Json        @default("[]") // core values / ideology driving behavior
+  agendas       Json        @default("[]") // goals: [{ text, secret: bool }]
+  resources     Json        @default("{}") // capabilities the agent can actually use
+  knowledgeScope String     @default("OMNISCIENT") // OMNISCIENT | IN_CHARACTER (fog of war)
   voiceGuide    String?
   constraints   String?                    // hard canon rules for generation
   compiledPrompt String?                   // cached persona prompt fragment
@@ -309,10 +314,10 @@ model AiKey {            // encrypted at rest
   @@unique([campaignId, providerId])
 }
 
-model Job {              // async generation / bulk runs
+model Job {              // async generation / bulk + simulation runs
   id          String @id @default(cuid())
   campaignId  String
-  kind        String   // generator family
+  kind        String   // generator family: ... | AGENT_SIM | WORLD_TICK | SCENARIO
   params      Json
   status      String   // QUEUED RUNNING DONE FAILED
   resultSetId String?  // -> ChangeSet

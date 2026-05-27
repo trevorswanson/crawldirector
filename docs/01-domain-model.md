@@ -117,9 +117,22 @@ Its state lives in an ordered series of **persona snapshots** (traits/"dials",
 overt + secret agendas, voice guide, compiled prompt) along campaign time; its
 political entanglement is expressed as dispositioned relationship edges to
 factions/organizations/crawlers. This is a signature feature with its own design
-doc — see [`09-system-ai-persona.md`](./09-system-ai-persona.md). The persona
-model is general enough to later flavor other "voice" entities (show hosts like
-the Maestro), but the System AI is the flagship instance.
+doc — see [`09-system-ai-persona.md`](./09-system-ai-persona.md). The System AI
+is the flagship instance of a **general agent-profile capability** (values,
+goals, voice) that applies to any motivated entity — factions, sponsors, gods,
+show hosts, crawlers — and powers subagent simulation of their actions; see
+[`10-entity-agents.md`](./10-entity-agents.md).
+
+### Agents (motivated actor entities)
+
+Any entity that *acts* can carry an **agent profile** (a generalized persona
+snapshot): values, goals (overt + secret), dispositions, resources, constraints,
+and voice. Profile-bearing types include Faction, Sponsor, Organization, Deity,
+Show host (NPC), Crawler (NPC), and the System AI. Profiles are versioned,
+reviewable, and lockable like any canon, and they enable **subagent simulation**
+— role-playing the entity to propose in-character actions/events that flow
+through the review pipeline. Full design in
+[`10-entity-agents.md`](./10-entity-agents.md).
 
 ### Media layer
 

@@ -27,6 +27,10 @@ This tool helps Game Masters:
   persona compiles into the generation prompts, so generated encounters,
   monsters, bosses, loot, and announcements reflect *who the System AI is right
   now*.
+- **Simulate a world of motivated actors** — give factions, sponsors, gods, show
+  hosts, and crawlers their own values, goals, and voice, then let subagents
+  role-play them to propose believable actions and events. Every move lands as a
+  reviewable proposal, so the causal web populates itself under the DM's control.
 
 ## Status
 
@@ -50,6 +54,7 @@ All planning lives in [`docs/`](./docs). Read in this order:
 | [`docs/07-roadmap.md`](./docs/07-roadmap.md) | Milestones M0–M8 (incl. M4B), sequenced and decomposable |
 | [`docs/08-working-sessions.md`](./docs/08-working-sessions.md) | How future sessions pick up and extend the work |
 | [`docs/09-system-ai-persona.md`](./docs/09-system-ai-persona.md) | The evolving System AI persona that drives generation prompts |
+| [`docs/10-entity-agents.md`](./docs/10-entity-agents.md) | Generalized agent profiles + subagent simulation for all major entities |
 
 ## Decisions already made
 
