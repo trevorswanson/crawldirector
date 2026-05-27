@@ -155,7 +155,7 @@ DMs will generate a lot. The review queue must support:
 
 This pipeline is implemented by the `review` service (`/src/server/review`) and
 backed by `ChangeSet`, `ChangeOperation`, `Provenance`, `Lock`, and `AuditLog`
-tables (see [`05-data-schema.md`](./05-data-schema.md)). The `entities`,
+tables (see [`07-data-schema.md`](./07-data-schema.md)). The `entities`,
 `relationships`, and `events` services call into `review` for all mutations —
 they do not write canon themselves.
 

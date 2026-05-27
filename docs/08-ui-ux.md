@@ -1,4 +1,4 @@
-# 06 — UI / UX
+# 08 — UI / UX
 
 Two distinct surfaces share one app and one data layer but feel different:
 
@@ -32,8 +32,8 @@ Two distinct surfaces share one app and one data layer but feel different:
   voice-guide textarea, and (for the System AI) a **live-updating compiled-prompt
   preview** the DM can edit and lock. A snapshot timeline shows the arc of change;
   diff two snapshots to see what shifted. The System AI is the flagship instance.
-  See [`09-system-ai-persona.md`](./09-system-ai-persona.md) and
-  [`10-entity-agents.md`](./10-entity-agents.md).
+  See [`05-system-ai-persona.md`](./05-system-ai-persona.md) and
+  [`06-entity-agents.md`](./06-entity-agents.md).
 - **Simulation panel** — pick an actor (or a set, for a world tick), choose a run
   mode (single act / reactive cascade / world tick / scenario), set bounds
   (depth, fan-out, spend cap) and knowledge scope, preview cost, run. Subagent

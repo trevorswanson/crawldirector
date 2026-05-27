@@ -67,7 +67,7 @@ Several generators are **persona-aware** (`personaAware: true`): encounter,
 monster/mob-type, boss, loot/reward, and System-message generators. For these,
 the active **System AI persona** is compiled to a prompt fragment and injected so
 output reflects the dungeon AI's current mood and agenda. See
-[`09-system-ai-persona.md`](./09-system-ai-persona.md). Non-voice generators
+[`05-system-ai-persona.md`](./05-system-ai-persona.md). Non-voice generators
 (e.g. real-world faction relationship inference) run without the persona.
 
 ### Agent simulation generators
@@ -80,7 +80,7 @@ subagents**, each sandboxed to one entity's perspective; otherwise the
 orchestrator runs them sequentially behind the same provider interface. Output is
 structured proposals (events + relationship/state deltas + causal links) → PENDING
 review. Cascades and ticks are **bounded** (max depth/fan-out, spend caps, DM
-confirmation). Full design in [`10-entity-agents.md`](./10-entity-agents.md).
+confirmation). Full design in [`06-entity-agents.md`](./06-entity-agents.md).
 
 ## Context building & lock-awareness
 

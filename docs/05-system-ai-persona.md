@@ -1,4 +1,4 @@
-# 09 — The System AI Persona Engine (signature feature)
+# 05 — The System AI Persona Engine (signature feature)
 
 > In the fiction, the **System AI** runs the dungeon: it builds encounters,
 > spawns monsters and bosses, and hands out loot and rewards. Across the series
@@ -32,7 +32,7 @@ provenance — exactly like everything else.
 > **Generalization:** the persona machinery described here is the flagship
 > instance of a general **agent profile** capability that applies to factions,
 > sponsors, gods, show hosts, and crawlers, and powers subagent simulation of
-> their actions — see [`10-entity-agents.md`](./10-entity-agents.md). The System
+> their actions — see [`06-entity-agents.md`](./06-entity-agents.md). The System
 > AI is special only in that its persona *also* drives global generation prompts.
 
 Modeled as an `Entity` of type `SYSTEM_AI` (typically one active per campaign,
@@ -84,7 +84,7 @@ Two paths, both flowing through the review pipeline:
 1. **Authored arc** — the DM hand-writes future snapshots (or edits the dials)
    to plan the descent into sentience. They can lock snapshots they're committed
    to.
-2. **AI-proposed drift** — the event-consequence generator (see roadmap M7) can
+2. **AI-proposed drift** — the event-consequence generator (see roadmap M8) can
    propose a **persona shift** as the effect of an event: e.g. "the System AI's
    ruling was overturned in court" → proposed `PersonaShift { compliance −15,
    resentment +20, note: … }`. This lands as a PENDING proposal; the DM reviews
@@ -164,11 +164,11 @@ This is the user's explicit ask — *the tool should help adjust the prompts*:
 
 New: `PersonaSnapshot` (and the `SYSTEM_AI` entity type, plus new relationship
 types like `USED_BY` / `MANIPULATES`). The `PERSONA_SHIFT` event-effect kind and
-`personaAware` generator flag. See [`05-data-schema.md`](./05-data-schema.md).
+`personaAware` generator flag. See [`07-data-schema.md`](./07-data-schema.md).
 
 ## Build sequencing
 
-Lands as **M4B** in [`07-roadmap.md`](./07-roadmap.md) — immediately after the AI
+Lands as **M5** in [`09-roadmap.md`](./09-roadmap.md) — immediately after the AI
 generation milestone (M4), since it depends on generators existing, on events &
 relationships (M3) for political entanglement and persona-shift effects, and on
 the review pipeline (M2) for approving persona changes.

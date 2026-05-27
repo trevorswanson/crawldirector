@@ -1,6 +1,6 @@
-# 10 — Entity Agents & Multi-Agent Simulation (signature feature)
+# 06 — Entity Agents & Multi-Agent Simulation (signature feature)
 
-> The [System AI persona engine](./09-system-ai-persona.md) gives one entity a
+> The [System AI persona engine](./05-system-ai-persona.md) gives one entity a
 > set of values + a voice that drive generation. This feature **generalizes that
 > machinery to every major entity** — factions, sponsors, corporations, gods/Old
 > Ones, show hosts, and crawlers — and adds a **simulation runtime**: subagents
@@ -15,7 +15,7 @@
 
 This is built directly on the [review pipeline](./03-review-pipeline.md), the
 [events & causality graph](./01-domain-model.md), the [AI
-integration](./04-ai-integration.md), and the persona model from doc 09. The
+integration](./04-ai-integration.md), and the persona model from doc 05. The
 System AI is simply the flagship agent; the same parts power the rest.
 
 ## Two layers
@@ -23,7 +23,7 @@ System AI is simply the flagship agent; the same parts power the rest.
 1. **Agent profile** *(who an entity is)* — a generalized persona: values,
    goals, dispositions, resources, voice, constraints. A versioned, reviewable,
    lockable snapshot attached to any entity (the same `PersonaSnapshot` model as
-   doc 09, broadened). Cheap to add; useful even without simulation, because it
+   doc 05, broadened). Cheap to add; useful even without simulation, because it
    documents motivation and feeds persona-aware flavor generation.
 2. **Agent runtime** *(what an entity does)* — subagents that, given a profile +
    scoped world context + a trigger, propose in-character actions and the events
@@ -116,7 +116,7 @@ This is distinct from player visibility; it shapes *believable* behavior.
 - **Locks respected.** Agents never silently modify locked targets; such changes
   surface as *blocked* operations.
 - **Consistency.** Agents receive canon + style guide + constraints; the
-  non-mutating consistency-check generator (M7) can sweep a run for
+  non-mutating consistency-check generator (M8) can sweep a run for
   contradictions and propose fixes.
 - **Determinism/repro.** Provenance captures profile snapshot, prompt version,
   temperature/seed, and run id so a run can be understood and re-created.
@@ -141,13 +141,13 @@ causal web populating itself, under the DM's control.
 - Simulation runs use the `Job` table (`kind: AGENT_SIM | WORLD_TICK | SCENARIO`)
   and emit Change Sets; actions become `Event`s (actor via `EventParticipant`)
   with `EventCausality` links — no fundamentally new tables. See
-  [`05-data-schema.md`](./05-data-schema.md).
+  [`07-data-schema.md`](./07-data-schema.md).
 
 ## Build sequencing
 
-- **M4B** lays the *generic* profile foundation (persona snapshots usable by any
+- **M5** lays the *generic* profile foundation (persona snapshots usable by any
   entity, authored in the studio), shipped alongside the System AI flagship.
-- **M7B** delivers the *runtime*: agent action runs, reactive cascades, world
+- **M9** delivers the *runtime*: agent action runs, reactive cascades, world
   ticks, and fog-of-war — since it depends on events/relationships (M3), AI
-  generation (M4), profiles (M4B), and pairs naturally with the event-consequence
-  generator (M7). See [`07-roadmap.md`](./07-roadmap.md).
+  generation (M4), profiles (M5), and pairs naturally with the event-consequence
+  generator (M8). See [`09-roadmap.md`](./09-roadmap.md).

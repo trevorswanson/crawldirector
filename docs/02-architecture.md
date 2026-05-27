@@ -133,4 +133,4 @@ This projection is the *only* way player-facing surfaces read data.
 
 Any Node-hosting + managed Postgres (e.g. Vercel + Neon/Supabase, or a single
 container + Postgres). The first build session does not need to commit to a host;
-local Docker Postgres is enough. Revisit at M6.
+local Docker Postgres is enough. Revisit at M7.

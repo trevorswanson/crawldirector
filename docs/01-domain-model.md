@@ -2,7 +2,7 @@
 
 This is the conceptual model of the DCC world. It is deliberately
 **stack-agnostic** — the concrete database tables live in
-[`05-data-schema.md`](./05-data-schema.md). When the two disagree, this document
+[`07-data-schema.md`](./07-data-schema.md). When the two disagree, this document
 describes *intent* and the schema describes *implementation*.
 
 ## Design strategy: a typed entity-relationship-event graph
@@ -83,7 +83,7 @@ double as Faction members or Show hosts via relationships.
   NPCs tied to the relevant Organization/Show/Faction via `EMPLOYS` / `MEMBER_OF`
   / `PRODUCES` edges. They are tracked exactly like any other persistent NPC.
 - Powerful NPCs (faction leaders, gods, hosts, key production figures) are
-  **actor entities** and can carry an [agent profile](./10-entity-agents.md).
+  **actor entities** and can carry an [agent profile](./06-entity-agents.md).
 
 **Species / Class** — catalog entities (30+ species, many bizarre classes in the
 TTRPG). Crawlers and NPCs reference them. Hold mechanical notes, flavor, typical
@@ -116,7 +116,7 @@ or factions via ordinary edges.
 > belong to a guild that is allied with a faction).
 
 Because Party and Guild are actor entities, they can also carry an
-[agent profile](./10-entity-agents.md) — a guild has goals, rivalries, and a
+[agent profile](./06-entity-agents.md) — a guild has goals, rivalries, and a
 collective "personality" a subagent can role-play.
 
 ### World structure
@@ -163,11 +163,11 @@ Its state lives in an ordered series of **persona snapshots** (traits/"dials",
 overt + secret agendas, voice guide, compiled prompt) along campaign time; its
 political entanglement is expressed as dispositioned relationship edges to
 factions/organizations/crawlers. This is a signature feature with its own design
-doc — see [`09-system-ai-persona.md`](./09-system-ai-persona.md). The System AI
+doc — see [`05-system-ai-persona.md`](./05-system-ai-persona.md). The System AI
 is the flagship instance of a **general agent-profile capability** (values,
 goals, voice) that applies to any motivated entity — factions, sponsors, gods,
 show hosts, crawlers — and powers subagent simulation of their actions; see
-[`10-entity-agents.md`](./10-entity-agents.md).
+[`06-entity-agents.md`](./06-entity-agents.md).
 
 ### Agents (motivated actor entities)
 
@@ -178,7 +178,7 @@ Show host (NPC), Crawler (NPC), and the System AI. Profiles are versioned,
 reviewable, and lockable like any canon, and they enable **subagent simulation**
 — role-playing the entity to propose in-character actions/events that flow
 through the review pipeline. Full design in
-[`10-entity-agents.md`](./10-entity-agents.md).
+[`06-entity-agents.md`](./06-entity-agents.md).
 
 ### Media layer
 
@@ -252,7 +252,7 @@ Event fields:
   is represented and traversed.
 - **Effects:** structured deltas (e.g. "Faction X strength −10", "Crawler Y
   gained Title Z", or a **`PERSONA_SHIFT`** that nudges the System AI's dials —
-  see [`09-system-ai-persona.md`](./09-system-ai-persona.md)) that can optionally
+  see [`05-system-ai-persona.md`](./05-system-ai-persona.md)) that can optionally
   be *applied* to entity state on approval.
 - provenance + review state.
 
@@ -284,8 +284,8 @@ To keep the world large but the database sane:
 Every entity, relationship, and event is scoped to a **Campaign**. A Campaign
 belongs to a DM (owner) and may have co-DMs and players. Nothing crosses
 campaign boundaries except optional **shared library templates** (see roadmap
-M7) — reusable canonical DCC content (the 18 canonical floors, common mob types)
+M8) — reusable canonical DCC content (the 18 canonical floors, common mob types)
 a DM can import as a starting point.
 
 See [`02-architecture.md`](./02-architecture.md) for how this maps onto auth and
-data access, and [`05-data-schema.md`](./05-data-schema.md) for tables.
+data access, and [`07-data-schema.md`](./07-data-schema.md) for tables.

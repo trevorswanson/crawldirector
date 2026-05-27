@@ -1,4 +1,4 @@
-# 05 — Data Schema (draft Prisma)
+# 07 — Data Schema (draft Prisma)
 
 > **Draft, not final.** This sketches the Prisma schema implied by the domain
 > model, architecture, and review pipeline. The first build sessions will refine
@@ -92,7 +92,7 @@ model Entity {
   locked       Boolean     @default(false)
   lockedFields String[]    @default([])
   isStub       Boolean     @default(false)
-  agentEnabled Boolean     @default(false)   // participates in agent simulation (doc 10)
+  agentEnabled Boolean     @default(false)   // participates in agent simulation (doc 06)
 
   campaign     Campaign    @relation(fields: [campaignId], references: [id])
   crawler      Crawler?                       // satellite (if type == CRAWLER)
@@ -129,7 +129,7 @@ model Crawler {
 // ───────────── Agent profile / persona ─────────────
 // Generalized: ordered snapshots of ANY actor entity's evolving profile
 // (System AI, factions, sponsors, gods, hosts, NPC crawlers). Exactly one
-// active per entity at a given point in campaign time. See docs 09 and 10.
+// active per entity at a given point in campaign time. See docs 05 and 06.
 model PersonaSnapshot {
   id            String      @id @default(cuid())
   campaignId    String
@@ -351,4 +351,4 @@ model Job {              // async generation / bulk + simulation runs
   (`{ kind, entityId, dialDeltas, note }`); applying it (via
   `APPLY_EVENT_EFFECTS`, on approval) creates/updates a `PersonaSnapshot`. This
   keeps the System AI's drift in the same reviewable causality graph as
-  everything else (see doc 09).
+  everything else (see doc 05).

@@ -1,4 +1,4 @@
-# 08 — Working Sessions Guide
+# 10 — Working Sessions Guide
 
 This project is intended to be built over **many sessions**. This doc tells a
 future session (human or AI) how to pick up the work and extend it without
@@ -6,10 +6,10 @@ drifting from the plan.
 
 ## Before you start a build session
 
-1. **Read the plan in order** (README → 00 → … → 07). At minimum read
+1. **Read the plan in order** (README → 00 → … → 10). At minimum read
    [`00-overview.md`](./00-overview.md), [`03-review-pipeline.md`](./03-review-pipeline.md)
    (the invariants), and the milestone you're working on in
-   [`07-roadmap.md`](./07-roadmap.md).
+   [`09-roadmap.md`](./09-roadmap.md).
 2. **Find the current milestone.** Check `git log`, the codebase, and
    `docs/PROGRESS.md` (create it on first build session) to see what's done.
 3. **Pick the lowest-numbered unfinished milestone.** Don't skip ahead;
@@ -35,7 +35,7 @@ just keep each PR coherent and green.
 - **Player reads only via the visibility projection.** Never hand a player query
   raw canon.
 - **Secrets (API keys) never reach the client, logs, or provenance.**
-- **Keep `01-domain-model.md` and `05-data-schema.md` honest.** If you change the
+- **Keep `01-domain-model.md` and `07-data-schema.md` honest.** If you change the
   model, update the docs in the same PR.
 
 ## Keep the plan alive

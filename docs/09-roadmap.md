@@ -1,16 +1,18 @@
-# 07 — Roadmap
+# 09 — Roadmap
 
 Milestones are **sequenced** so each builds on the last and each is small enough
 for a future session to **decompose into tasks**. Every milestone lists: goal,
 the slice of work, and a "done when" bar. Treat the task bullets as a starting
 decomposition, not a frozen spec — refine at the start of each session
-(see [`08-working-sessions.md`](./08-working-sessions.md)).
+(see [`10-working-sessions.md`](./10-working-sessions.md)).
 
 > **Sequencing rationale:** the review pipeline is the signature feature, but it
 > has nothing to operate on without a tenant model and at least one entity type.
 > So M0–M1 lay the foundation, **M2 builds the pipeline as early as possible**,
 > and everything after rides on it. We deliberately avoid building lots of CRUD
-> before the pipeline, so we never write a canon path that bypasses review.
+> before the pipeline, so we never write a canon path that bypasses review. The
+> two other signature features — the System AI persona engine (M5) and entity
+> agents (M9) — both sit on top of AI generation (M4).
 
 ---
 
@@ -28,7 +30,8 @@ decomposition, not a frozen spec — refine at the start of each session
 ## M1 — Entity core + one first-class type
 **Goal:** model and edit canon for the generic `Entity` plus `Crawler`.
 - `Entity` table + `Crawler` satellite; Zod entity schemas; visibility/lock
-  columns (columns now, enforcement in M2).
+  columns (columns now, enforcement in M2). Entity-type enum incl. `PARTY`,
+  `GUILD`, `SYSTEM_AI`, etc.
 - Entity CRUD through the **service layer** (not yet routed through the pipeline
   — but written so M2 can slot the pipeline underneath).
 - World browser (list/search) + entity detail (fields + markdown).
@@ -71,7 +74,7 @@ decomposition, not a frozen spec — refine at the start of each session
 - **Done when:** a DM with their own key can generate entities/relationships that
   land as PENDING proposals respecting locks, then review them.
 
-## M4B — System AI persona engine (signature feature)
+## M5 — System AI persona engine (signature feature)
 **Goal:** model the in-fiction System AI as an evolving entity whose persona
 drives the generation prompts.
 - `SYSTEM_AI` entity type + `PersonaSnapshot` (dials, overt/secret agendas, voice
@@ -85,16 +88,17 @@ drives the generation prompts.
 - Persona studio UI (dial sliders, agenda lists, voice guide, live prompt
   preview, snapshot timeline + diff). Build the snapshot model **generically** so
   any actor entity can carry a profile (values/goals/resources/knowledge scope) —
-  the foundation the M7B simulation runtime builds on, even though the studio
+  the foundation the M9 simulation runtime builds on, even though the studio
   ships first focused on the System AI.
 - `PERSONA_SHIFT` event-effect kind so persona drift lives in the causality graph
-  (AI-proposed shifts arrive with M7's consequence generator; manual shifts work
+  (AI-proposed shifts arrive with M8's consequence generator; manual shifts work
   now).
 - **Done when:** a DM can author/evolve the System AI persona, generate
   persona-flavored content that lands as PENDING proposals, and see which persona
   snapshot drove each generation. Persona changes are reviewable + lockable.
+  See [`05-system-ai-persona.md`](./05-system-ai-persona.md).
 
-## M5 — Player crawler interface + sharing
+## M6 — Player crawler interface + sharing
 **Goal:** scoped, in-fiction player experience.
 - Visibility projection enforced for player reads; player↔crawler linking.
 - Crawler sheet, inventory/loot, achievements/titles, System-message feed,
@@ -102,29 +106,29 @@ drives the generation prompts.
 - **Done when:** a player logs in, sees only shared/own-crawler data (verified by
   tests that pending/secret data never leaks), and can submit a suggestion.
 
-## M6 — Hardening & deploy
+## M7 — Hardening & deploy
 **Goal:** make it real.
 - Choose host + managed Postgres; production auth/secrets; backups; rate limits;
   audit/provenance review screens; performance pass on graph queries (indexes /
   materialized views); accessibility + responsive polish.
 - **Done when:** deployed, a real campaign can be run by a DM + players.
 
-## M7 — Shared canon library & event-consequence AI
+## M8 — Shared canon library & event-consequence AI
 **Goal:** leverage and scale.
 - Importable canonical DCC content (the 18 floors, common mob types, archetypes)
   as reviewable `IMPORT` change sets.
 - Event-consequence generator (propose downstream effects + causal links,
   including `PERSONA_SHIFT` effects that drift the System AI in reaction to
-  events — M4B); consistency-check generator (non-mutating → proposals).
+  events — M5); consistency-check generator (non-mutating → proposals).
 - **Done when:** a DM can seed a world from the library and let AI propose
   causal consequences of logged events.
 
-## M7B — Entity agents & multi-agent simulation (signature feature)
+## M9 — Entity agents & multi-agent simulation (signature feature)
 **Goal:** let major entities role-play themselves to propose believable actions
 and events from their values.
 - Generalize agent profiles to all actor types (faction, sponsor, organization,
-  deity, show host, NPC crawler) with per-type value/dial schemas; `agentEnabled`
-  flag; profile studio for any entity.
+  deity, show host, NPC crawler, party, guild) with per-type value/dial schemas;
+  `agentEnabled` flag; profile studio for any entity.
 - **Agent runtime**: subagent orchestration behind the provider abstraction
   (parallel where supported, sequential otherwise); single-act, reactive-cascade,
   and world-tick run modes; scenario/"what-if" runs.
@@ -132,13 +136,13 @@ and events from their values.
   landing as PENDING batches in the Review Queue. Fog-of-war knowledge scoping
   (omniscient vs. in-character). Bounded cascades (depth/fan-out caps, spend caps,
   DM confirmation); locks respected; provenance per acting agent + profile.
-- Simulation panel UI; integrates with the event-consequence generator (M7).
+- Simulation panel UI; integrates with the event-consequence generator (M8).
 - **Done when:** a DM can enable agents on entities, run a single act / reactive
   cascade / world tick, and review a batch of in-character proposed events with
   causal links — all bounded and provenance-tracked, nothing auto-canon.
-  See [`10-entity-agents.md`](./10-entity-agents.md).
+  See [`06-entity-agents.md`](./06-entity-agents.md).
 
-## M8 — Advanced worldbuilding (stretch)
+## M10 — Advanced worldbuilding (stretch)
 **Goal:** depth features as the world grows.
 - Richer graph analytics (centrality, "who's most connected", faction-power
   rollups), Faction-Wars tracker, broadcast/fan-economy modeling, map/zone
@@ -151,15 +155,19 @@ and events from their values.
 ## Dependency graph
 
 ```
-M0 ─▶ M1 ─▶ M2 ─▶ M3 ─▶ M4 ─▶ M4B ─▶ M5 ─▶ M6 ─▶ M7 ─▶ M7B ─▶ M8
-               ▲                ▲                         ▲
-               │                │                         └ M7B needs M3/M4/M4B
-               │                └ M4B needs M2/M3/M4 (pipeline, events, generators)
-               └────────── M5 also depends on M2 (visibility/pipeline)
+M0 ─▶ M1 ─▶ M2 ─▶ M3 ─▶ M4 ─▶ M5 ─▶ M6 ─▶ M7 ─▶ M8 ─▶ M9 ─▶ M10
+                         │     │                       ▲
+   M2 is the linchpin ───┘     │                       │
+   M5 needs M2/M3/M4 ──────────┘                       │
+   M6 needs M2 (visibility/pipeline)                   │
+   M9 needs M3/M4/M5 and pairs with M8 ────────────────┘
 ```
 
 M2 is the linchpin; nothing after it should introduce a canon write path that
-bypasses the pipeline.
+bypasses the pipeline. Note that **build order ≠ doc order**: the persona (M5)
+and agent (M9) *designs* live in docs 05–06 alongside the other feature designs,
+but the agent runtime is sequenced late because it is the heaviest feature and
+pairs with M8's consequence generator.
 
 ## Definition of done (every milestone)
 

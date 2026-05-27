@@ -47,14 +47,14 @@ All planning lives in [`docs/`](./docs). Read in this order:
 | [`docs/00-overview.md`](./docs/00-overview.md) | Vision, goals, core principles, glossary |
 | [`docs/01-domain-model.md`](./docs/01-domain-model.md) | The DCC world as entities, relationships, and events |
 | [`docs/02-architecture.md`](./docs/02-architecture.md) | Tech stack, multi-tenancy, auth, system shape |
-| [`docs/03-review-pipeline.md`](./docs/03-review-pipeline.md) | The signature pending → approve → lock workflow |
+| [`docs/03-review-pipeline.md`](./docs/03-review-pipeline.md) | **Signature feature:** the pending → approve → lock workflow |
 | [`docs/04-ai-integration.md`](./docs/04-ai-integration.md) | BYO-key, multi-provider generation pipeline |
-| [`docs/05-data-schema.md`](./docs/05-data-schema.md) | Concrete (draft) Prisma schema |
-| [`docs/06-ui-ux.md`](./docs/06-ui-ux.md) | DM console + player crawler interface |
-| [`docs/07-roadmap.md`](./docs/07-roadmap.md) | Milestones M0–M8 (incl. M4B), sequenced and decomposable |
-| [`docs/08-working-sessions.md`](./docs/08-working-sessions.md) | How future sessions pick up and extend the work |
-| [`docs/09-system-ai-persona.md`](./docs/09-system-ai-persona.md) | The evolving System AI persona that drives generation prompts |
-| [`docs/10-entity-agents.md`](./docs/10-entity-agents.md) | Generalized agent profiles + subagent simulation for all major entities |
+| [`docs/05-system-ai-persona.md`](./docs/05-system-ai-persona.md) | **Signature feature:** the evolving System AI persona that drives generation |
+| [`docs/06-entity-agents.md`](./docs/06-entity-agents.md) | **Signature feature:** agent profiles + subagent simulation for all major entities |
+| [`docs/07-data-schema.md`](./docs/07-data-schema.md) | Concrete (draft) Prisma schema for everything above |
+| [`docs/08-ui-ux.md`](./docs/08-ui-ux.md) | DM console + player crawler interface |
+| [`docs/09-roadmap.md`](./docs/09-roadmap.md) | Milestones M0–M10, sequenced and decomposable |
+| [`docs/10-working-sessions.md`](./docs/10-working-sessions.md) | How future sessions pick up and extend the work |
 
 ## Decisions already made
 
