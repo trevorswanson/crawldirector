@@ -1,0 +1,115 @@
+// DCC Campaign Builder — Prisma schema.
+// M0 scope: identity, tenancy (Campaign), and Membership (roles), plus the
+// Auth.js adapter models. The full domain model (Entity graph, review pipeline,
+// etc.) arrives in later milestones — see docs/09-data-schema.md.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────── Roles ─────────────
+// Per docs/02-architecture.md: tenancy boundary is the Campaign; a Membership
+// maps (user, campaign) -> role. A user may hold different roles across
+// campaigns.
+enum Role {
+  OWNER
+  CO_DM
+  PLAYER
+}
+
+// ───────────── Identity & Auth.js adapter ─────────────
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  // Credentials sign-in: bcrypt hash. Null for OAuth-only users.
+  passwordHash  String?
+
+  accounts    Account[]
+  sessions    Session[]
+  memberships Membership[]
+  // Campaigns this user owns (also represented by an OWNER membership).
+  ownedCampaigns Campaign[] @relation("OwnedCampaigns")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ───────────── Tenancy ─────────────
+model Campaign {
+  id         String  @id @default(cuid())
+  name       String
+  summary    String?
+  // Tone / canon constraints surfaced to AI generators in later milestones.
+  styleGuide String?
+
+  ownerId String
+  owner   User   @relation("OwnedCampaigns", fields: [ownerId], references: [id])
+
+  members Membership[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+}
+
+model Membership {
+  id         String @id @default(cuid())
+  userId     String
+  campaignId String
+  role       Role
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, campaignId])
+  @@index([campaignId])
+}

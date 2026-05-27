@@ -1,0 +1,15 @@
+import "dotenv/config";
+import { defineConfig, env } from "prisma/config";
+
+// Prisma 7 reads the migration/CLI datasource URL from here (it is no longer
+// allowed in schema.prisma). The runtime client gets its connection via the
+// driver adapter in src/server/db.ts.
+export default defineConfig({
+  schema: "prisma/schema.prisma",
+  migrations: {
+    seed: "tsx prisma/seed.ts",
+  },
+  datasource: {
+    url: env("DATABASE_URL"),
+  },
+});

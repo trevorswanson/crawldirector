@@ -14,10 +14,11 @@ pitch and [`docs/`](./docs) for the full plan.
 
 ## Current status
 
-🚧 **Planning phase — no application code exists yet.** The repo currently holds
-the master plan in `docs/`. The first build session (**M0**) scaffolds the app.
-Until then, the "Build / test / run" section below is a placeholder; **the M0
-session must fill it in.**
+🚧 **M0 (project foundation) implemented.** The app is scaffolded and runnable:
+Next.js 16 (App Router, TS, Tailwind) + Postgres/Prisma 7 + Auth.js, with
+sign-up → create campaign → empty dashboard working, and CI (lint, typecheck,
+build, unit, e2e). See [`docs/PROGRESS.md`](./docs/PROGRESS.md). Next up: **M1**
+(entity core + Crawler).
 
 ## Start here, every session
 
@@ -79,32 +80,40 @@ relevant milestone exists.
 
 ## Build / test / run
 
-> ⚠️ Placeholder — **no app exists yet.** The **M0** session creates the app and
-> must replace this section with the real commands. Until then there is nothing
-> to build or run.
-
-Target shape once M0 lands (the M0 session should confirm/adjust):
-
 ```bash
-# install
+# install (postinstall runs `prisma generate`)
 npm install
 
+# environment
+cp .env.example .env           # then fill in AUTH_SECRET etc.
+
 # database (local)
-docker compose up -d db        # Postgres
-npx prisma migrate dev         # apply migrations
-npm run db:seed                # seed script
+docker compose up -d db        # Postgres on :5432 (db "dcc")
+npm run db:migrate             # apply migrations (prisma migrate dev)
+npm run db:seed                # seed: dm@example.com / password123
 
 # develop
-npm run dev                    # Next.js dev server
+npm run dev                    # Next.js dev server on :3000
 
 # quality gates (must pass before "done")
 npm run lint
 npm run typecheck
-npm run test                   # Vitest unit tests
-npm run test:e2e               # Playwright
+npm run build
+npm run test                   # Vitest unit tests (uses DATABASE_URL; wipes
+                               #   User/Campaign/Membership — use a test DB)
+npm run test:e2e               # Playwright (downloads a browser first run)
 ```
 
-Environment: copy `.env.example` to `.env` (M0 creates it). Never commit secrets.
+Notes:
+- **Prisma 7** uses a driver adapter + `prisma.config.ts`; there is no `url` in
+  `schema.prisma`, and the client is imported from `@/generated/prisma/client`
+  (gitignored, regenerated on install). See `docs/adr/0002`.
+- **Auth** uses the JWT session strategy (credentials needs it); see
+  `docs/adr/0001`. GitHub OAuth turns on when `AUTH_GITHUB_ID`/`SECRET` are set.
+- Generate an `AUTH_SECRET` with `npx auth secret` or `openssl rand -base64 32`.
+
+Environment: copy `.env.example` to `.env`. Never commit secrets (`.env` is
+gitignored; `.env.example` is the committed template).
 
 ## Git workflow
 
