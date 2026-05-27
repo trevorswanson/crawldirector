@@ -108,6 +108,19 @@ of Factions.
 **Sponsor** — an entity (usually an Organization/Faction) sponsoring crawlers or
 shows. Sponsorship is a *relationship* with terms, stake, and money flow.
 
+### The System AI
+
+**SystemAI** (`SYSTEM_AI`) — the in-fiction AI that runs the dungeon: builds
+encounters, spawns mobs/bosses, distributes loot. A first-class entity (usually
+one active per campaign) whose **evolving persona drives the generation prompts**.
+Its state lives in an ordered series of **persona snapshots** (traits/"dials",
+overt + secret agendas, voice guide, compiled prompt) along campaign time; its
+political entanglement is expressed as dispositioned relationship edges to
+factions/organizations/crawlers. This is a signature feature with its own design
+doc — see [`09-system-ai-persona.md`](./09-system-ai-persona.md). The persona
+model is general enough to later flavor other "voice" entities (show hosts like
+the Maestro), but the System AI is the flagship instance.
+
 ### Media layer
 
 **Show / Broadcast** — talk shows, death-spectacle broadcasts, interview
@@ -137,6 +150,9 @@ Relationship types (extensible enum), grouped:
 
 - **Affiliation:** `MEMBER_OF`, `LEADS`, `SPONSORS`, `EMPLOYS`, `ALLIED_WITH`,
   `RIVAL_OF`, `AT_WAR_WITH`, `PARENT_ORG_OF`.
+- **Power / manipulation (esp. the System AI):** `USED_BY`, `MANIPULATES`,
+  `CONTROLS`, `DEFIES` — for "the System AI is being used by corporations" and
+  its own scheming.
 - **Social:** `ALLY_OF`, `ENEMY_OF`, `MENTOR_OF`, `MANAGES`, `LOVES`,
   `FAMILY_OF`, `OWES`.
 - **Spatial / structural:** `LOCATED_ON` (floor), `PART_OF` (neighborhood/zone),
@@ -166,7 +182,9 @@ Event fields:
   This is how "Carl's stunt → sponsor stock drop → faction defunded → war shift"
   is represented and traversed.
 - **Effects:** structured deltas (e.g. "Faction X strength −10", "Crawler Y
-  gained Title Z") that can optionally be *applied* to entity state on approval.
+  gained Title Z", or a **`PERSONA_SHIFT`** that nudges the System AI's dials —
+  see [`09-system-ai-persona.md`](./09-system-ai-persona.md)) that can optionally
+  be *applied* to entity state on approval.
 - provenance + review state.
 
 > **Causality view** is a headline feature: given any entity or event, show the

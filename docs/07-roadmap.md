@@ -66,6 +66,26 @@ decomposition, not a frozen spec — refine at the start of each session
 - **Done when:** a DM with their own key can generate entities/relationships that
   land as PENDING proposals respecting locks, then review them.
 
+## M4B — System AI persona engine (signature feature)
+**Goal:** model the in-fiction System AI as an evolving entity whose persona
+drives the generation prompts.
+- `SYSTEM_AI` entity type + `PersonaSnapshot` (dials, overt/secret agendas, voice
+  guide, constraints, compiled prompt, active flag), all through the pipeline +
+  lockable. New relationship types (`USED_BY`, `MANIPULATES`, `CONTROLS`,
+  `DEFIES`) for political entanglement.
+- **Persona compiler**: snapshot → prompt fragment; inject into persona-aware
+  generators (encounter, monster, boss, loot/reward, System-message). DM preview/
+  edit/lock of the compiled prompt; provenance records which snapshot produced
+  each generation.
+- Persona studio UI (dial sliders, agenda lists, voice guide, live prompt
+  preview, snapshot timeline + diff).
+- `PERSONA_SHIFT` event-effect kind so persona drift lives in the causality graph
+  (AI-proposed shifts arrive with M7's consequence generator; manual shifts work
+  now).
+- **Done when:** a DM can author/evolve the System AI persona, generate
+  persona-flavored content that lands as PENDING proposals, and see which persona
+  snapshot drove each generation. Persona changes are reviewable + lockable.
+
 ## M5 — Player crawler interface + sharing
 **Goal:** scoped, in-fiction player experience.
 - Visibility projection enforced for player reads; player↔crawler linking.
@@ -85,8 +105,9 @@ decomposition, not a frozen spec — refine at the start of each session
 **Goal:** leverage and scale.
 - Importable canonical DCC content (the 18 floors, common mob types, archetypes)
   as reviewable `IMPORT` change sets.
-- Event-consequence generator (propose downstream effects + causal links);
-  consistency-check generator (non-mutating → proposals).
+- Event-consequence generator (propose downstream effects + causal links,
+  including `PERSONA_SHIFT` effects that drift the System AI in reaction to
+  events — M4B); consistency-check generator (non-mutating → proposals).
 - **Done when:** a DM can seed a world from the library and let AI propose
   causal consequences of logged events.
 
@@ -103,9 +124,10 @@ decomposition, not a frozen spec — refine at the start of each session
 ## Dependency graph
 
 ```
-M0 ──▶ M1 ──▶ M2 ──▶ M3 ──▶ M4 ──▶ M5 ──▶ M6 ──▶ M7 ──▶ M8
-                 ▲                          │
-                 └────────── M5 also depends on M2 (visibility/pipeline)
+M0 ─▶ M1 ─▶ M2 ─▶ M3 ─▶ M4 ─▶ M4B ─▶ M5 ─▶ M6 ─▶ M7 ─▶ M8
+               ▲                ▲                  │
+               │                └ M4B needs M2/M3/M4 (pipeline, events, generators)
+               └────────── M5 also depends on M2 (visibility/pipeline)
 ```
 
 M2 is the linchpin; nothing after it should introduce a canon write path that

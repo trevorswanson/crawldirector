@@ -25,7 +25,14 @@ Two distinct surfaces share one app and one data layer but feel different:
   downstream-effect chain as a navigable DAG.
 - **Timeline** — chronological events with in-game-time ordering and filters.
 - **AI generation panel** — pick a generator, set params/scope, preview cost,
-  run; results flow to the Review Queue.
+  run; results flow to the Review Queue. For persona-aware generators, show the
+  compiled System AI persona that will flavor the run, with inline edit.
+- **System AI persona studio** — author the dungeon AI's evolving character: dial
+  sliders (sentience, compliance, volatility, benevolence, resentment,
+  theatricality), overt + secret agenda lists, voice-guide textarea, and a
+  **live-updating compiled-prompt preview** the DM can edit and lock. A snapshot
+  timeline shows the arc of drift; diff two snapshots to see what changed. See
+  [`09-system-ai-persona.md`](./09-system-ai-persona.md).
 - **Sharing controls** — set entity/field visibility; manage players and
   player↔crawler links.
 - **Campaign settings** — members/roles, AI providers + keys, style guide, spend

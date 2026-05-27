@@ -63,6 +63,7 @@ enum EntityType {
   FLOOR NEIGHBORHOOD LOCATION BOSS MOB_TYPE
   FACTION ORGANIZATION SPONSOR
   SHOW
+  SYSTEM_AI
   ITEM SKILL SPELL ACHIEVEMENT TITLE SYSTEM_MESSAGE DEITY
   // extensible
 }
@@ -92,6 +93,7 @@ model Entity {
   playerOwners Membership[] @relation("PlayerCrawlers")
   outEdges     Relationship[] @relation("SourceEntity")
   inEdges      Relationship[] @relation("TargetEntity")
+  personas     PersonaSnapshot[]
   provenance   Provenance[]
 
   createdAt    DateTime    @default(now())
@@ -118,9 +120,36 @@ model Crawler {
   // class/species/items/skills/achievements modeled as Relationships
 }
 
+// ───────────── System AI persona ─────────────
+// Ordered snapshots of a SYSTEM_AI entity's evolving behavior; exactly one
+// active per entity at a given point in campaign time. See doc 09.
+model PersonaSnapshot {
+  id            String      @id @default(cuid())
+  campaignId    String
+  entityId      String                     // the SYSTEM_AI entity (could generalize)
+  label         String?                    // e.g. "post-court-defiance"
+  inGameTime    Json        @default("{}")
+  orderKey      Float?
+  dials         Json        @default("{}") // { sentience, compliance, volatility, benevolence, resentment, theatricality, ... }
+  agendas       Json        @default("[]") // [{ text, secret: bool }]
+  voiceGuide    String?
+  constraints   String?                    // hard canon rules for generation
+  compiledPrompt String?                   // cached persona prompt fragment
+  isActive      Boolean     @default(false)
+  status        CanonStatus @default(PENDING)
+  locked        Boolean     @default(false)
+  promptLocked  Boolean     @default(false) // protects compiledPrompt from recompile/AI
+  version       Int         @default(1)
+  entity        Entity      @relation(fields: [entityId], references: [id])
+  provenance    Provenance[]
+  createdAt     DateTime    @default(now())
+  @@index([campaignId, entityId, orderKey])
+}
+
 // ───────────── Relationships (typed edges) ─────────────
 enum RelationshipType {
   MEMBER_OF LEADS SPONSORS EMPLOYS ALLIED_WITH RIVAL_OF AT_WAR_WITH PARENT_ORG_OF
+  USED_BY MANIPULATES CONTROLS DEFIES
   ALLY_OF ENEMY_OF MENTOR_OF MANAGES LOVES FAMILY_OF OWES
   LOCATED_ON PART_OF CONTAINS BOSS_OF SPAWNS_ON
   HAS_CLASS HAS_SPECIES OWNS_ITEM KNOWS_SKILL EARNED_ACHIEVEMENT HOLDS_TITLE APPEARS_ON
@@ -245,6 +274,7 @@ model Provenance {       // attached to each canon record's history
   entityId      String?
   relationshipId String?
   eventId       String?
+  personaSnapshotId String?
   changeSetId   String
   source        ChangeSource
   field         String?               // null => whole-record
@@ -304,3 +334,8 @@ model Job {              // async generation / bulk runs
   hard-delete where history matters).
 - Revisit whether more types deserve satellites once query patterns are known
   (likely candidates next: `Faction`, `Floor`).
+- `Event.effects` entries include a `PERSONA_SHIFT` kind
+  (`{ kind, entityId, dialDeltas, note }`); applying it (via
+  `APPLY_EVENT_EFFECTS`, on approval) creates/updates a `PersonaSnapshot`. This
+  keeps the System AI's drift in the same reviewable causality graph as
+  everything else (see doc 09).

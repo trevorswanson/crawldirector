@@ -21,6 +21,12 @@ This tool helps Game Masters:
 - **Run multiple campaigns** across multiple DMs, and **share player-facing
   "crawler interfaces"** with players (the in-fiction System UI each crawler
   sees).
+- **Drive generation with the evolving System AI** — model the in-fiction
+  dungeon AI as a living entity whose personality drifts over the campaign
+  (more sentient, less compliant, entangled in faction politics). Its current
+  persona compiles into the generation prompts, so generated encounters,
+  monsters, bosses, loot, and announcements reflect *who the System AI is right
+  now*.
 
 ## Status
 
@@ -41,8 +47,9 @@ All planning lives in [`docs/`](./docs). Read in this order:
 | [`docs/04-ai-integration.md`](./docs/04-ai-integration.md) | BYO-key, multi-provider generation pipeline |
 | [`docs/05-data-schema.md`](./docs/05-data-schema.md) | Concrete (draft) Prisma schema |
 | [`docs/06-ui-ux.md`](./docs/06-ui-ux.md) | DM console + player crawler interface |
-| [`docs/07-roadmap.md`](./docs/07-roadmap.md) | Milestones M0–M8, sequenced and decomposable |
+| [`docs/07-roadmap.md`](./docs/07-roadmap.md) | Milestones M0–M8 (incl. M4B), sequenced and decomposable |
 | [`docs/08-working-sessions.md`](./docs/08-working-sessions.md) | How future sessions pick up and extend the work |
+| [`docs/09-system-ai-persona.md`](./docs/09-system-ai-persona.md) | The evolving System AI persona that drives generation prompts |
 
 ## Decisions already made
 

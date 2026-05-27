@@ -10,8 +10,8 @@
 
 ### States
 
-Every reviewable artifact (entity, relationship, event — and individual field
-changes within them) moves through:
+Every reviewable artifact (entity, relationship, event, **System AI persona
+snapshot** — and individual field changes within them) moves through:
 
 ```
         ┌──────────┐  submit   ┌──────────┐  approve  ┌────────┐

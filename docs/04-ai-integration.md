@@ -61,6 +61,15 @@ Planned generator families (build incrementally — see roadmap):
 - **Consistency checks (non-mutating):** scan canon for contradictions and
   propose fixes as a Change Set the DM can review.
 
+### Persona-aware generators
+
+Several generators are **persona-aware** (`personaAware: true`): encounter,
+monster/mob-type, boss, loot/reward, and System-message generators. For these,
+the active **System AI persona** is compiled to a prompt fragment and injected so
+output reflects the dungeon AI's current mood and agenda. See
+[`09-system-ai-persona.md`](./09-system-ai-persona.md). Non-voice generators
+(e.g. real-world faction relationship inference) run without the persona.
+
 ## Context building & lock-awareness
 
 When assembling context for a generation:
@@ -71,7 +80,10 @@ When assembling context for a generation:
    not modify." The orchestrator post-filters output: any operation touching a
    locked target becomes a *blocked* operation, never an applied one.
 3. Include a campaign **style guide** (tone, canon constraints the DM sets) so
-   generated content matches the DM's voice.
+   generated content matches the DM's voice. For persona-aware generators, the
+   compiled **System AI persona** fragment is prepended after the style guide and
+   before the task (and is a good prompt-caching candidate, being stable across a
+   run).
 4. Keep context scoped and chunked to control token cost; prefer summaries +
    targeted detail over dumping the whole campaign.
 
