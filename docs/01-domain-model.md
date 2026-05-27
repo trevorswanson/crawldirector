@@ -31,9 +31,9 @@ splinter faction), and everything relates to everything. We therefore use a
 Every modeled noun is an `Entity`. Shared attributes:
 
 - `id`, `campaignId` (scoping)
-- `type` (CRAWLER, FLOOR, NEIGHBORHOOD, BOSS, MOB_TYPE, NPC, FACTION, SHOW,
-  SPONSOR, ITEM, SKILL, CLASS, SPECIES, ACHIEVEMENT, TITLE, LOCATION,
-  ORGANIZATION, DEITY, … extensible)
+- `type` (CRAWLER, NPC, PARTY, GUILD, FLOOR, NEIGHBORHOOD, BOSS, MOB_TYPE,
+  FACTION, ORGANIZATION, SPONSOR, SHOW, SYSTEM_AI, ITEM, SKILL, CLASS, SPECIES,
+  ACHIEVEMENT, TITLE, LOCATION, DEITY, … extensible)
 - `name`, `summary` (short), `description` (long, markdown)
 - `status` lifecycle: `DRAFT → PENDING → CANON` (plus `ARCHIVED`, `REJECTED`)
 - `provenance` (origin + history; see review pipeline)
@@ -64,14 +64,60 @@ First-class types add their own structured columns/relations on top.
 - *Player linkage:* a Crawler may be linked to a `Player` user; that player's
   crawler interface renders this entity.
 
-**NPC** — non-crawler beings: guides (Mordecai), admins (Zev), hosts (Odette,
-the Maestro), faction leaders, gods/Old Ones, shopkeepers, quest-givers.
-Lighter than Crawler but shares the core. Many NPCs double as Faction members or
-Show hosts via relationships.
+**NPC** — non-crawler beings: guides/managers (Mordecai), admins (Zev), hosts
+(Odette, the Maestro), production crew, faction leaders, gods/Old Ones,
+shopkeepers, quest-givers. Lighter than Crawler but shares the core. Many NPCs
+double as Faction members or Show hosts via relationships.
+- **Persistence is inherent.** Entities are scoped to the *campaign*, not a
+  floor, so a recurring NPC persists across the whole show by default. Their
+  movement is modeled as `LOCATED_ON` edges that change over time; their
+  recurring appearances as `Event` participation. Nothing is lost when the party
+  descends a floor.
+- **Role facet.** An NPC carries a `role`/`category` (e.g. `GUIDE`, `MANAGER`,
+  `ADMIN`, `HOST`, `PRODUCTION_CREW`, `ELITE`, `FACTION_LEADER`, `SHOPKEEPER`,
+  `DEITY`, `QUEST_GIVER`) stored in `data` so the persistent cast is queryable —
+  "show me all production elites" or "all active guides/managers." Roles are
+  not mutually exclusive (an NPC can be both a manager and a production figure).
+- **Production & elites.** The people running the show in-fiction — producers,
+  crew, admins, and the powerful "elite" beings attached to a production — are
+  NPCs tied to the relevant Organization/Show/Faction via `EMPLOYS` / `MEMBER_OF`
+  / `PRODUCES` edges. They are tracked exactly like any other persistent NPC.
+- Powerful NPCs (faction leaders, gods, hosts, key production figures) are
+  **actor entities** and can carry an [agent profile](./10-entity-agents.md).
 
 **Species / Class** — catalog entities (30+ species, many bizarre classes in the
 TTRPG). Crawlers and NPCs reference them. Hold mechanical notes, flavor, typical
 abilities.
+
+### Groups & collectives
+
+Crawlers organize into ever-larger groups as the show progresses. These are
+modeled as entities, with membership expressed through the relationship graph —
+so the hierarchy is just typed edges, not a rigid table.
+
+**Party** (`PARTY`) — a small group of crawlers adventuring together (the
+earliest form of organization). Fields: name, formation/disband status, notes.
+Membership: `Crawler --MEMBER_OF--> Party`, with an optional
+`Crawler --LEADS--> Party`. Membership edges carry `since`/`until`, so the
+history of who was in a party when is preserved.
+
+**Guild** (`GUILD`) — a larger crawler-formed organization that **multiple
+parties fan out into**. Membership can be expressed two ways (both supported):
+`Party --PART_OF--> Guild` (parties as the unit) and/or
+`Crawler --MEMBER_OF--> Guild` (individuals directly). A guild can have
+sub-structure, leadership (`LEADS`), alliances, and rivalries with other guilds
+or factions via ordinary edges.
+
+> **Party vs. Guild vs. Faction.** A **Party** is a small crawler band; a
+> **Guild** is a larger crawler-formed collective of parties/members; a
+> **Faction** (see below) is a sponsor/political/war team (e.g. the nine Floor-9
+> armies) — not necessarily crawler-formed. All three are entities and relate to
+> each other freely (a guild may be conscripted into a faction; a party may
+> belong to a guild that is allied with a faction).
+
+Because Party and Guild are actor entities, they can also carry an
+[agent profile](./10-entity-agents.md) — a guild has goals, rivalries, and a
+collective "personality" a subagent can role-play.
 
 ### World structure
 
@@ -158,6 +204,16 @@ and as triggers/causes for Events.
 A **Relationship** is a typed, directed edge: `(sourceEntity) --[type]-->
 (targetEntity)` with attributes and its own provenance + review state (yes,
 relationships go through the review pipeline too).
+
+**Any-to-any by design.** Both endpoints reference the generic `Entity` core, so
+*any* entity can relate to *any* other regardless of type — this is a property
+graph, not a set of fixed per-type foreign keys. The `RelationshipType` is a
+semantic label, not a structural constraint; the schema never forbids an edge by
+type, which keeps the model open to the unexpected connections DCC throws up (a
+guild `RIVAL_OF` a god, a sponsor `MANIPULATES` the System AI, an NPC `MANAGES` a
+party). Type-appropriateness is handled softly in the UI (sensible defaults and
+warnings), never as a hard schema rule. Crawler↔party↔guild membership, NPC
+affiliations, and faction politics are all just edges in this one graph.
 
 Relationship types (extensible enum), grouped:
 

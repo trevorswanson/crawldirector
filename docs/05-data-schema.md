@@ -14,7 +14,11 @@
   columns; everything else lives in `Entity.data` + `customFields`. This keeps
   the review pipeline uniform (it operates on `Entity`) while allowing rich
   queries where they matter.
-- **Relationships and Events are their own tables**, both reviewable.
+- **Relationships and Events are their own tables**, both reviewable. The
+  `Relationship` table is **any-to-any**: `sourceId`/`targetId` both FK to
+  `Entity`, so any type can link to any type (crawler↔party↔guild membership, NPC
+  affiliations, faction politics are all rows here). Type-appropriateness is a UI
+  concern, not a DB constraint.
 - **Review pipeline tables** (`ChangeSet`, `ChangeOperation`, `Provenance`,
   `Lock`, `AuditLog`) are central and referenced by everything mutable.
 
@@ -60,6 +64,7 @@ model Membership {
 // ───────────── Entity core ─────────────
 enum EntityType {
   CRAWLER NPC SPECIES CLASS
+  PARTY GUILD                       // crawler-formed collectives (party → guild)
   FLOOR NEIGHBORHOOD LOCATION BOSS MOB_TYPE
   FACTION ORGANIZATION SPONSOR
   SHOW
@@ -332,6 +337,9 @@ model Job {              // async generation / bulk + simulation runs
 
 - `Entity.data` schemas per `EntityType` should be defined as **Zod schemas** in
   `/src/lib/entitySchemas` and validated on every write; keep them versioned.
+  Examples: `NPC.data.roles: NpcRole[]` (GUIDE/MANAGER/ADMIN/HOST/
+  PRODUCTION_CREW/ELITE/FACTION_LEADER/SHOPKEEPER/DEITY/QUEST_GIVER — non-
+  exclusive, queryable); `PARTY.data`/`GUILD.data` hold formation/disband status.
 - Treat `BigInt` (fanCount) carefully across the JSON boundary.
 - The review service is the only writer of canon — keep mutation logic out of
   route handlers.

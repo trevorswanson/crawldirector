@@ -49,12 +49,17 @@ decomposition, not a frozen spec — refine at the start of each session
 
 ## M3 — Relationships & events graph
 **Goal:** model the connective tissue and causality.
-- `Relationship` (typed edges) + `Event` + `EventParticipant` +
+- `Relationship` (typed, **any-to-any** edges) + `Event` + `EventParticipant` +
   `EventCausality`, all through the pipeline.
 - Connections panel on entity detail; basic relationship graph view; timeline;
   causality (cause/effect) view (start simple, list-based, then visual).
-- **Done when:** a DM can link entities, log events with participants, and
-  traverse cause→effect chains; relationships/events are reviewable + lockable.
+- **Group hierarchies:** crawler → party → guild membership via `MEMBER_OF` /
+  `PART_OF` / `LEADS` edges (PARTY/GUILD entity types added in M1's enum);
+  time-bounded membership preserves "who was where, when." A group/membership
+  view that rolls up a guild's parties and members.
+- **Done when:** a DM can link any entity to any other, build crawler→party→guild
+  membership, log events with participants, and traverse cause→effect chains;
+  relationships/events are reviewable + lockable.
 
 ## M4 — AI generation (BYO-key)
 **Goal:** generate proposals via a provider-agnostic pipeline.

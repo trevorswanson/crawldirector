@@ -97,7 +97,8 @@ character would "see" — plus whatever extra information the DM chooses to shar
 | **Provenance** | The recorded origin + history of a piece of data. |
 | **Crawler interface** | The in-fiction, player-facing System UI for a crawler. |
 | **Entity** | Any modeled noun in the world (crawler, floor, faction, show, item…). |
-| **Relationship** | A typed, directed edge between two entities. |
+| **Relationship** | A typed, directed, any-to-any edge between two entities. |
+| **Party / Guild** | Crawler-formed collectives; parties fan out into guilds (membership via edges). |
 | **Event** | A timestamped occurrence with participants and causal links. |
 | **The System / System AI** | The in-fiction AI running the dungeon — modeled as an evolving `SYSTEM_AI` entity (distinct from *our* AI generators). |
 | **Persona snapshot** | A point-in-time capture of the System AI's traits, agendas, and voice along campaign time. |
