@@ -1,11 +1,17 @@
 import NextAuth, { type DefaultSession } from "next-auth";
-import type { Provider } from "next-auth/providers";
 import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
-import bcrypt from "bcryptjs";
 
 import { prisma } from "@/server/db";
-import { signInSchema } from "@/lib/validation";
+import {
+  authorizeCredentials,
+  jwtCallback,
+  oidcEnabled,
+  oidcProvider,
+  sessionCallback,
+} from "@/server/auth/config";
+
+export { oidcEnabled } from "@/server/auth/config";
 
 declare module "next-auth" {
   interface Session {
@@ -14,25 +20,6 @@ declare module "next-auth" {
     } & DefaultSession["user"];
   }
 }
-
-// Generic OIDC provider (provider id "oidc"). Works with any standards-
-// compliant identity provider via discovery from AUTH_OIDC_ISSUER's
-// .well-known/openid-configuration — e.g. a self-hosted Authentik, Keycloak,
-// Auth0, etc. Enabled only when all three env vars are present.
-export const oidcEnabled = Boolean(
-  process.env.AUTH_OIDC_ISSUER &&
-    process.env.AUTH_OIDC_ID &&
-    process.env.AUTH_OIDC_SECRET,
-);
-
-const oidcProvider: Provider = {
-  id: "oidc",
-  name: process.env.AUTH_OIDC_NAME ?? "SSO",
-  type: "oidc",
-  issuer: process.env.AUTH_OIDC_ISSUER,
-  clientId: process.env.AUTH_OIDC_ID,
-  clientSecret: process.env.AUTH_OIDC_SECRET,
-};
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
@@ -48,30 +35,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
-      authorize: async (raw) => {
-        const parsed = signInSchema.safeParse(raw);
-        if (!parsed.success) return null;
-
-        const { email, password } = parsed.data;
-        const user = await prisma.user.findUnique({ where: { email } });
-        if (!user?.passwordHash) return null;
-
-        const ok = await bcrypt.compare(password, user.passwordHash);
-        if (!ok) return null;
-
-        return { id: user.id, email: user.email, name: user.name };
-      },
+      authorize: authorizeCredentials,
     }),
     ...(oidcEnabled ? [oidcProvider] : []),
   ],
   callbacks: {
-    jwt: ({ token, user }) => {
-      if (user) token.id = user.id;
-      return token;
-    },
-    session: ({ session, token }) => {
-      if (token.id) session.user.id = token.id as string;
-      return session;
-    },
+    jwt: jwtCallback,
+    session: sessionCallback,
   },
 });
