@@ -18,7 +18,7 @@ export default defineConfig({
       // Write the summary even when a test fails, so the PR report still posts.
       reportOnFailure: true,
       // Measure all application source, not just files a test happened to import.
-      all: true,
+      // (In Vitest 4, setting `include` already reports untested files.)
       include: ["src/**/*.{ts,tsx}"],
       exclude: [
         "src/generated/**", // Prisma client, regenerated on install

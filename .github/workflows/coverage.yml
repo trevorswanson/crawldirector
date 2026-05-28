@@ -106,12 +106,24 @@ jobs:
           name: coverage-base
           path: coverage-base
 
+      # The action errors if a compare path is set but missing, so only pass it
+      # when the base summary actually exists (it won't until this lands on main).
+      - name: Detect base coverage
+        id: base
+        run: |
+          if [ -f coverage-base/coverage-summary.json ]; then
+            echo "compare=coverage-base/coverage-summary.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "compare=" >> "$GITHUB_OUTPUT"
+            echo "No base coverage summary found; the trend will appear on later PRs."
+          fi
+
       - name: Report coverage
         uses: davelosert/vitest-coverage-report-action@v2
         with:
           vite-config-path: ./vitest.config.ts
           json-summary-path: coverage/coverage-summary.json
           json-final-path: coverage/coverage-final.json
-          json-summary-compare-path: coverage-base/coverage-summary.json
+          json-summary-compare-path: ${{ steps.base.outputs.compare }}
           threshold-icons: "{0: '🔴', 80: '🟠', 90: '🟢'}"
           comment-on: pr
