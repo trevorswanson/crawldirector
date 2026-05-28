@@ -5,6 +5,9 @@ on:
     branches: ["**"]
   pull_request:
 
+permissions:
+  contents: read
+
 env:
   DATABASE_URL: postgresql://postgres:postgres@localhost:5432/dcc?schema=public
   AUTH_SECRET: ci-test-secret-not-used-in-production
