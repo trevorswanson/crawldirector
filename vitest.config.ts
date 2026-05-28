@@ -8,6 +8,9 @@ export default defineConfig({
     environment: "node",
     globals: true,
     include: ["tests/unit/**/*.test.{ts,tsx}"],
+    // The service-layer integration tests share one Postgres and wipe tables
+    // between runs, so test files must not execute concurrently against it.
+    fileParallelism: false,
     // Loads .env so DB-backed tests find DATABASE_URL (does not override CI env).
     setupFiles: ["dotenv/config"],
     coverage: {
@@ -26,6 +29,18 @@ export default defineConfig({
         "src/**/layout.tsx", // App Router shells with no logic
         "**/*.config.*",
       ],
+      // Coverage floors. `npm run test:coverage` (and the CI gate that runs it)
+      // exits non-zero if aggregate coverage drops below any of these, so a PR
+      // that meaningfully lowers coverage fails. Set just below current coverage
+      // to prevent erosion. These are a floor, not a target — ratchet them up as
+      // coverage rises; never lower them to make a red build pass (add the
+      // missing tests instead).
+      thresholds: {
+        statements: 95,
+        branches: 90,
+        functions: 95,
+        lines: 95,
+      },
     },
   },
 });

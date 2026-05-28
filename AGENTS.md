@@ -103,7 +103,8 @@ npm run typecheck
 npm run build
 npm run test                   # Vitest unit tests (uses DATABASE_URL; wipes
                                #   User/Campaign/Membership — use a test DB)
-npm run test:coverage          # Vitest + V8 coverage (what CI reports on PRs)
+npm run test:coverage          # Vitest + V8 coverage; FAILS below the coverage
+                               #   floors (the gate CI runs — see Testing below)
 npm run test:e2e               # Playwright (downloads a browser first run)
 ```
 
@@ -120,6 +121,38 @@ Notes:
 Environment: copy `.env.example` to `.env`. Never commit secrets (`.env` is
 gitignored; `.env.example` is the committed template).
 
+## Testing & coverage
+
+**Good test coverage is part of the definition of done, not an afterthought.**
+Every change ships with the tests that cover it; the bar rises as the product
+grows.
+
+- **High coverage floors (≥90% on every metric)**, enforced in CI. The exact
+  per-metric floors live in `vitest.config.ts` (currently 95% statements /
+  functions / lines, 90% branches — set just below current coverage to prevent
+  erosion). The `build-and-test` job runs `npm run test:coverage`, and those
+  thresholds make Vitest exit non-zero (failing the merge) if aggregate coverage
+  drops below a floor. Treat them as a **floor, not a target** — ratchet them
+  upward as coverage improves; never lower them to make a red build pass. Add the
+  missing tests instead. (The separate `Coverage` workflow posts the per-PR trend
+  as a comment; that one is report-only.)
+- **The service layer is tested against a real Postgres.** Tests for
+  `src/server/services/*` (and anything issuing Prisma queries) run against a
+  live database — CI provisions one; locally run `docker compose up -d db` (or
+  `podman run … postgres:18`) then `npm run db:deploy`. Don't mock Prisma for
+  these: tenancy/visibility invariants are the whole point and a mock can't
+  verify them. These files share one database and wipe tables between runs, so
+  Vitest file parallelism is disabled (`fileParallelism: false`).
+- **Pure logic and UI mock their boundaries.** Validation, utils, server
+  actions, auth callbacks, and React components/pages mock Prisma, `next-auth`,
+  and `next/navigation` — they don't need a database. Keep the NextAuth
+  composition in `src/server/auth/index.ts` thin (it can't be imported under
+  Vitest because it pulls `next/server`); the testable auth logic lives in
+  `src/server/auth/config.ts`.
+- **Cover the invariants.** The non-negotiable invariants above must be backed by
+  tests once their milestone exists — especially tenancy, the review pipeline,
+  and the visibility projection.
+
 ## Git workflow
 
 - **Develop on the designated feature branch** for this work (see the task /
@@ -131,7 +164,8 @@ gitignored; `.env.example` is the committed template).
 
 ## Verify before reporting done
 
-- Run lint, typecheck, unit tests, and (where relevant) e2e.
+- Run lint, typecheck, and `npm run test:coverage` (must stay above the coverage
+  floors — see Testing & coverage), plus e2e where relevant.
 - For UI work, actually run the app and exercise the flow; for the review
   pipeline and visibility projection, verify the invariants by hand **and** with
   tests.

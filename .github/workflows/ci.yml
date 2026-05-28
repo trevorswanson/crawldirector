@@ -89,8 +89,11 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Unit tests
-        run: npm run test
+      # Runs the unit suite with coverage; the thresholds in vitest.config.ts
+      # make this fail (and block the merge) if coverage drops below the floor.
+      # The report-only Coverage workflow renders the per-PR trend separately.
+      - name: Unit tests & coverage floors
+        run: npm run test:coverage
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
