@@ -12,9 +12,15 @@ import { Button } from "@/components/ui/button";
 import { CredentialsForm } from "@/components/auth/credentials-form";
 import { signUpAction } from "@/app/(auth)/actions";
 import { signInWithOidc } from "@/app/(auth)/oauth-actions";
-import { oidcEnabled } from "@/server/auth";
+
+export const dynamic = "force-dynamic";
 
 export default function SignUpPage() {
+  const oidcEnabled = Boolean(
+    process.env.AUTH_OIDC_ISSUER &&
+      process.env.AUTH_OIDC_ID &&
+      process.env.AUTH_OIDC_SECRET,
+  );
   const oidcName = process.env.AUTH_OIDC_NAME ?? "SSO";
 
   return (
