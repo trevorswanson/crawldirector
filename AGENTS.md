@@ -17,7 +17,9 @@ pitch and [`docs/`](./docs) for the full plan.
 🚧 **M0 (project foundation) implemented.** The app is scaffolded and runnable:
 Next.js 16 (App Router, TS, Tailwind) + Postgres/Prisma 7 + Auth.js, with
 sign-up → create campaign → empty dashboard working, and CI (lint, typecheck,
-build, unit, e2e). See [`docs/PROGRESS.md`](./docs/PROGRESS.md). Next up: **M1**
+build, unit, e2e, coverage) plus security/quality gates (CodeQL, dependency
+review, `npm audit`, migration-drift). Coverage is posted to every PR.
+See [`docs/PROGRESS.md`](./docs/PROGRESS.md). Next up: **M1**
 (entity core + Crawler).
 
 ## Start here, every session
@@ -101,6 +103,7 @@ npm run typecheck
 npm run build
 npm run test                   # Vitest unit tests (uses DATABASE_URL; wipes
                                #   User/Campaign/Membership — use a test DB)
+npm run test:coverage          # Vitest + V8 coverage (what CI reports on PRs)
 npm run test:e2e               # Playwright (downloads a browser first run)
 ```
 
