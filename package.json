@@ -39,7 +39,6 @@
     "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/react": "^16.3.2",
-    "@types/bcryptjs": "^3.0.0",
     "@types/node": "^24.0.0",
     "@types/pg": "^8.20.0",
     "@types/react": "^19",
