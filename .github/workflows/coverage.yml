@@ -25,7 +25,6 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name
     name: Collect coverage (${{ matrix.name }})
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     strategy:
       fail-fast: false
@@ -64,10 +63,15 @@ jobs:
       # postinstall runs `prisma generate`
       - run: npm ci
 
+      # Coverage is best-effort: the base branch may predate this setup, so a
+      # failure here must not fail the job. Whatever summary is produced gets
+      # uploaded; a missing one just means no trend (handled by the report job).
       - name: Apply migrations
+        continue-on-error: true
         run: npx prisma migrate deploy
 
       - name: Unit tests with coverage
+        continue-on-error: true
         run: npm run test:coverage
 
       - name: Upload coverage
