@@ -5,7 +5,10 @@ WORKDIR /app
 COPY package*.json ./
 COPY prisma ./prisma
 COPY prisma.config.ts ./prisma.config.ts
-RUN npm ci
+# postinstall runs `prisma generate`, which loads prisma.config.ts and eagerly
+# resolves env("DATABASE_URL"). No DB is contacted during generate, so a
+# throwaway URL satisfies the config without a real connection.
+RUN DATABASE_URL=postgresql://x:x@localhost/x npm ci
 
 COPY . .
 RUN npm run build
