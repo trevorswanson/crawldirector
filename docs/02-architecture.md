@@ -75,13 +75,33 @@
 
 ### Visibility projection
 
-Reads for players go through a **projection** that:
-- includes only entities/fields with `visibility ∈ {SHARED_WITH_PLAYERS,
-  PLAYER_FACING}` (or that belong to the player's own crawler),
-- strips `secret` relationship/edge attributes and DM-only fields,
-- hides everything still in `PENDING`/`DRAFT` unless the DM explicitly shares.
+Reads for players go through a **projection** that combines two layers:
+- **Campaign-wide defaults** from record/field visibility:
+  - `DM_ONLY`: not broadly visible to players.
+  - `SHARED_WITH_PLAYERS`: visible to players as ordinary known-world canon.
+  - `PLAYER_FACING`: visible to players and intended for in-fiction crawler UI /
+    System presentation. This is a presentation signal layered on top of
+    visibility, not a separate audience.
+- **Per-recipient knowledge grants** from the reveal/knowledge log: a fact,
+  field, entity, relationship, or event may be visible only to specific
+  crawlers, player memberships, NPCs, parties, guilds, or other actor entities.
+
+The projection:
+- includes campaign-wide shared/player-facing data,
+- includes private grants addressed to the requesting player's linked crawler(s)
+  or membership,
+- strips `secret` relationship/edge attributes and DM-only fields unless that
+  exact fact has been granted to the requester,
+- hides everything still in `PENDING`/`DRAFT` unless the DM explicitly shares an
+  approved/player-safe view.
 
 This projection is the *only* way player-facing surfaces read data.
+
+The same knowledge grants feed **agent fog of war**. When an NPC or faction runs
+in in-character mode, retrieval includes canon known by that actor: facts
+granted to that entity, facts from events it witnessed, and information implied
+by relationships such as `KNOWS_ABOUT`. This keeps player secrecy and NPC
+knowledge on one consistent model instead of separate ad-hoc filters.
 
 ## Secrets & API keys
 

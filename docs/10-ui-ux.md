@@ -46,8 +46,9 @@ Two distinct surfaces share one app and one data layer but feel different:
   tagging), one-click **reveal** of an entity/fact to players, **promote** log
   entries into canonical Events (via the review pipeline), and generate session /
   per-crawler **recaps**. See [`08-session-mode.md`](./08-session-mode.md).
-- **Sharing controls** — set entity/field visibility; manage players and
-  player↔crawler links.
+- **Sharing controls** — set campaign-wide entity/field visibility, grant or
+  revoke private knowledge for specific players/crawlers/NPCs/parties/guilds,
+  and manage player↔crawler links.
 - **Campaign settings** — members/roles, AI providers + keys, style guide, spend
   caps, import shared library.
 
@@ -78,17 +79,24 @@ An in-fiction reskin of canon, scoped by the visibility projection
 ([`02-architecture.md`](./02-architecture.md)). It should evoke the DCC System
 UI a crawler "sees."
 
+`SHARED_WITH_PLAYERS` and `PLAYER_FACING` are both player-visible. The
+difference is presentation: shared content appears as normal known-world canon;
+player-facing content is written for direct display in the crawler/System UI
+(messages, achievements, item text, sheet fields). Private reveals decide *who*
+gets access to otherwise hidden facts.
+
 - **Crawler sheet:** name, species/class, level, the core stats, HP/MP/stamina,
   gold, current floor/location.
 - **Inventory & loot boxes:** items, equipped gear, unopened loot boxes (flavor).
 - **Achievements & titles:** earned list with System-style descriptions.
 - **System messages / notifications:** the DM-published in-fiction feed (rule
   changes, announcements, personal notifications).
-- **Known world:** only entities/relationships the DM has shared
-  (`SHARED_WITH_PLAYERS`/`PLAYER_FACING`) — e.g. floors they've cleared, NPCs
-  they've met, factions they know of, populated from the reveal log
+- **Known world:** entities/relationships/facts the DM has shared broadly
+  (`SHARED_WITH_PLAYERS`) plus private knowledge grants for that player or their
+  linked crawler — e.g. floors they've cleared, NPCs they've met, secrets only
+  their crawler learned, populated from the reveal/knowledge log
   ([`08-session-mode.md`](./08-session-mode.md)). Secrets and DM-only data never
-  appear.
+  appear unless explicitly granted to that player/crawler.
 - **Recap feed:** "previously on *Dungeon Crawler World*" — session and
   per-crawler recaps the DM publishes, in the show's voice.
 - **Ask (scoped):** the player can ask natural-language questions, answered only
@@ -102,7 +110,8 @@ UI a crawler "sees."
 - **No leakage:** the projection is the only data path; pending/DM-only/secret
   content is never sent to the client. Test this explicitly.
 - **Shareable:** a player visits their interface via their account; a DM controls
-  exactly what is visible per entity/field.
+  exactly what is visible per entity/field and can reveal specific facts to one
+  player/crawler without revealing them to the table.
 
 ## Cross-cutting UX
 

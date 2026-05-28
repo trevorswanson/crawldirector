@@ -101,10 +101,19 @@ output: structured proposed actions  →  a Change Set (PENDING)
 ### Fog of war (knowledge scoping)
 
 For realism, an agent's context can be restricted to **what its entity plausibly
-knows** — derived from `KNOWS_ABOUT` edges, shared/visible canon, and events it
-witnessed — so a faction doesn't scheme using secrets it could never have. The DM
-toggles **omniscient** (sees all canon) vs. **in-character** knowledge per run.
-This is distinct from player visibility; it shapes *believable* behavior.
+knows** — derived from explicit knowledge grants/reveals, `KNOWS_ABOUT` edges,
+shared/visible canon, and events it witnessed — so a faction doesn't scheme
+using secrets it could never have. The DM toggles **omniscient** (sees all canon)
+vs. **in-character** knowledge per run. This shares the same underlying
+knowledge model as player visibility, but the consumer is different: player
+visibility controls what a human player can read, while agent fog-of-war
+controls what an NPC/faction/crawler agent receives as context.
+
+Example: an NPC privately tells Zev and Carl a secret. The canon secret remains
+DM-only by default, but the reveal creates knowledge grants for Zev's `Entity`
+and Carl's `Crawler` entity. Zev's in-character agent context can retrieve it,
+and Carl's linked player can see it in their crawler interface; no other player
+or NPC agent can retrieve it.
 
 ## Guardrails (must hold)
 

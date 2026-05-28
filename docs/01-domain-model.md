@@ -38,8 +38,13 @@ Every modeled noun is an `Entity`. Shared attributes:
 - `status` lifecycle: `DRAFT → PENDING → CANON` (plus `ARCHIVED`, `REJECTED`)
 - `provenance` (origin + history; see review pipeline)
 - `locked` / per-field locks
-- `visibility` (DM_ONLY, SHARED_WITH_PLAYERS, PLAYER_FACING) — drives the
-  crawler interface and sharing
+- `visibility` — campaign-wide default visibility/presentation:
+  - `DM_ONLY`: visible only to DMs unless a private knowledge grant reveals a
+    specific fact/field/entity to someone else.
+  - `SHARED_WITH_PLAYERS`: visible to players as ordinary known-world canon.
+  - `PLAYER_FACING`: visible to players and intentionally authored for the
+    in-fiction crawler/System UI (sheet fields, achievements, item copy, System
+    messages). This is a presentation signal, not a different recipient scope.
 - `tags[]`, `customFields` (JSON), `attachments[]`
 - timestamps, `createdBy`, `lastReviewedBy`
 

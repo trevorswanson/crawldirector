@@ -39,9 +39,10 @@ This tool helps Game Masters:
 
 ## Status
 
-🚧 **Planning phase.** No application code exists yet. This repository currently
-contains the master plan that future build sessions will decompose and
-implement.
+🚧 **M1 in progress.** M0 foundation is implemented: the app is scaffolded and
+runnable with auth, campaigns, Prisma/Postgres, CI, and coverage gates. M1 has
+started with the generic Entity core, Crawler satellite, service-layer CRUD, and
+a basic world browser/detail UI. See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
 ## Where to start
 

@@ -30,8 +30,10 @@ decomposition, not a frozen spec — refine at the start of each session
 ## M1 — Entity core + one first-class type
 **Goal:** model and edit canon for the generic `Entity` plus `Crawler`.
 - `Entity` table + `Crawler` satellite; Zod entity schemas; visibility/lock
-  columns (columns now, enforcement in M2). Entity-type enum incl. `PARTY`,
-  `GUILD`, `SYSTEM_AI`, etc.
+  columns (columns now, enforcement in M2). Treat `PLAYER_FACING` as a
+  presentation hint for crawler/System UI content, not a different audience
+  scope from `SHARED_WITH_PLAYERS`. Entity-type enum incl. `PARTY`, `GUILD`,
+  `SYSTEM_AI`, etc.
 - Entity CRUD through the **service layer** (not yet routed through the pipeline
   — but written so M2 can slot the pipeline underneath).
 - World browser (list/search incl. basic keyword/full-text) + entity detail
@@ -55,6 +57,9 @@ decomposition, not a frozen spec — refine at the start of each session
 **Goal:** model the connective tissue and causality.
 - `Relationship` (typed, **any-to-any** edges) + `Event` + `EventParticipant` +
   `EventCausality`, all through the pipeline.
+- Knowledge/reveal foundations for fog of war: canonical facts can be granted to
+  specific actor entities (NPCs, crawlers, parties, factions) without making
+  them campaign-wide player-visible.
 - Connections panel on entity detail; basic relationship graph view; timeline;
   causality (cause/effect) view (start simple, list-based, then visual).
 - **Group hierarchies:** crawler → party → guild membership via `MEMBER_OF` /
@@ -113,7 +118,8 @@ drives the generation prompts.
 
 ## M7 — Player crawler interface + sharing
 **Goal:** scoped, in-fiction player experience.
-- Visibility projection enforced for player reads; player↔crawler linking.
+- Visibility projection enforced for player reads; player↔crawler linking;
+  private reveals/knowledge grants respected per player/crawler.
 - Crawler sheet, inventory/loot, achievements/titles, System-message feed,
   "known world," scoped Ask, and player **suggestions** (→ pipeline).
 - **Done when:** a player logs in, sees only shared/own-crawler data (verified by
@@ -123,9 +129,10 @@ drives the generation prompts.
 **Goal:** run a live game and turn the good bits into canon.
 - `Session` + `SessionLogEntry`; fast capture log with `@`/`#` tagging; **promote**
   entries to canonical Events via the review pipeline (with AI-assisted drafting).
-- **Live reveal** (flip visibility to players, recorded as `REVEAL` audit rows →
-  feeds the "known world"); session & per-crawler **recap** generation
-  (persona-aware, visibility-respecting).
+- **Live reveal** (broad visibility flips or private knowledge grants, recorded
+  as `REVEAL` audit rows → feeds the "known world" and agent fog-of-war);
+  session & per-crawler **recap** generation (persona-aware,
+  visibility-respecting).
 - **Done when:** a DM can capture a session live, reveal facts to players,
   promote moments to Events, and publish recaps. See [`08-session-mode.md`](./08-session-mode.md).
 

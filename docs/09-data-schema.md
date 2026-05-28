@@ -22,6 +22,13 @@
 - **Review pipeline tables** (`ChangeSet`, `ChangeOperation`, `Provenance`,
   `Lock`, `AuditLog`) are central and referenced by everything mutable.
 
+> **Implementation note (M1):** the committed schema currently includes the
+> identity/tenancy foundation plus `Entity` and `Crawler`. M1 direct DM/co-DM
+> writes default entities to `CANON` through the service layer so the UI can edit
+> crawlers before the review engine exists. M2 must reroute those service
+> internals through `ChangeSet`/provenance and can restore `PENDING` as the
+> default for proposal-created records.
+
 ## Sketch
 
 ```prisma
@@ -74,6 +81,12 @@ enum EntityType {
 }
 
 enum CanonStatus { DRAFT PENDING CANON REJECTED ARCHIVED }
+// Visibility is a campaign-wide default plus a presentation hint.
+// - DM_ONLY: not broadly visible to players. Private KnowledgeGrant rows may
+//   reveal exact facts/fields/entities to selected recipients.
+// - SHARED_WITH_PLAYERS: visible to players as ordinary known-world canon.
+// - PLAYER_FACING: visible to players and authored for the in-fiction
+//   crawler/System UI. It is not a separate audience scope.
 enum Visibility  { DM_ONLY SHARED_WITH_PLAYERS PLAYER_FACING }
 
 model Entity {
@@ -347,6 +360,34 @@ model SearchDoc {
   updatedAt   DateTime @updatedAt
   @@unique([targetType, targetId])
   @@index([campaignId, targetType])
+}
+
+// ───────────── Knowledge / reveals (fog of war) ─────────────
+// Canon visibility is not only global. A DM can reveal a specific entity, field,
+// relationship, event, or fact to one crawler/player/NPC/faction without sharing
+// it with everyone. These grants power both the player "known world" projection
+// and in-character agent context.
+enum KnowledgeTargetType { ENTITY ENTITY_FIELD RELATIONSHIP EVENT FACT }
+enum KnowledgeRecipientType { ENTITY MEMBERSHIP }
+
+model KnowledgeGrant {
+  id              String   @id @default(cuid())
+  campaignId      String
+  targetType      KnowledgeTargetType
+  targetId        String               // entityId, relationshipId, eventId, etc.
+  field           String?              // for ENTITY_FIELD / field-level reveals
+  factKey         String?              // optional stable key for derived/ad-hoc facts
+  recipientType   KnowledgeRecipientType
+  recipientId     String               // Entity.id (NPC/Crawler/Party/etc.) or Membership.id
+  sourceEventId   String?              // optional event/session context that revealed it
+  revealedById    String
+  revealedAt      DateTime @default(now())
+  expiresAt       DateTime?
+  notes           String?
+  revokedAt       DateTime?
+  revokedById     String?
+  @@index([campaignId, recipientType, recipientId])
+  @@index([campaignId, targetType, targetId])
 }
 
 // ───────────── Live session mode (doc 08) ─────────────
