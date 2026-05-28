@@ -101,7 +101,7 @@ jobs:
       # On failure, keep the HTML report + traces/screenshots for debugging.
       - name: Upload Playwright report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: |
