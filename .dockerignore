@@ -1,0 +1,9 @@
+node_modules
+.next
+src/generated/prisma
+.env
+docs
+tests
+*.md
+*.log
+.git
