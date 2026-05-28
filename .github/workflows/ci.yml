@@ -8,12 +8,41 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded runs for the same branch/PR to save minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   DATABASE_URL: postgresql://postgres:postgres@localhost:5432/dcc?schema=public
   AUTH_SECRET: ci-test-secret-not-used-in-production
   AUTH_URL: http://localhost:3000
 
 jobs:
+  # Fast feedback: lint + typecheck run in parallel with build-and-test, with
+  # no database, so style/type errors surface without waiting on the heavy job.
+  lint:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+    name: Lint & typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      # postinstall runs `prisma generate` (the generated client is needed for
+      # typecheck); generation reads the schema only and needs no live database.
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
   build-and-test:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     runs-on: ubuntu-latest
@@ -47,11 +76,15 @@ jobs:
       - name: Apply migrations
         run: npx prisma migrate deploy
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Typecheck
-        run: npm run typecheck
+      # Fail if schema.prisma has changes not captured in a committed migration.
+      # Compares the just-migrated database against the current datamodel;
+      # --exit-code returns 2 when they differ (i.e. a missing migration).
+      - name: Check migration drift
+        run: >-
+          npx prisma migrate diff
+          --from-config-datasource
+          --to-schema=./prisma/schema.prisma
+          --exit-code
 
       - name: Build
         run: npm run build
@@ -64,6 +97,18 @@ jobs:
 
       - name: E2E tests
         run: npm run test:e2e
+
+      # On failure, keep the HTML report + traces/screenshots for debugging.
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
 
   docker-smoke:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
@@ -127,3 +172,28 @@ jobs:
       - name: Stop container
         if: always()
         run: docker rm -f dcc-smoke 2>/dev/null || true
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+
+  audit:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      # Audit against the lockfile; fail only on high/critical in runtime deps.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
