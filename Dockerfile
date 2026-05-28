@@ -23,7 +23,7 @@ ENV HOSTNAME=0.0.0.0
 COPY package*.json ./
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
-RUN npm ci --omit=dev
+RUN DATABASE_URL=postgresql://x:x@localhost/x npm ci --omit=dev
 
 # Standalone Next.js bundle (merges its bundled server deps on top)
 COPY --from=builder /app/.next/standalone ./
