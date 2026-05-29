@@ -542,7 +542,12 @@ export async function getEntityProvenance(
   if (!membership) return null;
 
   const ops = await prisma.changeOperation.findMany({
-    where: { targetType: "ENTITY", targetId: entityId, changeSet: { campaignId } },
+    where: {
+      targetType: "ENTITY",
+      targetId: entityId,
+      changeSet: { campaignId, status: ChangeSetStatus.APPROVED },
+      decision: OpDecision.ACCEPTED,
+    },
     orderBy: { changeSet: { createdAt: "asc" } },
     select: {
       changeSet: {

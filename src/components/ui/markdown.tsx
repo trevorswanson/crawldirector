@@ -1,6 +1,15 @@
 import DOMPurify from "isomorphic-dompurify";
 import { marked, type Tokens } from "marked";
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 class CustomRenderer extends marked.Renderer {
   override heading(token: Tokens.Heading): string {
     const text = this.parser.parseInline(token.tokens);
@@ -44,11 +53,11 @@ class CustomRenderer extends marked.Renderer {
   }
 
   override codespan(token: Tokens.Codespan): string {
-    return `<code class="font-mono text-[0.9em] bg-[var(--bg-2)] px-[0.4rem] py-[0.2rem] rounded-[2px] border border-[var(--line)]">${token.text}</code>`;
+    return `<code class="font-mono text-[0.9em] bg-[var(--bg-2)] px-[0.4rem] py-[0.2rem] rounded-[2px] border border-[var(--line)]">${escapeHtml(token.text)}</code>`;
   }
 
   override code(token: Tokens.Code): string {
-    return `<pre class="bg-[var(--bg-2)] border border-[var(--line)] p-4 rounded-[2px] overflow-x-auto mb-5"><code class="font-mono text-[0.85em] bg-transparent p-0 border-none rounded-none block">${token.text}</code></pre>\n`;
+    return `<pre class="bg-[var(--bg-2)] border border-[var(--line)] p-4 rounded-[2px] overflow-x-auto mb-5"><code class="font-mono text-[0.85em] bg-transparent p-0 border-none rounded-none block">${escapeHtml(token.text)}</code></pre>\n`;
   }
 
   override strong(token: Tokens.Strong): string {

@@ -257,7 +257,7 @@ describe("EntityPage", () => {
   it("renders the description as formatted Markdown", async () => {
     getEntityForUser.mockResolvedValue(
       crawler({
-        description: "# Carl's Notes\n\n- Bullet item\n- **Bold item** with [a link](https://dcc.com)\n\n1. Numbered item 1\n2. Numbered item 2\n\n> Quote block\n\n| Header A | Header B |\n| -------- | -------- |\n| Cell A   | Cell B   |",
+        description: "# Carl's Notes\n\n- Bullet item\n- **Bold item** with [a link](https://dcc.com)\n\n1. Numbered item 1\n2. Numbered item 2\n\n> Quote block\n\n| Header A | Header B |\n| -------- | -------- |\n| Cell A   | Cell B   |\n\nThis is `inline <code>` snippet.\n\n```html\n<div>Hello</div>\n```",
       }),
     );
 
@@ -296,5 +296,11 @@ describe("EntityPage", () => {
 
     const tableCellA = screen.getByText("Cell A");
     expect(tableCellA.tagName.toLowerCase()).toBe("td");
+
+    // Check escaped inline code
+    expect(screen.getByText("inline <code>")).toBeDefined();
+
+    // Check escaped code block
+    expect(screen.getByText("<div>Hello</div>")).toBeDefined();
   });
 });
