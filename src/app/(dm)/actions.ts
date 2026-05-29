@@ -147,6 +147,7 @@ export async function quickCreateEntityAction(
         name,
         visibility: "DM_ONLY",
         tags: "",
+        isStub: true,
       });
       if (!parsed.success) {
         return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -161,6 +162,7 @@ export async function quickCreateEntityAction(
         description: "",
         visibility: "DM_ONLY",
         tags: "",
+        isStub: true,
       });
       if (!parsed.success) {
         return { error: parsed.error.issues[0]?.message ?? "Invalid input." };

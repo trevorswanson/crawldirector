@@ -622,6 +622,7 @@ async function applyCreateEntity(
       visibility: (readTo(patch, "visibility") as Visibility) ?? Visibility.DM_ONLY,
       tags: stringArray(readTo(patch, "tags")),
       status: CanonStatus.CANON,
+      isStub: Boolean(readTo(patch, "isStub") ?? false),
       ...(type === EntityType.CRAWLER
         ? {
             crawler: {
@@ -797,6 +798,7 @@ function entityUpdateData(patch: ReviewPatch, type: EntityType): Prisma.EntityUp
     data.visibility = (readTo(patch, "visibility") as Visibility) ?? Visibility.DM_ONLY;
   }
   if ("tags" in patch) data.tags = stringArray(readTo(patch, "tags"));
+  if ("isStub" in patch) data.isStub = Boolean(readTo(patch, "isStub"));
 
   const crawlerPatch = Object.keys(patch).some((field) => crawlerFields.has(field));
   if (type === EntityType.CRAWLER && crawlerPatch) {

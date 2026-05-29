@@ -10,6 +10,11 @@ Running checklist of milestones/tasks, newest first. See
 **Done when:** every canon change has provenance; locked fields can't be
 overwritten; a DM can review/approve/reject a proposal end to end.
 
+### Done — PR feedback: locked filters & quick-create stubs (2026-05-29)
+
+- [x] Fixed status facet and locked filter to match entities with per-field locks (i.e., where `lockedFields` is non-empty) in addition to whole-entity locks.
+- [x] Fixed Quick-create stub path to set `isStub: true` on creation, and reset it to `false` when the entity is subsequently updated/edited.
+
 ### Done — slice 1: entity proposals + review queue (2026-05-29)
 
 - [x] Added M2 Prisma schema + migration for `ChangeSet`,

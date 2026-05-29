@@ -3,6 +3,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { Role } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
+import { createCrawlerSchema } from "@/lib/validation";
 import { createCampaign } from "@/server/services/campaigns";
 import {
   archiveEntity,
@@ -103,6 +104,56 @@ describe("entity service", () => {
     });
     expect(list.entities).toHaveLength(1);
     expect(list.entities[0].name).toBe("Skull Empire");
+  });
+
+  it("persists isStub on creation and clears it on update", async () => {
+    const owner = await makeUser("stub-test@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Stub NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+      isStub: true,
+    });
+
+    const created = await getEntityForUser(owner.id, campaign.id, entity.id);
+    expect(created?.isStub).toBe(true);
+
+    await updateEntity(owner.id, campaign.id, entity.id, {
+      type: "NPC",
+      name: "Fleshed Out NPC",
+      summary: "Now he has a summary",
+      description: "And a description too.",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    const updated = await getEntityForUser(owner.id, campaign.id, entity.id);
+    expect(updated?.isStub).toBe(false);
+    expect(updated?.name).toBe("Fleshed Out NPC");
+  });
+
+  it("persists isStub for crawlers on creation", async () => {
+    const owner = await makeUser("crawler-stub-test@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const crawler = await createCrawler(
+      owner.id,
+      campaign.id,
+      createCrawlerSchema.parse({
+        name: "Stub Crawler",
+        visibility: "DM_ONLY",
+        tags: [],
+        isStub: true,
+      }),
+    );
+
+    const created = await getEntityForUser(owner.id, campaign.id, crawler.id);
+    expect(created?.isStub).toBe(true);
   });
 
   it("records direct DM entity writes as approved change sets with provenance", async () => {
@@ -800,7 +851,7 @@ describe("world-browser facets", () => {
       visibility: "DM_ONLY",
       tags: [],
     });
-    await createGenericEntity(owner.id, campaign.id, {
+    const zev = await createGenericEntity(owner.id, campaign.id, {
       type: "NPC",
       name: "Zev",
       summary: "",
@@ -814,11 +865,15 @@ describe("world-browser facets", () => {
     expect(counts.FACTION).toBe(1);
 
     await setEntityLock(owner.id, campaign.id, faction.id, { locked: true });
+    await setEntityLock(owner.id, campaign.id, zev.id, { lockedFields: ["summary"] });
+
     const locked = await listEntitiesForUser(owner.id, campaign.id, {
       status: "LOCKED",
     });
-    expect(locked.entities).toHaveLength(1);
-    expect(locked.entities[0].name).toBe("Skull Empire");
+    expect(locked.entities).toHaveLength(2);
+    const lockedNames = locked.entities.map(e => e.name);
+    expect(lockedNames).toContain("Skull Empire");
+    expect(lockedNames).toContain("Zev");
 
     const canon = await listEntitiesForUser(owner.id, campaign.id, {
       status: "CANON",

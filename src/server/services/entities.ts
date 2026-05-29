@@ -166,7 +166,7 @@ function entityCreatePatch(
   type: EntityType,
   input: Pick<
     CreateGenericEntityInput,
-    "name" | "summary" | "description" | "visibility" | "tags"
+    "name" | "summary" | "description" | "visibility" | "tags" | "isStub"
   >,
 ) {
   const core = entityCoreData(userId, campaignId, input);
@@ -180,6 +180,7 @@ function entityCreatePatch(
     visibility: { to: core.visibility },
     tags: { to: core.tags },
     status: { to: core.status },
+    ...(input.isStub !== undefined ? { isStub: { to: input.isStub } } : {}),
   } satisfies ReviewPatch;
 }
 
@@ -284,7 +285,14 @@ export async function listEntitiesForUser(
           : status === "PENDING"
             ? CanonStatus.PENDING
             : { not: CanonStatus.ARCHIVED },
-      ...(lockedOnly ? { locked: true } : {}),
+      ...(lockedOnly
+        ? {
+            OR: [
+              { locked: true },
+              { NOT: { lockedFields: { equals: [] } } },
+            ],
+          }
+        : {}),
       ...playerVisibleWhere(membership.role),
       ...(type ? { type } : {}),
       ...(query
@@ -367,6 +375,7 @@ export async function updateEntity(
       visibility: true,
       tags: true,
       version: true,
+      isStub: true,
       crawler: {
         select: {
           realName: true,
@@ -404,6 +413,10 @@ export async function updateEntity(
   );
   addPatch(patch, "visibility", existing.visibility, parsed.visibility as Visibility);
   addPatch(patch, "tags", existing.tags, parsed.tags);
+
+  if (existing.isStub) {
+    addPatch(patch, "isStub", true, false);
+  }
 
   if (existing.type === EntityType.CRAWLER && existing.crawler) {
     addPatch(patch, "crawler.realName", existing.crawler.realName, nullIfEmpty(parsed.realName));

@@ -142,6 +142,7 @@ const entityCoreSchema = z.object({
   description: optionalText(10000),
   visibility: z.enum(visibilityValues).default("DM_ONLY"),
   tags: tagsSchema,
+  isStub: z.boolean().optional(),
 });
 
 export const createGenericEntitySchema = entityCoreSchema.extend({
