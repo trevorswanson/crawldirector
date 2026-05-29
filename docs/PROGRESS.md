@@ -30,9 +30,10 @@ campaign, scoped by tenancy.
 - M1 entity writes are direct service-layer canon writes by design. M2 must route
   these internals through the review/provenance pipeline before further canon
   write paths are added.
-- Local `prisma migrate deploy` still reports only `Schema engine error` in this
-  environment; the committed migration SQL was applied directly to the local
-  Postgres database for verification.
+- Local `prisma migrate deploy` applied the crawler audience-ratings migration
+  successfully in this environment.
+- Crawler audience modeling now tracks DCC's three broadcast ratings explicitly:
+  views, followers, and favorites.
 - Remaining M1 polish: add richer crawler stat modeling/custom fields if needed,
   improve browser search beyond basic keyword matching, and add e2e coverage for
   create/edit once Playwright browsers are available locally.

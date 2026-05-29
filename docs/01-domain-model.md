@@ -62,8 +62,14 @@ First-class types add their own structured columns/relations on top.
   sub-aptitudes), HP/MP/stamina, gold.
 - Inventory & kit: items, equipped gear, **loot boxes** (tier + opened state),
   skills, spells.
-- Meta-game: **achievements**, **titles**, sponsorships, **fan count /
-  popularity**, kill count, notable broadcasts/clips, deaths/respawns.
+- Meta-game: **achievements**, **titles**, sponsorships, audience ratings
+  (`viewCount`, `followerCount`, `favoriteCount`), kill count, notable
+  broadcasts/clips, deaths/respawns.
+  - **Views:** each approximately 8-second feed watch counts as one view.
+  - **Followers:** viewers who bookmarked the crawler's ID and can tune in when
+    they want, unless the crawler is in the bathroom.
+  - **Favorites:** limited viewer slots that provide live crawler stat,
+    condition, and combat-status updates.
 - Story: status (alive/dead/escaped), current floor & location, bio, secrets
   (DM-only).
 - *Player linkage:* a Crawler may be linked to a `Player` user; that player's

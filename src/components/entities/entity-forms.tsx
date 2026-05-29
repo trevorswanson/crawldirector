@@ -172,13 +172,33 @@ function CrawlerFields({ entity }: { entity?: EntityDetail }) {
         />
       </div>
       <div className="grid gap-2">
-        <Label htmlFor="fanCount">Fans</Label>
+        <Label htmlFor="viewCount">Views</Label>
         <Input
-          id="fanCount"
-          name="fanCount"
+          id="viewCount"
+          name="viewCount"
           type="number"
           min={0}
-          defaultValue={crawler?.fanCount.toString() ?? 0}
+          defaultValue={crawler?.viewCount.toString() ?? 0}
+        />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="followerCount">Followers</Label>
+        <Input
+          id="followerCount"
+          name="followerCount"
+          type="number"
+          min={0}
+          defaultValue={crawler?.followerCount.toString() ?? 0}
+        />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="favoriteCount">Favorites</Label>
+        <Input
+          id="favoriteCount"
+          name="favoriteCount"
+          type="number"
+          min={0}
+          defaultValue={crawler?.favoriteCount.toString() ?? 0}
         />
       </div>
       <div className="grid gap-2">

@@ -46,7 +46,9 @@ describe("entity service", () => {
       hp: 22,
       mp: 9,
       gold: 100,
-      fanCount: BigInt(1000),
+      viewCount: BigInt(10000),
+      followerCount: BigInt(1000),
+      favoriteCount: BigInt(100),
       killCount: 7,
       currentFloor: 2,
       isAlive: true,
@@ -55,7 +57,9 @@ describe("entity service", () => {
     const detail = await getEntityForUser(owner.id, campaign.id, crawler.id);
     expect(detail?.type).toBe("CRAWLER");
     expect(detail?.crawler?.level).toBe(3);
-    expect(detail?.crawler?.fanCount).toBe(BigInt(1000));
+    expect(detail?.crawler?.viewCount).toBe(BigInt(10000));
+    expect(detail?.crawler?.followerCount).toBe(BigInt(1000));
+    expect(detail?.crawler?.favoriteCount).toBe(BigInt(100));
 
     const list = await listEntitiesForUser(owner.id, campaign.id, {
       query: "royal",
@@ -147,10 +151,12 @@ describe("entity service", () => {
     });
   });
 
-  it("preserves large crawler fan counts as bigint values", async () => {
-    const owner = await makeUser("bigfans@test.com");
+  it("preserves large crawler audience ratings as bigint values", async () => {
+    const owner = await makeUser("bigratings@test.com");
     const campaign = await createCampaign(owner.id, { name: "Dungeon" });
-    const fanCount = BigInt("9007199254740993");
+    const viewCount = BigInt("9007199254740993");
+    const followerCount = BigInt("9007199254740991");
+    const favoriteCount = BigInt("9007199254740990");
 
     const crawler = await createCrawler(owner.id, campaign.id, {
       name: "Famous Crawler",
@@ -160,17 +166,21 @@ describe("entity service", () => {
       tags: [],
       level: 1,
       gold: 0,
-      fanCount,
+      viewCount,
+      followerCount,
+      favoriteCount,
       killCount: 0,
       isAlive: true,
     });
 
-    expect(
-      (await getEntityForUser(owner.id, campaign.id, crawler.id))?.crawler
-        ?.fanCount,
-    ).toBe(fanCount);
+    const created = await getEntityForUser(owner.id, campaign.id, crawler.id);
+    expect(created?.crawler?.viewCount).toBe(viewCount);
+    expect(created?.crawler?.followerCount).toBe(followerCount);
+    expect(created?.crawler?.favoriteCount).toBe(favoriteCount);
 
-    const updatedFanCount = BigInt("9007199254740995");
+    const updatedViewCount = BigInt("9007199254740995");
+    const updatedFollowerCount = BigInt("9007199254740994");
+    const updatedFavoriteCount = BigInt("9007199254740992");
     await updateEntity(owner.id, campaign.id, crawler.id, {
       type: "CRAWLER",
       name: "Famous Crawler",
@@ -180,15 +190,17 @@ describe("entity service", () => {
       tags: [],
       level: 1,
       gold: 0,
-      fanCount: updatedFanCount,
+      viewCount: updatedViewCount,
+      followerCount: updatedFollowerCount,
+      favoriteCount: updatedFavoriteCount,
       killCount: 0,
       isAlive: true,
     });
 
-    expect(
-      (await getEntityForUser(owner.id, campaign.id, crawler.id))?.crawler
-        ?.fanCount,
-    ).toBe(updatedFanCount);
+    const updated = await getEntityForUser(owner.id, campaign.id, crawler.id);
+    expect(updated?.crawler?.viewCount).toBe(updatedViewCount);
+    expect(updated?.crawler?.followerCount).toBe(updatedFollowerCount);
+    expect(updated?.crawler?.favoriteCount).toBe(updatedFavoriteCount);
   });
 
   it("allows co-DMs but not players to create canon entities", async () => {
@@ -237,7 +249,9 @@ describe("entity service", () => {
       tags: [],
       level: 1,
       gold: 0,
-      fanCount: BigInt(0),
+      viewCount: BigInt(0),
+      followerCount: BigInt(0),
+      favoriteCount: BigInt(0),
       killCount: 0,
       isAlive: true,
     });
@@ -255,7 +269,9 @@ describe("entity service", () => {
       hp: 30,
       mp: 5,
       gold: 12,
-      fanCount: BigInt(500),
+      viewCount: BigInt(5000),
+      followerCount: BigInt(500),
+      favoriteCount: BigInt(50),
       killCount: 3,
       currentFloor: 1,
       isAlive: true,
@@ -265,7 +281,9 @@ describe("entity service", () => {
     expect(detail?.name).toBe("Crawler Carl");
     expect(detail?.version).toBe(2);
     expect(detail?.crawler?.level).toBe(2);
-    expect(detail?.crawler?.fanCount).toBe(BigInt(500));
+    expect(detail?.crawler?.viewCount).toBe(BigInt(5000));
+    expect(detail?.crawler?.followerCount).toBe(BigInt(500));
+    expect(detail?.crawler?.favoriteCount).toBe(BigInt(50));
   });
 
   it("rejects updates that try to change an entity type", async () => {

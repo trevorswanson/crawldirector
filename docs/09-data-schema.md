@@ -123,19 +123,21 @@ model Entity {
 
 // Satellite for the heaviest type. Other types may get satellites later.
 model Crawler {
-  id           String  @id            // == Entity.id
-  entity       Entity  @relation(fields: [id], references: [id])
-  realName     String?
-  crawlerNo    String?
-  level        Int     @default(1)
-  stats        Json    @default("{}") // core stat set (configurable per ruleset)
-  hp           Int?
-  mp           Int?
-  gold         Int     @default(0)
-  fanCount     BigInt  @default(0)
-  killCount    Int     @default(0)
-  isAlive      Boolean @default(true)
-  currentFloor Int?
+  id            String  @id            // == Entity.id
+  entity        Entity  @relation(fields: [id], references: [id])
+  realName      String?
+  crawlerNo     String?
+  level         Int     @default(1)
+  stats         Json    @default("{}") // core stat set (configurable per ruleset)
+  hp            Int?
+  mp            Int?
+  gold          Int     @default(0)
+  viewCount     BigInt  @default(0)
+  followerCount BigInt  @default(0)
+  favoriteCount BigInt  @default(0)
+  killCount     Int     @default(0)
+  isAlive       Boolean @default(true)
+  currentFloor  Int?
   // class/species/items/skills/achievements modeled as Relationships
 }
 
@@ -425,7 +427,8 @@ model SessionLogEntry {             // real-time capture; NOT canon until promot
   Examples: `NPC.data.roles: NpcRole[]` (GUIDE/MANAGER/ADMIN/HOST/
   PRODUCTION_CREW/ELITE/FACTION_LEADER/SHOPKEEPER/DEITY/QUEST_GIVER — non-
   exclusive, queryable); `PARTY.data`/`GUILD.data` hold formation/disband status.
-- Treat `BigInt` (fanCount) carefully across the JSON boundary.
+- Treat `BigInt` crawler audience ratings (`viewCount`, `followerCount`,
+  `favoriteCount`) carefully across the JSON boundary.
 - The review service is the only writer of canon — keep mutation logic out of
   route handlers.
 - Add DB-level constraints where cheap (unique edges, FK cascades to archive not

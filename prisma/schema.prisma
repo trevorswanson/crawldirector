@@ -71,12 +71,12 @@ model User {
   // Credentials sign-in: bcrypt hash. Null for OAuth-only users.
   passwordHash  String?
 
-  accounts    Account[]
-  sessions    Session[]
-  memberships Membership[]
+  accounts        Account[]
+  sessions        Session[]
+  memberships     Membership[]
   // Campaigns this user owns (also represented by an OWNER membership).
-  ownedCampaigns Campaign[] @relation("OwnedCampaigns")
-  createdEntities Entity[]  @relation("CreatedEntities")
+  ownedCampaigns  Campaign[]   @relation("OwnedCampaigns")
+  createdEntities Entity[]     @relation("CreatedEntities")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -131,7 +131,7 @@ model Campaign {
   ownerId String
   owner   User   @relation("OwnedCampaigns", fields: [ownerId], references: [id])
 
-  members Membership[]
+  members  Membership[]
   entities Entity[]
 
   createdAt DateTime @default(now())
@@ -157,22 +157,22 @@ model Membership {
 
 // ───────────── Entity core ─────────────
 model Entity {
-  id          String      @id @default(cuid())
-  campaignId  String
-  type        EntityType
-  name        String
-  summary     String?
-  description String?
-  status      CanonStatus @default(CANON)
-  visibility  Visibility  @default(DM_ONLY)
-  data        Json        @default("{}")
-  customFields Json       @default("{}")
-  tags        String[]    @default([])
-  version     Int         @default(1)
-  locked      Boolean     @default(false)
-  lockedFields String[]   @default([])
-  isStub      Boolean     @default(false)
-  agentEnabled Boolean    @default(false)
+  id           String      @id @default(cuid())
+  campaignId   String
+  type         EntityType
+  name         String
+  summary      String?
+  description  String?
+  status       CanonStatus @default(CANON)
+  visibility   Visibility  @default(DM_ONLY)
+  data         Json        @default("{}")
+  customFields Json        @default("{}")
+  tags         String[]    @default([])
+  version      Int         @default(1)
+  locked       Boolean     @default(false)
+  lockedFields String[]    @default([])
+  isStub       Boolean     @default(false)
+  agentEnabled Boolean     @default(false)
 
   campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   createdById String?
@@ -188,17 +188,19 @@ model Entity {
 }
 
 model Crawler {
-  id           String  @id
-  entity       Entity  @relation(fields: [id], references: [id], onDelete: Cascade)
-  realName     String?
-  crawlerNo    String?
-  level        Int     @default(1)
-  stats        Json    @default("{}")
-  hp           Int?
-  mp           Int?
-  gold         Int     @default(0)
-  fanCount     BigInt  @default(0)
-  killCount    Int     @default(0)
-  isAlive      Boolean @default(true)
-  currentFloor Int?
+  id            String  @id
+  entity        Entity  @relation(fields: [id], references: [id], onDelete: Cascade)
+  realName      String?
+  crawlerNo     String?
+  level         Int     @default(1)
+  stats         Json    @default("{}")
+  hp            Int?
+  mp            Int?
+  gold          Int     @default(0)
+  viewCount     BigInt  @default(0)
+  followerCount BigInt  @default(0)
+  favoriteCount BigInt  @default(0)
+  killCount     Int     @default(0)
+  isAlive       Boolean @default(true)
+  currentFloor  Int?
 }

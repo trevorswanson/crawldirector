@@ -58,7 +58,9 @@ const crawlerEntity: EntityDetail = {
     hp: 30,
     mp: 5,
     gold: 10,
-    fanCount: BigInt(500),
+    viewCount: BigInt(5000),
+    followerCount: BigInt(500),
+    favoriteCount: BigInt(50),
     killCount: 3,
     isAlive: true,
     currentFloor: 1,
@@ -92,7 +94,9 @@ describe("entity forms", () => {
     expect(screen.getByLabelText("Name")).toBeDefined();
     expect(screen.getByLabelText("Real name")).toBeDefined();
     expect(screen.getByLabelText("Crawler number")).toBeDefined();
-    expect(screen.getByLabelText("Fans")).toBeDefined();
+    expect(screen.getByLabelText("Views")).toBeDefined();
+    expect(screen.getByLabelText("Followers")).toBeDefined();
+    expect(screen.getByLabelText("Favorites")).toBeDefined();
     expect(screen.getByRole("button", { name: /Create crawler/ })).toBeDefined();
   });
 
