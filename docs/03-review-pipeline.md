@@ -153,11 +153,14 @@ DMs will generate a lot. The review queue must support:
 
 ## Data model touchpoints
 
-This pipeline is implemented by the `review` service (`/src/server/review`) and
-backed by `ChangeSet`, `ChangeOperation`, `Provenance`, `Lock`, and `AuditLog`
-tables (see [`09-data-schema.md`](./09-data-schema.md)). The `entities`,
-`relationships`, and `events` services call into `review` for all mutations —
-they do not write canon themselves.
+This pipeline is implemented by the `review` service
+(`/src/server/services/review.ts`) and backed by `ChangeSet`,
+`ChangeOperation`, `Provenance`, and `AuditLog` tables (see
+[`09-data-schema.md`](./09-data-schema.md)). The first entity slice uses the
+`Entity.locked` / `Entity.lockedFields` columns for field locks; a unified lock
+table can arrive when relationships and events need the same treatment. The
+`entities`, `relationships`, and `events` services call into `review` for all
+mutations — they do not write canon themselves.
 
 ## Invariants (must always hold)
 

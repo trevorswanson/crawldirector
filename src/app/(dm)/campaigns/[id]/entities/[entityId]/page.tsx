@@ -99,8 +99,8 @@ export default async function EntityPage({
         <CardHeader>
           <CardTitle>Edit entity</CardTitle>
           <CardDescription>
-            M1 edits write canon directly through the service layer. M2 will move
-            this path under review/provenance.
+            Direct DM edits apply immediately as auto-approved change sets with
+            provenance.
           </CardDescription>
         </CardHeader>
         <CardContent>

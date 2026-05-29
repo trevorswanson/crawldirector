@@ -4,6 +4,38 @@ Running checklist of milestones/tasks, newest first. See
 [`11-roadmap.md`](./11-roadmap.md) for the full plan and
 [`12-working-sessions.md`](./12-working-sessions.md) for how to pick up work.
 
+## M2 — Review pipeline 🚧 (in progress)
+
+**Goal:** all canon mutations flow through proposals; locking + provenance work.
+**Done when:** every canon change has provenance; locked fields can't be
+overwritten; a DM can review/approve/reject a proposal end to end.
+
+### Done (2026-05-29)
+
+- [x] Added M2 Prisma schema + migration for `ChangeSet`,
+      `ChangeOperation`, `Provenance`, and `AuditLog`, plus review source/status/
+      operation/decision enums.
+- [x] Added the review service for entity proposals, auto-approved DM change
+      sets, approval, rejection, version staleness checks, locked-field blocking,
+      provenance rows, and audit rows.
+- [x] Re-routed M1 entity create/update/archive service methods through
+      auto-approved `DM` change sets instead of direct canon writes.
+- [x] Added the first Review Queue UI at `/campaigns/[id]/review`, linked from
+      the console nav, with operation diffs and approve/reject actions.
+- [x] Added DB-backed regression coverage for direct-write provenance, locked
+      field blocking, pending proposal approval, and pending proposal rejection;
+      added server-action coverage for queue decisions.
+
+### Notes / follow-ups
+
+- This is the first entity-only vertical slice of M2. Per-field edit decisions,
+      relationship/event operations, unlock/lock UI, and richer conflict
+      resolution remain before M2 is complete.
+- Local verification used the existing Postgres database. That database already
+      contained an older local review-pipeline migration, so the new migration
+      was marked applied after non-destructive local schema alignment; a fresh CI
+      database will apply the committed migration normally.
+
 ## UI polish — campaign-aware shell + crawl language (2026-05-29)
 
 ### Done

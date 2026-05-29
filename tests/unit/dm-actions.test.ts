@@ -7,6 +7,8 @@ const {
   createGenericEntity,
   updateEntity,
   archiveEntity,
+  approveChangeSet,
+  rejectChangeSet,
   signOut,
   redirect,
   revalidatePath,
@@ -17,6 +19,8 @@ const {
   createGenericEntity: vi.fn(),
   updateEntity: vi.fn(),
   archiveEntity: vi.fn(),
+  approveChangeSet: vi.fn(),
+  rejectChangeSet: vi.fn(),
   signOut: vi.fn(),
   redirect: vi.fn(() => {
     throw new Error("NEXT_REDIRECT");
@@ -32,15 +36,21 @@ vi.mock("@/server/services/entities", () => ({
   createGenericEntity,
   updateEntity,
 }));
+vi.mock("@/server/services/review", () => ({
+  approveChangeSet,
+  rejectChangeSet,
+}));
 vi.mock("@/server/auth", () => ({ signOut }));
 vi.mock("next/navigation", () => ({ redirect }));
 vi.mock("next/cache", () => ({ revalidatePath }));
 
 import {
   archiveEntityAction,
+  approveChangeSetAction,
   createCampaignAction,
   createCrawlerAction,
   createGenericEntityAction,
+  rejectChangeSetAction,
   signOutAction,
   updateEntityAction,
 } from "@/app/(dm)/actions";
@@ -276,5 +286,22 @@ describe("archiveEntityAction", () => {
     expect(archiveEntity).toHaveBeenCalledWith("u1", "c1", "e1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1");
     expect(redirect).toHaveBeenCalledWith("/campaigns/c1");
+  });
+});
+
+describe("review queue actions", () => {
+  it("approves a change set and revalidates campaign surfaces", async () => {
+    await approveChangeSetAction("c1", "cs1");
+
+    expect(approveChangeSet).toHaveBeenCalledWith("u1", "c1", "cs1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+  });
+
+  it("rejects a change set and revalidates the queue", async () => {
+    await rejectChangeSetAction("c1", "cs1");
+
+    expect(rejectChangeSet).toHaveBeenCalledWith("u1", "c1", "cs1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
   });
 });

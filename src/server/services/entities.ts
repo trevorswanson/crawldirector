@@ -1,6 +1,7 @@
 import {
   CanonStatus,
   EntityType,
+  OpKind,
   Role,
   Visibility,
 } from "@/generated/prisma/client";
@@ -14,6 +15,10 @@ import {
   type UpdateEntityInput,
 } from "@/lib/validation";
 import { prisma } from "@/server/db";
+import {
+  applyAutoApprovedEntityChangeSet,
+  type ReviewPatch,
+} from "@/server/services/review";
 
 const entityListSelect = {
   id: true,
@@ -120,6 +125,69 @@ function entityCoreData(
   };
 }
 
+function jsonValue(value: unknown): unknown {
+  if (typeof value === "bigint") return value.toString();
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return value.map(jsonValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nested]) => [key, jsonValue(nested)]),
+    );
+  }
+  return value as string | number | boolean | null | undefined;
+}
+
+function addPatch(
+  patch: ReviewPatch,
+  field: string,
+  from: unknown,
+  to: unknown,
+) {
+  const encodedFrom = jsonValue(from);
+  const encodedTo = jsonValue(to);
+  if (JSON.stringify(encodedFrom) === JSON.stringify(encodedTo)) return;
+  patch[field] = {
+    ...(encodedFrom === undefined
+      ? {}
+      : { from: encodedFrom as ReviewPatch[string]["from"] }),
+    ...(encodedTo === undefined
+      ? {}
+      : { to: encodedTo as ReviewPatch[string]["to"] }),
+  };
+}
+
+function entityCreatePatch(
+  userId: string,
+  campaignId: string,
+  type: EntityType,
+  input: Pick<
+    CreateGenericEntityInput,
+    "name" | "summary" | "description" | "visibility" | "tags"
+  >,
+) {
+  const core = entityCoreData(userId, campaignId, input);
+  return {
+    campaignId: { to: campaignId },
+    createdById: { to: userId },
+    type: { to: type },
+    name: { to: core.name },
+    summary: { to: core.summary },
+    description: { to: core.description },
+    visibility: { to: core.visibility },
+    tags: { to: core.tags },
+    status: { to: core.status },
+  } satisfies ReviewPatch;
+}
+
+async function entityResult(entityId: string) {
+  const entity = await prisma.entity.findUnique({
+    where: { id: entityId },
+    select: { id: true, name: true, type: true },
+  });
+  if (!entity) throw new ServiceError("Entity not found.");
+  return entity;
+}
+
 function playerVisibleWhere(role: Role) {
   return role === Role.PLAYER
     ? {
@@ -138,13 +206,19 @@ export async function createGenericEntity(
   const parsed = createGenericEntitySchema.parse(input);
   await assertCampaignDm(userId, campaignId);
 
-  return prisma.entity.create({
-    data: {
-      ...entityCoreData(userId, campaignId, parsed),
-      type: parsed.type as EntityType,
-    },
-    select: { id: true, name: true, type: true },
+  const result = await applyAutoApprovedEntityChangeSet(userId, campaignId, {
+    title: `Create ${parsed.name}`,
+    operations: [{
+      op: OpKind.CREATE_ENTITY,
+      patch: entityCreatePatch(
+        userId,
+        campaignId,
+        parsed.type as EntityType,
+        parsed,
+      ),
+    }],
   });
+  return entityResult(result.targetIds[0]);
 }
 
 export async function createCrawler(
@@ -155,29 +229,27 @@ export async function createCrawler(
   const parsed = createCrawlerSchema.parse(input);
   await assertCampaignDm(userId, campaignId);
 
-  return prisma.entity.create({
-    data: {
-      ...entityCoreData(userId, campaignId, parsed),
-      type: EntityType.CRAWLER,
-      crawler: {
-        create: {
-          realName: nullIfEmpty(parsed.realName),
-          crawlerNo: nullIfEmpty(parsed.crawlerNo),
-          level: parsed.level,
-          hp: parsed.hp ?? null,
-          mp: parsed.mp ?? null,
-          gold: parsed.gold,
-          viewCount: parsed.viewCount,
-          followerCount: parsed.followerCount,
-          favoriteCount: parsed.favoriteCount,
-          killCount: parsed.killCount,
-          isAlive: parsed.isAlive,
-          currentFloor: parsed.currentFloor ?? null,
-        },
-      },
-    },
-    select: { id: true, name: true, type: true },
+  const patch = entityCreatePatch(userId, campaignId, EntityType.CRAWLER, parsed);
+  Object.assign(patch, {
+    "crawler.realName": { to: nullIfEmpty(parsed.realName) },
+    "crawler.crawlerNo": { to: nullIfEmpty(parsed.crawlerNo) },
+    "crawler.level": { to: parsed.level },
+    "crawler.hp": { to: parsed.hp ?? null },
+    "crawler.mp": { to: parsed.mp ?? null },
+    "crawler.gold": { to: parsed.gold },
+    "crawler.viewCount": { to: parsed.viewCount.toString() },
+    "crawler.followerCount": { to: parsed.followerCount.toString() },
+    "crawler.favoriteCount": { to: parsed.favoriteCount.toString() },
+    "crawler.killCount": { to: parsed.killCount },
+    "crawler.isAlive": { to: parsed.isAlive },
+    "crawler.currentFloor": { to: parsed.currentFloor ?? null },
   });
+
+  const result = await applyAutoApprovedEntityChangeSet(userId, campaignId, {
+    title: `Create ${parsed.name}`,
+    operations: [{ op: OpKind.CREATE_ENTITY, patch }],
+  });
+  return entityResult(result.targetIds[0]);
 }
 
 export async function listEntitiesForUser(
@@ -244,7 +316,32 @@ export async function updateEntity(
 
   const existing = await prisma.entity.findFirst({
     where: { id: entityId, campaignId, status: { not: CanonStatus.ARCHIVED } },
-    select: { id: true, type: true },
+    select: {
+      id: true,
+      type: true,
+      name: true,
+      summary: true,
+      description: true,
+      visibility: true,
+      tags: true,
+      version: true,
+      crawler: {
+        select: {
+          realName: true,
+          crawlerNo: true,
+          level: true,
+          hp: true,
+          mp: true,
+          gold: true,
+          viewCount: true,
+          followerCount: true,
+          favoriteCount: true,
+          killCount: true,
+          isAlive: true,
+          currentFloor: true,
+        },
+      },
+    },
   });
 
   if (!existing) throw new ServiceError("Entity not found.");
@@ -252,38 +349,62 @@ export async function updateEntity(
     throw new ServiceError("Entity type cannot be changed.");
   }
 
-  return prisma.entity.update({
-    where: { id: entityId },
-    data: {
-      name: parsed.name,
-      summary: nullIfEmpty(parsed.summary),
-      description: nullIfEmpty(parsed.description),
-      visibility: parsed.visibility as Visibility,
-      tags: parsed.tags,
-      version: { increment: 1 },
-      ...(existing.type === EntityType.CRAWLER
-        ? {
-            crawler: {
-              update: {
-                realName: nullIfEmpty(parsed.realName),
-                crawlerNo: nullIfEmpty(parsed.crawlerNo),
-                level: parsed.level ?? 1,
-                hp: parsed.hp ?? null,
-                mp: parsed.mp ?? null,
-                gold: parsed.gold ?? 0,
-                viewCount: parsed.viewCount ?? BigInt(0),
-                followerCount: parsed.followerCount ?? BigInt(0),
-                favoriteCount: parsed.favoriteCount ?? BigInt(0),
-                killCount: parsed.killCount ?? 0,
-                isAlive: parsed.isAlive ?? true,
-                currentFloor: parsed.currentFloor ?? null,
-              },
-            },
-          }
-        : {}),
-    },
-    select: { id: true, name: true, type: true },
+  const patch: ReviewPatch = {
+    _baseVersion: { to: existing.version },
+  };
+  addPatch(patch, "name", existing.name, parsed.name);
+  addPatch(patch, "summary", existing.summary, nullIfEmpty(parsed.summary));
+  addPatch(
+    patch,
+    "description",
+    existing.description,
+    nullIfEmpty(parsed.description),
+  );
+  addPatch(patch, "visibility", existing.visibility, parsed.visibility as Visibility);
+  addPatch(patch, "tags", existing.tags, parsed.tags);
+
+  if (existing.type === EntityType.CRAWLER && existing.crawler) {
+    addPatch(patch, "crawler.realName", existing.crawler.realName, nullIfEmpty(parsed.realName));
+    addPatch(patch, "crawler.crawlerNo", existing.crawler.crawlerNo, nullIfEmpty(parsed.crawlerNo));
+    addPatch(patch, "crawler.level", existing.crawler.level, parsed.level ?? 1);
+    addPatch(patch, "crawler.hp", existing.crawler.hp, parsed.hp ?? null);
+    addPatch(patch, "crawler.mp", existing.crawler.mp, parsed.mp ?? null);
+    addPatch(patch, "crawler.gold", existing.crawler.gold, parsed.gold ?? 0);
+    addPatch(
+      patch,
+      "crawler.viewCount",
+      existing.crawler.viewCount,
+      parsed.viewCount ?? BigInt(0),
+    );
+    addPatch(
+      patch,
+      "crawler.followerCount",
+      existing.crawler.followerCount,
+      parsed.followerCount ?? BigInt(0),
+    );
+    addPatch(
+      patch,
+      "crawler.favoriteCount",
+      existing.crawler.favoriteCount,
+      parsed.favoriteCount ?? BigInt(0),
+    );
+    addPatch(patch, "crawler.killCount", existing.crawler.killCount, parsed.killCount ?? 0);
+    addPatch(patch, "crawler.isAlive", existing.crawler.isAlive, parsed.isAlive ?? true);
+    addPatch(
+      patch,
+      "crawler.currentFloor",
+      existing.crawler.currentFloor,
+      parsed.currentFloor ?? null,
+    );
+  }
+
+  if (Object.keys(patch).length === 1) return entityResult(entityId);
+
+  await applyAutoApprovedEntityChangeSet(userId, campaignId, {
+    title: `Update ${existing.name}`,
+    operations: [{ op: OpKind.UPDATE_ENTITY, targetId: entityId, patch }],
   });
+  return entityResult(entityId);
 }
 
 export async function archiveEntity(
@@ -295,13 +416,20 @@ export async function archiveEntity(
 
   const existing = await prisma.entity.findFirst({
     where: { id: entityId, campaignId, status: { not: CanonStatus.ARCHIVED } },
-    select: { id: true },
+    select: { id: true, name: true, status: true, version: true },
   });
   if (!existing) throw new ServiceError("Entity not found.");
 
-  return prisma.entity.update({
-    where: { id: entityId },
-    data: { status: CanonStatus.ARCHIVED, version: { increment: 1 } },
-    select: { id: true },
+  await applyAutoApprovedEntityChangeSet(userId, campaignId, {
+    title: `Archive ${existing.name}`,
+    operations: [{
+      op: OpKind.DELETE_ENTITY,
+      targetId: entityId,
+      patch: {
+        _baseVersion: { to: existing.version },
+        status: { from: existing.status, to: CanonStatus.ARCHIVED },
+      },
+    }],
   });
+  return { id: entityId };
 }
