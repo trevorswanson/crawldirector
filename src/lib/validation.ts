@@ -96,6 +96,30 @@ const optionalInt = (label: string, min = 0) =>
       .optional(),
   );
 
+const postgresBigIntMax = BigInt("9223372036854775807");
+
+const optionalBigInt = (label: string) =>
+  z.preprocess(
+    (value) => {
+      if (value === "" || value === null || value === undefined) {
+        return undefined;
+      }
+      if (typeof value === "bigint") return value;
+      if (typeof value === "number" && Number.isSafeInteger(value)) {
+        return BigInt(value);
+      }
+      if (typeof value === "string" && /^\d+$/.test(value.trim())) {
+        return BigInt(value.trim());
+      }
+      return value;
+    },
+    z
+      .bigint()
+      .min(BigInt(0), `${label} cannot be negative.`)
+      .max(postgresBigIntMax, `${label} is too large.`)
+      .optional(),
+  );
+
 const tagsSchema = z
   .preprocess(
     (value) => (value === null ? undefined : value),
@@ -134,7 +158,7 @@ export const createCrawlerSchema = entityCoreSchema.extend({
   hp: optionalInt("HP"),
   mp: optionalInt("MP"),
   gold: optionalInt("Gold").default(0),
-  fanCount: optionalInt("Fan count").default(0),
+  fanCount: optionalBigInt("Fan count").default(BigInt(0)),
   killCount: optionalInt("Kill count").default(0),
   currentFloor: optionalInt("Current floor", 1),
   isAlive: z
@@ -151,7 +175,7 @@ export const updateEntitySchema = entityCoreSchema.extend({
   hp: optionalInt("HP"),
   mp: optionalInt("MP"),
   gold: optionalInt("Gold"),
-  fanCount: optionalInt("Fan count"),
+  fanCount: optionalBigInt("Fan count"),
   killCount: optionalInt("Kill count"),
   currentFloor: optionalInt("Current floor", 1),
   isAlive: z.preprocess((value) => value !== "false", z.boolean()).optional(),

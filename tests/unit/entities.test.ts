@@ -46,7 +46,7 @@ describe("entity service", () => {
       hp: 22,
       mp: 9,
       gold: 100,
-      fanCount: 1000,
+      fanCount: BigInt(1000),
       killCount: 7,
       currentFloor: 2,
       isAlive: true,
@@ -111,6 +111,86 @@ describe("entity service", () => {
     expect(list.role).toBeNull();
   });
 
+  it("filters player reads to player-visible entities", async () => {
+    const owner = await makeUser("owner@test.com");
+    const player = await makeUser("player@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const secret = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Secret NPC",
+      summary: "A secret",
+      description: "Raw DM-only canon",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const shared = await createGenericEntity(owner.id, campaign.id, {
+      type: "LOCATION",
+      name: "Known safe room",
+      summary: "A known place",
+      description: "Player-safe canon",
+      visibility: "SHARED_WITH_PLAYERS",
+      tags: [],
+    });
+
+    const playerList = await listEntitiesForUser(player.id, campaign.id);
+    expect(playerList.entities.map((entity) => entity.id)).toEqual([shared.id]);
+    expect(
+      await listEntitiesForUser(player.id, campaign.id, { query: "secret" }),
+    ).toMatchObject({ entities: [] });
+    expect(await getEntityForUser(player.id, campaign.id, secret.id)).toBeNull();
+    expect(await getEntityForUser(player.id, campaign.id, shared.id)).toMatchObject({
+      id: shared.id,
+      description: "Player-safe canon",
+    });
+  });
+
+  it("preserves large crawler fan counts as bigint values", async () => {
+    const owner = await makeUser("bigfans@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const fanCount = BigInt("9007199254740993");
+
+    const crawler = await createCrawler(owner.id, campaign.id, {
+      name: "Famous Crawler",
+      summary: "",
+      description: "",
+      visibility: "PLAYER_FACING",
+      tags: [],
+      level: 1,
+      gold: 0,
+      fanCount,
+      killCount: 0,
+      isAlive: true,
+    });
+
+    expect(
+      (await getEntityForUser(owner.id, campaign.id, crawler.id))?.crawler
+        ?.fanCount,
+    ).toBe(fanCount);
+
+    const updatedFanCount = BigInt("9007199254740995");
+    await updateEntity(owner.id, campaign.id, crawler.id, {
+      type: "CRAWLER",
+      name: "Famous Crawler",
+      summary: "",
+      description: "",
+      visibility: "PLAYER_FACING",
+      tags: [],
+      level: 1,
+      gold: 0,
+      fanCount: updatedFanCount,
+      killCount: 0,
+      isAlive: true,
+    });
+
+    expect(
+      (await getEntityForUser(owner.id, campaign.id, crawler.id))?.crawler
+        ?.fanCount,
+    ).toBe(updatedFanCount);
+  });
+
   it("allows co-DMs but not players to create canon entities", async () => {
     const owner = await makeUser("owner@test.com");
     const coDm = await makeUser("codm@test.com");
@@ -157,7 +237,7 @@ describe("entity service", () => {
       tags: [],
       level: 1,
       gold: 0,
-      fanCount: 0,
+      fanCount: BigInt(0),
       killCount: 0,
       isAlive: true,
     });
@@ -175,7 +255,7 @@ describe("entity service", () => {
       hp: 30,
       mp: 5,
       gold: 12,
-      fanCount: 500,
+      fanCount: BigInt(500),
       killCount: 3,
       currentFloor: 1,
       isAlive: true,

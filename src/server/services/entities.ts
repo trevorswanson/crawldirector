@@ -118,6 +118,16 @@ function entityCoreData(
   };
 }
 
+function playerVisibleWhere(role: Role) {
+  return role === Role.PLAYER
+    ? {
+        visibility: {
+          in: [Visibility.SHARED_WITH_PLAYERS, Visibility.PLAYER_FACING],
+        },
+      }
+    : {};
+}
+
 export async function createGenericEntity(
   userId: string,
   campaignId: string,
@@ -155,7 +165,7 @@ export async function createCrawler(
           hp: parsed.hp ?? null,
           mp: parsed.mp ?? null,
           gold: parsed.gold,
-          fanCount: BigInt(parsed.fanCount),
+          fanCount: parsed.fanCount,
           killCount: parsed.killCount,
           isAlive: parsed.isAlive,
           currentFloor: parsed.currentFloor ?? null,
@@ -181,6 +191,7 @@ export async function listEntitiesForUser(
     where: {
       campaignId,
       status: { not: CanonStatus.ARCHIVED },
+      ...playerVisibleWhere(membership.role),
       ...(type ? { type } : {}),
       ...(query
         ? {
@@ -212,6 +223,7 @@ export async function getEntityForUser(
       id: entityId,
       campaignId,
       status: { not: CanonStatus.ARCHIVED },
+      ...playerVisibleWhere(membership.role),
     },
     select: entityDetailSelect,
   });
@@ -255,7 +267,7 @@ export async function updateEntity(
                 hp: parsed.hp ?? null,
                 mp: parsed.mp ?? null,
                 gold: parsed.gold ?? 0,
-                fanCount: BigInt(parsed.fanCount ?? 0),
+                fanCount: parsed.fanCount ?? BigInt(0),
                 killCount: parsed.killCount ?? 0,
                 isAlive: parsed.isAlive ?? true,
                 currentFloor: parsed.currentFloor ?? null,

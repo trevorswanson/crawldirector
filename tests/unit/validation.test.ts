@@ -143,7 +143,32 @@ describe("entity schemas", () => {
     });
     expect(parsed.level).toBe(2);
     expect(parsed.mp).toBeUndefined();
-    expect(parsed.fanCount).toBe(500);
+    expect(parsed.fanCount).toBe(BigInt(500));
+  });
+
+  it("preserves large crawler fan counts as bigint values", () => {
+    const fanCount = "9007199254740993";
+    const parsed = createCrawlerSchema.parse({
+      name: "Carl",
+      summary: "",
+      description: "",
+      visibility: "PLAYER_FACING",
+      tags: "",
+      fanCount,
+    });
+    expect(parsed.fanCount).toBe(BigInt(fanCount));
+  });
+
+  it("rejects unsafe numeric fan counts before precision is lost", () => {
+    const r = createCrawlerSchema.safeParse({
+      name: "Carl",
+      summary: "",
+      description: "",
+      visibility: "PLAYER_FACING",
+      tags: "",
+      fanCount: 9007199254740992,
+    });
+    expect(r.success).toBe(false);
   });
 
   it("keeps update type immutable by requiring the submitted type", () => {

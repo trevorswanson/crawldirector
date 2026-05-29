@@ -183,7 +183,7 @@ describe("createCrawlerAction", () => {
     expect(createCrawler).toHaveBeenCalledWith(
       "u1",
       "c1",
-      expect.objectContaining({ name: "Carl", level: 2, fanCount: 10 }),
+      expect.objectContaining({ name: "Carl", level: 2, fanCount: BigInt(10) }),
     );
     expect(redirect).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
   });
