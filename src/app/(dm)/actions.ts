@@ -18,6 +18,10 @@ import {
   createGenericEntity,
   updateEntity,
 } from "@/server/services/entities";
+import {
+  approveChangeSet,
+  rejectChangeSet,
+} from "@/server/services/review";
 
 export type CampaignActionState = { error?: string } | undefined;
 export type EntityActionState =
@@ -172,4 +176,23 @@ export async function archiveEntityAction(
   await archiveEntity(user.id, campaignId, entityId);
   revalidatePath(`/campaigns/${campaignId}`);
   redirect(`/campaigns/${campaignId}`);
+}
+
+export async function approveChangeSetAction(
+  campaignId: string,
+  changeSetId: string,
+): Promise<void> {
+  const user = await requireUser();
+  await approveChangeSet(user.id, campaignId, changeSetId);
+  revalidatePath(`/campaigns/${campaignId}`);
+  revalidatePath(`/campaigns/${campaignId}/review`);
+}
+
+export async function rejectChangeSetAction(
+  campaignId: string,
+  changeSetId: string,
+): Promise<void> {
+  const user = await requireUser();
+  await rejectChangeSet(user.id, campaignId, changeSetId);
+  revalidatePath(`/campaigns/${campaignId}/review`);
 }

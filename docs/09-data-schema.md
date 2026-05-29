@@ -22,12 +22,12 @@
 - **Review pipeline tables** (`ChangeSet`, `ChangeOperation`, `Provenance`,
   `Lock`, `AuditLog`) are central and referenced by everything mutable.
 
-> **Implementation note (M1):** the committed schema currently includes the
-> identity/tenancy foundation plus `Entity` and `Crawler`. M1 direct DM/co-DM
-> writes default entities to `CANON` through the service layer so the UI can edit
-> crawlers before the review engine exists. M2 must reroute those service
-> internals through `ChangeSet`/provenance and can restore `PENDING` as the
-> default for proposal-created records.
+> **Implementation note (M2):** the committed schema includes the identity/
+> tenancy foundation, `Entity`/`Crawler`, and the first review-pipeline tables.
+> Direct DM/co-DM entity writes still feel instant in the UI, but the service
+> layer now records them as auto-approved `DM` change sets with provenance and
+> audit rows. Pending proposal support currently covers entity operations first;
+> relationship/event operations arrive with their milestones.
 
 ## Sketch
 

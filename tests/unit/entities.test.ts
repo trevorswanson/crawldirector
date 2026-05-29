@@ -12,6 +12,12 @@ import {
   listEntitiesForUser,
   updateEntity,
 } from "@/server/services/entities";
+import {
+  approveChangeSet,
+  createPendingEntityChangeSet,
+  listPendingChangeSetsForUser,
+  rejectChangeSet,
+} from "@/server/services/review";
 
 function makeUser(email: string) {
   return prisma.user.create({ data: { email } });
@@ -94,6 +100,57 @@ describe("entity service", () => {
     });
     expect(list.entities).toHaveLength(1);
     expect(list.entities[0].name).toBe("Skull Empire");
+  });
+
+  it("records direct DM entity writes as approved change sets with provenance", async () => {
+    const owner = await makeUser("provenance@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Zev",
+      summary: "Crawler admin",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: ["admin"],
+    });
+
+    const changeSet = await prisma.changeSet.findFirst({
+      where: { campaignId: campaign.id },
+      include: { operations: true },
+    });
+    expect(changeSet).toMatchObject({
+      source: "DM",
+      status: "APPROVED",
+      actorUserId: owner.id,
+      reviewedById: owner.id,
+    });
+    expect(changeSet?.operations).toHaveLength(1);
+    expect(changeSet?.operations[0]).toMatchObject({
+      op: "CREATE_ENTITY",
+      targetType: "ENTITY",
+      targetId: entity.id,
+      decision: "ACCEPTED",
+    });
+
+    const fields = await prisma.provenance.findMany({
+      where: { entityId: entity.id },
+      select: { field: true, source: true, changeSetId: true },
+    });
+    expect(fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: "name",
+          source: "DM",
+          changeSetId: changeSet?.id,
+        }),
+      ]),
+    );
+    await expect(
+      prisma.auditLog.findFirstOrThrow({
+        where: { targetType: "CHANGE_SET", targetId: changeSet?.id },
+      }),
+    ).resolves.toMatchObject({ action: "AUTO_APPROVE" });
   });
 
   it("does not leak entities across campaign membership boundaries", async () => {
@@ -284,6 +341,262 @@ describe("entity service", () => {
     expect(detail?.crawler?.viewCount).toBe(BigInt(5000));
     expect(detail?.crawler?.followerCount).toBe(BigInt(500));
     expect(detail?.crawler?.favoriteCount).toBe(BigInt(50));
+  });
+
+  it("blocks overwrites to locked fields", async () => {
+    const owner = await makeUser("locked@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Locked NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    await prisma.entity.update({
+      where: { id: entity.id },
+      data: { lockedFields: ["name"] },
+    });
+
+    await expect(
+      updateEntity(owner.id, campaign.id, entity.id, {
+        type: "NPC",
+        name: "Renamed NPC",
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: [],
+      }),
+    ).rejects.toThrow("locked");
+
+    await expect(
+      prisma.entity.findUniqueOrThrow({ where: { id: entity.id } }),
+    ).resolves.toMatchObject({ name: "Locked NPC", version: 1 });
+  });
+
+  it("blocks archiving a locked entity", async () => {
+    const owner = await makeUser("locked-archive@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Locked Archive NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    await prisma.entity.update({
+      where: { id: entity.id },
+      data: { locked: true },
+    });
+
+    await expect(archiveEntity(owner.id, campaign.id, entity.id)).rejects.toThrow(
+      "locked",
+    );
+    await expect(
+      prisma.entity.findUniqueOrThrow({ where: { id: entity.id } }),
+    ).resolves.toMatchObject({ status: "CANON", version: 1 });
+  });
+
+  it("approves a pending entity proposal end to end", async () => {
+    const owner = await makeUser("approve@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const proposal = await createPendingEntityChangeSet(owner.id, campaign.id, {
+      title: "Create proposed NPC",
+      operations: [
+        {
+          op: "CREATE_ENTITY",
+          patch: {
+            type: { to: "NPC" },
+            name: { to: "Proposed NPC" },
+            summary: { to: "Queued for review" },
+            description: { to: null },
+            visibility: { to: "DM_ONLY" },
+            tags: { to: [] },
+          },
+        },
+      ],
+    });
+
+    const pending = await prisma.changeSet.findUniqueOrThrow({
+      where: { id: proposal.id },
+    });
+    expect(pending.status).toBe("PENDING");
+    await expect(listPendingChangeSetsForUser(owner.id, campaign.id)).resolves
+      .toHaveLength(1);
+
+    const result = await approveChangeSet(owner.id, campaign.id, proposal.id);
+    expect(result.targetIds).toHaveLength(1);
+    await expect(
+      prisma.entity.findUniqueOrThrow({ where: { id: result.targetIds[0] } }),
+    ).resolves.toMatchObject({ name: "Proposed NPC", status: "CANON" });
+    await expect(
+      prisma.changeSet.findUniqueOrThrow({ where: { id: proposal.id } }),
+    ).resolves.toMatchObject({ status: "APPROVED", reviewedById: owner.id });
+  });
+
+  it("flags queued proposals that touch locked fields", async () => {
+    const owner = await makeUser("pending-locked@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Locked Pending NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    await prisma.entity.update({
+      where: { id: entity.id },
+      data: { lockedFields: ["name"] },
+    });
+
+    const proposal = await createPendingEntityChangeSet(owner.id, campaign.id, {
+      title: "Rename locked NPC",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: entity.id,
+          patch: {
+            _baseVersion: { to: 1 },
+            name: { from: "Locked Pending NPC", to: "New Name" },
+          },
+        },
+      ],
+    });
+
+    await expect(
+      prisma.changeOperation.findFirstOrThrow({
+        where: { changeSetId: proposal.id },
+      }),
+    ).resolves.toMatchObject({ blockedByLock: true });
+    await expect(
+      approveChangeSet(owner.id, campaign.id, proposal.id),
+    ).rejects.toThrow("blocked by locks");
+  });
+
+  it("rejects stale queued proposals when canon changed underneath", async () => {
+    const owner = await makeUser("stale@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Stale NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const proposal = await createPendingEntityChangeSet(owner.id, campaign.id, {
+      title: "Stale rename",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: entity.id,
+          patch: {
+            _baseVersion: { to: 1 },
+            name: { from: "Stale NPC", to: "Old proposal name" },
+          },
+        },
+      ],
+    });
+    await updateEntity(owner.id, campaign.id, entity.id, {
+      type: "NPC",
+      name: "Fresh canon name",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    await expect(
+      approveChangeSet(owner.id, campaign.id, proposal.id),
+    ).rejects.toThrow("stale");
+    await expect(
+      prisma.entity.findUniqueOrThrow({ where: { id: entity.id } }),
+    ).resolves.toMatchObject({ name: "Fresh canon name", version: 2 });
+  });
+
+  it("rejects stale queued archive proposals when canon changed underneath", async () => {
+    const owner = await makeUser("stale-archive@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Archive Stale NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const proposal = await createPendingEntityChangeSet(owner.id, campaign.id, {
+      title: "Archive stale NPC",
+      operations: [
+        {
+          op: "DELETE_ENTITY",
+          targetId: entity.id,
+          patch: {
+            _baseVersion: { to: 1 },
+            status: { from: "CANON", to: "ARCHIVED" },
+          },
+        },
+      ],
+    });
+    await updateEntity(owner.id, campaign.id, entity.id, {
+      type: "NPC",
+      name: "Archive Stale NPC",
+      summary: "Changed after proposal",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    await expect(
+      approveChangeSet(owner.id, campaign.id, proposal.id),
+    ).rejects.toThrow("stale");
+    await expect(
+      prisma.changeOperation.findFirstOrThrow({
+        where: { changeSetId: proposal.id },
+      }),
+    ).resolves.toMatchObject({ isStale: true });
+    await expect(
+      prisma.entity.findUniqueOrThrow({ where: { id: entity.id } }),
+    ).resolves.toMatchObject({
+      status: "CANON",
+      summary: "Changed after proposal",
+      version: 2,
+    });
+  });
+
+  it("rejects a pending entity proposal without applying canon", async () => {
+    const owner = await makeUser("reject@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const proposal = await createPendingEntityChangeSet(owner.id, campaign.id, {
+      title: "Reject proposed NPC",
+      operations: [
+        {
+          op: "CREATE_ENTITY",
+          patch: {
+            type: { to: "NPC" },
+            name: { to: "Rejected NPC" },
+            summary: { to: null },
+            description: { to: null },
+            visibility: { to: "DM_ONLY" },
+            tags: { to: [] },
+          },
+        },
+      ],
+    });
+
+    await rejectChangeSet(owner.id, campaign.id, proposal.id);
+
+    await expect(
+      prisma.changeSet.findUniqueOrThrow({ where: { id: proposal.id } }),
+    ).resolves.toMatchObject({ status: "REJECTED", reviewedById: owner.id });
+    await expect(
+      prisma.entity.findFirst({ where: { campaignId: campaign.id, name: "Rejected NPC" } }),
+    ).resolves.toBeNull();
   });
 
   it("rejects updates that try to change an entity type", async () => {
