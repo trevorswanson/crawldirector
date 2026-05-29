@@ -17,7 +17,7 @@ export const signInSchema = z.object({
 export type SignInInput = z.infer<typeof signInSchema>;
 
 export const createCampaignSchema = z.object({
-  name: z.string().trim().min(1, "Campaign name is required").max(120),
+  name: z.string().trim().min(1, "Crawl name is required").max(120),
   summary: z.string().trim().max(2000).optional().or(z.literal("")),
 });
 export type CreateCampaignInput = z.infer<typeof createCampaignSchema>;

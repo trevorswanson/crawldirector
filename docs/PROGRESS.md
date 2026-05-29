@@ -4,6 +4,18 @@ Running checklist of milestones/tasks, newest first. See
 [`11-roadmap.md`](./11-roadmap.md) for the full plan and
 [`12-working-sessions.md`](./12-working-sessions.md) for how to pick up work.
 
+## UI polish — campaign-aware shell + crawl language (2026-05-29)
+
+### Done
+
+- [x] Sidebar World Browser links now preserve the active campaign context
+      instead of sending DMs back to the dashboard picker.
+- [x] Topbar campaign control now shows the active campaign name and opens a
+      switcher listing the user's campaigns plus **Start New Crawl**; it closes
+      on route changes, menu selection, and focus leaving the control.
+- [x] Renamed the visible new-campaign creation surface to **New Crawl** /
+      **Create crawl** while keeping the internal `Campaign` domain model.
+
 ## Design language adoption — "broadcast HUD" 🎨 (2026-05-29)
 
 Adopted the CrawlDirector Console mockup as the app's design language. **No new

@@ -21,16 +21,16 @@ export default async function DashboardPage() {
       <div className="flex flex-col gap-1">
         <Kicker>World Browser · Campaigns</Kicker>
         <h1 className="font-display text-2xl font-semibold tracking-tight">
-          Your campaigns
+          Your crawls
         </h1>
         <p className="text-sm text-[var(--muted-foreground)]">
-          Each campaign is an isolated world you model and curate.
+          Each crawl is an isolated world you model and curate.
         </p>
       </div>
 
-      <Card>
+      <Card id="new-crawl">
         <CardHeader>
-          <CardTitle>New campaign</CardTitle>
+          <CardTitle>New Crawl</CardTitle>
           <CardDescription>
             Spin up a fresh Dungeon Crawler Carl world.
           </CardDescription>
@@ -42,7 +42,7 @@ export default async function DashboardPage() {
 
       {campaigns.length === 0 ? (
         <p className="text-sm text-[var(--muted-foreground)]">
-          No campaigns yet. Create your first one above.
+          No crawls yet. Create your first one above.
         </p>
       ) : (
         <ul className="grid gap-4 sm:grid-cols-2">

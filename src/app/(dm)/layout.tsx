@@ -1,12 +1,13 @@
-import Link from "next/link";
 import { Search } from "lucide-react";
 
 import { cookies } from "next/headers";
 
 import { requireUser } from "@/server/auth/session";
+import { listCampaignsForUser } from "@/server/services/campaigns";
 import { signOutAction } from "@/app/(dm)/actions";
 import { Button } from "@/components/ui/button";
 import { DmNav } from "@/components/console/dm-nav";
+import { CampaignSwitcher } from "@/components/console/campaign-switcher";
 import { FxToggle } from "@/components/ui/fx-toggle";
 
 export default async function DmLayout({
@@ -15,6 +16,8 @@ export default async function DmLayout({
   children: React.ReactNode;
 }) {
   const user = await requireUser();
+  const campaigns = await listCampaignsForUser(user.id);
+  const campaignChoices = campaigns.map(({ id, name }) => ({ id, name }));
   const initials = (user.email ?? "?").slice(0, 2).toUpperCase();
   const fxEnabled = (await cookies()).get("cd-fx")?.value !== "off";
 
@@ -38,13 +41,7 @@ export default async function DmLayout({
       {/* Main column: topbar + scrolling content. */}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-[52px] shrink-0 items-center gap-4 border-b border-[var(--line)] bg-[var(--bg-1)] px-[18px]">
-          <Link
-            href="/dashboard"
-            className="flex items-center gap-[9px] border border-[var(--line-strong)] bg-[var(--bg-3)] px-[11px] py-[6px] text-[var(--ink)] transition-colors hover:border-[var(--accent)]"
-          >
-            <span className="size-[7px] rounded-full bg-[var(--accent)]" />
-            <span className="text-[13px] font-semibold">Campaigns</span>
-          </Link>
+          <CampaignSwitcher campaigns={campaignChoices} />
 
           <span
             title="Global search & Ask the Campaign — planned (M5). Per-campaign search is on the World Browser."

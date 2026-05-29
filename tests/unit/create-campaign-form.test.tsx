@@ -33,9 +33,9 @@ afterEach(cleanup);
 describe("CreateCampaignForm", () => {
   it("renders the name and summary fields and the create button", () => {
     render(<CreateCampaignForm />);
-    expect(screen.getByLabelText("Campaign name")).toBeDefined();
+    expect(screen.getByLabelText("Crawl name")).toBeDefined();
     expect(screen.getByLabelText("Summary (optional)")).toBeDefined();
-    expect(screen.getByRole("button", { name: "Create campaign" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Create crawl" })).toBeDefined();
   });
 
   it("shows the error alert from the action state", () => {
