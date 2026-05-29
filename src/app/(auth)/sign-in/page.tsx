@@ -9,6 +9,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Kicker } from "@/components/ui/kicker";
 import { CredentialsForm } from "@/components/auth/credentials-form";
 import { signInAction } from "@/app/(auth)/actions";
 import { signInWithOidc } from "@/app/(auth)/oauth-actions";
@@ -26,6 +27,7 @@ export default function SignInPage() {
   return (
     <Card>
       <CardHeader>
+        <Kicker className="mb-1">Access · Console</Kicker>
         <CardTitle>Sign in</CardTitle>
         <CardDescription>
           Welcome back, Crawler. Sign in to run your campaign.

@@ -15,6 +15,11 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Kicker } from "@/components/ui/kicker";
+import { HudTag } from "@/components/ui/hud-tag";
+import { TypeDot } from "@/components/ui/type-dot";
+import { SourceBadge } from "@/components/ui/source-badge";
+import { StatusPill } from "@/components/ui/status-pill";
 import {
   CreateCrawlerForm,
   CreateGenericEntityForm,
@@ -56,7 +61,7 @@ export default async function CampaignPage({
         >
           ← All campaigns
         </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">
+        <h1 className="font-display text-2xl font-semibold tracking-tight">
           {campaign.name}
         </h1>
         {campaign.summary && (
@@ -64,16 +69,16 @@ export default async function CampaignPage({
             {campaign.summary}
           </p>
         )}
-        <div className="mt-1 flex gap-3 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
-          <span>Role: {role}</span>
-          <span>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <HudTag>Role · {role}</HudTag>
+          <HudTag>
             {campaign._count.members} member
             {campaign._count.members === 1 ? "" : "s"}
-          </span>
-          <span>
+          </HudTag>
+          <HudTag>
             {campaign._count.entities} entit
             {campaign._count.entities === 1 ? "y" : "ies"}
-          </span>
+          </HudTag>
         </div>
       </div>
 
@@ -104,8 +109,11 @@ export default async function CampaignPage({
       </section>
 
       <section className="flex flex-col gap-4">
-        <div>
-          <h2 className="text-xl font-semibold tracking-tight">World browser</h2>
+        <div className="flex flex-col gap-1">
+          <Kicker>Canon · Entities</Kicker>
+          <h2 className="font-display text-xl font-semibold tracking-tight">
+            World browser
+          </h2>
           <p className="text-sm text-[var(--muted-foreground)]">
             Browse and keyword-search campaign entities. Relationships and
             events arrive after the review pipeline.
@@ -148,34 +156,48 @@ export default async function CampaignPage({
             No matching entities yet.
           </p>
         ) : (
-          <ul className="grid gap-3">
-            {entities.map((entity) => (
-              <li key={entity.id}>
-                <Link href={`/campaigns/${id}/entities/${entity.id}`}>
-                  <Card className="transition-colors hover:border-[var(--primary)]">
-                    <CardHeader className="gap-2">
-                      <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
-                        <span>{formatEntityType(entity.type)}</span>
-                        <span>{formatVisibility(entity.visibility)}</span>
-                        {entity.crawler && (
-                          <span>
-                            Level {entity.crawler.level}
-                            {entity.crawler.currentFloor
-                              ? `, floor ${entity.crawler.currentFloor}`
-                              : ""}
+          <>
+            <p className="font-mono text-[11px] uppercase tracking-[.08em] text-[var(--ink-faint)]">
+              {entities.length} result{entities.length === 1 ? "" : "s"}
+            </p>
+            <ul className="grid gap-3 sm:grid-cols-2">
+              {entities.map((entity) => (
+                <li key={entity.id}>
+                  <Link href={`/campaigns/${id}/entities/${entity.id}`}>
+                    <Card className="h-full transition-colors hover:border-[var(--accent)]">
+                      <CardHeader className="gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <TypeDot type={entity.type} />
+                          <span className="font-mono text-[9.5px] uppercase tracking-[.08em] text-[var(--ink-faint)]">
+                            {formatEntityType(entity.type)}
                           </span>
-                        )}
-                      </div>
-                      <CardTitle>{entity.name}</CardTitle>
-                      <CardDescription>
-                        {entity.summary || "No summary yet."}
-                      </CardDescription>
-                    </CardHeader>
-                  </Card>
-                </Link>
-              </li>
-            ))}
-          </ul>
+                          <span className="ml-auto flex items-center gap-2">
+                            <StatusPill status={entity.status} />
+                            <SourceBadge source="DM" small />
+                          </span>
+                        </div>
+                        <CardTitle>{entity.name}</CardTitle>
+                        <CardDescription>
+                          {entity.summary || "No summary yet."}
+                        </CardDescription>
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          <HudTag>{formatVisibility(entity.visibility)}</HudTag>
+                          {entity.crawler && (
+                            <HudTag>
+                              Lv {entity.crawler.level}
+                              {entity.crawler.currentFloor
+                                ? ` · Floor ${entity.crawler.currentFloor}`
+                                : ""}
+                            </HudTag>
+                          )}
+                        </div>
+                      </CardHeader>
+                    </Card>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </section>
     </div>

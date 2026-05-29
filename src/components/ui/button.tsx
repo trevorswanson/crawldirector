@@ -3,23 +3,31 @@ import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
 
+// HUD buttons: mono, uppercase, square, hairline-bordered. See
+// docs/13-design-language.md. Existing variant names are preserved; `primary`,
+// `ok`, and `bare` are added to mirror the mockup's button kit.
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap font-mono uppercase tracking-[.06em] transition-[filter,background,color] hover:brightness-110 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ring)] disabled:pointer-events-none disabled:opacity-40",
   {
     variants: {
       variant: {
         default:
-          "bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90",
+          "border border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-ink)]",
+        primary:
+          "border border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-ink)]",
         outline:
-          "border border-[var(--border)] bg-transparent hover:bg-[var(--muted)]",
-        ghost: "hover:bg-[var(--muted)]",
+          "border border-[var(--line-strong)] bg-[var(--bg-3)] text-[var(--ink-dim)] hover:text-[var(--ink)]",
+        ghost:
+          "border border-transparent bg-transparent text-[var(--ink-dim)] hover:text-[var(--ink)]",
+        ok: "border border-[var(--ok)] bg-[color-mix(in_srgb,var(--ok)_16%,transparent)] text-[var(--ok)]",
         destructive:
-          "bg-[var(--destructive)] text-white hover:opacity-90",
+          "border border-[color-mix(in_srgb,var(--no)_50%,transparent)] bg-transparent text-[var(--no)]",
+        bare: "border border-transparent bg-transparent text-[var(--ink-dim)] hover:text-[var(--ink)]",
       },
       size: {
-        default: "h-10 px-4 py-2",
-        sm: "h-9 px-3",
-        lg: "h-11 px-6",
+        default: "h-10 px-[13px] text-xs",
+        sm: "h-9 px-[9px] text-[11px]",
+        lg: "h-11 px-[18px] text-[13px]",
       },
     },
     defaultVariants: { variant: "default", size: "default" },

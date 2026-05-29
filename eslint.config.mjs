@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Static design-mockup reference (not part of the app build) — see
+    // docs/design/mockup/README.md.
+    "docs/design/mockup/**",
   ]),
   {
     settings: {

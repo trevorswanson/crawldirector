@@ -1,5 +1,70 @@
 @import "tailwindcss";
 
+/*
+ * CrawlDirector design language — "Dungeon Crawler World broadcast HUD".
+ * The canonical spec lives in docs/13-design-language.md and the visual source
+ * of truth is docs/design/mockup/. Never hardcode colors in components; use
+ * these tokens (or their shadcn aliases below).
+ */
+
+:root {
+  /* ---- type ---- */
+  --font-display: var(--font-chakra-petch), "Chakra Petch", sans-serif;
+  --font-body: var(--font-space-grotesk), "Space Grotesk", sans-serif;
+  --font-mono: var(--font-jetbrains-mono), "JetBrains Mono", monospace;
+
+  /* ---- brand / accent ---- */
+  --accent: #f0c349;          /* DCC book-cover gold */
+  --accent-ink: #1a1306;      /* text on accent */
+  --hot: #ff5b3a;             /* hazard / live */
+
+  /* ---- surfaces (warm near-black, layered) ---- */
+  --bg: #0a0908;
+  --bg-1: #100e0c;
+  --bg-2: #16130f;
+  --bg-3: #1e1a14;
+  --bg-4: #262019;
+
+  /* ---- ink ---- */
+  --ink: #f3eee3;
+  --ink-dim: #a89f8d;
+  --ink-faint: #6d6557;
+
+  /* ---- hairlines ---- */
+  --line: rgba(240, 230, 200, 0.1);
+  --line-strong: rgba(240, 230, 200, 0.18);
+
+  /* ---- semantic ---- */
+  --ok: #57d98a;
+  --no: #ff5d5d;
+  --sys: #74b6ff;             /* system / locked */
+
+  /* ---- provenance / status semantics (core UX) ---- */
+  --ai: #c08bff;              /* AI-origin */
+  --player: #5fd1c9;          /* player suggestion */
+  --import: #d8a45f;          /* imported */
+  --add: #57d98a;             /* diff additions */
+  --del: #ff7a6b;             /* diff deletions */
+
+  /* ---- FX intensity (gated by .fx on <html>) ---- */
+  --grain-opacity: 0.045;
+  --scan-opacity: 0.05;
+
+  /* ---- shadcn alias layer: keeps existing var(--*) utilities valid ---- */
+  --background: var(--bg);
+  --foreground: var(--ink);
+  --card: var(--bg-1);
+  --card-foreground: var(--ink);
+  --primary: var(--accent);
+  --primary-foreground: var(--accent-ink);
+  --muted: var(--bg-3);
+  --muted-foreground: var(--ink-dim);
+  --border: var(--line);
+  --input: var(--line-strong);
+  --ring: var(--accent);
+  --destructive: var(--no);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -13,34 +78,132 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-destructive: var(--destructive);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-  --radius-lg: 0.625rem;
-  --radius-md: calc(0.625rem - 2px);
-  --radius-sm: calc(0.625rem - 4px);
-}
-
-:root {
-  --background: #0a0a0b;
-  --foreground: #ededed;
-  --card: #141417;
-  --card-foreground: #ededed;
-  --primary: #7c5cff;
-  --primary-foreground: #ffffff;
-  --muted: #1c1c20;
-  --muted-foreground: #9b9ba3;
-  --border: #2a2a30;
-  --input: #2a2a30;
-  --ring: #7c5cff;
-  --destructive: #ef4444;
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-mono);
+  /* square-ish HUD radii */
+  --radius-lg: 2px;
+  --radius-md: 2px;
+  --radius-sm: 0px;
 }
 
 * {
   border-color: var(--border);
+  box-sizing: border-box;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body), Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: var(--accent); color: var(--accent-ink); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--bg-4); border: 2px solid var(--bg); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: #342c22; }
+:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+
+/* ---------------------------- HUD primitives ---------------------------- */
+.mono { font-family: var(--font-mono); }
+.font-display { font-family: var(--font-display); }
+
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.kicker.dim { color: var(--ink-faint); }
+.kicker::before {
+  content: "";
+  width: 16px;
+  height: 1px;
+  background: currentColor;
+  display: inline-block;
+}
+.kicker.nolead::before { display: none; }
+
+.panel { background: var(--bg-1); border: 1px solid var(--line); }
+
+.hud-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border: 1px solid var(--line-strong);
+  color: var(--ink-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.bracket { position: relative; }
+.bracket::before,
+.bracket::after {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-color: var(--line-strong);
+  border-style: solid;
+  pointer-events: none;
+}
+.bracket::before { top: 0; left: 0; border-width: 1px 0 0 1px; }
+.bracket::after { bottom: 0; right: 0; border-width: 0 1px 1px 0; }
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--hot);
+  box-shadow: 0 0 0 0 var(--hot);
+  animation: pulse 1.8s infinite;
+  display: inline-block;
+}
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--hot) 70%, transparent); }
+  70% { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.fade-in { animation: fadeIn 0.35s ease; }
+@keyframes fadeIn { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* ------------------------- broadcast FX overlays ------------------------ */
+/* Hidden by default; shown only when <html class="fx"> (see FxToggle). */
+.fx-layer { position: fixed; inset: 0; pointer-events: none; z-index: 9000; display: none; }
+html.fx .fx-layer { display: block; }
+.fx-scanlines {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0px, rgba(0, 0, 0, 0) 2px,
+    rgba(0, 0, 0, 0.45) 3px, rgba(0, 0, 0, 0) 4px
+  );
+  opacity: var(--scan-opacity);
+  mix-blend-mode: multiply;
+}
+.fx-grain {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: var(--grain-opacity);
+  mix-blend-mode: overlay;
+}
+.fx-vignette { background: radial-gradient(130% 100% at 50% 0%, transparent 60%, rgba(0, 0, 0, 0.5) 100%); }
+
+/* Accessibility: no motion + no flicker overlays for users who ask for it. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .fx-scanlines, .fx-grain { display: none !important; }
 }

@@ -57,7 +57,9 @@ Reality is pending review.
 🚧 **M1 in progress.** M0 foundation is implemented: the app is scaffolded and
 runnable with auth, campaigns, Prisma/Postgres, CI, and coverage gates. M1 has
 started with the generic Entity core, Crawler satellite, service-layer CRUD, and
-a basic world browser/detail UI. See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
+a world browser/detail UI. The app now wears the CrawlDirector "broadcast HUD"
+design language ([`docs/13-design-language.md`](./docs/13-design-language.md)).
+See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
 ## Where to start
 
@@ -78,6 +80,7 @@ All planning lives in [`docs/`](./docs). Read in this order:
 | [`docs/10-ui-ux.md`](./docs/10-ui-ux.md) | DM console + player crawler interface |
 | [`docs/11-roadmap.md`](./docs/11-roadmap.md) | Milestones M0–M12, sequenced and decomposable |
 | [`docs/12-working-sessions.md`](./docs/12-working-sessions.md) | How future sessions pick up and extend the work |
+| [`docs/13-design-language.md`](./docs/13-design-language.md) | The "broadcast HUD" design system: tokens, fonts, primitives, FX (build all UI from this) |
 
 ## Decisions already made
 

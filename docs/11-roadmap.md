@@ -203,6 +203,50 @@ and agent (M11) *designs* live in docs 05–06 alongside the other feature desig
 but the agent runtime is sequenced late because it is the heaviest feature and
 pairs with M10's consequence generator.
 
+## Design-driven refinements (proposals, 2026-05-29)
+
+Building the [design language](./13-design-language.md) from the
+[mockup](./design/mockup) surfaced concrete additions. These are **proposals** to
+fold into the named milestones — not a re-sequencing:
+
+- **Provenance/status visual contract from M2's first UI.** The source-badge /
+  status-pill / lock-chip system is built now (`src/components/ui`). M2's Review
+  Queue and every later canon surface should reuse it rather than inventing
+  per-screen treatments — it's the cross-cutting "AI vs. human vs. locked"
+  language the product promises.
+- **Canon-integrity meter** (DM / AI-origin / locked %) — the mockup's nav footer.
+  Real once provenance exists: **M2** computes the figures; surface it in the
+  shell and in **M9**'s audit/provenance review screens.
+- **Global "Search · Ask the Campaign" affordance** lives in the shell from day
+  one but is shown disabled until **M5** wires hybrid search + RAG Q&A. Keep the
+  "Planned · M5" treatment until then.
+- **Per-DM theme preference** (accent color + FX toggles, per the mockup's tweaks
+  panel) — small **M9** polish item. The FX toggle already ships.
+- **Entity-type taxonomy reconciliation.** The mockup uses a smaller set
+  (CRAWLER, NPC, SYSTEM_AI, FACTION, ORGANIZATION, FLOOR, LOCATION, MOB_TYPE,
+  TITLE); our enum is broader (adds PARTY, GUILD, BOSS, SPONSOR, SHOW, SPELL,
+  ACHIEVEMENT, DEITY, …). The app's enum is the source of truth; `entityTypeColor`
+  in `lib/entities.ts` already assigns category colors across the full set.
+  Nothing to change — noted so the mockup's narrower list isn't mistaken for a
+  spec.
+
+### Deferred broadcast-HUD features (captured from the mockup so we don't lose them)
+
+The mockup's topbar/ticker chrome was intentionally **not** shipped now (no honest
+data source yet — see the no-fake-data principle in
+[`13-design-language.md`](./13-design-language.md)). Each lands with the milestone
+that produces its data:
+
+- **Live broadcast ticker** (scrolling world events: siege timers, faction
+  standings, viral clips, pending persona drift) → **M8 (live session mode)**: a
+  feed of live session events + reveals. _Add as an explicit M8 deliverable._
+- **In-game clock HUD** ("Floor N · Day D") → needs an in-game time/calendar
+  model: data with **M3** (events carry in-game time), live display with **M8**.
+- **Fame / audience-rating tickers** (views/followers/favorites trends, sponsor-
+  stock moves) → the `Crawler` model already tracks views/followers/favorites;
+  trends + fan-economy modeling are **M12 (broadcast/fan-economy)**. _Add the
+  at-a-glance rating ticker as an M12 deliverable._
+
 ## Definition of done (every milestone)
 
 - Migrations committed; service layer covered by unit tests; key flows covered by

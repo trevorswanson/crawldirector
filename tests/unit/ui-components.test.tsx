@@ -42,7 +42,7 @@ describe("Button", () => {
 
   it("exposes a buttonVariants helper", () => {
     expect(typeof buttonVariants()).toBe("string");
-    expect(buttonVariants({ variant: "destructive" })).toContain("destructive");
+    expect(buttonVariants({ variant: "destructive" })).toContain("var(--no)");
     expect(buttonVariants({ variant: "ghost", size: "sm" })).toContain("h-9");
   });
 });
