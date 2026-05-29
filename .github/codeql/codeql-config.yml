@@ -1,0 +1,10 @@
+name: "CrawlDirector CodeQL config"
+
+# The saved design mockup in docs/design/mockup/ is a read-only reference
+# snapshot (authored in Claude Design) — it is not part of the app build and is
+# already excluded from ESLint (eslint.config.mjs) and TypeScript (tsconfig only
+# includes *.ts/*.tsx). Exclude it from CodeQL too so its editor-harness code
+# (e.g. the tweaks panel's postMessage bridge) doesn't raise findings against
+# code we never ship or execute.
+paths-ignore:
+  - docs/design/mockup

@@ -5,6 +5,15 @@ Two distinct surfaces share one app and one data layer but feel different:
 1. **DM Console** — a dense worldbuilding + review workbench.
 2. **Crawler Interface** — an in-fiction, read-mostly System UI for players.
 
+> **Design language.** Both surfaces use the **"Dungeon Crawler World broadcast
+> HUD"** look — warm-black, DCC gold, mono HUD labels, optional broadcast FX. The
+> canonical spec (tokens, fonts, primitives, FX/accessibility rules) is
+> [`13-design-language.md`](./13-design-language.md), and the visual source of
+> truth is the saved mockup in [`design/mockup/`](./design/mockup/). Each IA
+> section below names the mockup screen that realizes it. Build every milestone's
+> UI from those primitives; the provenance/status visual semantics here are a
+> cross-cutting contract, not per-screen decisions.
+
 ## DM Console
 
 ### Information architecture
@@ -13,8 +22,10 @@ Two distinct surfaces share one app and one data layer but feel different:
 - **Review Queue** — the home base. Pending Change Sets grouped by source and
   run, with diff views and batch actions. This should be the most polished
   screen; it is where the product's promise is felt. (See pipeline doc.)
+  _Mockup: `design/mockup/screen-review.jsx` (M2)._
 - **World browser** — navigate entities by type, floor/area, faction, tag, or
   full-text search. Quick-create stubs.
+  _Mockup: `design/mockup/screen-world.jsx` (M1 — implemented)._
 - **Search & "Ask the Campaign"** — a global search box (hybrid keyword + semantic)
   and a natural-language Q&A that answers from canon with **citations** linking to
   the source entities/events. Read-only; never writes canon. See
@@ -25,6 +36,7 @@ Two distinct surfaces share one app and one data layer but feel different:
   X, approved by you on …"), and lock controls.
 - **Relationship graph** — interactive node-link view of the campaign (filter by
   type/faction/floor). Central to feeling the "web."
+  _Mockup: `design/mockup/screen-graph.jsx` (M3)._
 - **Causality view** — for any event/entity, the upstream-cause /
   downstream-effect chain as a navigable DAG.
 - **Timeline** — chronological events with in-game-time ordering and filters.
@@ -42,6 +54,7 @@ Two distinct surfaces share one app and one data layer but feel different:
   mode (single act / reactive cascade / world tick / scenario), set bounds
   (depth, fan-out, spend cap) and knowledge scope, preview cost, run. Subagent
   proposals flow to the Review Queue as a batch.
+  _Mockup: `design/mockup/screen-sim.jsx` (M11)._
 - **Session console** — run a live game: a fast capture log (freeform, `@`/`#`
   tagging), one-click **reveal** of an entity/fact to players, **promote** log
   entries into canonical Events (via the review pipeline), and generate session /
@@ -77,7 +90,7 @@ locked-in*. Establish a consistent treatment early:
 
 An in-fiction reskin of canon, scoped by the visibility projection
 ([`02-architecture.md`](./02-architecture.md)). It should evoke the DCC System
-UI a crawler "sees."
+UI a crawler "sees." _Mockup: `design/mockup/screen-crawler.jsx` (M7)._
 
 `SHARED_WITH_PLAYERS` and `PLAYER_FACING` are both player-visible. The
 difference is presentation: shared content appears as normal known-world canon;

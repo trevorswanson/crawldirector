@@ -60,7 +60,7 @@ describe("CampaignPage", () => {
 
     expect(screen.getByRole("heading", { name: "World One" })).toBeDefined();
     expect(screen.getByText("A grand world")).toBeDefined();
-    expect(screen.getByText("Role: OWNER")).toBeDefined();
+    expect(screen.getByText("Role · OWNER")).toBeDefined();
     expect(screen.getByText("1 member")).toBeDefined();
     expect(screen.getByText("0 entities")).toBeDefined();
     expect(getCampaignForUser).toHaveBeenCalledWith("u1", "c1");
@@ -87,7 +87,7 @@ describe("CampaignPage", () => {
       }),
     );
 
-    expect(screen.getByText("Role: MEMBER")).toBeDefined();
+    expect(screen.getByText("Role · MEMBER")).toBeDefined();
     expect(screen.getByText("3 members")).toBeDefined();
     expect(screen.getByText("1 entity")).toBeDefined();
     expect(listEntitiesForUser).toHaveBeenCalledWith("u1", "c2", {
@@ -138,7 +138,7 @@ describe("CampaignPage", () => {
     expect(
       screen.getByRole("link", { name: /Carl/ }).getAttribute("href"),
     ).toBe("/campaigns/c3/entities/e1");
-    expect(screen.getByText("Level 2, floor 1")).toBeDefined();
+    expect(screen.getByText("Lv 2 · Floor 1")).toBeDefined();
   });
 
   it("calls notFound when the user is not a member", async () => {

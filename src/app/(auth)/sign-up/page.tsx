@@ -9,6 +9,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Kicker } from "@/components/ui/kicker";
 import { CredentialsForm } from "@/components/auth/credentials-form";
 import { signUpAction } from "@/app/(auth)/actions";
 import { signInWithOidc } from "@/app/(auth)/oauth-actions";
@@ -26,6 +27,7 @@ export default function SignUpPage() {
   return (
     <Card>
       <CardHeader>
+        <Kicker className="mb-1">Access · Enlist</Kicker>
         <CardTitle>Create your account</CardTitle>
         <CardDescription>
           Start modeling your Dungeon Crawler Carl campaign.

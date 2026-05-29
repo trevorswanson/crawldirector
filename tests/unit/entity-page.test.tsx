@@ -91,7 +91,7 @@ describe("EntityPage", () => {
     expect(screen.getByRole("heading", { name: "Carl" })).toBeDefined();
     expect(screen.getByText("Crawler")).toBeDefined();
     expect(screen.getByText("Player Facing")).toBeDefined();
-    expect(screen.getByText("Version 2")).toBeDefined();
+    expect(screen.getByText("v2")).toBeDefined();
     expect(screen.getByText("1000")).toBeDefined();
     expect(screen.getByText("100")).toBeDefined();
     expect(screen.getByText("10")).toBeDefined();

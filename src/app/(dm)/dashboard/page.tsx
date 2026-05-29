@@ -8,6 +8,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Kicker } from "@/components/ui/kicker";
+import { HudTag } from "@/components/ui/hud-tag";
 import { CreateCampaignForm } from "@/components/campaigns/create-campaign-form";
 
 export default async function DashboardPage() {
@@ -16,8 +18,11 @@ export default async function DashboardPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Your campaigns</h1>
+      <div className="flex flex-col gap-1">
+        <Kicker>World Browser · Campaigns</Kicker>
+        <h1 className="font-display text-2xl font-semibold tracking-tight">
+          Your campaigns
+        </h1>
         <p className="text-sm text-[var(--muted-foreground)]">
           Each campaign is an isolated world you model and curate.
         </p>
@@ -44,15 +49,16 @@ export default async function DashboardPage() {
           {campaigns.map((c) => (
             <li key={c.id}>
               <Link href={`/campaigns/${c.id}`}>
-                <Card className="transition-colors hover:border-[var(--primary)]">
+                <Card className="h-full transition-colors hover:border-[var(--accent)]">
                   <CardHeader>
+                    <div className="flex items-center gap-2">
+                      <span className="size-[7px] rounded-full bg-[var(--accent)]" />
+                      <HudTag>{c.members[0]?.role ?? "MEMBER"}</HudTag>
+                    </div>
                     <CardTitle>{c.name}</CardTitle>
                     <CardDescription>
                       {c.summary || "No summary yet."}
                     </CardDescription>
-                    <span className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
-                      {c.members[0]?.role ?? "MEMBER"}
-                    </span>
                   </CardHeader>
                 </Card>
               </Link>

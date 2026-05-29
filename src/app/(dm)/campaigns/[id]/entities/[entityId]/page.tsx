@@ -12,6 +12,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Kicker } from "@/components/ui/kicker";
+import { HudTag } from "@/components/ui/hud-tag";
+import { TypeDot } from "@/components/ui/type-dot";
+import { StatusPill } from "@/components/ui/status-pill";
+import { SourceBadge } from "@/components/ui/source-badge";
+import { LockChip } from "@/components/ui/lock-chip";
 import { formatEntityType, formatVisibility } from "@/lib/entities";
 import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
@@ -42,13 +48,11 @@ export default async function EntityPage({
         </Link>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <div className="mb-2 flex flex-wrap gap-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
-              <span>{formatEntityType(entity.type)}</span>
-              <span>{formatVisibility(entity.visibility)}</span>
-              <span>Version {entity.version}</span>
-              {entity.locked && <span>Locked</span>}
-            </div>
-            <h1 className="text-2xl font-semibold tracking-tight">
+            <Kicker className="mb-2">
+              <TypeDot type={entity.type} />
+              {formatEntityType(entity.type)}
+            </Kicker>
+            <h1 className="font-display text-2xl font-semibold tracking-tight">
               {entity.name}
             </h1>
             {entity.summary && (
@@ -56,6 +60,13 @@ export default async function EntityPage({
                 {entity.summary}
               </p>
             )}
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <StatusPill status={entity.status} />
+              <LockChip locked={entity.locked} />
+              <SourceBadge source="DM" />
+              <HudTag>{formatVisibility(entity.visibility)}</HudTag>
+              <HudTag>v{entity.version}</HudTag>
+            </div>
           </div>
           <ArchiveEntityForm campaignId={id} entityId={entity.id} />
         </div>
@@ -102,11 +113,13 @@ export default async function EntityPage({
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-[var(--border)] p-4">
-      <div className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+    <div className="panel p-4">
+      <div className="font-mono text-[10px] uppercase tracking-[.12em] text-[var(--ink-faint)]">
         {label}
       </div>
-      <div className="mt-1 text-lg font-semibold">{value}</div>
+      <div className="mt-1 font-mono text-lg font-semibold text-[var(--ink)]">
+        {value}
+      </div>
     </div>
   );
 }
