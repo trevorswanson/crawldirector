@@ -64,6 +64,9 @@ Two distinct surfaces share one app and one data layer but feel different:
   and manage player↔crawler links.
 - **Campaign settings** — members/roles, AI providers + keys, style guide, spend
   caps, import shared library.
+- **Archive / Trash Bin** — view all soft-deleted/archived entities (those with
+  status `ARCHIVED`), with actions for the DM to inspect provenance and restore
+  them back to canon or draft.
 
 ### Key interactions
 
