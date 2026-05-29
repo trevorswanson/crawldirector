@@ -39,6 +39,12 @@ vi.mock("@/components/entities/entity-forms", () => ({
   EditEntityForm: ({ entity }: { entity: { id: string; name: string } }) => (
     <div>Edit form {entity.name}</div>
   ),
+  EditFormProvider: ({ children }: { children: React.ReactNode }) => (
+    <>{children}</>
+  ),
+  EditRailControls: ({ detailHref }: { detailHref: string }) => (
+    <div>Edit controls {detailHref}</div>
+  ),
 }));
 
 import EntityPage from "@/app/(dm)/campaigns/[id]/entities/[entityId]/page";
@@ -81,6 +87,7 @@ function crawler(overrides = {}) {
     description: "Canon text",
     status: "CANON",
     visibility: "PLAYER_FACING",
+    source: "DM",
     tags: ["floor 1"],
     version: 2,
     locked: false,
@@ -124,7 +131,7 @@ describe("EntityPage", () => {
 
     expect(screen.getByRole("heading", { name: "Carl" })).toBeDefined();
     // breadcrumb + rail
-    expect(screen.getByText("World Browser")).toBeDefined();
+    expect(screen.getByText("WORLD BROWSER")).toBeDefined();
     expect(screen.getByText("Controls")).toBeDefined();
     expect(screen.getByText("Provenance")).toBeDefined();
     // fields table rows (crawler structured fields)
@@ -137,6 +144,8 @@ describe("EntityPage", () => {
     expect(screen.getAllByText("trevor").length).toBeGreaterThan(0);
     // read view, not the edit form
     expect(screen.queryByText("Edit form Carl")).toBeNull();
+    // lock button should be present in read-only mode
+    expect(screen.getByRole("button", { name: "Lock" })).toBeDefined();
     // planned panels for M3 data
     expect(screen.getAllByText(/Planned · M3/).length).toBe(2);
   });
@@ -149,6 +158,9 @@ describe("EntityPage", () => {
     expect(screen.getByText("Edit form Carl")).toBeDefined();
     // fields table is hidden in edit mode
     expect(screen.queryByText("Real name")).toBeNull();
+    // lock button should be hidden in edit mode
+    expect(screen.queryByRole("button", { name: "Lock" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Locked" })).toBeNull();
   });
 
   it("renders a locked generic entity without crawler fields", async () => {
@@ -171,6 +183,10 @@ describe("EntityPage", () => {
     expect(screen.queryByText("Followers")).toBeNull();
     // whole-entity lock control reads "Locked"
     expect(screen.getByText("Locked")).toBeDefined();
+
+    // edit button should be disabled
+    const editBtn = screen.getByRole("button", { name: "Edit" });
+    expect(editBtn.getAttribute("disabled")).not.toBeNull();
   });
 
   it("falls back gracefully when no provenance is recorded", async () => {
@@ -236,5 +252,49 @@ describe("EntityPage", () => {
 
     await expect(renderPage("missing")).rejects.toThrow("NEXT_NOT_FOUND");
     expect(notFound).toHaveBeenCalled();
+  });
+
+  it("renders the description as formatted Markdown", async () => {
+    getEntityForUser.mockResolvedValue(
+      crawler({
+        description: "# Carl's Notes\n\n- Bullet item\n- **Bold item** with [a link](https://dcc.com)\n\n1. Numbered item 1\n2. Numbered item 2\n\n> Quote block\n\n| Header A | Header B |\n| -------- | -------- |\n| Cell A   | Cell B   |",
+      }),
+    );
+
+    await renderPage();
+
+    // Check heading
+    const h1 = screen.getByRole("heading", { name: "Carl's Notes" });
+    expect(h1).toBeDefined();
+    expect(h1.tagName.toLowerCase()).toBe("h1");
+
+    // Check list item
+    expect(screen.getByText("Bullet item")).toBeDefined();
+
+    // Check bold text
+    const boldText = screen.getByText("Bold item");
+    expect(boldText.tagName.toLowerCase()).toBe("strong");
+
+    // Check link
+    const link = screen.getByRole("link", { name: "a link" });
+    expect(link.getAttribute("href")).toBe("https://dcc.com");
+
+    // Check ordered list items
+    const numberedItem1 = screen.getByText("Numbered item 1");
+    expect(numberedItem1.tagName.toLowerCase()).toBe("li");
+    expect(numberedItem1.closest("ol")).not.toBeNull();
+    expect(screen.getByText("Numbered item 2")).toBeDefined();
+
+    // Check blockquote
+    const quoteText = screen.getByText("Quote block");
+    expect(quoteText.closest("blockquote")).not.toBeNull();
+
+    // Check table rendering
+    const tableHeaderA = screen.getByText("Header A");
+    expect(tableHeaderA.tagName.toLowerCase()).toBe("th");
+    expect(tableHeaderA.closest("table")).not.toBeNull();
+
+    const tableCellA = screen.getByText("Cell A");
+    expect(tableCellA.tagName.toLowerCase()).toBe("td");
   });
 });

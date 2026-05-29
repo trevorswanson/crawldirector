@@ -10,6 +10,42 @@ Running checklist of milestones/tasks, newest first. See
 **Done when:** every canon change has provenance; locked fields can't be
 overwritten; a DM can review/approve/reject a proposal end to end.
 
+### Done — Markdown rendering for entity descriptions (2026-05-29)
+
+- [x] Installed `marked` for parsing markdown and `isomorphic-dompurify` for HTML sanitization (on both server and client).
+- [x] Created a reusable `<Markdown />` component in `src/components/ui/markdown.tsx` that safely parses, sanitizes, and renders Markdown content.
+- [x] Styled markdown HTML elements (paragraphs, headers, links, lists, code, blockquotes) in `src/app/globals.css` with a customized design language that matches the theme's colors.
+- [x] Integrated the `<Markdown />` component on the entity detail page (`src/app/(dm)/campaigns/[id]/entities/[entityId]/page.tsx`) to render dynamic formatted descriptions.
+- [x] Added unit tests in `tests/unit/entity-page.test.tsx` verifying that markdown headings, lists, bold text, links, and blockquotes in the description are rendered correctly.
+
+### Done — UI polish: simplified entity editing controls (2026-05-29)
+
+- [x] Removed the "Done" link from the top of the editing section on the entity detail page.
+- [x] Removed the bottom "Save entity" button from the edit form.
+- [x] Assigned `id="edit-entity-form"` to the EditEntityForm to allow external submission.
+- [x] Added `Save` and `Discard` buttons in the right-hand controls rail of the entity page when in edit mode. The `Save` button submits the edit form using the HTML5 `form` attribute and redirects back to the read-only view on success, and the `Discard` button links back to the read-only view.
+- [x] Disabled editing of locked fields on the editing screen (inputs are set to `readOnly` and selects are set to `disabled` with a hidden input fallback), and updated global Tailwind styles for inputs/textareas to visually shade read-only fields.
+- [x] Disabled opening the entity edit page (`?edit=1`) when the entire entity is locked by redirecting the user back to the read-only view in the client-side component if no form error is present.
+- [x] Hid the Lock/Unlock controls in the entity view right-hand sidebar when in edit mode to prevent users from inadvertently locking the entity (and triggering a form reset) while editing.
+- [x] Improved the backend update error to report the specific field(s) that were modified but locked (e.g. `This proposal touches locked entity fields: "name", "description"` or `Cannot update because the entity is locked.`).
+- [x] Preserved the form state when a save fails due to a locked entity, allowing the user to copy their input or retry.
+
+### Done — Entity source modeling and World Browser sidebar filter (2026-05-29)
+
+- [x] Added `source ChangeSource @default(DM)` field and index to `Entity` model in `schema.prisma`.
+- [x] Created database migration `add_entity_source` and regenerated Prisma client.
+- [x] Updated the review service to populate the new `source` field on entity creation from the change set's source.
+- [x] Updated `listEntitiesForUser` to support filtering by entity source.
+- [x] Implemented the "Source" sidebar filter UI (ALL / DM / AI / PLAYER / IMPORT) in the World Browser, passing it correctly via URL state and hidden form fields.
+- [x] Rendered the dynamic `SourceBadge` on entity cards in the browser.
+- [x] Added unit and integration tests covering the new source filtering logic.
+
+### Done — UI simplification: removed redundant back buttons (2026-05-29)
+
+- [x] Removed redundant "All crawls" link from the World Browser sidebar (navigation is handled by the navbar dropdown).
+- [x] Removed redundant "Back to [crawl name]" link from the Review Queue header.
+- [x] Updated unit tests for the Review Queue page to match.
+
 ### Done — PR feedback: locked filters & quick-create stubs (2026-05-29)
 
 - [x] Fixed status facet and locked filter to match entities with per-field locks (i.e., where `lockedFields` is non-empty) in addition to whole-entity locks.

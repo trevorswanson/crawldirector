@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Lock, Search, Sparkles } from "lucide-react";
-import type { EntityType } from "@/generated/prisma/client";
+import type { EntityType, ChangeSource } from "@/generated/prisma/client";
 
 import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
@@ -24,7 +24,14 @@ const STATUS_FILTERS: EntityStatusFilter[] = [
   "ALL",
   "CANON",
   "PENDING",
-  "LOCKED",
+];
+
+const SOURCE_FILTERS = [
+  "ALL",
+  "DM",
+  "AI",
+  "PLAYER",
+  "IMPORT",
 ];
 
 export default async function CampaignPage({
@@ -36,6 +43,7 @@ export default async function CampaignPage({
     q?: string;
     type?: string;
     status?: string;
+    source?: string;
     locked?: string;
   }>;
 }) {
@@ -56,13 +64,24 @@ export default async function CampaignPage({
   )
     ? (filters.status as EntityStatusFilter)
     : "ALL";
+  const activeSource = SOURCE_FILTERS.includes(filters.source ?? "")
+    ? filters.source!
+    : "ALL";
   const lockedOnly = filters.locked === "1";
+
+  const sourceFilter =
+    activeSource === "PLAYER"
+      ? "PLAYER_SUGGESTION"
+      : activeSource === "ALL"
+        ? "ALL"
+        : (activeSource as ChangeSource);
 
   const [{ entities }, counts] = await Promise.all([
     listEntitiesForUser(user.id, id, {
       query: filters.q,
       type: activeType ?? "ALL",
       status: activeStatus,
+      source: sourceFilter === "ALL" ? undefined : sourceFilter,
       lockedOnly,
     }),
     getEntityTypeCounts(user.id, id),
@@ -76,6 +95,7 @@ export default async function CampaignPage({
       q: filters.q,
       type: activeType,
       status: activeStatus === "ALL" ? undefined : activeStatus,
+      source: activeSource === "ALL" ? undefined : activeSource,
       locked: lockedOnly ? "1" : undefined,
       ...overrides,
     };
@@ -88,12 +108,6 @@ export default async function CampaignPage({
     <div className="grid h-full grid-cols-1 lg:grid-cols-[248px_minmax(0,1fr)]">
       {/* FACETS */}
       <div className="order-2 hidden overflow-y-auto border-r border-[var(--line)] bg-[var(--bg-1)] px-4 pb-10 pt-4 lg:order-1 lg:block">
-        <Link
-          href="/dashboard"
-          className="hud-tag mb-4 inline-flex items-center hover:text-[var(--ink)]"
-        >
-          ← All crawls
-        </Link>
 
         <Kicker dim noLead className="mb-[10px]">
           Entity type
@@ -101,12 +115,13 @@ export default async function CampaignPage({
         <div className="flex flex-col">
           {entityTypeValues.map((type) => {
             const count = counts[type] ?? 0;
+            if (!count) return null;
             const active = activeType === type;
             const row = (
               <span className="flex w-full items-center gap-[9px] px-2 py-[6px] text-left">
                 <TypeDot type={type} />
                 <span
-                  className="flex-1 text-[12.5px]"
+                  className="flex-1 text-[12.5px] uppercase"
                   style={{ color: active ? "var(--ink)" : "var(--ink-dim)" }}
                 >
                   {formatEntityType(type)}
@@ -116,13 +131,6 @@ export default async function CampaignPage({
                 </span>
               </span>
             );
-            if (!count) {
-              return (
-                <span key={type} className="opacity-35">
-                  {row}
-                </span>
-              );
-            }
             return (
               <Link
                 key={type}
@@ -133,6 +141,29 @@ export default async function CampaignPage({
                 )}
               >
                 {row}
+              </Link>
+            );
+          })}
+        </div>
+
+        <Kicker dim noLead className="mb-[9px] mt-5">
+          Source
+        </Kicker>
+        <div className="flex flex-wrap gap-[5px]">
+          {SOURCE_FILTERS.map((s) => {
+            const active = activeSource === s;
+            return (
+              <Link
+                key={s}
+                href={hrefWith({ source: s === "ALL" ? undefined : s })}
+                className={cn(
+                  "border px-[9px] py-1 font-mono text-[10px] uppercase tracking-[.06em]",
+                  active
+                    ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-ink)]"
+                    : "border-[var(--line-strong)] text-[var(--ink-dim)] hover:text-[var(--ink)]",
+                )}
+              >
+                {s}
               </Link>
             );
           })}
@@ -204,6 +235,9 @@ export default async function CampaignPage({
               {activeStatus !== "ALL" && (
                 <input type="hidden" name="status" value={activeStatus} />
               )}
+              {activeSource !== "ALL" && (
+                <input type="hidden" name="source" value={activeSource} />
+              )}
               {lockedOnly && <input type="hidden" name="locked" value="1" />}
               <Input
                 name="q"
@@ -261,7 +295,7 @@ export default async function CampaignPage({
                           style={{ color: "var(--sys)" }}
                         />
                       )}
-                      <SourceBadge source="DM" small />
+                      <SourceBadge source={entity.source} small />
                     </span>
                   </div>
                   <div className="flex items-center gap-2">

@@ -881,6 +881,49 @@ describe("world-browser facets", () => {
     expect(canon.entities).toHaveLength(3);
   });
 
+  it("filters entities by source", async () => {
+    const owner = await makeUser("source-filter@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const dmEntity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "DM NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const aiEntity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "AI NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    await prisma.entity.update({
+      where: { id: aiEntity.id },
+      data: { source: "AI" },
+    });
+
+    const dmOnlyList = await listEntitiesForUser(owner.id, campaign.id, {
+      source: "DM",
+    });
+    expect(dmOnlyList.entities).toHaveLength(1);
+    expect(dmOnlyList.entities[0].id).toBe(dmEntity.id);
+
+    const aiOnlyList = await listEntitiesForUser(owner.id, campaign.id, {
+      source: "AI",
+    });
+    expect(aiOnlyList.entities).toHaveLength(1);
+    expect(aiOnlyList.entities[0].id).toBe(aiEntity.id);
+
+    const allList = await listEntitiesForUser(owner.id, campaign.id, {
+      source: "ALL",
+    });
+    expect(allList.entities).toHaveLength(2);
+  });
+
   it("returns empty counts for a non-member", async () => {
     const owner = await makeUser("facets-owner@test.com");
     const stranger = await makeUser("facets-stranger@test.com");

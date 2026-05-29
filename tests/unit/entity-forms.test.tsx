@@ -27,11 +27,20 @@ vi.mock("@/app/(dm)/actions", () => ({
   }),
 }));
 
+const mockReplace = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    replace: mockReplace,
+    push: vi.fn(),
+  }),
+}));
+
 import {
   ArchiveEntityForm,
   CreateCrawlerForm,
   CreateGenericEntityForm,
   EditEntityForm,
+  EditFormProvider,
   QuickCreateStub,
 } from "@/components/entities/entity-forms";
 import type { EntityDetail } from "@/server/services/entities";
@@ -47,6 +56,7 @@ const crawlerEntity: EntityDetail = {
   description: "Crawler notes",
   status: "CANON",
   visibility: "PLAYER_FACING",
+  source: "DM",
   tags: ["floor 1"],
   version: 1,
   locked: false,
@@ -113,7 +123,11 @@ describe("entity forms", () => {
 
   it("renders crawler edit values and success state", () => {
     useActionState.mockReturnValue([{ success: "Saved." }, noopAction]);
-    render(<EditEntityForm campaignId="c1" entity={crawlerEntity} />);
+    render(
+      <EditFormProvider>
+        <EditEntityForm campaignId="c1" entity={crawlerEntity} />
+      </EditFormProvider>,
+    );
 
     expect(screen.getAllByDisplayValue("Carl")).toHaveLength(2);
     expect(screen.getByDisplayValue("Crawler notes")).toBeDefined();
@@ -121,9 +135,39 @@ describe("entity forms", () => {
     expect(screen.getByText("Saved.")).toBeDefined();
   });
 
+  it("marks fields as read-only/disabled when locked", () => {
+    useActionState.mockReturnValue([undefined, noopAction]);
+    const lockedEntity: EntityDetail = {
+      ...crawlerEntity,
+      locked: false,
+      lockedFields: ["crawler.realName", "visibility"],
+    };
+    render(
+      <EditFormProvider>
+        <EditEntityForm campaignId="c1" entity={lockedEntity} />
+      </EditFormProvider>,
+    );
+
+    // realName is locked
+    const realNameInput = screen.getByLabelText("Real name");
+    expect(realNameInput.getAttribute("readonly")).not.toBeNull();
+
+    // visibility is locked
+    const visibilitySelect = screen.getByLabelText("Visibility");
+    expect(visibilitySelect.getAttribute("disabled")).not.toBeNull();
+
+    // name is not locked
+    const nameInput = screen.getByLabelText("Name");
+    expect(nameInput.getAttribute("readonly")).toBeNull();
+  });
+
   it("renders generic edit fields without crawler-only inputs", () => {
     useActionState.mockReturnValue([{ error: "Nope" }, noopAction]);
-    render(<EditEntityForm campaignId="c1" entity={genericEntity} />);
+    render(
+      <EditFormProvider>
+        <EditEntityForm campaignId="c1" entity={genericEntity} />
+      </EditFormProvider>,
+    );
 
     expect(screen.getByDisplayValue("Zev")).toBeDefined();
     expect(screen.queryByLabelText("Crawler number")).toBeNull();
@@ -149,5 +193,81 @@ describe("entity forms", () => {
 
     expect(screen.getByPlaceholderText(/New entity name/)).toBeDefined();
     expect(screen.getByRole("button", { name: /Create stub/ })).toBeDefined();
+  });
+
+  it("redirects to read-only view if the entity is locked and no error state is present", () => {
+    const lockedEntity: EntityDetail = {
+      ...crawlerEntity,
+      locked: true,
+    };
+    render(
+      <EditFormProvider>
+        <EditEntityForm campaignId="c1" entity={lockedEntity} />
+      </EditFormProvider>,
+    );
+    expect(mockReplace).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+  });
+
+  it("does not redirect to read-only view if the entity is locked but an error state is present", () => {
+    mockReplace.mockClear();
+    useActionState.mockReturnValue([{ error: "Touches locked fields" }, noopAction]);
+    const lockedEntity: EntityDetail = {
+      ...crawlerEntity,
+      locked: true,
+    };
+    render(
+      <EditFormProvider>
+        <EditEntityForm campaignId="c1" entity={lockedEntity} />
+      </EditFormProvider>,
+    );
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it("preserves and displays submitted form values when save fails with error state", () => {
+    const errorState = {
+      error: "Locked",
+      timestamp: 12345,
+      values: {
+        name: "Carl Changed Name",
+        summary: "New summary content",
+        description: "New description text",
+        tags: "tag1, tag2",
+        realName: "Carl Real Name",
+        crawlerNo: "999",
+        level: 10,
+        hp: 150,
+        mp: 40,
+        gold: 300,
+        viewCount: "500000",
+        followerCount: "25000",
+        favoriteCount: "1200",
+        killCount: 99,
+        currentFloor: 5,
+        isAlive: false,
+      },
+    };
+    useActionState.mockReturnValue([errorState, noopAction]);
+    render(
+      <EditFormProvider>
+        <EditEntityForm campaignId="c1" entity={crawlerEntity} />
+      </EditFormProvider>,
+    );
+
+    expect(screen.getByDisplayValue("Carl Changed Name")).toBeDefined();
+    expect(screen.getByDisplayValue("New summary content")).toBeDefined();
+    expect(screen.getByDisplayValue("New description text")).toBeDefined();
+    expect(screen.getByDisplayValue("tag1, tag2")).toBeDefined();
+    expect(screen.getByDisplayValue("Carl Real Name")).toBeDefined();
+    expect(screen.getByDisplayValue("999")).toBeDefined();
+    expect(screen.getByDisplayValue("10")).toBeDefined();
+    expect(screen.getByDisplayValue("150")).toBeDefined();
+    expect(screen.getByDisplayValue("40")).toBeDefined();
+    expect(screen.getByDisplayValue("300")).toBeDefined();
+    expect(screen.getByDisplayValue("500000")).toBeDefined();
+    expect(screen.getByDisplayValue("25000")).toBeDefined();
+    expect(screen.getByDisplayValue("1200")).toBeDefined();
+    expect(screen.getByDisplayValue("99")).toBeDefined();
+    expect(screen.getByDisplayValue("5")).toBeDefined();
+    expect(screen.getByDisplayValue("Dead")).toBeDefined();
   });
 });

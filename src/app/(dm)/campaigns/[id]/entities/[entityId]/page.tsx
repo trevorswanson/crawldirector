@@ -9,9 +9,12 @@ import {
 import {
   ArchiveEntityForm,
   EditEntityForm,
+  EditFormProvider,
+  EditRailControls,
 } from "@/components/entities/entity-forms";
 import { HudTag } from "@/components/ui/hud-tag";
 import { Kicker } from "@/components/ui/kicker";
+import { Markdown } from "@/components/ui/markdown";
 import { SourceBadge } from "@/components/ui/source-badge";
 import { StatusPill } from "@/components/ui/status-pill";
 import { TypeDot } from "@/components/ui/type-dot";
@@ -45,7 +48,8 @@ export default async function EntityPage({
   const detailHref = `/campaigns/${id}/entities/${entityId}`;
 
   return (
-    <div className="grid h-full grid-cols-1 lg:grid-cols-[minmax(0,1fr)_304px]">
+    <EditFormProvider>
+      <div className="grid h-full grid-cols-1 lg:grid-cols-[minmax(0,1fr)_304px]">
       {/* MAIN COLUMN */}
       <div className="order-2 min-w-0 overflow-y-auto lg:order-1">
         {/* sticky breadcrumb back-bar */}
@@ -55,9 +59,9 @@ export default async function EntityPage({
             className="hud-tag inline-flex items-center gap-1 hover:text-[var(--ink)]"
           >
             <ChevronLeft aria-hidden size={12} />
-            World Browser
+            WORLD BROWSER
           </Link>
-          <span className="truncate font-mono text-[10.5px] text-[var(--ink-faint)]">
+          <span className="truncate font-mono text-[10.5px] text-[var(--ink-faint)] uppercase">
             / {formatEntityType(entity.type)} / {entity.name}
           </span>
         </div>
@@ -83,17 +87,9 @@ export default async function EntityPage({
 
           {editing ? (
             <section className="mt-7">
-              <div className="mb-3 flex items-center justify-between">
-                <Kicker dim noLead>
-                  Edit entity
-                </Kicker>
-                <Link
-                  href={detailHref}
-                  className="inline-flex items-center gap-[6px] border border-[var(--line-strong)] bg-[var(--bg-3)] px-[10px] py-[5px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-dim)] transition-[filter,color] hover:text-[var(--ink)] hover:brightness-110"
-                >
-                  Done
-                </Link>
-              </div>
+              <Kicker dim noLead className="mb-3">
+                Edit entity
+              </Kicker>
               <p className="mb-4 text-[12.5px] leading-[1.5] text-[var(--ink-faint)]">
                 Direct DM edits apply immediately as auto-approved change sets
                 with provenance.{" "}
@@ -109,9 +105,7 @@ export default async function EntityPage({
                   <Kicker dim noLead className="mb-[10px]">
                     Description
                   </Kicker>
-                  <p className="whitespace-pre-wrap text-[14.5px] leading-[1.7] text-[var(--ink)] [text-wrap:pretty]">
-                    {entity.description}
-                  </p>
+                  <Markdown content={entity.description} />
                 </div>
               )}
 
@@ -204,40 +198,55 @@ export default async function EntityPage({
             Controls
           </Kicker>
           <div className="mb-3 flex flex-wrap gap-2">
-            <form action={toggleEntityLockAction.bind(null, id, entityId)}>
+            {!editing && (
+              <form action={toggleEntityLockAction.bind(null, id, entityId)}>
+                <button
+                  type="submit"
+                  title={
+                    entity.locked
+                      ? "Locked — click to unlock"
+                      : "Unlocked — click to lock the whole entity"
+                  }
+                  className="inline-flex items-center gap-[6px] border px-[10px] py-[5px] font-mono text-[10px] uppercase tracking-[.08em] transition-[filter,color] hover:brightness-110"
+                  style={{
+                    borderColor: entity.locked
+                      ? "var(--sys)"
+                      : "var(--line-strong)",
+                    background: entity.locked
+                      ? "color-mix(in srgb, var(--sys) 12%, transparent)"
+                      : "transparent",
+                    color: entity.locked ? "var(--sys)" : "var(--ink-dim)",
+                  }}
+                >
+                  {entity.locked ? (
+                    <Lock aria-hidden size={12} />
+                  ) : (
+                    <Unlock aria-hidden size={12} />
+                  )}
+                  {entity.locked ? "Locked" : "Lock"}
+                </button>
+              </form>
+            )}
+            {editing ? (
+              <EditRailControls detailHref={detailHref} />
+            ) : entity.locked ? (
               <button
-                type="submit"
-                title={
-                  entity.locked
-                    ? "Locked — click to unlock"
-                    : "Unlocked — click to lock the whole entity"
-                }
-                className="inline-flex items-center gap-[6px] border px-[10px] py-[5px] font-mono text-[10px] uppercase tracking-[.08em] transition-[filter,color] hover:brightness-110"
-                style={{
-                  borderColor: entity.locked
-                    ? "var(--sys)"
-                    : "var(--line-strong)",
-                  background: entity.locked
-                    ? "color-mix(in srgb, var(--sys) 12%, transparent)"
-                    : "transparent",
-                  color: entity.locked ? "var(--sys)" : "var(--ink-dim)",
-                }}
+                disabled
+                title="Entity is locked — unlock it to edit"
+                className="inline-flex items-center gap-[6px] border border-[var(--line-strong)] bg-[var(--bg-3)] px-[10px] py-[5px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-faint)] opacity-50 cursor-not-allowed"
               >
-                {entity.locked ? (
-                  <Lock aria-hidden size={12} />
-                ) : (
-                  <Unlock aria-hidden size={12} />
-                )}
-                {entity.locked ? "Locked" : "Lock"}
+                <Pencil aria-hidden size={12} />
+                Edit
               </button>
-            </form>
-            <Link
-              href={editing ? detailHref : `${detailHref}?edit=1`}
-              className="inline-flex items-center gap-[6px] border border-[var(--line-strong)] bg-[var(--bg-3)] px-[10px] py-[5px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-dim)] transition-[filter,color] hover:text-[var(--ink)] hover:brightness-110"
-            >
-              <Pencil aria-hidden size={12} />
-              {editing ? "Done" : "Edit"}
-            </Link>
+            ) : (
+              <Link
+                href={`${detailHref}?edit=1`}
+                className="inline-flex items-center gap-[6px] border border-[var(--line-strong)] bg-[var(--bg-3)] px-[10px] py-[5px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-dim)] transition-[filter,color] hover:text-[var(--ink)] hover:brightness-110"
+              >
+                <Pencil aria-hidden size={12} />
+                Edit
+              </Link>
+            )}
           </div>
           {!entity.locked && entity.lockedFields.length > 0 && (
             <p className="font-mono text-[10px] text-[var(--ink-faint)]">
@@ -331,6 +340,7 @@ export default async function EntityPage({
         </div>
       </aside>
     </div>
+    </EditFormProvider>
   );
 }
 

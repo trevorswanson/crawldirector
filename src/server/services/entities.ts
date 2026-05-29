@@ -1,5 +1,6 @@
 import {
   CanonStatus,
+  ChangeSource,
   EntityType,
   OpKind,
   Role,
@@ -27,6 +28,7 @@ const entityListSelect = {
   summary: true,
   status: true,
   visibility: true,
+  source: true,
   tags: true,
   locked: true,
   isStub: true,
@@ -53,6 +55,7 @@ const entityDetailSelect = {
   description: true,
   status: true,
   visibility: true,
+  source: true,
   tags: true,
   version: true,
   locked: true,
@@ -265,6 +268,7 @@ export async function listEntitiesForUser(
     type?: EntityType | "ALL";
     status?: EntityStatusFilter;
     lockedOnly?: boolean;
+    source?: ChangeSource | "ALL";
   } = {},
 ) {
   const membership = await assertCampaignMember(userId, campaignId);
@@ -274,6 +278,7 @@ export async function listEntitiesForUser(
   const type = filters.type && filters.type !== "ALL" ? filters.type : undefined;
   const status = filters.status && filters.status !== "ALL" ? filters.status : undefined;
   const lockedOnly = filters.lockedOnly || status === "LOCKED";
+  const source = filters.source && filters.source !== "ALL" ? filters.source : undefined;
 
   const entities = await prisma.entity.findMany({
     where: {
@@ -293,6 +298,7 @@ export async function listEntitiesForUser(
             ],
           }
         : {}),
+      ...(source ? { source } : {}),
       ...playerVisibleWhere(membership.role),
       ...(type ? { type } : {}),
       ...(query

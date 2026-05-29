@@ -77,6 +77,7 @@ describe("CampaignPage", () => {
       query: undefined,
       type: "ALL",
       status: "ALL",
+      source: undefined,
       lockedOnly: false,
     });
     expect(getEntityTypeCounts).toHaveBeenCalledWith("u1", "c1");
@@ -99,6 +100,7 @@ describe("CampaignPage", () => {
           q: "carl",
           type: "CRAWLER",
           status: "PENDING",
+          source: "PLAYER",
           locked: "1",
         }),
       }),
@@ -108,6 +110,7 @@ describe("CampaignPage", () => {
       query: "carl",
       type: "CRAWLER",
       status: "PENDING",
+      source: "PLAYER_SUGGESTION",
       lockedOnly: true,
     });
   });

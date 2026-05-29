@@ -620,6 +620,7 @@ async function applyCreateEntity(
       summary: nullableString(readTo(patch, "summary")),
       description: nullableString(readTo(patch, "description")),
       visibility: (readTo(patch, "visibility") as Visibility) ?? Visibility.DM_ONLY,
+      source: changeSet.source,
       tags: stringArray(readTo(patch, "tags")),
       status: CanonStatus.CANON,
       isStub: Boolean(readTo(patch, "isStub") ?? false),
@@ -686,7 +687,11 @@ async function applyUpdateEntity(
       where: { id: operationId },
       data: { blockedByLock: true },
     });
-    throw new ServiceError("This proposal touches locked entity fields.");
+    if (entity.locked) {
+      throw new ServiceError("Cannot update because the entity is locked.");
+    }
+    const fieldsText = lockedFields.map((f) => `"${f}"`).join(", ");
+    throw new ServiceError(`This proposal touches locked entity fields: ${fieldsText}`);
   }
 
   const data = entityUpdateData(patch, entity.type);

@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Check, X } from "lucide-react";
 
@@ -43,12 +42,6 @@ export default async function ReviewQueuePage({
     <PageContainer>
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-2">
-        <Link
-          href={`/campaigns/${id}`}
-          className="text-sm text-[var(--muted-foreground)] hover:underline"
-        >
-          Back to {campaign.name}
-        </Link>
         <div>
           <Kicker>Canon Control</Kicker>
           <h1 className="font-display text-2xl font-semibold tracking-tight">

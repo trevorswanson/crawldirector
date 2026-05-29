@@ -29,7 +29,7 @@ import {
 
 export type CampaignActionState = { error?: string } | undefined;
 export type EntityActionState =
-  | { error?: string; success?: string }
+  | { error?: string; success?: string; values?: Record<string, any>; timestamp?: number }
   | undefined;
 
 export async function createCampaignAction(
@@ -185,6 +185,26 @@ export async function updateEntityAction(
   formData: FormData,
 ): Promise<EntityActionState> {
   const user = await requireUser();
+  const values = {
+    name: formData.get("name")?.toString() ?? "",
+    summary: formData.get("summary")?.toString() ?? "",
+    description: formData.get("description")?.toString() ?? "",
+    visibility: formData.get("visibility")?.toString() ?? "DM_ONLY",
+    tags: formData.get("tags")?.toString() ?? "",
+    realName: formData.get("realName")?.toString() ?? "",
+    crawlerNo: formData.get("crawlerNo")?.toString() ?? "",
+    level: formData.get("level") ? Number(formData.get("level")) : undefined,
+    hp: formData.get("hp") ? Number(formData.get("hp")) : undefined,
+    mp: formData.get("mp") ? Number(formData.get("mp")) : undefined,
+    gold: formData.get("gold") ? Number(formData.get("gold")) : undefined,
+    viewCount: formData.get("viewCount")?.toString() ?? "",
+    followerCount: formData.get("followerCount")?.toString() ?? "",
+    favoriteCount: formData.get("favoriteCount")?.toString() ?? "",
+    killCount: formData.get("killCount") ? Number(formData.get("killCount")) : undefined,
+    currentFloor: formData.get("currentFloor") ? Number(formData.get("currentFloor")) : undefined,
+    isAlive: formData.get("isAlive") === "false" ? false : true,
+  };
+
   const parsed = updateEntitySchema.safeParse({
     type: formData.get("type"),
     name: formData.get("name"),
@@ -206,7 +226,11 @@ export async function updateEntityAction(
     isAlive: formData.get("isAlive"),
   });
   if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+    return {
+      error: parsed.error.issues[0]?.message ?? "Invalid input.",
+      values,
+      timestamp: Date.now(),
+    };
   }
 
   try {
@@ -214,13 +238,19 @@ export async function updateEntityAction(
   } catch (error) {
     // Surface expected failures (e.g. a locked field) so the DM knows to
     // unlock rather than uselessly retry; hide anything unexpected.
-    if (error instanceof ServiceError) return { error: error.message };
-    return { error: "Could not update the entity. Please try again." };
+    if (error instanceof ServiceError) {
+      return { error: error.message, values, timestamp: Date.now() };
+    }
+    return {
+      error: "Could not update the entity. Please try again.",
+      values,
+      timestamp: Date.now(),
+    };
   }
 
   revalidatePath(`/campaigns/${campaignId}`);
   revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
-  return { success: "Saved." };
+  redirect(`/campaigns/${campaignId}/entities/${entityId}`);
 }
 
 export async function toggleEntityLockAction(

@@ -242,21 +242,22 @@ describe("updateEntityAction", () => {
   });
 
   it("updates an entity and revalidates relevant routes", async () => {
-    const result = await updateEntityAction(
-      "c1",
-      "e1",
-      undefined,
-      form({
-        type: "NPC",
-        name: "Zev",
-        summary: "",
-        description: "",
-        visibility: "DM_ONLY",
-        tags: "",
-      }),
-    );
+    await expect(
+      updateEntityAction(
+        "c1",
+        "e1",
+        undefined,
+        form({
+          type: "NPC",
+          name: "Zev",
+          summary: "",
+          description: "",
+          visibility: "DM_ONLY",
+          tags: "",
+        }),
+      ),
+    ).rejects.toThrow("NEXT_REDIRECT");
 
-    expect(result?.success).toBe("Saved.");
     expect(updateEntity).toHaveBeenCalledWith(
       "u1",
       "c1",
@@ -265,6 +266,7 @@ describe("updateEntityAction", () => {
     );
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(redirect).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
   });
 
   it("returns a generic error when update fails", async () => {
