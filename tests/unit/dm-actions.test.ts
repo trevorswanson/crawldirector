@@ -10,6 +10,7 @@ const {
   archiveEntity,
   approveChangeSet,
   rejectChangeSet,
+  setChangeOperationDecision,
   setEntityLock,
   signOut,
   redirect,
@@ -24,6 +25,7 @@ const {
   archiveEntity: vi.fn(),
   approveChangeSet: vi.fn(),
   rejectChangeSet: vi.fn(),
+  setChangeOperationDecision: vi.fn(),
   setEntityLock: vi.fn(),
   signOut: vi.fn(),
   redirect: vi.fn(() => {
@@ -44,6 +46,7 @@ vi.mock("@/server/services/entities", () => ({
 vi.mock("@/server/services/review", () => ({
   approveChangeSet,
   rejectChangeSet,
+  setChangeOperationDecision,
   setEntityLock,
 }));
 vi.mock("@/server/auth", () => ({ signOut }));
@@ -57,6 +60,7 @@ import {
   createCrawlerAction,
   createGenericEntityAction,
   rejectChangeSetAction,
+  setChangeOperationDecisionAction,
   toggleEntityFieldLockAction,
   toggleEntityLockAction,
   signOutAction,
@@ -336,6 +340,26 @@ describe("review queue actions", () => {
 
     expect(rejectChangeSet).toHaveBeenCalledWith("u1", "c1", "cs1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+  });
+
+  it("sets an operation decision and revalidates the queue", async () => {
+    await setChangeOperationDecisionAction("c1", "cs1", "op1", "REJECTED");
+
+    expect(setChangeOperationDecision).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      "cs1",
+      "op1",
+      { decision: "REJECTED" },
+    );
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+  });
+
+  it("ignores invalid operation decisions", async () => {
+    await setChangeOperationDecisionAction("c1", "cs1", "op1", "EDITED");
+    await setChangeOperationDecisionAction("c1", "cs1", "op1", "NOPE");
+
+    expect(setChangeOperationDecision).not.toHaveBeenCalled();
   });
 });
 

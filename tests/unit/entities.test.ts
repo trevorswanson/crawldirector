@@ -20,6 +20,7 @@ import {
   getEntityProvenance,
   listPendingChangeSetsForUser,
   rejectChangeSet,
+  setChangeOperationDecision,
   setEntityLock,
 } from "@/server/services/review";
 
@@ -489,6 +490,132 @@ describe("entity service", () => {
     await expect(
       prisma.changeSet.findUniqueOrThrow({ where: { id: proposal.id } }),
     ).resolves.toMatchObject({ status: "APPROVED", reviewedById: owner.id });
+  });
+
+  it("partially applies accepted operations and skips rejected operations", async () => {
+    const owner = await makeUser("partial-review@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const zev = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Zev",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const mordecai = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Mordecai",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    const proposal = await createPendingEntityChangeSet(owner.id, campaign.id, {
+      title: "Review two NPC updates",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: zev.id,
+          patch: {
+            _baseVersion: { to: 1 },
+            summary: { from: "", to: "Crawler admin" },
+          },
+        },
+        {
+          op: "UPDATE_ENTITY",
+          targetId: mordecai.id,
+          patch: {
+            _baseVersion: { to: 1 },
+            summary: { from: "", to: "Rejected trainer note" },
+          },
+        },
+      ],
+    });
+    const rejectedOperation = await prisma.changeOperation.findFirstOrThrow({
+      where: { changeSetId: proposal.id, targetId: mordecai.id },
+    });
+    await setChangeOperationDecision(
+      owner.id,
+      campaign.id,
+      proposal.id,
+      rejectedOperation.id,
+      { decision: "REJECTED" },
+    );
+
+    await approveChangeSet(owner.id, campaign.id, proposal.id);
+
+    await expect(
+      prisma.entity.findUniqueOrThrow({ where: { id: zev.id } }),
+    ).resolves.toMatchObject({ summary: "Crawler admin", version: 2 });
+    await expect(
+      prisma.entity.findUniqueOrThrow({ where: { id: mordecai.id } }),
+    ).resolves.toMatchObject({ summary: null, version: 1 });
+    await expect(
+      prisma.changeSet.findUniqueOrThrow({ where: { id: proposal.id } }),
+    ).resolves.toMatchObject({
+      status: "PARTIALLY_APPLIED",
+      reviewedById: owner.id,
+    });
+  });
+
+  it("applies an edited operation patch and clears lock blocking for omitted fields", async () => {
+    const owner = await makeUser("edited-review@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Locked Name",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    await setEntityLock(owner.id, campaign.id, entity.id, { lockedFields: ["name"] });
+    const proposal = await createPendingEntityChangeSet(owner.id, campaign.id, {
+      title: "Review edited NPC update",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: entity.id,
+          patch: {
+            _baseVersion: { to: 1 },
+            name: { from: "Locked Name", to: "AI Name" },
+            summary: { from: "", to: "AI summary" },
+          },
+        },
+      ],
+    });
+    const operation = await prisma.changeOperation.findFirstOrThrow({
+      where: { changeSetId: proposal.id },
+    });
+    expect(operation.blockedByLock).toBe(true);
+
+    await setChangeOperationDecision(owner.id, campaign.id, proposal.id, operation.id, {
+      decision: "EDITED",
+      editedPatch: {
+        summary: { from: "", to: "DM-edited summary" },
+      },
+    });
+    await expect(
+      prisma.changeOperation.findUniqueOrThrow({ where: { id: operation.id } }),
+    ).resolves.toMatchObject({ decision: "EDITED", blockedByLock: false });
+
+    await approveChangeSet(owner.id, campaign.id, proposal.id);
+
+    await expect(
+      prisma.entity.findUniqueOrThrow({ where: { id: entity.id } }),
+    ).resolves.toMatchObject({
+      name: "Locked Name",
+      summary: "DM-edited summary",
+      version: 2,
+    });
+    await expect(
+      prisma.provenance.findMany({
+        where: { entityId: entity.id, changeSetId: proposal.id },
+        select: { field: true },
+      }),
+    ).resolves.toEqual([{ field: "summary" }]);
   });
 
   it("flags queued proposals that touch locked fields", async () => {

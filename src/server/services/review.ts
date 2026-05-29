@@ -5,9 +5,9 @@ import {
   EntityType,
   OpDecision,
   OpKind,
+  Prisma,
   Role,
   Visibility,
-  type Prisma,
 } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
@@ -28,6 +28,10 @@ export type EntityReviewOperationInput = {
   targetId?: string;
   patch: ReviewPatch;
 };
+
+export type ChangeOperationDecisionInput =
+  | { decision: "PENDING" | "ACCEPTED" | "REJECTED"; editedPatch?: never }
+  | { decision: "EDITED"; editedPatch: ReviewPatch };
 
 const crawlerFields = new Set([
   "crawler.realName",
@@ -106,6 +110,26 @@ function baseVersionsObject(baseVersions: Prisma.JsonValue): Record<string, numb
 
 function patchFields(patch: ReviewPatch) {
   return Object.keys(patch).filter((field) => field !== "campaignId");
+}
+
+function effectiveOperationPatch(
+  operation: Pick<
+    Prisma.ChangeOperationGetPayload<object>,
+    "decision" | "editedPatch" | "patch"
+  >,
+) {
+  if (operation.decision !== OpDecision.EDITED) {
+    return operation.patch as ReviewPatch;
+  }
+  const originalPatch = operation.patch as ReviewPatch;
+  const editedPatch = operation.editedPatch as ReviewPatch | null;
+  if (!editedPatch) return originalPatch;
+  return {
+    ...("_baseVersion" in originalPatch
+      ? { _baseVersion: originalPatch._baseVersion }
+      : {}),
+    ...editedPatch,
+  };
 }
 
 function lockedPatchFields(
@@ -297,6 +321,90 @@ export async function listPendingChangeSetsForUser(
   });
 }
 
+export async function setChangeOperationDecision(
+  userId: string,
+  campaignId: string,
+  changeSetId: string,
+  operationId: string,
+  input: ChangeOperationDecisionInput,
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  return prisma.$transaction(async (tx) => {
+    const changeSet = await tx.changeSet.findFirst({
+      where: { id: changeSetId, campaignId, status: ChangeSetStatus.PENDING },
+      include: { operations: true },
+    });
+    if (!changeSet) throw new ServiceError("Change set not found.");
+
+    const operation = changeSet.operations.find((op) => op.id === operationId);
+    if (!operation) throw new ServiceError("Change operation not found.");
+    if (operation.targetType !== "ENTITY" || !isEntityReviewOp(operation.op)) {
+      throw new ServiceError("Unsupported operation target.");
+    }
+    if (input.decision === OpDecision.EDITED) {
+      const originalFields = new Set(patchFields(operation.patch as ReviewPatch));
+      const editedFields = patchFields(input.editedPatch);
+      if (editedFields.length === 0) {
+        throw new ServiceError("Edited operation patch must include at least one field.");
+      }
+      const unknownField = editedFields.find((field) => !originalFields.has(field));
+      if (unknownField) {
+        throw new ServiceError(`Edited operation includes unknown field "${unknownField}".`);
+      }
+    }
+
+    const editedPatch =
+      input.decision === OpDecision.EDITED
+        ? (input.editedPatch as Prisma.InputJsonValue)
+        : Prisma.DbNull;
+    const patchForFlags =
+      input.decision === OpDecision.EDITED ? input.editedPatch : operation.patch as ReviewPatch;
+    const flags =
+      input.decision === OpDecision.REJECTED
+        ? { blockedByLock: false, isStale: false }
+        : await evaluateEntityOperationFlags(
+            tx,
+            {
+              op: operation.op,
+              targetId: operation.targetId ?? undefined,
+              patch: patchForFlags,
+            },
+            campaignId,
+            baseVersionsObject(changeSet.baseVersions),
+          );
+
+    const updated = await tx.changeOperation.update({
+      where: { id: operation.id },
+      data: {
+        decision: input.decision,
+        editedPatch,
+        ...flags,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        campaignId,
+        actorUserId: userId,
+        action: "SET_OPERATION_DECISION",
+        targetType: "CHANGE_OPERATION",
+        targetId: operation.id,
+        detail: {
+          changeSetId,
+          decision: input.decision,
+          editedFields:
+            input.decision === OpDecision.EDITED
+              ? patchFields(input.editedPatch)
+              : [],
+        },
+      },
+    });
+
+    return updated;
+  });
+}
+
 export async function approveChangeSet(
   userId: string,
   campaignId: string,
@@ -311,27 +419,48 @@ export async function approveChangeSet(
       include: { operations: true },
     });
     if (!changeSet) throw new ServiceError("Change set not found.");
-    if (changeSet.operations.some((operation) => operation.blockedByLock)) {
+    const applicableOperations = changeSet.operations.filter(
+      (operation) => operation.decision !== OpDecision.REJECTED,
+    );
+    if (applicableOperations.some((operation) => operation.blockedByLock)) {
       throw new ServiceError("One or more operations are blocked by locks.");
     }
-    if (changeSet.operations.some((operation) => operation.isStale)) {
+    if (applicableOperations.some((operation) => operation.isStale)) {
       throw new ServiceError("One or more operations are stale.");
     }
 
     const appliedIds: string[] = [];
-    for (const operation of changeSet.operations) {
-      const targetId = await applyEntityOperation(tx, changeSet, operation);
+    for (const operation of applicableOperations) {
+      const targetId = await applyEntityOperation(
+        tx,
+        changeSet,
+        operation,
+        effectiveOperationPatch(operation),
+      );
       appliedIds.push(targetId);
       await tx.changeOperation.update({
         where: { id: operation.id },
-        data: { targetId, decision: OpDecision.ACCEPTED },
+        data: {
+          targetId,
+          decision:
+            operation.decision === OpDecision.EDITED
+              ? OpDecision.EDITED
+              : OpDecision.ACCEPTED,
+        },
       });
     }
 
+    const rejectedCount = changeSet.operations.length - applicableOperations.length;
+    const status =
+      applicableOperations.length === 0
+        ? ChangeSetStatus.REJECTED
+        : rejectedCount > 0
+          ? ChangeSetStatus.PARTIALLY_APPLIED
+          : ChangeSetStatus.APPROVED;
     await tx.changeSet.update({
       where: { id: changeSet.id },
       data: {
-        status: ChangeSetStatus.APPROVED,
+        status,
         reviewedById: userId,
         reviewedAt: new Date(),
       },
@@ -340,10 +469,10 @@ export async function approveChangeSet(
       data: {
         campaignId,
         actorUserId: userId,
-        action: "APPROVE",
+        action: status === ChangeSetStatus.REJECTED ? "REJECT" : "APPROVE",
         targetType: "CHANGE_SET",
         targetId: changeSet.id,
-        detail: { appliedIds },
+        detail: { appliedIds, rejectedCount },
       },
     });
 
@@ -364,6 +493,13 @@ async function refreshPendingOperationFlags(
 
     const baseVersions = baseVersionsObject(changeSet.baseVersions);
     for (const operation of changeSet.operations) {
+      if (operation.decision === OpDecision.REJECTED) {
+        await tx.changeOperation.update({
+          where: { id: operation.id },
+          data: { blockedByLock: false, isStale: false },
+        });
+        continue;
+      }
       if (
         operation.targetType !== "ENTITY" ||
         !isEntityReviewOp(operation.op)
@@ -376,7 +512,7 @@ async function refreshPendingOperationFlags(
         {
           op: operation.op,
           targetId: operation.targetId ?? undefined,
-          patch: operation.patch as ReviewPatch,
+          patch: effectiveOperationPatch(operation),
         },
         campaignId,
         baseVersions,
@@ -587,11 +723,12 @@ async function applyEntityOperation(
   tx: Prisma.TransactionClient,
   changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
   operation: Prisma.ChangeOperationGetPayload<object>,
+  patchOverride?: ReviewPatch,
 ) {
   if (operation.targetType !== "ENTITY") {
     throw new ServiceError("Unsupported operation target.");
   }
-  const patch = operation.patch as ReviewPatch;
+  const patch = patchOverride ?? operation.patch as ReviewPatch;
 
   switch (operation.op) {
     case OpKind.CREATE_ENTITY:

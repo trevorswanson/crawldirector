@@ -9,6 +9,7 @@ const {
   notFound,
   approveChangeSetAction,
   rejectChangeSetAction,
+  setChangeOperationDecisionAction,
 } = vi.hoisted(() => ({
   requireUser: vi.fn(),
   getCampaignForUser: vi.fn(),
@@ -18,6 +19,7 @@ const {
   }),
   approveChangeSetAction: vi.fn(),
   rejectChangeSetAction: vi.fn(),
+  setChangeOperationDecisionAction: vi.fn(),
 }));
 
 vi.mock("@/server/auth/session", () => ({ requireUser }));
@@ -26,6 +28,7 @@ vi.mock("@/server/services/review", () => ({ listPendingChangeSetsForUser }));
 vi.mock("@/app/(dm)/actions", () => ({
   approveChangeSetAction,
   rejectChangeSetAction,
+  setChangeOperationDecisionAction,
 }));
 vi.mock("next/navigation", () => ({ notFound }));
 vi.mock("next/link", () => ({
@@ -109,9 +112,12 @@ describe("ReviewQueuePage", () => {
     expect(screen.getByText("Blocked")).toBeDefined();
     expect(screen.getByText("Stale")).toBeDefined();
     expect(screen.getByText("Target · entity-1")).toBeDefined();
+    expect(screen.getByText("PENDING")).toBeDefined();
     expect(screen.getByText("summary")).toBeDefined();
     expect(screen.getByText("Old")).toBeDefined();
     expect(screen.getByText("New")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Accept op" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Reject op" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Approve" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Reject" })).toBeDefined();
   });
