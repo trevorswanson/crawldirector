@@ -10,6 +10,22 @@ Running checklist of milestones/tasks, newest first. See
 **Done when:** every canon change has provenance; locked fields can't be
 overwritten; a DM can review/approve/reject a proposal end to end.
 
+### Done — slice 3: operation decisions in Review Queue (2026-05-29)
+
+- [x] Added `setChangeOperationDecision` in the review service so pending
+      operations can be marked `ACCEPTED`, `REJECTED`, or `EDITED` before final
+      approval, using the existing `OpDecision` and `editedPatch` columns.
+- [x] Updated approval semantics to skip rejected operations, apply edited
+      patches, keep existing approve-all behavior for undecided operations, and
+      mark mixed outcomes as `PARTIALLY_APPLIED`.
+- [x] Re-ran lock/staleness flag checks against the effective patch, so an
+      edited operation can omit a locked field and still apply the accepted
+      fields safely.
+- [x] Added Review Queue operation-level Accept/Reject controls plus a server
+      action to persist those decisions.
+- [x] Added regression coverage for partial apply, edited-patch approval,
+      operation-decision actions, and Review Queue controls.
+
 ### Done — Markdown rendering for entity descriptions (2026-05-29)
 
 - [x] Installed `marked` for parsing markdown and `isomorphic-dompurify` for HTML sanitization (on both server and client).
@@ -139,8 +155,9 @@ The detail page had drifted from [`screen-world.jsx`](./design/mockup/screen-wor
 - Per-field **AI markers** and the connections/timeline panels are stubbed as
       "Planned · M3/M4" — no fake data — and light up when that data exists.
 - Remaining before M2 is complete: per-operation / per-field accept-edit-reject
-      decisions in the Review Queue, `supersede` for replaced/stale proposals,
-      relationship/event operations (land with M3), and batch review actions.
+      UI refinements in the Review Queue (especially editing field values),
+      `supersede` for replaced/stale proposals, relationship/event operations
+      (land with M3), and batch review actions.
 - Local verification used the existing Postgres database. That database already
       contained an older local review-pipeline migration, so the new migration
       was marked applied after non-destructive local schema alignment; a fresh CI

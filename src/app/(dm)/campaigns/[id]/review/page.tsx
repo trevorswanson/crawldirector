@@ -4,6 +4,7 @@ import { Check, X } from "lucide-react";
 import {
   approveChangeSetAction,
   rejectChangeSetAction,
+  setChangeOperationDecisionAction,
 } from "@/app/(dm)/actions";
 import { Button } from "@/components/ui/button";
 import {
@@ -95,11 +96,56 @@ export default async function ReviewQueuePage({
                     <div key={operation.id} className="panel p-4">
                       <div className="mb-3 flex flex-wrap items-center gap-2">
                         <HudTag>{operation.op.replaceAll("_", " ")}</HudTag>
+                        <HudTag>{operation.decision.replaceAll("_", " ")}</HudTag>
                         {operation.targetId && (
                           <HudTag>Target · {operation.targetId.slice(0, 8)}</HudTag>
                         )}
                       </div>
                       <DiffTable patch={operation.patch as ReviewPatch} />
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <form
+                          action={setChangeOperationDecisionAction.bind(
+                            null,
+                            id,
+                            changeSet.id,
+                            operation.id,
+                            "ACCEPTED",
+                          )}
+                        >
+                          <Button
+                            type="submit"
+                            size="sm"
+                            variant={
+                              operation.decision === "ACCEPTED" ? "ok" : "outline"
+                            }
+                          >
+                            <Check aria-hidden size={14} />
+                            Accept op
+                          </Button>
+                        </form>
+                        <form
+                          action={setChangeOperationDecisionAction.bind(
+                            null,
+                            id,
+                            changeSet.id,
+                            operation.id,
+                            "REJECTED",
+                          )}
+                        >
+                          <Button
+                            type="submit"
+                            size="sm"
+                            variant={
+                              operation.decision === "REJECTED"
+                                ? "destructive"
+                                : "outline"
+                            }
+                          >
+                            <X aria-hidden size={14} />
+                            Reject op
+                          </Button>
+                        </form>
+                      </div>
                     </div>
                   ))}
                 </div>

@@ -11,6 +11,7 @@ import {
   createCampaignSchema,
   createCrawlerSchema,
   createGenericEntitySchema,
+  changeOperationDecisionSchema,
   lockFieldSchema,
   updateEntitySchema,
 } from "@/lib/validation";
@@ -24,6 +25,7 @@ import {
 import {
   approveChangeSet,
   rejectChangeSet,
+  setChangeOperationDecision,
   setEntityLock,
 } from "@/server/services/review";
 
@@ -303,6 +305,22 @@ export async function approveChangeSetAction(
   const user = await requireUser();
   await approveChangeSet(user.id, campaignId, changeSetId);
   revalidatePath(`/campaigns/${campaignId}`);
+  revalidatePath(`/campaigns/${campaignId}/review`);
+}
+
+export async function setChangeOperationDecisionAction(
+  campaignId: string,
+  changeSetId: string,
+  operationId: string,
+  decision: string,
+): Promise<void> {
+  const user = await requireUser();
+  const parsed = changeOperationDecisionSchema.safeParse(decision);
+  if (!parsed.success || parsed.data === "EDITED") return;
+
+  await setChangeOperationDecision(user.id, campaignId, changeSetId, operationId, {
+    decision: parsed.data,
+  });
   revalidatePath(`/campaigns/${campaignId}/review`);
 }
 

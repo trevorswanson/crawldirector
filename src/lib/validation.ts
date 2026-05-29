@@ -222,3 +222,10 @@ export const lockableFields = [
 
 // A single lockable field key, validated where a per-field lock toggle posts it.
 export const lockFieldSchema = z.enum(lockableFields);
+
+export const changeOperationDecisionSchema = z.enum([
+  "PENDING",
+  "ACCEPTED",
+  "EDITED",
+  "REJECTED",
+]);
