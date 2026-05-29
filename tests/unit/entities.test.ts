@@ -9,6 +9,7 @@ import {
   createCrawler,
   createGenericEntity,
   getEntityForUser,
+  getEntityTypeCounts,
   listEntitiesForUser,
   updateEntity,
 } from "@/server/services/entities";
@@ -776,6 +777,63 @@ describe("entity locking", () => {
     await expect(
       setEntityLock(owner.id, campaign.id, "missing", { locked: true }),
     ).rejects.toThrow("Entity not found.");
+  });
+});
+
+describe("world-browser facets", () => {
+  it("counts entities per type and filters by locked status", async () => {
+    const owner = await makeUser("facets@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Mordecai",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const faction = await createGenericEntity(owner.id, campaign.id, {
+      type: "FACTION",
+      name: "Skull Empire",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Zev",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    const counts = await getEntityTypeCounts(owner.id, campaign.id);
+    expect(counts.NPC).toBe(2);
+    expect(counts.FACTION).toBe(1);
+
+    await setEntityLock(owner.id, campaign.id, faction.id, { locked: true });
+    const locked = await listEntitiesForUser(owner.id, campaign.id, {
+      status: "LOCKED",
+    });
+    expect(locked.entities).toHaveLength(1);
+    expect(locked.entities[0].name).toBe("Skull Empire");
+
+    const canon = await listEntitiesForUser(owner.id, campaign.id, {
+      status: "CANON",
+    });
+    expect(canon.entities).toHaveLength(3);
+  });
+
+  it("returns empty counts for a non-member", async () => {
+    const owner = await makeUser("facets-owner@test.com");
+    const stranger = await makeUser("facets-stranger@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    await expect(
+      getEntityTypeCounts(stranger.id, campaign.id),
+    ).resolves.toEqual({});
   });
 });
 

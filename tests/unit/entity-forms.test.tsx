@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 const { useActionState, useFormStatus } = vi.hoisted(() => ({
   useActionState: vi.fn(),
@@ -22,6 +22,9 @@ vi.mock("@/app/(dm)/actions", () => ({
     bind: vi.fn(() => vi.fn()),
   }),
   updateEntityAction: Object.assign(vi.fn(), { bind: vi.fn(() => vi.fn()) }),
+  quickCreateEntityAction: Object.assign(vi.fn(), {
+    bind: vi.fn(() => vi.fn()),
+  }),
 }));
 
 import {
@@ -29,6 +32,7 @@ import {
   CreateCrawlerForm,
   CreateGenericEntityForm,
   EditEntityForm,
+  QuickCreateStub,
 } from "@/components/entities/entity-forms";
 import type { EntityDetail } from "@/server/services/entities";
 
@@ -131,5 +135,19 @@ describe("entity forms", () => {
     render(<ArchiveEntityForm campaignId="c1" entityId="e1" />);
 
     expect(screen.getByRole("button", { name: /Archive/ })).toBeDefined();
+  });
+
+  it("toggles the quick-create stub form open", () => {
+    render(<QuickCreateStub campaignId="c1" />);
+
+    expect(
+      screen.getByRole("button", { name: /Quick-create stub/ }),
+    ).toBeDefined();
+    expect(screen.queryByPlaceholderText(/New entity name/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Quick-create stub/ }));
+
+    expect(screen.getByPlaceholderText(/New entity name/)).toBeDefined();
+    expect(screen.getByRole("button", { name: /Create stub/ })).toBeDefined();
   });
 });

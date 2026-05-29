@@ -69,12 +69,32 @@ The detail page had drifted from [`screen-world.jsx`](./design/mockup/screen-wor
       service is unchanged. Tests updated; lint/typecheck/build/coverage green;
       verified in-browser against the mockup.
 
+### Done — World Browser redesign + detail polish (2026-05-29)
+
+- [x] Rebuilt the campaign page as the mockup's **World Browser**: full-bleed
+      two-column with a **facet sidebar** (entity-type list with live counts +
+      Status + "Locked only", all functional; Source / AI-origin shown as
+      "Planned · M4") and a **card grid** (type-dot · source · lock · status ·
+      floor). Service gained `getEntityTypeCounts` + status/locked list filters.
+- [x] Replaced the two big inline create forms with the mockup's
+      **Quick-create stub** (name + type → thin entity → detail to flesh out),
+      backed by `quickCreateEntityAction`.
+- [x] Detail-page **Controls** polish: LOCK and EDIT are now a matched HUD chip
+      pair (the old `ghost` Button rendered borderless and looked broken). Edit/
+      Done use the same chip.
+- [x] Added `scripts/seed-world.ts` (dev-only, via the service layer) to populate
+      a demo Floor-9 world for local QA. Tests/lint/typecheck/build green;
+      coverage above floors; verified in-browser against both mockup screens.
+
 ### Notes / follow-ups
 
 - Locking deliberately blocks **all** writers to a locked target (including the
       DM's own direct edit), matching the "unlock to edit" UX. If a source-aware
       policy is wanted later (locks bind AI/import but not deliberate DM edits),
       that's a review-service change, not a UI one.
+- The full create forms (`CreateCrawlerForm` / `CreateGenericEntityForm`) are now
+      unused by the World Browser (quick-create + detail-edit replace them) but
+      kept for a future dedicated "new entity" page; their tests still run.
 - Per-field **AI markers** and the connections/timeline panels are stubbed as
       "Planned · M3/M4" — no fake data — and light up when that data exists.
 - Remaining before M2 is complete: per-operation / per-field accept-edit-reject

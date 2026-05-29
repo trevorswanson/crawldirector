@@ -28,6 +28,8 @@ const entityListSelect = {
   status: true,
   visibility: true,
   tags: true,
+  locked: true,
+  isStub: true,
   updatedAt: true,
   crawler: {
     select: {
@@ -39,6 +41,8 @@ const entityListSelect = {
     },
   },
 } as const;
+
+export type EntityStatusFilter = "ALL" | "CANON" | "PENDING" | "LOCKED";
 
 const entityDetailSelect = {
   id: true,
@@ -255,18 +259,32 @@ export async function createCrawler(
 export async function listEntitiesForUser(
   userId: string,
   campaignId: string,
-  filters: { query?: string; type?: EntityType | "ALL" } = {},
+  filters: {
+    query?: string;
+    type?: EntityType | "ALL";
+    status?: EntityStatusFilter;
+    lockedOnly?: boolean;
+  } = {},
 ) {
   const membership = await assertCampaignMember(userId, campaignId);
   if (!membership) return { entities: [], role: null };
 
   const query = filters.query?.trim();
   const type = filters.type && filters.type !== "ALL" ? filters.type : undefined;
+  const status = filters.status && filters.status !== "ALL" ? filters.status : undefined;
+  const lockedOnly = filters.lockedOnly || status === "LOCKED";
 
   const entities = await prisma.entity.findMany({
     where: {
       campaignId,
-      status: { not: CanonStatus.ARCHIVED },
+      // CANON/PENDING narrow the status; everything else just excludes archived.
+      status:
+        status === "CANON"
+          ? CanonStatus.CANON
+          : status === "PENDING"
+            ? CanonStatus.PENDING
+            : { not: CanonStatus.ARCHIVED },
+      ...(lockedOnly ? { locked: true } : {}),
       ...playerVisibleWhere(membership.role),
       ...(type ? { type } : {}),
       ...(query
@@ -284,6 +302,30 @@ export async function listEntitiesForUser(
   });
 
   return { entities, role: membership.role };
+}
+
+// Per-type counts for the world-browser facets. Scoped + visibility-aware, and
+// independent of the active type filter so every facet shows its true total.
+export async function getEntityTypeCounts(
+  userId: string,
+  campaignId: string,
+): Promise<Partial<Record<EntityType, number>>> {
+  const membership = await assertCampaignMember(userId, campaignId);
+  if (!membership) return {};
+
+  const groups = await prisma.entity.groupBy({
+    by: ["type"],
+    where: {
+      campaignId,
+      status: { not: CanonStatus.ARCHIVED },
+      ...playerVisibleWhere(membership.role),
+    },
+    _count: { _all: true },
+  });
+
+  const counts: Partial<Record<EntityType, number>> = {};
+  for (const group of groups) counts[group.type] = group._count._all;
+  return counts;
 }
 
 export async function getEntityForUser(

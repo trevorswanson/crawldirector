@@ -130,6 +130,52 @@ export async function createCrawlerAction(
   redirect(`/campaigns/${campaignId}/entities/${entityId}`);
 }
 
+export async function quickCreateEntityAction(
+  campaignId: string,
+  _prev: EntityActionState,
+  formData: FormData,
+): Promise<EntityActionState> {
+  const user = await requireUser();
+  const type = String(formData.get("type") ?? "");
+  const name = formData.get("name");
+
+  // A thin reference the DM fleshes out on the detail page (or with AI later).
+  let entityId: string;
+  try {
+    if (type === "CRAWLER") {
+      const parsed = createCrawlerSchema.safeParse({
+        name,
+        visibility: "DM_ONLY",
+        tags: "",
+      });
+      if (!parsed.success) {
+        return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+      }
+      const entity = await createCrawler(user.id, campaignId, parsed.data);
+      entityId = entity.id;
+    } else {
+      const parsed = createGenericEntitySchema.safeParse({
+        type,
+        name,
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: "",
+      });
+      if (!parsed.success) {
+        return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+      }
+      const entity = await createGenericEntity(user.id, campaignId, parsed.data);
+      entityId = entity.id;
+    }
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    return { error: "Could not create the entity. Please try again." };
+  }
+
+  redirect(`/campaigns/${campaignId}/entities/${entityId}`);
+}
+
 export async function updateEntityAction(
   campaignId: string,
   entityId: string,

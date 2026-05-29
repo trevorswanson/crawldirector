@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import type { ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import { Archive, Plus, Save } from "lucide-react";
@@ -9,6 +9,7 @@ import {
   archiveEntityAction,
   createCrawlerAction,
   createGenericEntityAction,
+  quickCreateEntityAction,
   updateEntityAction,
   type EntityActionState,
 } from "@/app/(dm)/actions";
@@ -18,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatEntityType, formatTags, formatVisibility } from "@/lib/entities";
 import {
+  entityTypeValues,
   genericEntityTypeValues,
   visibilityValues,
 } from "@/lib/validation";
@@ -299,6 +301,55 @@ export function EditEntityForm({
         <SubmitButton icon={<Save aria-hidden size={16} />}>Save entity</SubmitButton>
       </div>
     </form>
+  );
+}
+
+export function QuickCreateStub({ campaignId }: { campaignId: string }) {
+  const [open, setOpen] = useState(false);
+  const [state, action] = useActionState(
+    quickCreateEntityAction.bind(null, campaignId),
+    undefined,
+  );
+
+  return (
+    <div className="relative">
+      <Button
+        type="button"
+        variant="primary"
+        size="sm"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <Plus aria-hidden size={16} />
+        Quick-create stub
+      </Button>
+      {open && (
+        <div className="absolute right-0 top-full z-20 mt-2 w-[340px] border border-[var(--line-strong)] bg-[var(--bg-2)] p-3 shadow-[0_12px_32px_rgba(0,0,0,.45)]">
+          <form action={action} className="grid gap-2">
+            <Input name="name" autoFocus placeholder="New entity name…" required />
+            <select
+              name="type"
+              defaultValue="NPC"
+              className="h-9 border border-[var(--line-strong)] bg-[var(--bg)] px-2 text-sm"
+            >
+              {entityTypeValues.map((type) => (
+                <option key={type} value={type}>
+                  {formatEntityType(type)}
+                </option>
+              ))}
+            </select>
+            <div className="flex items-center justify-between gap-2">
+              <SubmitButton icon={<Plus aria-hidden size={14} />}>
+                Create stub
+              </SubmitButton>
+              <span className="font-mono text-[10px] text-[var(--ink-faint)]">
+                thin reference · flesh out later
+              </span>
+            </div>
+            <StateMessage state={state} />
+          </form>
+        </div>
+      )}
+    </div>
   );
 }
 

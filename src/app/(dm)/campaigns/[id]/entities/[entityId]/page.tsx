@@ -10,7 +10,6 @@ import {
   ArchiveEntityForm,
   EditEntityForm,
 } from "@/components/entities/entity-forms";
-import { buttonVariants } from "@/components/ui/button";
 import { HudTag } from "@/components/ui/hud-tag";
 import { Kicker } from "@/components/ui/kicker";
 import { SourceBadge } from "@/components/ui/source-badge";
@@ -90,7 +89,7 @@ export default async function EntityPage({
                 </Kicker>
                 <Link
                   href={detailHref}
-                  className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+                  className="inline-flex items-center gap-[6px] border border-[var(--line-strong)] bg-[var(--bg-3)] px-[10px] py-[5px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-dim)] transition-[filter,color] hover:text-[var(--ink)] hover:brightness-110"
                 >
                   Done
                 </Link>
@@ -213,27 +212,30 @@ export default async function EntityPage({
                     ? "Locked — click to unlock"
                     : "Unlocked — click to lock the whole entity"
                 }
-                className="inline-flex items-center gap-[5px] border px-[7px] py-[4px] font-mono text-[9px] uppercase tracking-[.1em] transition-colors"
+                className="inline-flex items-center gap-[6px] border px-[10px] py-[5px] font-mono text-[10px] uppercase tracking-[.08em] transition-[filter,color] hover:brightness-110"
                 style={{
                   borderColor: entity.locked
                     ? "var(--sys)"
                     : "var(--line-strong)",
-                  color: entity.locked ? "var(--sys)" : "var(--ink-faint)",
+                  background: entity.locked
+                    ? "color-mix(in srgb, var(--sys) 12%, transparent)"
+                    : "transparent",
+                  color: entity.locked ? "var(--sys)" : "var(--ink-dim)",
                 }}
               >
                 {entity.locked ? (
-                  <Lock aria-hidden size={11} />
+                  <Lock aria-hidden size={12} />
                 ) : (
-                  <Unlock aria-hidden size={11} />
+                  <Unlock aria-hidden size={12} />
                 )}
                 {entity.locked ? "Locked" : "Lock"}
               </button>
             </form>
             <Link
               href={editing ? detailHref : `${detailHref}?edit=1`}
-              className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+              className="inline-flex items-center gap-[6px] border border-[var(--line-strong)] bg-[var(--bg-3)] px-[10px] py-[5px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-dim)] transition-[filter,color] hover:text-[var(--ink)] hover:brightness-110"
             >
-              <Pencil aria-hidden size={13} />
+              <Pencil aria-hidden size={12} />
               {editing ? "Done" : "Edit"}
             </Link>
           </div>

@@ -2,11 +2,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
-const { requireUser, getCampaignForUser, listEntitiesForUser, notFound } =
-  vi.hoisted(() => ({
+const {
+  requireUser,
+  getCampaignForUser,
+  listEntitiesForUser,
+  getEntityTypeCounts,
+  notFound,
+} = vi.hoisted(() => ({
   requireUser: vi.fn(),
   getCampaignForUser: vi.fn(),
   listEntitiesForUser: vi.fn(),
+  getEntityTypeCounts: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
@@ -14,7 +20,10 @@ const { requireUser, getCampaignForUser, listEntitiesForUser, notFound } =
 
 vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/campaigns", () => ({ getCampaignForUser }));
-vi.mock("@/server/services/entities", () => ({ listEntitiesForUser }));
+vi.mock("@/server/services/entities", () => ({
+  listEntitiesForUser,
+  getEntityTypeCounts,
+}));
 vi.mock("next/navigation", () => ({ notFound }));
 vi.mock("next/link", () => ({
   default: ({ href, children }: { href: string; children: React.ReactNode }) => (
@@ -22,11 +31,8 @@ vi.mock("next/link", () => ({
   ),
 }));
 vi.mock("@/components/entities/entity-forms", () => ({
-  CreateCrawlerForm: ({ campaignId }: { campaignId: string }) => (
-    <div>Create crawler form {campaignId}</div>
-  ),
-  CreateGenericEntityForm: ({ campaignId }: { campaignId: string }) => (
-    <div>Create entity form {campaignId}</div>
+  QuickCreateStub: ({ campaignId }: { campaignId: string }) => (
+    <div>Quick create {campaignId}</div>
   ),
 }));
 
@@ -36,12 +42,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   requireUser.mockResolvedValue({ id: "u1" });
   listEntitiesForUser.mockResolvedValue({ entities: [], role: "OWNER" });
+  getEntityTypeCounts.mockResolvedValue({});
 });
 
 afterEach(cleanup);
 
 describe("CampaignPage", () => {
-  it("renders the campaign with summary, role, and singular member count", async () => {
+  it("renders the world browser shell and passes default filters", async () => {
     getCampaignForUser.mockResolvedValue({
       id: "c1",
       name: "World One",
@@ -50,6 +57,7 @@ describe("CampaignPage", () => {
       members: [{ role: "OWNER" }],
       _count: { members: 1, entities: 0 },
     });
+    getEntityTypeCounts.mockResolvedValue({ CRAWLER: 2 });
 
     render(
       await CampaignPage({
@@ -60,17 +68,21 @@ describe("CampaignPage", () => {
 
     expect(screen.getByRole("heading", { name: "World One" })).toBeDefined();
     expect(screen.getByText("A grand world")).toBeDefined();
-    expect(screen.getByText("Role · OWNER")).toBeDefined();
-    expect(screen.getByText("1 member")).toBeDefined();
-    expect(screen.getByText("0 entities")).toBeDefined();
-    expect(getCampaignForUser).toHaveBeenCalledWith("u1", "c1");
+    expect(screen.getByText("Entity type")).toBeDefined();
+    expect(screen.getByText("Locked only")).toBeDefined();
+    expect(screen.getByText("Quick create c1")).toBeDefined();
+    // count chip: 0 results / 2 total
+    expect(screen.getByText("0 / 2")).toBeDefined();
     expect(listEntitiesForUser).toHaveBeenCalledWith("u1", "c1", {
       query: undefined,
       type: "ALL",
+      status: "ALL",
+      lockedOnly: false,
     });
+    expect(getEntityTypeCounts).toHaveBeenCalledWith("u1", "c1");
   });
 
-  it("omits the summary, defaults the role, and pluralizes counts", async () => {
+  it("translates facet search params into service filters", async () => {
     getCampaignForUser.mockResolvedValue({
       id: "c2",
       name: "World Two",
@@ -83,20 +95,24 @@ describe("CampaignPage", () => {
     render(
       await CampaignPage({
         params: Promise.resolve({ id: "c2" }),
-        searchParams: Promise.resolve({ q: "carl", type: "CRAWLER" }),
+        searchParams: Promise.resolve({
+          q: "carl",
+          type: "CRAWLER",
+          status: "PENDING",
+          locked: "1",
+        }),
       }),
     );
 
-    expect(screen.getByText("Role · MEMBER")).toBeDefined();
-    expect(screen.getByText("3 members")).toBeDefined();
-    expect(screen.getByText("1 entity")).toBeDefined();
     expect(listEntitiesForUser).toHaveBeenCalledWith("u1", "c2", {
       query: "carl",
       type: "CRAWLER",
+      status: "PENDING",
+      lockedOnly: true,
     });
   });
 
-  it("renders matching entities in the world browser", async () => {
+  it("renders entity cards linking to detail", async () => {
     getCampaignForUser.mockResolvedValue({
       id: "c3",
       name: "World Three",
@@ -116,6 +132,8 @@ describe("CampaignPage", () => {
           status: "CANON",
           visibility: "PLAYER_FACING",
           tags: [],
+          locked: true,
+          isStub: false,
           updatedAt: new Date(),
           crawler: {
             level: 2,
@@ -138,14 +156,39 @@ describe("CampaignPage", () => {
     expect(
       screen.getByRole("link", { name: /Carl/ }).getAttribute("href"),
     ).toBe("/campaigns/c3/entities/e1");
-    expect(screen.getByText("Lv 2 · Floor 1")).toBeDefined();
+    expect(screen.getByText("Floor 1")).toBeDefined();
+  });
+
+  it("shows an empty state when no entities match", async () => {
+    getCampaignForUser.mockResolvedValue({
+      id: "c4",
+      name: "World Four",
+      summary: null,
+      createdAt: new Date(),
+      members: [{ role: "OWNER" }],
+      _count: { members: 1, entities: 0 },
+    });
+
+    render(
+      await CampaignPage({
+        params: Promise.resolve({ id: "c4" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+
+    expect(
+      screen.getByText(/No entities match/),
+    ).toBeDefined();
   });
 
   it("calls notFound when the user is not a member", async () => {
     getCampaignForUser.mockResolvedValue(null);
 
     await expect(
-      CampaignPage({ params: Promise.resolve({ id: "missing" }) }),
+      CampaignPage({
+        params: Promise.resolve({ id: "missing" }),
+        searchParams: Promise.resolve({}),
+      }),
     ).rejects.toThrow("NEXT_NOT_FOUND");
     expect(notFound).toHaveBeenCalled();
   });
