@@ -10,6 +10,17 @@ Running checklist of milestones/tasks, newest first. See
 **Done when:** every canon change has provenance; locked fields can't be
 overwritten; a DM can review/approve/reject a proposal end to end.
 
+### Done — slice 4: editable Review Queue field values (2026-05-29)
+
+- [x] Added a Review Queue edit path that saves `EDITED` operation decisions
+      with an `editedPatch` from the queue UI.
+- [x] Added per-field apply checkboxes so a DM can omit proposed fields while
+      editing the values that should be committed.
+- [x] Rendered existing edited patches back into the queue so saved field
+      decisions are visible before approval.
+- [x] Added action and page regression coverage for string, array, number, and
+      boolean edited field values.
+
 ### Done — slice 3: operation decisions in Review Queue (2026-05-29)
 
 - [x] Added `setChangeOperationDecision` in the review service so pending
@@ -155,9 +166,9 @@ The detail page had drifted from [`screen-world.jsx`](./design/mockup/screen-wor
 - Per-field **AI markers** and the connections/timeline panels are stubbed as
       "Planned · M3/M4" — no fake data — and light up when that data exists.
 - Remaining before M2 is complete: per-operation / per-field accept-edit-reject
-      UI refinements in the Review Queue (especially editing field values),
-      `supersede` for replaced/stale proposals, relationship/event operations
-      (land with M3), and batch review actions.
+      UI refinements in the Review Queue, `supersede` for replaced/stale
+      proposals, relationship/event operations (land with M3), and batch review
+      actions.
 - Local verification used the existing Postgres database. That database already
       contained an older local review-pipeline migration, so the new migration
       was marked applied after non-destructive local schema alignment; a fresh CI
