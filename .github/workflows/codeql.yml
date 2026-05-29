@@ -31,6 +31,8 @@ jobs:
           languages: javascript-typescript
           # Includes the broader query set, not just the default high-confidence ones.
           queries: security-and-quality
+          # Excludes the read-only design mockup (docs/design/mockup) — see config.
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v4
