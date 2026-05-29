@@ -136,37 +136,41 @@ describe("entity schemas", () => {
       hp: "30",
       mp: "",
       gold: "10",
-      fanCount: "500",
+      viewCount: "500",
+      followerCount: "25",
+      favoriteCount: "5",
       killCount: "3",
       currentFloor: "1",
       isAlive: "true",
     });
     expect(parsed.level).toBe(2);
     expect(parsed.mp).toBeUndefined();
-    expect(parsed.fanCount).toBe(BigInt(500));
+    expect(parsed.viewCount).toBe(BigInt(500));
+    expect(parsed.followerCount).toBe(BigInt(25));
+    expect(parsed.favoriteCount).toBe(BigInt(5));
   });
 
-  it("preserves large crawler fan counts as bigint values", () => {
-    const fanCount = "9007199254740993";
+  it("preserves large crawler audience ratings as bigint values", () => {
+    const viewCount = "9007199254740993";
     const parsed = createCrawlerSchema.parse({
       name: "Carl",
       summary: "",
       description: "",
       visibility: "PLAYER_FACING",
       tags: "",
-      fanCount,
+      viewCount,
     });
-    expect(parsed.fanCount).toBe(BigInt(fanCount));
+    expect(parsed.viewCount).toBe(BigInt(viewCount));
   });
 
-  it("rejects unsafe numeric fan counts before precision is lost", () => {
+  it("rejects unsafe numeric audience ratings before precision is lost", () => {
     const r = createCrawlerSchema.safeParse({
       name: "Carl",
       summary: "",
       description: "",
       visibility: "PLAYER_FACING",
       tags: "",
-      fanCount: 9007199254740992,
+      viewCount: 9007199254740992,
     });
     expect(r.success).toBe(false);
   });

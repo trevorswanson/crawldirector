@@ -1,0 +1,5 @@
+ALTER TABLE "Crawler" RENAME COLUMN "fanCount" TO "followerCount";
+
+ALTER TABLE "Crawler"
+  ADD COLUMN "viewCount" BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN "favoriteCount" BIGINT NOT NULL DEFAULT 0;

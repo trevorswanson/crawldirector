@@ -68,7 +68,15 @@ export default async function EntityPage({
             label="Floor"
             value={entity.crawler.currentFloor?.toString() ?? "Unknown"}
           />
-          <Stat label="Fans" value={entity.crawler.fanCount.toString()} />
+          <Stat label="Views" value={entity.crawler.viewCount.toString()} />
+          <Stat
+            label="Followers"
+            value={entity.crawler.followerCount.toString()}
+          />
+          <Stat
+            label="Favorites"
+            value={entity.crawler.favoriteCount.toString()}
+          />
           <Stat
             label="Status"
             value={entity.crawler.isAlive ? "Alive" : "Dead"}

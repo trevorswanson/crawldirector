@@ -73,7 +73,9 @@ describe("EntityPage", () => {
         hp: 30,
         mp: 5,
         gold: 10,
-        fanCount: BigInt(1000),
+        viewCount: BigInt(1000),
+        followerCount: BigInt(100),
+        favoriteCount: BigInt(10),
         killCount: 4,
         isAlive: true,
         currentFloor: 2,
@@ -91,6 +93,8 @@ describe("EntityPage", () => {
     expect(screen.getByText("Player Facing")).toBeDefined();
     expect(screen.getByText("Version 2")).toBeDefined();
     expect(screen.getByText("1000")).toBeDefined();
+    expect(screen.getByText("100")).toBeDefined();
+    expect(screen.getByText("10")).toBeDefined();
     expect(screen.getByText("Edit Carl")).toBeDefined();
   });
 
@@ -123,7 +127,9 @@ describe("EntityPage", () => {
 
     expect(screen.getByRole("heading", { name: "Zev" })).toBeDefined();
     expect(screen.getByText("Locked")).toBeDefined();
-    expect(screen.queryByText("Fans")).toBeNull();
+    expect(screen.queryByText("Views")).toBeNull();
+    expect(screen.queryByText("Followers")).toBeNull();
+    expect(screen.queryByText("Favorites")).toBeNull();
   });
 
   it("renders unknown floor and dead status for crawlers", async () => {
@@ -151,7 +157,9 @@ describe("EntityPage", () => {
         hp: null,
         mp: null,
         gold: 0,
-        fanCount: BigInt(0),
+        viewCount: BigInt(0),
+        followerCount: BigInt(0),
+        favoriteCount: BigInt(0),
         killCount: 0,
         isAlive: false,
         currentFloor: null,

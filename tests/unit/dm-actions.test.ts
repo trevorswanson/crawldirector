@@ -174,7 +174,9 @@ describe("createCrawlerAction", () => {
           tags: "",
           level: "2",
           gold: "1",
-          fanCount: "10",
+          viewCount: "100",
+          followerCount: "10",
+          favoriteCount: "2",
           killCount: "3",
         }),
       ),
@@ -183,7 +185,13 @@ describe("createCrawlerAction", () => {
     expect(createCrawler).toHaveBeenCalledWith(
       "u1",
       "c1",
-      expect.objectContaining({ name: "Carl", level: 2, fanCount: BigInt(10) }),
+      expect.objectContaining({
+        name: "Carl",
+        level: 2,
+        viewCount: BigInt(100),
+        followerCount: BigInt(10),
+        favoriteCount: BigInt(2),
+      }),
     );
     expect(redirect).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
   });
