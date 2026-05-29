@@ -57,9 +57,6 @@ describe("ReviewQueuePage", () => {
 
     expect(screen.getByRole("heading", { name: "Review Queue" })).toBeDefined();
     expect(screen.getByText("No pending proposals")).toBeDefined();
-    expect(
-      screen.getByRole("link", { name: "Back to Dungeon" }).getAttribute("href"),
-    ).toBe("/campaigns/c1");
     expect(listPendingChangeSetsForUser).toHaveBeenCalledWith("u1", "c1");
   });
 

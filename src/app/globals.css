@@ -207,3 +207,155 @@ html.fx .fx-layer { display: block; }
   }
   .fx-scanlines, .fx-grain { display: none !important; }
 }
+
+/* ------------------------- markdown-content ------------------------- */
+.markdown-content {
+  font-size: 14.5px !important;
+  line-height: 1.7 !important;
+  color: var(--ink) !important;
+}
+
+.markdown-content p {
+  margin-bottom: 1.25rem !important;
+}
+.markdown-content p:last-child {
+  margin-bottom: 0 !important;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+  font-family: var(--font-display) !important;
+  font-weight: 600 !important;
+  color: var(--accent) !important;
+  margin-top: 1.75rem !important;
+  margin-bottom: 0.75rem !important;
+}
+
+.markdown-content h1 { font-size: 1.50rem !important; }
+.markdown-content h2 { font-size: 1.35rem !important; }
+.markdown-content h3 { font-size: 1.20rem !important; }
+.markdown-content h4 { font-size: 1.05rem !important; }
+.markdown-content h5 { font-size: 0.95rem !important; }
+.markdown-content h6 { font-size: 0.85rem !important; }
+
+.markdown-content a {
+  color: var(--accent) !important;
+  text-decoration: underline !important;
+  text-underline-offset: 2px !important;
+}
+.markdown-content a:hover {
+  color: var(--ink) !important;
+}
+
+.markdown-content ul {
+  list-style-type: disc !important;
+  padding-left: 1.5rem !important;
+  margin-bottom: 1.25rem !important;
+}
+
+.markdown-content ol {
+  list-style-type: decimal !important;
+  padding-left: 1.5rem !important;
+  margin-bottom: 1.25rem !important;
+}
+
+.markdown-content li {
+  margin-bottom: 0.35rem !important;
+  display: list-item !important;
+}
+
+.markdown-content blockquote {
+  border-left: 2px solid var(--accent) !important;
+  padding-left: 1rem !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  margin-bottom: 1.25rem !important;
+  font-style: italic !important;
+  color: var(--ink-dim) !important;
+}
+
+.markdown-content code {
+  font-family: var(--font-mono) !important;
+  font-size: 0.9em !important;
+  background-color: var(--bg-2) !important;
+  padding: 0.2rem 0.4rem !important;
+  border-radius: 2px !important;
+  border: 1px solid var(--line) !important;
+}
+
+.markdown-content pre {
+  background-color: var(--bg-2) !important;
+  border: 1px solid var(--line) !important;
+  padding: 1rem !important;
+  border-radius: 2px !important;
+  overflow-x: auto !important;
+  margin-bottom: 1.25rem !important;
+}
+
+.markdown-content pre code {
+  background-color: transparent !important;
+  padding: 0 !important;
+  border: none !important;
+  font-size: 0.85em !important;
+  border-radius: 0 !important;
+}
+
+.markdown-content strong {
+  font-weight: 600 !important;
+  color: var(--ink) !important;
+}
+
+.markdown-content em {
+  font-style: italic !important;
+  color: var(--ink-dim) !important;
+}
+
+.markdown-content hr {
+  border: 0 !important;
+  border-top: 1px solid var(--line-strong) !important;
+  margin: 1.75rem 0 !important;
+}
+
+/* GFM Table Styling matching the design language panels */
+.markdown-content table {
+  width: 100% !important;
+  border-collapse: collapse !important;
+  margin-bottom: 1.25rem !important;
+  background: var(--bg-1) !important;
+  border: 1px solid var(--line) !important;
+}
+
+.markdown-content th,
+.markdown-content td {
+  padding: 10px 14px !important;
+  text-align: left !important;
+}
+
+.markdown-content th {
+  font-family: var(--font-mono) !important;
+  font-size: 10.5px !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.06em !important;
+  color: var(--ink-faint) !important;
+  border-bottom: 1px solid var(--line-strong) !important;
+  font-weight: 600 !important;
+}
+
+.markdown-content td {
+  font-size: 13.5px !important;
+  color: var(--ink) !important;
+}
+
+.markdown-content tr {
+  border-bottom: 1px solid var(--line) !important;
+}
+
+.markdown-content tr:last-child {
+  border-bottom: none !important;
+}
+
+

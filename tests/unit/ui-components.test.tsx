@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen, fireEvent } from "@testing-library/react";
+import { FxToggle } from "@/components/ui/fx-toggle";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -43,7 +44,7 @@ describe("Button", () => {
   it("exposes a buttonVariants helper", () => {
     expect(typeof buttonVariants()).toBe("string");
     expect(buttonVariants({ variant: "destructive" })).toContain("var(--no)");
-    expect(buttonVariants({ variant: "ghost", size: "sm" })).toContain("h-9");
+    expect(buttonVariants({ variant: "ghost", size: "sm" })).toContain("h-8");
   });
 });
 
@@ -81,5 +82,25 @@ describe("Label", () => {
     const label = screen.getByText("Email");
     expect(label.tagName).toBe("LABEL");
     expect(label.getAttribute("for")).toBe("email");
+  });
+});
+
+describe("FxToggle", () => {
+  it("toggles the FX class and cookies on click", () => {
+    const toggleSpy = vi.spyOn(document.documentElement.classList, "toggle");
+
+    render(<FxToggle defaultOn={true} />);
+    const button = screen.getByRole("button", { name: /FX/ });
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(button);
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+    expect(toggleSpy).toHaveBeenCalledWith("fx", false);
+
+    fireEvent.click(button);
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    expect(toggleSpy).toHaveBeenCalledWith("fx", true);
+
+    toggleSpy.mockRestore();
   });
 });

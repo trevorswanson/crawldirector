@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/card";
 import { Kicker } from "@/components/ui/kicker";
 import { HudTag } from "@/components/ui/hud-tag";
+import { PageContainer } from "@/components/console/page-container";
 import { CreateCampaignForm } from "@/components/campaigns/create-campaign-form";
 
 export default async function DashboardPage() {
@@ -17,6 +18,7 @@ export default async function DashboardPage() {
   const campaigns = await listCampaignsForUser(user.id);
 
   return (
+    <PageContainer>
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-1">
         <Kicker>World Browser · Campaigns</Kicker>
@@ -67,5 +69,6 @@ export default async function DashboardPage() {
         </ul>
       )}
     </div>
+    </PageContainer>
   );
 }

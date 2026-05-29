@@ -10,7 +10,48 @@ Running checklist of milestones/tasks, newest first. See
 **Done when:** every canon change has provenance; locked fields can't be
 overwritten; a DM can review/approve/reject a proposal end to end.
 
-### Done (2026-05-29)
+### Done — Markdown rendering for entity descriptions (2026-05-29)
+
+- [x] Installed `marked` for parsing markdown and `isomorphic-dompurify` for HTML sanitization (on both server and client).
+- [x] Created a reusable `<Markdown />` component in `src/components/ui/markdown.tsx` that safely parses, sanitizes, and renders Markdown content.
+- [x] Styled markdown HTML elements (paragraphs, headers, links, lists, code, blockquotes) in `src/app/globals.css` with a customized design language that matches the theme's colors.
+- [x] Integrated the `<Markdown />` component on the entity detail page (`src/app/(dm)/campaigns/[id]/entities/[entityId]/page.tsx`) to render dynamic formatted descriptions.
+- [x] Added unit tests in `tests/unit/entity-page.test.tsx` verifying that markdown headings, lists, bold text, links, and blockquotes in the description are rendered correctly.
+
+### Done — UI polish: simplified entity editing controls (2026-05-29)
+
+- [x] Removed the "Done" link from the top of the editing section on the entity detail page.
+- [x] Removed the bottom "Save entity" button from the edit form.
+- [x] Assigned `id="edit-entity-form"` to the EditEntityForm to allow external submission.
+- [x] Added `Save` and `Discard` buttons in the right-hand controls rail of the entity page when in edit mode. The `Save` button submits the edit form using the HTML5 `form` attribute and redirects back to the read-only view on success, and the `Discard` button links back to the read-only view.
+- [x] Disabled editing of locked fields on the editing screen (inputs are set to `readOnly` and selects are set to `disabled` with a hidden input fallback), and updated global Tailwind styles for inputs/textareas to visually shade read-only fields.
+- [x] Disabled opening the entity edit page (`?edit=1`) when the entire entity is locked by redirecting the user back to the read-only view in the client-side component if no form error is present.
+- [x] Hid the Lock/Unlock controls in the entity view right-hand sidebar when in edit mode to prevent users from inadvertently locking the entity (and triggering a form reset) while editing.
+- [x] Improved the backend update error to report the specific field(s) that were modified but locked (e.g. `This proposal touches locked entity fields: "name", "description"` or `Cannot update because the entity is locked.`).
+- [x] Preserved the form state when a save fails due to a locked entity, allowing the user to copy their input or retry.
+
+### Done — Entity source modeling and World Browser sidebar filter (2026-05-29)
+
+- [x] Added `source ChangeSource @default(DM)` field and index to `Entity` model in `schema.prisma`.
+- [x] Created database migration `add_entity_source` and regenerated Prisma client.
+- [x] Updated the review service to populate the new `source` field on entity creation from the change set's source.
+- [x] Updated `listEntitiesForUser` to support filtering by entity source.
+- [x] Implemented the "Source" sidebar filter UI (ALL / DM / AI / PLAYER / IMPORT) in the World Browser, passing it correctly via URL state and hidden form fields.
+- [x] Rendered the dynamic `SourceBadge` on entity cards in the browser.
+- [x] Added unit and integration tests covering the new source filtering logic.
+
+### Done — UI simplification: removed redundant back buttons (2026-05-29)
+
+- [x] Removed redundant "All crawls" link from the World Browser sidebar (navigation is handled by the navbar dropdown).
+- [x] Removed redundant "Back to [crawl name]" link from the Review Queue header.
+- [x] Updated unit tests for the Review Queue page to match.
+
+### Done — PR feedback: locked filters & quick-create stubs (2026-05-29)
+
+- [x] Fixed status facet and locked filter to match entities with per-field locks (i.e., where `lockedFields` is non-empty) in addition to whole-entity locks.
+- [x] Fixed Quick-create stub path to set `isStub: true` on creation, and reset it to `false` when the entity is subsequently updated/edited.
+
+### Done — slice 1: entity proposals + review queue (2026-05-29)
 
 - [x] Added M2 Prisma schema + migration for `ChangeSet`,
       `ChangeOperation`, `Provenance`, and `AuditLog`, plus review source/status/
@@ -26,11 +67,80 @@ overwritten; a DM can review/approve/reject a proposal end to end.
       field blocking, pending proposal approval, and pending proposal rejection;
       added server-action coverage for queue decisions.
 
+### Done — slice 2: DM canon locking (2026-05-29)
+
+- [x] `setEntityLock` review-service method: lock/unlock the whole entity and
+      lock individual fields (`locked` / `lockedFields`). Locking is a deliberate
+      DM action — not a proposal — and writes a `LOCK` / `UNLOCK` /
+      `SET_FIELD_LOCKS` `AuditLog` row. It does **not** bump `version` (a lock
+      protects content without making pending proposals look stale). DM-only;
+      no-op when nothing changes.
+- [x] `setEntityLockSchema` (Zod) + `setEntityLockAction` server action; lockable
+      field names line up with the review service's patch field keys.
+- [x] `EntityLockControls` UI on entity detail (lock-whole-entity toggle +
+      per-field checkboxes), a field-lock count tag in the status row, and an
+      edit-card hint when locked. Made the existing `updateEntityAction` surface
+      `ServiceError` reasons (e.g. "touches locked entity fields") so a blocked
+      edit explains itself instead of saying "try again."
+- [x] Closes the **"locked fields can't be overwritten"** half of M2's done-bar
+      end to end: DB-backed lock/unlock/field-lock + blocking tests, action tests,
+      schema tests, and a page/form render test. Verified in-browser (lock a
+      field → edit is blocked with the lock reason; canon unchanged).
+
+### Done — entity-detail redesign to the mockup (2026-05-29)
+
+The detail page had drifted from [`screen-world.jsx`](./design/mockup/screen-world.jsx)'s
+`EntityDetail`. Reworked it to match the mockup's vision:
+
+- [x] Full-bleed **two-column workspace** (main + 304px right rail). The console
+      `<main>` is now full-bleed/non-scrolling; "document" pages (dashboard,
+      campaign, review) opt into the centered column via the new `PageContainer`.
+- [x] Sticky **breadcrumb back-bar**, header (type-dot · type · status · stub),
+      description, and a **Fields table** whose rows carry per-field **lock
+      toggles** (server actions) + a whole-entity lock in the rail — replacing the
+      old stat grid and checkbox "Canon lock" card.
+- [x] **Read-first**: the page shows the read view by default; Edit is a control
+      that flips to the form via `?edit` (no always-open form).
+- [x] Right rail: **Controls** (lock + Edit) · **Visibility** (eye/eye-off list)
+      · **Connections** (honest "Planned · M3") · **Provenance** (real data from
+      `getEntityProvenance`: origin/author, created, model, approved-by, last
+      change + the permanence note).
+- [x] Lock UI now uses `toggleEntityLockAction` / `toggleEntityFieldLockAction`
+      (replacing the form-based `setEntityLockAction`); the `setEntityLock`
+      service is unchanged. Tests updated; lint/typecheck/build/coverage green;
+      verified in-browser against the mockup.
+
+### Done — World Browser redesign + detail polish (2026-05-29)
+
+- [x] Rebuilt the campaign page as the mockup's **World Browser**: full-bleed
+      two-column with a **facet sidebar** (entity-type list with live counts +
+      Status + "Locked only", all functional; Source / AI-origin shown as
+      "Planned · M4") and a **card grid** (type-dot · source · lock · status ·
+      floor). Service gained `getEntityTypeCounts` + status/locked list filters.
+- [x] Replaced the two big inline create forms with the mockup's
+      **Quick-create stub** (name + type → thin entity → detail to flesh out),
+      backed by `quickCreateEntityAction`.
+- [x] Detail-page **Controls** polish: LOCK and EDIT are now a matched HUD chip
+      pair (the old `ghost` Button rendered borderless and looked broken). Edit/
+      Done use the same chip.
+- [x] Added `scripts/seed-world.ts` (dev-only, via the service layer) to populate
+      a demo Floor-9 world for local QA. Tests/lint/typecheck/build green;
+      coverage above floors; verified in-browser against both mockup screens.
+
 ### Notes / follow-ups
 
-- This is the first entity-only vertical slice of M2. Per-field edit decisions,
-      relationship/event operations, unlock/lock UI, and richer conflict
-      resolution remain before M2 is complete.
+- Locking deliberately blocks **all** writers to a locked target (including the
+      DM's own direct edit), matching the "unlock to edit" UX. If a source-aware
+      policy is wanted later (locks bind AI/import but not deliberate DM edits),
+      that's a review-service change, not a UI one.
+- The full create forms (`CreateCrawlerForm` / `CreateGenericEntityForm`) are now
+      unused by the World Browser (quick-create + detail-edit replace them) but
+      kept for a future dedicated "new entity" page; their tests still run.
+- Per-field **AI markers** and the connections/timeline panels are stubbed as
+      "Planned · M3/M4" — no fake data — and light up when that data exists.
+- Remaining before M2 is complete: per-operation / per-field accept-edit-reject
+      decisions in the Review Queue, `supersede` for replaced/stale proposals,
+      relationship/event operations (land with M3), and batch review actions.
 - Local verification used the existing Postgres database. That database already
       contained an older local review-pipeline migration, so the new migration
       was marked applied after non-destructive local schema alignment; a fresh CI

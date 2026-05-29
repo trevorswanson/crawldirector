@@ -1,5 +1,6 @@
 import {
   CanonStatus,
+  ChangeSource,
   EntityType,
   OpKind,
   Role,
@@ -27,7 +28,10 @@ const entityListSelect = {
   summary: true,
   status: true,
   visibility: true,
+  source: true,
   tags: true,
+  locked: true,
+  isStub: true,
   updatedAt: true,
   crawler: {
     select: {
@@ -40,6 +44,8 @@ const entityListSelect = {
   },
 } as const;
 
+export type EntityStatusFilter = "ALL" | "CANON" | "PENDING" | "LOCKED";
+
 const entityDetailSelect = {
   id: true,
   campaignId: true,
@@ -49,6 +55,7 @@ const entityDetailSelect = {
   description: true,
   status: true,
   visibility: true,
+  source: true,
   tags: true,
   version: true,
   locked: true,
@@ -162,7 +169,7 @@ function entityCreatePatch(
   type: EntityType,
   input: Pick<
     CreateGenericEntityInput,
-    "name" | "summary" | "description" | "visibility" | "tags"
+    "name" | "summary" | "description" | "visibility" | "tags" | "isStub"
   >,
 ) {
   const core = entityCoreData(userId, campaignId, input);
@@ -176,6 +183,7 @@ function entityCreatePatch(
     visibility: { to: core.visibility },
     tags: { to: core.tags },
     status: { to: core.status },
+    ...(input.isStub !== undefined ? { isStub: { to: input.isStub } } : {}),
   } satisfies ReviewPatch;
 }
 
@@ -255,18 +263,42 @@ export async function createCrawler(
 export async function listEntitiesForUser(
   userId: string,
   campaignId: string,
-  filters: { query?: string; type?: EntityType | "ALL" } = {},
+  filters: {
+    query?: string;
+    type?: EntityType | "ALL";
+    status?: EntityStatusFilter;
+    lockedOnly?: boolean;
+    source?: ChangeSource | "ALL";
+  } = {},
 ) {
   const membership = await assertCampaignMember(userId, campaignId);
   if (!membership) return { entities: [], role: null };
 
   const query = filters.query?.trim();
   const type = filters.type && filters.type !== "ALL" ? filters.type : undefined;
+  const status = filters.status && filters.status !== "ALL" ? filters.status : undefined;
+  const lockedOnly = filters.lockedOnly || status === "LOCKED";
+  const source = filters.source && filters.source !== "ALL" ? filters.source : undefined;
 
   const entities = await prisma.entity.findMany({
     where: {
       campaignId,
-      status: { not: CanonStatus.ARCHIVED },
+      // CANON/PENDING narrow the status; everything else just excludes archived.
+      status:
+        status === "CANON"
+          ? CanonStatus.CANON
+          : status === "PENDING"
+            ? CanonStatus.PENDING
+            : { not: CanonStatus.ARCHIVED },
+      ...(lockedOnly
+        ? {
+            OR: [
+              { locked: true },
+              { NOT: { lockedFields: { equals: [] } } },
+            ],
+          }
+        : {}),
+      ...(source ? { source } : {}),
       ...playerVisibleWhere(membership.role),
       ...(type ? { type } : {}),
       ...(query
@@ -284,6 +316,30 @@ export async function listEntitiesForUser(
   });
 
   return { entities, role: membership.role };
+}
+
+// Per-type counts for the world-browser facets. Scoped + visibility-aware, and
+// independent of the active type filter so every facet shows its true total.
+export async function getEntityTypeCounts(
+  userId: string,
+  campaignId: string,
+): Promise<Partial<Record<EntityType, number>>> {
+  const membership = await assertCampaignMember(userId, campaignId);
+  if (!membership) return {};
+
+  const groups = await prisma.entity.groupBy({
+    by: ["type"],
+    where: {
+      campaignId,
+      status: { not: CanonStatus.ARCHIVED },
+      ...playerVisibleWhere(membership.role),
+    },
+    _count: { _all: true },
+  });
+
+  const counts: Partial<Record<EntityType, number>> = {};
+  for (const group of groups) counts[group.type] = group._count._all;
+  return counts;
 }
 
 export async function getEntityForUser(
@@ -325,6 +381,7 @@ export async function updateEntity(
       visibility: true,
       tags: true,
       version: true,
+      isStub: true,
       crawler: {
         select: {
           realName: true,
@@ -362,6 +419,10 @@ export async function updateEntity(
   );
   addPatch(patch, "visibility", existing.visibility, parsed.visibility as Visibility);
   addPatch(patch, "tags", existing.tags, parsed.tags);
+
+  if (existing.isStub) {
+    addPatch(patch, "isStub", true, false);
+  }
 
   if (existing.type === EntityType.CRAWLER && existing.crawler) {
     addPatch(patch, "crawler.realName", existing.crawler.realName, nullIfEmpty(parsed.realName));

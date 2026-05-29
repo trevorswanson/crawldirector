@@ -5,27 +5,31 @@ import { revalidatePath } from "next/cache";
 
 import { signOut } from "@/server/auth";
 import { requireUser } from "@/server/auth/session";
+import { ServiceError } from "@/lib/errors";
 import { createCampaign } from "@/server/services/campaigns";
 import {
   createCampaignSchema,
   createCrawlerSchema,
   createGenericEntitySchema,
+  lockFieldSchema,
   updateEntitySchema,
 } from "@/lib/validation";
 import {
   archiveEntity,
   createCrawler,
   createGenericEntity,
+  getEntityForUser,
   updateEntity,
 } from "@/server/services/entities";
 import {
   approveChangeSet,
   rejectChangeSet,
+  setEntityLock,
 } from "@/server/services/review";
 
 export type CampaignActionState = { error?: string } | undefined;
 export type EntityActionState =
-  | { error?: string; success?: string }
+  | { error?: string; success?: string; values?: Record<string, unknown>; timestamp?: number }
   | undefined;
 
 export async function createCampaignAction(
@@ -126,6 +130,54 @@ export async function createCrawlerAction(
   redirect(`/campaigns/${campaignId}/entities/${entityId}`);
 }
 
+export async function quickCreateEntityAction(
+  campaignId: string,
+  _prev: EntityActionState,
+  formData: FormData,
+): Promise<EntityActionState> {
+  const user = await requireUser();
+  const type = String(formData.get("type") ?? "");
+  const name = formData.get("name");
+
+  // A thin reference the DM fleshes out on the detail page (or with AI later).
+  let entityId: string;
+  try {
+    if (type === "CRAWLER") {
+      const parsed = createCrawlerSchema.safeParse({
+        name,
+        visibility: "DM_ONLY",
+        tags: "",
+        isStub: true,
+      });
+      if (!parsed.success) {
+        return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+      }
+      const entity = await createCrawler(user.id, campaignId, parsed.data);
+      entityId = entity.id;
+    } else {
+      const parsed = createGenericEntitySchema.safeParse({
+        type,
+        name,
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: "",
+        isStub: true,
+      });
+      if (!parsed.success) {
+        return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+      }
+      const entity = await createGenericEntity(user.id, campaignId, parsed.data);
+      entityId = entity.id;
+    }
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    return { error: "Could not create the entity. Please try again." };
+  }
+
+  redirect(`/campaigns/${campaignId}/entities/${entityId}`);
+}
+
 export async function updateEntityAction(
   campaignId: string,
   entityId: string,
@@ -133,6 +185,26 @@ export async function updateEntityAction(
   formData: FormData,
 ): Promise<EntityActionState> {
   const user = await requireUser();
+  const values = {
+    name: formData.get("name")?.toString() ?? "",
+    summary: formData.get("summary")?.toString() ?? "",
+    description: formData.get("description")?.toString() ?? "",
+    visibility: formData.get("visibility")?.toString() ?? "DM_ONLY",
+    tags: formData.get("tags")?.toString() ?? "",
+    realName: formData.get("realName")?.toString() ?? "",
+    crawlerNo: formData.get("crawlerNo")?.toString() ?? "",
+    level: formData.get("level") ? Number(formData.get("level")) : undefined,
+    hp: formData.get("hp") ? Number(formData.get("hp")) : undefined,
+    mp: formData.get("mp") ? Number(formData.get("mp")) : undefined,
+    gold: formData.get("gold") ? Number(formData.get("gold")) : undefined,
+    viewCount: formData.get("viewCount")?.toString() ?? "",
+    followerCount: formData.get("followerCount")?.toString() ?? "",
+    favoriteCount: formData.get("favoriteCount")?.toString() ?? "",
+    killCount: formData.get("killCount") ? Number(formData.get("killCount")) : undefined,
+    currentFloor: formData.get("currentFloor") ? Number(formData.get("currentFloor")) : undefined,
+    isAlive: formData.get("isAlive") === "false" ? false : true,
+  };
+
   const parsed = updateEntitySchema.safeParse({
     type: formData.get("type"),
     name: formData.get("name"),
@@ -154,18 +226,64 @@ export async function updateEntityAction(
     isAlive: formData.get("isAlive"),
   });
   if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+    return {
+      error: parsed.error.issues[0]?.message ?? "Invalid input.",
+      values,
+      timestamp: Date.now(),
+    };
   }
 
   try {
     await updateEntity(user.id, campaignId, entityId, parsed.data);
-  } catch {
-    return { error: "Could not update the entity. Please try again." };
+  } catch (error) {
+    // Surface expected failures (e.g. a locked field) so the DM knows to
+    // unlock rather than uselessly retry; hide anything unexpected.
+    if (error instanceof ServiceError) {
+      return { error: error.message, values, timestamp: Date.now() };
+    }
+    return {
+      error: "Could not update the entity. Please try again.",
+      values,
+      timestamp: Date.now(),
+    };
   }
 
   revalidatePath(`/campaigns/${campaignId}`);
   revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
-  return { success: "Saved." };
+  redirect(`/campaigns/${campaignId}/entities/${entityId}`);
+}
+
+export async function toggleEntityLockAction(
+  campaignId: string,
+  entityId: string,
+): Promise<void> {
+  const user = await requireUser();
+  const entity = await getEntityForUser(user.id, campaignId, entityId);
+  if (!entity) return;
+  await setEntityLock(user.id, campaignId, entityId, { locked: !entity.locked });
+  revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
+}
+
+export async function toggleEntityFieldLockAction(
+  campaignId: string,
+  entityId: string,
+  formData: FormData,
+): Promise<void> {
+  const user = await requireUser();
+  const field = lockFieldSchema.safeParse(formData.get("field"));
+  if (!field.success) return;
+
+  const entity = await getEntityForUser(user.id, campaignId, entityId);
+  if (!entity) return;
+
+  const next = new Set(entity.lockedFields);
+  if (next.has(field.data)) next.delete(field.data);
+  else next.add(field.data);
+
+  await setEntityLock(user.id, campaignId, entityId, {
+    lockedFields: [...next],
+  });
+  revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
 }
 
 export async function archiveEntityAction(

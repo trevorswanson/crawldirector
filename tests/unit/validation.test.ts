@@ -4,6 +4,7 @@ import {
   createCampaignSchema,
   createCrawlerSchema,
   createGenericEntitySchema,
+  lockFieldSchema,
   signInSchema,
   signUpSchema,
   updateEntitySchema,
@@ -195,5 +196,19 @@ describe("entity schemas", () => {
         tags: "",
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("lockFieldSchema", () => {
+  it("accepts a core lockable field", () => {
+    expect(lockFieldSchema.safeParse("name").success).toBe(true);
+  });
+
+  it("accepts a crawler lockable field", () => {
+    expect(lockFieldSchema.safeParse("crawler.level").success).toBe(true);
+  });
+
+  it("rejects an unknown field", () => {
+    expect(lockFieldSchema.safeParse("bogus").success).toBe(false);
   });
 });

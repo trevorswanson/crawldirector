@@ -5,10 +5,12 @@ const {
   createCampaign,
   createCrawler,
   createGenericEntity,
+  getEntityForUser,
   updateEntity,
   archiveEntity,
   approveChangeSet,
   rejectChangeSet,
+  setEntityLock,
   signOut,
   redirect,
   revalidatePath,
@@ -17,10 +19,12 @@ const {
   createCampaign: vi.fn(),
   createCrawler: vi.fn(),
   createGenericEntity: vi.fn(),
+  getEntityForUser: vi.fn(),
   updateEntity: vi.fn(),
   archiveEntity: vi.fn(),
   approveChangeSet: vi.fn(),
   rejectChangeSet: vi.fn(),
+  setEntityLock: vi.fn(),
   signOut: vi.fn(),
   redirect: vi.fn(() => {
     throw new Error("NEXT_REDIRECT");
@@ -34,11 +38,13 @@ vi.mock("@/server/services/entities", () => ({
   archiveEntity,
   createCrawler,
   createGenericEntity,
+  getEntityForUser,
   updateEntity,
 }));
 vi.mock("@/server/services/review", () => ({
   approveChangeSet,
   rejectChangeSet,
+  setEntityLock,
 }));
 vi.mock("@/server/auth", () => ({ signOut }));
 vi.mock("next/navigation", () => ({ redirect }));
@@ -51,9 +57,13 @@ import {
   createCrawlerAction,
   createGenericEntityAction,
   rejectChangeSetAction,
+  toggleEntityFieldLockAction,
+  toggleEntityLockAction,
   signOutAction,
   updateEntityAction,
 } from "@/app/(dm)/actions";
+
+import { ServiceError } from "@/lib/errors";
 
 function form(fields: Record<string, string>): FormData {
   const fd = new FormData();
@@ -232,21 +242,22 @@ describe("updateEntityAction", () => {
   });
 
   it("updates an entity and revalidates relevant routes", async () => {
-    const result = await updateEntityAction(
-      "c1",
-      "e1",
-      undefined,
-      form({
-        type: "NPC",
-        name: "Zev",
-        summary: "",
-        description: "",
-        visibility: "DM_ONLY",
-        tags: "",
-      }),
-    );
+    await expect(
+      updateEntityAction(
+        "c1",
+        "e1",
+        undefined,
+        form({
+          type: "NPC",
+          name: "Zev",
+          summary: "",
+          description: "",
+          visibility: "DM_ONLY",
+          tags: "",
+        }),
+      ),
+    ).rejects.toThrow("NEXT_REDIRECT");
 
-    expect(result?.success).toBe("Saved.");
     expect(updateEntity).toHaveBeenCalledWith(
       "u1",
       "c1",
@@ -255,6 +266,7 @@ describe("updateEntityAction", () => {
     );
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(redirect).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
   });
 
   it("returns a generic error when update fails", async () => {
@@ -274,6 +286,27 @@ describe("updateEntityAction", () => {
     );
 
     expect(result?.error).toBe("Could not update the entity. Please try again.");
+  });
+
+  it("surfaces a locked-field service error to the DM", async () => {
+    updateEntity.mockRejectedValue(
+      new ServiceError("This proposal touches locked entity fields."),
+    );
+    const result = await updateEntityAction(
+      "c1",
+      "e1",
+      undefined,
+      form({
+        type: "NPC",
+        name: "Zev",
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: "",
+      }),
+    );
+
+    expect(result?.error).toBe("This proposal touches locked entity fields.");
   });
 });
 
@@ -303,5 +336,82 @@ describe("review queue actions", () => {
 
     expect(rejectChangeSet).toHaveBeenCalledWith("u1", "c1", "cs1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+  });
+});
+
+describe("toggleEntityLockAction", () => {
+  it("flips the whole-entity lock and revalidates the entity page", async () => {
+    getEntityForUser.mockResolvedValue({
+      id: "e1",
+      locked: false,
+      lockedFields: [],
+    });
+
+    await toggleEntityLockAction("c1", "e1");
+
+    expect(setEntityLock).toHaveBeenCalledWith("u1", "c1", "e1", {
+      locked: true,
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+  });
+
+  it("is a no-op when the entity is inaccessible", async () => {
+    getEntityForUser.mockResolvedValue(null);
+
+    await toggleEntityLockAction("c1", "missing");
+
+    expect(setEntityLock).not.toHaveBeenCalled();
+  });
+});
+
+describe("toggleEntityFieldLockAction", () => {
+  function fieldForm(field: string): FormData {
+    const fd = new FormData();
+    fd.set("field", field);
+    return fd;
+  }
+
+  it("adds a field lock when not already locked", async () => {
+    getEntityForUser.mockResolvedValue({
+      id: "e1",
+      locked: false,
+      lockedFields: ["summary"],
+    });
+
+    await toggleEntityFieldLockAction("c1", "e1", fieldForm("name"));
+
+    expect(setEntityLock).toHaveBeenCalledWith("u1", "c1", "e1", {
+      lockedFields: ["summary", "name"],
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+  });
+
+  it("removes a field lock when already locked", async () => {
+    getEntityForUser.mockResolvedValue({
+      id: "e1",
+      locked: false,
+      lockedFields: ["name", "summary"],
+    });
+
+    await toggleEntityFieldLockAction("c1", "e1", fieldForm("name"));
+
+    expect(setEntityLock).toHaveBeenCalledWith("u1", "c1", "e1", {
+      lockedFields: ["summary"],
+    });
+  });
+
+  it("ignores an unknown field", async () => {
+    await toggleEntityFieldLockAction("c1", "e1", fieldForm("not-a-field"));
+
+    expect(getEntityForUser).not.toHaveBeenCalled();
+    expect(setEntityLock).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op when the entity is inaccessible", async () => {
+    getEntityForUser.mockResolvedValue(null);
+
+    await toggleEntityFieldLockAction("c1", "missing", fieldForm("name"));
+
+    expect(setEntityLock).not.toHaveBeenCalled();
   });
 });

@@ -14,13 +14,16 @@ pitch and [`docs/`](./docs) for the full plan.
 
 ## Current status
 
-🚧 **M0 (project foundation) implemented.** The app is scaffolded and runnable:
-Next.js 16 (App Router, TS, Tailwind) + Postgres/Prisma 7 + Auth.js, with
-sign-up → create campaign → empty dashboard working, and CI (lint, typecheck,
-build, unit, e2e, coverage) plus security/quality gates (CodeQL, dependency
-review, `npm audit`, migration-drift). Coverage is posted to every PR.
-See [`docs/PROGRESS.md`](./docs/PROGRESS.md). Next up: **M1**
-(entity core + Crawler).
+🚧 **M0 + M1 complete; M2 (review pipeline) in progress.** The app is scaffolded
+and runnable: Next.js 16 (App Router, TS, Tailwind) + Postgres/Prisma 7 +
+Auth.js, with sign-up → create campaign working, and CI (lint, typecheck, build,
+unit, e2e, coverage) plus security/quality gates (CodeQL, dependency review,
+`npm audit`, migration-drift). M1 ships generic-entity + Crawler CRUD, the world
+browser, and entity detail/edit. M2 so far: all entity writes route through the
+`review` service as change sets with provenance + audit; a Review Queue approves/
+rejects proposals; and DMs can lock entities/fields (locked targets can't be
+overwritten). See [`docs/PROGRESS.md`](./docs/PROGRESS.md). Next up in **M2**:
+per-field accept/edit/reject in the queue, `supersede`, and batch actions.
 
 ## Start here, every session
 

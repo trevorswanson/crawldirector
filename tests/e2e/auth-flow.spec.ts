@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-// The M1 flow still starts from M0's sign-up → create crawl path, then lands
-// on the campaign's entity browser and creation surface.
+// The flow starts from M0's sign-up → create crawl path, then lands on the
+// World Browser (facets + card grid) with its quick-create surface.
 test("sign up, create a crawl, see the entity browser", async ({
   page,
 }) => {
@@ -24,12 +24,11 @@ test("sign up, create a crawl, see the entity browser", async ({
   await expect(page).toHaveURL(/\/campaigns\//);
   await expect(page.getByRole("heading", { name: "Floor One" })).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Create crawler" }),
+    page.getByRole("button", { name: "Quick-create stub" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "World browser" }),
+    page.getByText("No entities match.", { exact: false }),
   ).toBeVisible();
-  await expect(page.getByText("No matching entities yet.")).toBeVisible();
 });
 
 test("unauthenticated visit to a protected route redirects to sign-in", async ({

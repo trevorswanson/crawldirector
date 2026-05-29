@@ -206,6 +206,7 @@ model Entity {
   description  String?
   status       CanonStatus @default(CANON)
   visibility   Visibility  @default(DM_ONLY)
+  source       ChangeSource @default(DM)
   data         Json        @default("{}")
   customFields Json        @default("{}")
   tags         String[]    @default([])
@@ -226,6 +227,7 @@ model Entity {
 
   @@index([campaignId, type])
   @@index([campaignId, status])
+  @@index([campaignId, source])
   @@index([campaignId, name])
 }
 

@@ -1,9 +1,9 @@
 import { Lock, Unlock } from "lucide-react";
 
 /**
- * Lock indicator for canon. Display-only for now — the lock *mutation* (and the
- * lock-aware blocking it implies) lands with the M2 review pipeline; until then
- * this just surfaces the `entity.locked` flag in the design language.
+ * Lock indicator for canon — surfaces the `entity.locked` flag in the design
+ * language. The lock *mutation* lives in `EntityLockControls` (M2); the
+ * lock-aware blocking it implies is enforced by the review service.
  */
 export function LockChip({ locked }: { locked: boolean }) {
   const color = locked ? "var(--sys)" : "var(--ink-faint)";

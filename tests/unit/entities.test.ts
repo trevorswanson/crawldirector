@@ -3,20 +3,24 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { Role } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
+import { createCrawlerSchema } from "@/lib/validation";
 import { createCampaign } from "@/server/services/campaigns";
 import {
   archiveEntity,
   createCrawler,
   createGenericEntity,
   getEntityForUser,
+  getEntityTypeCounts,
   listEntitiesForUser,
   updateEntity,
 } from "@/server/services/entities";
 import {
   approveChangeSet,
   createPendingEntityChangeSet,
+  getEntityProvenance,
   listPendingChangeSetsForUser,
   rejectChangeSet,
+  setEntityLock,
 } from "@/server/services/review";
 
 function makeUser(email: string) {
@@ -100,6 +104,56 @@ describe("entity service", () => {
     });
     expect(list.entities).toHaveLength(1);
     expect(list.entities[0].name).toBe("Skull Empire");
+  });
+
+  it("persists isStub on creation and clears it on update", async () => {
+    const owner = await makeUser("stub-test@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Stub NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+      isStub: true,
+    });
+
+    const created = await getEntityForUser(owner.id, campaign.id, entity.id);
+    expect(created?.isStub).toBe(true);
+
+    await updateEntity(owner.id, campaign.id, entity.id, {
+      type: "NPC",
+      name: "Fleshed Out NPC",
+      summary: "Now he has a summary",
+      description: "And a description too.",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    const updated = await getEntityForUser(owner.id, campaign.id, entity.id);
+    expect(updated?.isStub).toBe(false);
+    expect(updated?.name).toBe("Fleshed Out NPC");
+  });
+
+  it("persists isStub for crawlers on creation", async () => {
+    const owner = await makeUser("crawler-stub-test@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const crawler = await createCrawler(
+      owner.id,
+      campaign.id,
+      createCrawlerSchema.parse({
+        name: "Stub Crawler",
+        visibility: "DM_ONLY",
+        tags: [],
+        isStub: true,
+      }),
+    );
+
+    const created = await getEntityForUser(owner.id, campaign.id, crawler.id);
+    expect(created?.isStub).toBe(true);
   });
 
   it("records direct DM entity writes as approved change sets with provenance", async () => {
@@ -640,5 +694,292 @@ describe("entity service", () => {
     expect(await getEntityForUser(owner.id, campaign.id, entity.id)).toBeNull();
     const stored = await prisma.entity.findUnique({ where: { id: entity.id } });
     expect(stored?.status).toBe("ARCHIVED");
+  });
+});
+
+describe("entity locking", () => {
+  async function makeNpc(email: string) {
+    const owner = await makeUser(email);
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Lockable NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    return { owner, campaign, entity };
+  }
+
+  it("locks an entire entity and records a LOCK audit row", async () => {
+    const { owner, campaign, entity } = await makeNpc("lock-whole@test.com");
+
+    const result = await setEntityLock(owner.id, campaign.id, entity.id, {
+      locked: true,
+    });
+    expect(result.locked).toBe(true);
+
+    const stored = await prisma.entity.findUniqueOrThrow({
+      where: { id: entity.id },
+      // locking must not bump version (would falsely mark proposals stale)
+      select: { locked: true, version: true },
+    });
+    expect(stored).toMatchObject({ locked: true, version: 1 });
+
+    const audit = await prisma.auditLog.findFirst({
+      where: { targetType: "ENTITY", targetId: entity.id, action: "LOCK" },
+    });
+    expect(audit).not.toBeNull();
+  });
+
+  it("unlocks an entity and records an UNLOCK audit row", async () => {
+    const { owner, campaign, entity } = await makeNpc("unlock@test.com");
+    await setEntityLock(owner.id, campaign.id, entity.id, { locked: true });
+
+    const result = await setEntityLock(owner.id, campaign.id, entity.id, {
+      locked: false,
+    });
+    expect(result.locked).toBe(false);
+
+    const audit = await prisma.auditLog.findFirst({
+      where: { targetType: "ENTITY", targetId: entity.id, action: "UNLOCK" },
+    });
+    expect(audit).not.toBeNull();
+  });
+
+  it("locks specific fields and blocks only those from direct edits", async () => {
+    const { owner, campaign, entity } = await makeNpc("lock-fields@test.com");
+
+    const result = await setEntityLock(owner.id, campaign.id, entity.id, {
+      lockedFields: ["name", "name", "summary"],
+    });
+    // de-duplicated and sorted
+    expect(result.lockedFields).toEqual(["name", "summary"]);
+
+    const audit = await prisma.auditLog.findFirst({
+      where: {
+        targetType: "ENTITY",
+        targetId: entity.id,
+        action: "SET_FIELD_LOCKS",
+      },
+    });
+    expect(audit).not.toBeNull();
+
+    // Editing a locked field is blocked...
+    await expect(
+      updateEntity(owner.id, campaign.id, entity.id, {
+        type: "NPC",
+        name: "Renamed NPC",
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: [],
+      }),
+    ).rejects.toThrow("locked");
+
+    // ...but editing an unlocked field still applies.
+    await updateEntity(owner.id, campaign.id, entity.id, {
+      type: "NPC",
+      name: "Lockable NPC",
+      summary: "",
+      description: "Now described",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const stored = await prisma.entity.findUniqueOrThrow({
+      where: { id: entity.id },
+    });
+    expect(stored.description).toBe("Now described");
+    expect(stored.name).toBe("Lockable NPC");
+  });
+
+  it("is a no-op (no audit row) when nothing changes", async () => {
+    const { owner, campaign, entity } = await makeNpc("lock-noop@test.com");
+
+    const result = await setEntityLock(owner.id, campaign.id, entity.id, {
+      locked: false,
+      lockedFields: [],
+    });
+    expect(result).toMatchObject({ locked: false, lockedFields: [] });
+
+    const audits = await prisma.auditLog.count({
+      where: { targetType: "ENTITY", targetId: entity.id },
+    });
+    expect(audits).toBe(0);
+  });
+
+  it("rejects a lock from a non-DM member", async () => {
+    const { campaign, entity } = await makeNpc("lock-owner@test.com");
+    const player = await makeUser("lock-player@test.com");
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+
+    await expect(
+      setEntityLock(player.id, campaign.id, entity.id, { locked: true }),
+    ).rejects.toThrow(ServiceError);
+  });
+
+  it("throws when the entity does not exist", async () => {
+    const owner = await makeUser("lock-missing@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    await expect(
+      setEntityLock(owner.id, campaign.id, "missing", { locked: true }),
+    ).rejects.toThrow("Entity not found.");
+  });
+});
+
+describe("world-browser facets", () => {
+  it("counts entities per type and filters by locked status", async () => {
+    const owner = await makeUser("facets@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Mordecai",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const faction = await createGenericEntity(owner.id, campaign.id, {
+      type: "FACTION",
+      name: "Skull Empire",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const zev = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Zev",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    const counts = await getEntityTypeCounts(owner.id, campaign.id);
+    expect(counts.NPC).toBe(2);
+    expect(counts.FACTION).toBe(1);
+
+    await setEntityLock(owner.id, campaign.id, faction.id, { locked: true });
+    await setEntityLock(owner.id, campaign.id, zev.id, { lockedFields: ["summary"] });
+
+    const locked = await listEntitiesForUser(owner.id, campaign.id, {
+      status: "LOCKED",
+    });
+    expect(locked.entities).toHaveLength(2);
+    const lockedNames = locked.entities.map(e => e.name);
+    expect(lockedNames).toContain("Skull Empire");
+    expect(lockedNames).toContain("Zev");
+
+    const canon = await listEntitiesForUser(owner.id, campaign.id, {
+      status: "CANON",
+    });
+    expect(canon.entities).toHaveLength(3);
+  });
+
+  it("filters entities by source", async () => {
+    const owner = await makeUser("source-filter@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const dmEntity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "DM NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const aiEntity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "AI NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    await prisma.entity.update({
+      where: { id: aiEntity.id },
+      data: { source: "AI" },
+    });
+
+    const dmOnlyList = await listEntitiesForUser(owner.id, campaign.id, {
+      source: "DM",
+    });
+    expect(dmOnlyList.entities).toHaveLength(1);
+    expect(dmOnlyList.entities[0].id).toBe(dmEntity.id);
+
+    const aiOnlyList = await listEntitiesForUser(owner.id, campaign.id, {
+      source: "AI",
+    });
+    expect(aiOnlyList.entities).toHaveLength(1);
+    expect(aiOnlyList.entities[0].id).toBe(aiEntity.id);
+
+    const allList = await listEntitiesForUser(owner.id, campaign.id, {
+      source: "ALL",
+    });
+    expect(allList.entities).toHaveLength(2);
+  });
+
+  it("returns empty counts for a non-member", async () => {
+    const owner = await makeUser("facets-owner@test.com");
+    const stranger = await makeUser("facets-stranger@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    await expect(
+      getEntityTypeCounts(stranger.id, campaign.id),
+    ).resolves.toEqual({});
+  });
+});
+
+describe("entity provenance", () => {
+  it("summarizes origin and latest change from the change history", async () => {
+    const owner = await makeUser("prov@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Mordecai",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    await updateEntity(owner.id, campaign.id, entity.id, {
+      type: "NPC",
+      name: "Mordecai the Guide",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    const prov = await getEntityProvenance(owner.id, campaign.id, entity.id);
+    expect(prov).not.toBeNull();
+    expect(prov?.source).toBe("DM");
+    expect(prov?.authorLabel).toBe("prov@test.com");
+    expect(prov?.approvedByLabel).toBe("prov@test.com");
+    expect(prov?.changeCount).toBe(2);
+    expect(prov?.lastChangeTitle).toBe("Update Mordecai");
+  });
+
+  it("returns null for a non-member", async () => {
+    const owner = await makeUser("prov-owner@test.com");
+    const stranger = await makeUser("prov-stranger@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Hidden NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    await expect(
+      getEntityProvenance(stranger.id, campaign.id, entity.id),
+    ).resolves.toBeNull();
   });
 });

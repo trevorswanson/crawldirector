@@ -430,6 +430,159 @@ export async function rejectChangeSet(
   });
 }
 
+export type EntityLockInput = {
+  // Whole-entity lock. Omit to leave the current value unchanged.
+  locked?: boolean;
+  // Field-level locks. Omit to leave the current set unchanged; pass [] to clear.
+  lockedFields?: string[];
+};
+
+function sortedUnique(fields: string[]) {
+  return Array.from(new Set(fields)).sort();
+}
+
+/**
+ * Place or release a canon lock on an entity. Locking is a deliberate DM action
+ * — not a proposal — and is itself audited (docs/03-review-pipeline.md). It does
+ * not bump `version`: a lock protects content from automated edits without
+ * making pending proposals look stale.
+ */
+export async function setEntityLock(
+  userId: string,
+  campaignId: string,
+  entityId: string,
+  input: EntityLockInput,
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  return prisma.$transaction(async (tx) => {
+    const entity = await tx.entity.findFirst({
+      where: {
+        id: entityId,
+        campaignId,
+        status: { not: CanonStatus.ARCHIVED },
+      },
+      select: { id: true, locked: true, lockedFields: true },
+    });
+    if (!entity) throw new ServiceError("Entity not found.");
+
+    const nextLocked = input.locked ?? entity.locked;
+    const nextLockedFields =
+      input.lockedFields !== undefined
+        ? sortedUnique(input.lockedFields)
+        : sortedUnique(entity.lockedFields);
+    const prevLockedFields = sortedUnique(entity.lockedFields);
+
+    const lockedChanged = nextLocked !== entity.locked;
+    const fieldsChanged =
+      JSON.stringify(nextLockedFields) !== JSON.stringify(prevLockedFields);
+    if (!lockedChanged && !fieldsChanged) {
+      return {
+        id: entity.id,
+        locked: entity.locked,
+        lockedFields: prevLockedFields,
+      };
+    }
+
+    const updated = await tx.entity.update({
+      where: { id: entityId },
+      data: { locked: nextLocked, lockedFields: nextLockedFields },
+      select: { id: true, locked: true, lockedFields: true },
+    });
+
+    const action = lockedChanged
+      ? nextLocked
+        ? "LOCK"
+        : "UNLOCK"
+      : "SET_FIELD_LOCKS";
+    await tx.auditLog.create({
+      data: {
+        campaignId,
+        actorUserId: userId,
+        action,
+        targetType: "ENTITY",
+        targetId: entityId,
+        detail: {
+          locked: updated.locked,
+          lockedFields: updated.lockedFields,
+          previousLocked: entity.locked,
+          previousLockedFields: prevLockedFields,
+        },
+      },
+    });
+
+    return updated;
+  });
+}
+
+export type EntityProvenance = {
+  source: ChangeSource;
+  authorLabel: string | null;
+  createdAt: Date;
+  model: string | null;
+  approvedByLabel: string | null;
+  approvedAt: Date | null;
+  lastChangeTitle: string;
+  lastChangeSource: ChangeSource;
+  changeCount: number;
+};
+
+/**
+ * Provenance summary for an entity, derived from the change operations that
+ * targeted it: origin (who/what created it, and who approved it) plus the most
+ * recent change. Provenance is permanent — this is the "where did this come
+ * from?" answer the product promises. Any campaign member may read it.
+ */
+export async function getEntityProvenance(
+  userId: string,
+  campaignId: string,
+  entityId: string,
+): Promise<EntityProvenance | null> {
+  const membership = await getMembership(userId, campaignId);
+  if (!membership) return null;
+
+  const ops = await prisma.changeOperation.findMany({
+    where: {
+      targetType: "ENTITY",
+      targetId: entityId,
+      changeSet: { campaignId, status: ChangeSetStatus.APPROVED },
+      decision: OpDecision.ACCEPTED,
+    },
+    orderBy: { changeSet: { createdAt: "asc" } },
+    select: {
+      changeSet: {
+        select: {
+          title: true,
+          source: true,
+          model: true,
+          createdAt: true,
+          reviewedAt: true,
+          actor: { select: { name: true, email: true } },
+          reviewer: { select: { name: true, email: true } },
+        },
+      },
+    },
+  });
+  if (ops.length === 0) return null;
+
+  const origin = ops[0].changeSet;
+  const last = ops[ops.length - 1].changeSet;
+  const label = (u: { name: string | null; email: string } | null) =>
+    u?.name || u?.email || null;
+
+  return {
+    source: origin.source,
+    authorLabel: label(origin.actor),
+    createdAt: origin.createdAt,
+    model: origin.model,
+    approvedByLabel: label(origin.reviewer),
+    approvedAt: origin.reviewedAt,
+    lastChangeTitle: last.title,
+    lastChangeSource: last.source,
+    changeCount: ops.length,
+  };
+}
+
 async function applyEntityOperation(
   tx: Prisma.TransactionClient,
   changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
@@ -472,8 +625,10 @@ async function applyCreateEntity(
       summary: nullableString(readTo(patch, "summary")),
       description: nullableString(readTo(patch, "description")),
       visibility: (readTo(patch, "visibility") as Visibility) ?? Visibility.DM_ONLY,
+      source: changeSet.source,
       tags: stringArray(readTo(patch, "tags")),
       status: CanonStatus.CANON,
+      isStub: Boolean(readTo(patch, "isStub") ?? false),
       ...(type === EntityType.CRAWLER
         ? {
             crawler: {
@@ -537,7 +692,11 @@ async function applyUpdateEntity(
       where: { id: operationId },
       data: { blockedByLock: true },
     });
-    throw new ServiceError("This proposal touches locked entity fields.");
+    if (entity.locked) {
+      throw new ServiceError("Cannot update because the entity is locked.");
+    }
+    const fieldsText = lockedFields.map((f) => `"${f}"`).join(", ");
+    throw new ServiceError(`This proposal touches locked entity fields: ${fieldsText}`);
   }
 
   const data = entityUpdateData(patch, entity.type);
@@ -649,6 +808,7 @@ function entityUpdateData(patch: ReviewPatch, type: EntityType): Prisma.EntityUp
     data.visibility = (readTo(patch, "visibility") as Visibility) ?? Visibility.DM_ONLY;
   }
   if ("tags" in patch) data.tags = stringArray(readTo(patch, "tags"));
+  if ("isStub" in patch) data.isStub = Boolean(readTo(patch, "isStub"));
 
   const crawlerPatch = Object.keys(patch).some((field) => crawlerFields.has(field));
   if (type === EntityType.CRAWLER && crawlerPatch) {
