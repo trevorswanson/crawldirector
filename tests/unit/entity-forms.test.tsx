@@ -22,6 +22,7 @@ vi.mock("@/app/(dm)/actions", () => ({
     bind: vi.fn(() => vi.fn()),
   }),
   updateEntityAction: Object.assign(vi.fn(), { bind: vi.fn(() => vi.fn()) }),
+  setEntityLockAction: Object.assign(vi.fn(), { bind: vi.fn(() => vi.fn()) }),
 }));
 
 import {
@@ -29,6 +30,7 @@ import {
   CreateCrawlerForm,
   CreateGenericEntityForm,
   EditEntityForm,
+  EntityLockControls,
 } from "@/components/entities/entity-forms";
 import type { EntityDetail } from "@/server/services/entities";
 
@@ -131,5 +133,24 @@ describe("entity forms", () => {
     render(<ArchiveEntityForm campaignId="c1" entityId="e1" />);
 
     expect(screen.getByRole("button", { name: /Archive/ })).toBeDefined();
+  });
+
+  it("renders lock controls reflecting current locks", () => {
+    useActionState.mockReturnValue([{ success: "Canon locks updated." }, noopAction]);
+    render(
+      <EntityLockControls
+        campaignId="c1"
+        entity={{ id: "e1", locked: false, lockedFields: ["name"] }}
+      />,
+    );
+
+    const lockWhole = screen.getByLabelText(/Lock entire entity/) as HTMLInputElement;
+    expect(lockWhole.checked).toBe(false);
+    const nameLock = screen.getByLabelText("Name") as HTMLInputElement;
+    expect(nameLock.checked).toBe(true);
+    const summaryLock = screen.getByLabelText("Summary") as HTMLInputElement;
+    expect(summaryLock.checked).toBe(false);
+    expect(screen.getByRole("button", { name: /Update locks/ })).toBeDefined();
+    expect(screen.getByText("Canon locks updated.")).toBeDefined();
   });
 });

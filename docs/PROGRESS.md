@@ -10,7 +10,7 @@ Running checklist of milestones/tasks, newest first. See
 **Done when:** every canon change has provenance; locked fields can't be
 overwritten; a DM can review/approve/reject a proposal end to end.
 
-### Done (2026-05-29)
+### Done — slice 1: entity proposals + review queue (2026-05-29)
 
 - [x] Added M2 Prisma schema + migration for `ChangeSet`,
       `ChangeOperation`, `Provenance`, and `AuditLog`, plus review source/status/
@@ -26,11 +26,35 @@ overwritten; a DM can review/approve/reject a proposal end to end.
       field blocking, pending proposal approval, and pending proposal rejection;
       added server-action coverage for queue decisions.
 
+### Done — slice 2: DM canon locking (2026-05-29)
+
+- [x] `setEntityLock` review-service method: lock/unlock the whole entity and
+      lock individual fields (`locked` / `lockedFields`). Locking is a deliberate
+      DM action — not a proposal — and writes a `LOCK` / `UNLOCK` /
+      `SET_FIELD_LOCKS` `AuditLog` row. It does **not** bump `version` (a lock
+      protects content without making pending proposals look stale). DM-only;
+      no-op when nothing changes.
+- [x] `setEntityLockSchema` (Zod) + `setEntityLockAction` server action; lockable
+      field names line up with the review service's patch field keys.
+- [x] `EntityLockControls` UI on entity detail (lock-whole-entity toggle +
+      per-field checkboxes), a field-lock count tag in the status row, and an
+      edit-card hint when locked. Made the existing `updateEntityAction` surface
+      `ServiceError` reasons (e.g. "touches locked entity fields") so a blocked
+      edit explains itself instead of saying "try again."
+- [x] Closes the **"locked fields can't be overwritten"** half of M2's done-bar
+      end to end: DB-backed lock/unlock/field-lock + blocking tests, action tests,
+      schema tests, and a page/form render test. Verified in-browser (lock a
+      field → edit is blocked with the lock reason; canon unchanged).
+
 ### Notes / follow-ups
 
-- This is the first entity-only vertical slice of M2. Per-field edit decisions,
-      relationship/event operations, unlock/lock UI, and richer conflict
-      resolution remain before M2 is complete.
+- Locking deliberately blocks **all** writers to a locked target (including the
+      DM's own direct edit), matching the "unlock to edit" UX. If a source-aware
+      policy is wanted later (locks bind AI/import but not deliberate DM edits),
+      that's a review-service change, not a UI one.
+- Remaining before M2 is complete: per-operation / per-field accept-edit-reject
+      decisions in the Review Queue, `supersede` for replaced/stale proposals,
+      relationship/event operations (land with M3), and batch review actions.
 - Local verification used the existing Postgres database. That database already
       contained an older local review-pipeline migration, so the new migration
       was marked applied after non-destructive local schema alignment; a fresh CI

@@ -4,6 +4,7 @@ import {
   createCampaignSchema,
   createCrawlerSchema,
   createGenericEntitySchema,
+  setEntityLockSchema,
   signInSchema,
   signUpSchema,
   updateEntitySchema,
@@ -195,5 +196,45 @@ describe("entity schemas", () => {
         tags: "",
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("setEntityLockSchema", () => {
+  it("treats a checked box as locked and an array of fields", () => {
+    const r = setEntityLockSchema.safeParse({
+      locked: "true",
+      lockedFields: ["name", "crawler.level"],
+    });
+    expect(r.success).toBe(true);
+    expect(r.data).toEqual({
+      locked: true,
+      lockedFields: ["name", "crawler.level"],
+    });
+  });
+
+  it("treats an absent box as unlocked and missing fields as empty", () => {
+    const r = setEntityLockSchema.safeParse({
+      locked: false,
+      lockedFields: undefined,
+    });
+    expect(r.success).toBe(true);
+    expect(r.data).toEqual({ locked: false, lockedFields: [] });
+  });
+
+  it("parses a comma-delimited lockedFields string", () => {
+    const r = setEntityLockSchema.safeParse({
+      locked: "on",
+      lockedFields: "name, summary",
+    });
+    expect(r.success).toBe(true);
+    expect(r.data?.lockedFields).toEqual(["name", "summary"]);
+  });
+
+  it("rejects an unknown lock field", () => {
+    const r = setEntityLockSchema.safeParse({
+      locked: "true",
+      lockedFields: ["bogus"],
+    });
+    expect(r.success).toBe(false);
   });
 });

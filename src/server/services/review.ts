@@ -430,6 +430,91 @@ export async function rejectChangeSet(
   });
 }
 
+export type EntityLockInput = {
+  // Whole-entity lock. Omit to leave the current value unchanged.
+  locked?: boolean;
+  // Field-level locks. Omit to leave the current set unchanged; pass [] to clear.
+  lockedFields?: string[];
+};
+
+function sortedUnique(fields: string[]) {
+  return Array.from(new Set(fields)).sort();
+}
+
+/**
+ * Place or release a canon lock on an entity. Locking is a deliberate DM action
+ * — not a proposal — and is itself audited (docs/03-review-pipeline.md). It does
+ * not bump `version`: a lock protects content from automated edits without
+ * making pending proposals look stale.
+ */
+export async function setEntityLock(
+  userId: string,
+  campaignId: string,
+  entityId: string,
+  input: EntityLockInput,
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  return prisma.$transaction(async (tx) => {
+    const entity = await tx.entity.findFirst({
+      where: {
+        id: entityId,
+        campaignId,
+        status: { not: CanonStatus.ARCHIVED },
+      },
+      select: { id: true, locked: true, lockedFields: true },
+    });
+    if (!entity) throw new ServiceError("Entity not found.");
+
+    const nextLocked = input.locked ?? entity.locked;
+    const nextLockedFields =
+      input.lockedFields !== undefined
+        ? sortedUnique(input.lockedFields)
+        : sortedUnique(entity.lockedFields);
+    const prevLockedFields = sortedUnique(entity.lockedFields);
+
+    const lockedChanged = nextLocked !== entity.locked;
+    const fieldsChanged =
+      JSON.stringify(nextLockedFields) !== JSON.stringify(prevLockedFields);
+    if (!lockedChanged && !fieldsChanged) {
+      return {
+        id: entity.id,
+        locked: entity.locked,
+        lockedFields: prevLockedFields,
+      };
+    }
+
+    const updated = await tx.entity.update({
+      where: { id: entityId },
+      data: { locked: nextLocked, lockedFields: nextLockedFields },
+      select: { id: true, locked: true, lockedFields: true },
+    });
+
+    const action = lockedChanged
+      ? nextLocked
+        ? "LOCK"
+        : "UNLOCK"
+      : "SET_FIELD_LOCKS";
+    await tx.auditLog.create({
+      data: {
+        campaignId,
+        actorUserId: userId,
+        action,
+        targetType: "ENTITY",
+        targetId: entityId,
+        detail: {
+          locked: updated.locked,
+          lockedFields: updated.lockedFields,
+          previousLocked: entity.locked,
+          previousLockedFields: prevLockedFields,
+        },
+      },
+    });
+
+    return updated;
+  });
+}
+
 async function applyEntityOperation(
   tx: Prisma.TransactionClient,
   changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,

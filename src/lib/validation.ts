@@ -185,3 +185,57 @@ export const updateEntitySchema = entityCoreSchema.extend({
   isAlive: z.preprocess((value) => value !== "false", z.boolean()).optional(),
 });
 export type UpdateEntityInput = z.infer<typeof updateEntitySchema>;
+
+// Canon-lock targets. These keys match the patch field names the review service
+// uses (see src/server/services/review.ts) so a locked field name lines up with
+// the field a proposal would touch. Core entity fields are exposed in the lock
+// UI; crawler.* fields are valid lock targets too (covered when the whole
+// entity is locked).
+export const lockableEntityFields = [
+  "name",
+  "summary",
+  "description",
+  "visibility",
+  "tags",
+] as const;
+
+export const lockableCrawlerFields = [
+  "crawler.realName",
+  "crawler.crawlerNo",
+  "crawler.level",
+  "crawler.hp",
+  "crawler.mp",
+  "crawler.gold",
+  "crawler.viewCount",
+  "crawler.followerCount",
+  "crawler.favoriteCount",
+  "crawler.killCount",
+  "crawler.isAlive",
+  "crawler.currentFloor",
+] as const;
+
+export const lockableFields = [
+  ...lockableEntityFields,
+  ...lockableCrawlerFields,
+] as const;
+
+export const setEntityLockSchema = z.object({
+  // Whole-entity lock. A bare checkbox submits "true" when checked and nothing
+  // when unchecked, so an absent value means "unlocked".
+  locked: z.preprocess(
+    (value) => value === true || value === "true" || value === "on",
+    z.boolean(),
+  ),
+  // Field-level locks. Accepts a checkbox array, a comma string, or nothing.
+  lockedFields: z.preprocess(
+    (value) => {
+      if (Array.isArray(value)) return value;
+      if (typeof value === "string") {
+        return value.length ? value.split(",").map((field) => field.trim()) : [];
+      }
+      return [];
+    },
+    z.array(z.enum(lockableFields)),
+  ),
+});
+export type SetEntityLockInput = z.infer<typeof setEntityLockSchema>;

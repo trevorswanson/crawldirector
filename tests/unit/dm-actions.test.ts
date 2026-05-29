@@ -9,6 +9,7 @@ const {
   archiveEntity,
   approveChangeSet,
   rejectChangeSet,
+  setEntityLock,
   signOut,
   redirect,
   revalidatePath,
@@ -21,6 +22,7 @@ const {
   archiveEntity: vi.fn(),
   approveChangeSet: vi.fn(),
   rejectChangeSet: vi.fn(),
+  setEntityLock: vi.fn(),
   signOut: vi.fn(),
   redirect: vi.fn(() => {
     throw new Error("NEXT_REDIRECT");
@@ -39,6 +41,7 @@ vi.mock("@/server/services/entities", () => ({
 vi.mock("@/server/services/review", () => ({
   approveChangeSet,
   rejectChangeSet,
+  setEntityLock,
 }));
 vi.mock("@/server/auth", () => ({ signOut }));
 vi.mock("next/navigation", () => ({ redirect }));
@@ -51,9 +54,12 @@ import {
   createCrawlerAction,
   createGenericEntityAction,
   rejectChangeSetAction,
+  setEntityLockAction,
   signOutAction,
   updateEntityAction,
 } from "@/app/(dm)/actions";
+
+import { ServiceError } from "@/lib/errors";
 
 function form(fields: Record<string, string>): FormData {
   const fd = new FormData();
@@ -275,6 +281,27 @@ describe("updateEntityAction", () => {
 
     expect(result?.error).toBe("Could not update the entity. Please try again.");
   });
+
+  it("surfaces a locked-field service error to the DM", async () => {
+    updateEntity.mockRejectedValue(
+      new ServiceError("This proposal touches locked entity fields."),
+    );
+    const result = await updateEntityAction(
+      "c1",
+      "e1",
+      undefined,
+      form({
+        type: "NPC",
+        name: "Zev",
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: "",
+      }),
+    );
+
+    expect(result?.error).toBe("This proposal touches locked entity fields.");
+  });
 });
 
 describe("archiveEntityAction", () => {
@@ -303,5 +330,74 @@ describe("review queue actions", () => {
 
     expect(rejectChangeSet).toHaveBeenCalledWith("u1", "c1", "cs1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+  });
+});
+
+describe("setEntityLockAction", () => {
+  function lockForm(locked: boolean, fields: string[]): FormData {
+    const fd = new FormData();
+    if (locked) fd.set("locked", "true");
+    for (const field of fields) fd.append("lockedFields", field);
+    return fd;
+  }
+
+  it("rejects an invalid lock field", async () => {
+    const result = await setEntityLockAction(
+      "c1",
+      "e1",
+      undefined,
+      lockForm(false, ["not-a-field"]),
+    );
+
+    expect(result?.error).toBeTruthy();
+    expect(setEntityLock).not.toHaveBeenCalled();
+  });
+
+  it("locks fields and revalidates the entity page", async () => {
+    setEntityLock.mockResolvedValue({
+      id: "e1",
+      locked: false,
+      lockedFields: ["name", "summary"],
+    });
+
+    const result = await setEntityLockAction(
+      "c1",
+      "e1",
+      undefined,
+      lockForm(false, ["name", "summary"]),
+    );
+
+    expect(result?.success).toBe("Canon locks updated.");
+    expect(setEntityLock).toHaveBeenCalledWith("u1", "c1", "e1", {
+      locked: false,
+      lockedFields: ["name", "summary"],
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+  });
+
+  it("surfaces a service error message", async () => {
+    setEntityLock.mockRejectedValue(new ServiceError("You do not have permission."));
+
+    const result = await setEntityLockAction(
+      "c1",
+      "e1",
+      undefined,
+      lockForm(true, []),
+    );
+
+    expect(result?.error).toBe("You do not have permission.");
+  });
+
+  it("returns a generic error for unexpected failures", async () => {
+    setEntityLock.mockRejectedValue(new Error("db down"));
+
+    const result = await setEntityLockAction(
+      "c1",
+      "e1",
+      undefined,
+      lockForm(true, []),
+    );
+
+    expect(result?.error).toBe("Could not update canon locks. Please try again.");
   });
 });

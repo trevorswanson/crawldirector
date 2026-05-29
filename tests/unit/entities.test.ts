@@ -17,6 +17,7 @@ import {
   createPendingEntityChangeSet,
   listPendingChangeSetsForUser,
   rejectChangeSet,
+  setEntityLock,
 } from "@/server/services/review";
 
 function makeUser(email: string) {
@@ -640,5 +641,139 @@ describe("entity service", () => {
     expect(await getEntityForUser(owner.id, campaign.id, entity.id)).toBeNull();
     const stored = await prisma.entity.findUnique({ where: { id: entity.id } });
     expect(stored?.status).toBe("ARCHIVED");
+  });
+});
+
+describe("entity locking", () => {
+  async function makeNpc(email: string) {
+    const owner = await makeUser(email);
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Lockable NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    return { owner, campaign, entity };
+  }
+
+  it("locks an entire entity and records a LOCK audit row", async () => {
+    const { owner, campaign, entity } = await makeNpc("lock-whole@test.com");
+
+    const result = await setEntityLock(owner.id, campaign.id, entity.id, {
+      locked: true,
+    });
+    expect(result.locked).toBe(true);
+
+    const stored = await prisma.entity.findUniqueOrThrow({
+      where: { id: entity.id },
+      // locking must not bump version (would falsely mark proposals stale)
+      select: { locked: true, version: true },
+    });
+    expect(stored).toMatchObject({ locked: true, version: 1 });
+
+    const audit = await prisma.auditLog.findFirst({
+      where: { targetType: "ENTITY", targetId: entity.id, action: "LOCK" },
+    });
+    expect(audit).not.toBeNull();
+  });
+
+  it("unlocks an entity and records an UNLOCK audit row", async () => {
+    const { owner, campaign, entity } = await makeNpc("unlock@test.com");
+    await setEntityLock(owner.id, campaign.id, entity.id, { locked: true });
+
+    const result = await setEntityLock(owner.id, campaign.id, entity.id, {
+      locked: false,
+    });
+    expect(result.locked).toBe(false);
+
+    const audit = await prisma.auditLog.findFirst({
+      where: { targetType: "ENTITY", targetId: entity.id, action: "UNLOCK" },
+    });
+    expect(audit).not.toBeNull();
+  });
+
+  it("locks specific fields and blocks only those from direct edits", async () => {
+    const { owner, campaign, entity } = await makeNpc("lock-fields@test.com");
+
+    const result = await setEntityLock(owner.id, campaign.id, entity.id, {
+      lockedFields: ["name", "name", "summary"],
+    });
+    // de-duplicated and sorted
+    expect(result.lockedFields).toEqual(["name", "summary"]);
+
+    const audit = await prisma.auditLog.findFirst({
+      where: {
+        targetType: "ENTITY",
+        targetId: entity.id,
+        action: "SET_FIELD_LOCKS",
+      },
+    });
+    expect(audit).not.toBeNull();
+
+    // Editing a locked field is blocked...
+    await expect(
+      updateEntity(owner.id, campaign.id, entity.id, {
+        type: "NPC",
+        name: "Renamed NPC",
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: [],
+      }),
+    ).rejects.toThrow("locked");
+
+    // ...but editing an unlocked field still applies.
+    await updateEntity(owner.id, campaign.id, entity.id, {
+      type: "NPC",
+      name: "Lockable NPC",
+      summary: "",
+      description: "Now described",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const stored = await prisma.entity.findUniqueOrThrow({
+      where: { id: entity.id },
+    });
+    expect(stored.description).toBe("Now described");
+    expect(stored.name).toBe("Lockable NPC");
+  });
+
+  it("is a no-op (no audit row) when nothing changes", async () => {
+    const { owner, campaign, entity } = await makeNpc("lock-noop@test.com");
+
+    const result = await setEntityLock(owner.id, campaign.id, entity.id, {
+      locked: false,
+      lockedFields: [],
+    });
+    expect(result).toMatchObject({ locked: false, lockedFields: [] });
+
+    const audits = await prisma.auditLog.count({
+      where: { targetType: "ENTITY", targetId: entity.id },
+    });
+    expect(audits).toBe(0);
+  });
+
+  it("rejects a lock from a non-DM member", async () => {
+    const { campaign, entity } = await makeNpc("lock-owner@test.com");
+    const player = await makeUser("lock-player@test.com");
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+
+    await expect(
+      setEntityLock(player.id, campaign.id, entity.id, { locked: true }),
+    ).rejects.toThrow(ServiceError);
+  });
+
+  it("throws when the entity does not exist", async () => {
+    const owner = await makeUser("lock-missing@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    await expect(
+      setEntityLock(owner.id, campaign.id, "missing", { locked: true }),
+    ).rejects.toThrow("Entity not found.");
   });
 });

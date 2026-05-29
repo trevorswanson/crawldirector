@@ -5,11 +5,13 @@ import { revalidatePath } from "next/cache";
 
 import { signOut } from "@/server/auth";
 import { requireUser } from "@/server/auth/session";
+import { ServiceError } from "@/lib/errors";
 import { createCampaign } from "@/server/services/campaigns";
 import {
   createCampaignSchema,
   createCrawlerSchema,
   createGenericEntitySchema,
+  setEntityLockSchema,
   updateEntitySchema,
 } from "@/lib/validation";
 import {
@@ -21,6 +23,7 @@ import {
 import {
   approveChangeSet,
   rejectChangeSet,
+  setEntityLock,
 } from "@/server/services/review";
 
 export type CampaignActionState = { error?: string } | undefined;
@@ -159,13 +162,42 @@ export async function updateEntityAction(
 
   try {
     await updateEntity(user.id, campaignId, entityId, parsed.data);
-  } catch {
+  } catch (error) {
+    // Surface expected failures (e.g. a locked field) so the DM knows to
+    // unlock rather than uselessly retry; hide anything unexpected.
+    if (error instanceof ServiceError) return { error: error.message };
     return { error: "Could not update the entity. Please try again." };
   }
 
   revalidatePath(`/campaigns/${campaignId}`);
   revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
   return { success: "Saved." };
+}
+
+export async function setEntityLockAction(
+  campaignId: string,
+  entityId: string,
+  _prev: EntityActionState,
+  formData: FormData,
+): Promise<EntityActionState> {
+  const user = await requireUser();
+  const parsed = setEntityLockSchema.safeParse({
+    locked: formData.get("locked") ?? false,
+    lockedFields: formData.getAll("lockedFields"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  try {
+    await setEntityLock(user.id, campaignId, entityId, parsed.data);
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    return { error: "Could not update canon locks. Please try again." };
+  }
+
+  revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
+  return { success: "Canon locks updated." };
 }
 
 export async function archiveEntityAction(

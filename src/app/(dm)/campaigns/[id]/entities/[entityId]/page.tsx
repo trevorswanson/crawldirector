@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import {
   ArchiveEntityForm,
   EditEntityForm,
+  EntityLockControls,
 } from "@/components/entities/entity-forms";
 import {
   Card,
@@ -63,6 +64,12 @@ export default async function EntityPage({
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <StatusPill status={entity.status} />
               <LockChip locked={entity.locked} />
+              {!entity.locked && entity.lockedFields.length > 0 && (
+                <HudTag>
+                  {entity.lockedFields.length} field
+                  {entity.lockedFields.length === 1 ? "" : "s"} locked
+                </HudTag>
+              )}
               <SourceBadge source="DM" />
               <HudTag>{formatVisibility(entity.visibility)}</HudTag>
               <HudTag>v{entity.version}</HudTag>
@@ -101,10 +108,31 @@ export default async function EntityPage({
           <CardDescription>
             Direct DM edits apply immediately as auto-approved change sets with
             provenance.
+            {(entity.locked || entity.lockedFields.length > 0) && (
+              <>
+                {" "}
+                Locked {entity.locked ? "entities" : "fields"} are protected —
+                unlock below before editing them.
+              </>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <EditEntityForm campaignId={id} entity={entity} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Canon lock</CardTitle>
+          <CardDescription>
+            Locking protects canon from AI and import edits. Locked targets
+            surface as blocked operations in the review queue instead of being
+            overwritten. Lock changes are audited.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <EntityLockControls campaignId={id} entity={entity} />
         </CardContent>
       </Card>
     </div>

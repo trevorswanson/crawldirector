@@ -3,12 +3,13 @@
 import { useActionState } from "react";
 import type { ReactNode } from "react";
 import { useFormStatus } from "react-dom";
-import { Archive, Plus, Save } from "lucide-react";
+import { Archive, Lock, Plus, Save } from "lucide-react";
 
 import {
   archiveEntityAction,
   createCrawlerAction,
   createGenericEntityAction,
+  setEntityLockAction,
   updateEntityAction,
   type EntityActionState,
 } from "@/app/(dm)/actions";
@@ -19,6 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatEntityType, formatTags, formatVisibility } from "@/lib/entities";
 import {
   genericEntityTypeValues,
+  lockableEntityFields,
   visibilityValues,
 } from "@/lib/validation";
 import type { EntityDetail } from "@/server/services/entities";
@@ -297,6 +299,73 @@ export function EditEntityForm({
       <StateMessage state={state} />
       <div>
         <SubmitButton icon={<Save aria-hidden size={16} />}>Save entity</SubmitButton>
+      </div>
+    </form>
+  );
+}
+
+const lockFieldLabels: Record<(typeof lockableEntityFields)[number], string> = {
+  name: "Name",
+  summary: "Summary",
+  description: "Description",
+  visibility: "Visibility",
+  tags: "Tags",
+};
+
+export function EntityLockControls({
+  campaignId,
+  entity,
+}: {
+  campaignId: string;
+  entity: Pick<EntityDetail, "id" | "locked" | "lockedFields">;
+}) {
+  const [state, action] = useActionState(
+    setEntityLockAction.bind(null, campaignId, entity.id),
+    undefined,
+  );
+
+  return (
+    <form action={action} className="grid gap-4">
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          name="locked"
+          value="true"
+          defaultChecked={entity.locked}
+          className="mt-1 accent-[var(--sys)]"
+        />
+        <span>
+          <span className="font-medium">Lock entire entity</span>
+          <span className="block text-[var(--muted-foreground)]">
+            AI and import proposals that touch any field are blocked until you
+            unlock it.
+          </span>
+        </span>
+      </label>
+
+      <fieldset className="grid gap-2">
+        <legend className="font-mono text-[10px] uppercase tracking-[.12em] text-[var(--ink-faint)]">
+          Lock individual fields
+        </legend>
+        {lockableEntityFields.map((field) => (
+          <label key={field} className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="lockedFields"
+              value={field}
+              defaultChecked={entity.lockedFields.includes(field)}
+              className="accent-[var(--sys)]"
+            />
+            {lockFieldLabels[field]}
+          </label>
+        ))}
+      </fieldset>
+
+      <StateMessage state={state} />
+      <div>
+        <SubmitButton icon={<Lock aria-hidden size={16} />}>
+          Update locks
+        </SubmitButton>
       </div>
     </form>
   );

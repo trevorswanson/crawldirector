@@ -28,6 +28,9 @@ vi.mock("@/components/entities/entity-forms", () => ({
   EditEntityForm: ({ entity }: { entity: { id: string; name: string } }) => (
     <div>Edit {entity.name}</div>
   ),
+  EntityLockControls: ({ entity }: { entity: { id: string } }) => (
+    <div>Lock controls {entity.id}</div>
+  ),
 }));
 
 import EntityPage from "@/app/(dm)/campaigns/[id]/entities/[entityId]/page";
@@ -96,6 +99,8 @@ describe("EntityPage", () => {
     expect(screen.getByText("100")).toBeDefined();
     expect(screen.getByText("10")).toBeDefined();
     expect(screen.getByText("Edit Carl")).toBeDefined();
+    expect(screen.getByText("Canon lock")).toBeDefined();
+    expect(screen.getByText("Lock controls e1")).toBeDefined();
   });
 
   it("renders locked generic entities without crawler stats", async () => {
@@ -145,7 +150,7 @@ describe("EntityPage", () => {
       tags: [],
       version: 1,
       locked: false,
-      lockedFields: [],
+      lockedFields: ["name", "summary"],
       isStub: false,
       agentEnabled: false,
       createdAt: new Date(),
@@ -174,6 +179,8 @@ describe("EntityPage", () => {
 
     expect(screen.getByText("Unknown")).toBeDefined();
     expect(screen.getByText("Dead")).toBeDefined();
+    // Field-level locks surface a HUD tag when the whole entity isn't locked.
+    expect(screen.getByText("2 fields locked")).toBeDefined();
   });
 
   it("calls notFound when campaign or entity is inaccessible", async () => {
