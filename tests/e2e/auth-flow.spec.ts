@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-// The M0 "done when" bar: a user can sign up, create a campaign, and see an
-// (empty) campaign dashboard.
-test("sign up, create a campaign, see the empty campaign dashboard", async ({
+// The M1 flow still starts from M0's sign-up → create campaign path, then lands
+// on the campaign's entity browser and creation surface.
+test("sign up, create a campaign, see the entity browser", async ({
   page,
 }) => {
   const email = `e2e-${Date.now()}@example.com`;
@@ -24,8 +24,12 @@ test("sign up, create a campaign, see the empty campaign dashboard", async ({
   await expect(page).toHaveURL(/\/campaigns\//);
   await expect(page.getByRole("heading", { name: "Floor One" })).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "This world is empty" }),
+    page.getByRole("heading", { name: "Create crawler" }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "World browser" }),
+  ).toBeVisible();
+  await expect(page.getByText("No matching entities yet.")).toBeVisible();
 });
 
 test("unauthenticated visit to a protected route redirects to sign-in", async ({

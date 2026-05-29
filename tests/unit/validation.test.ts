@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   createCampaignSchema,
+  createCrawlerSchema,
+  createGenericEntitySchema,
   signInSchema,
   signUpSchema,
+  updateEntitySchema,
 } from "@/lib/validation";
 
 describe("signUpSchema", () => {
@@ -80,5 +83,113 @@ describe("createCampaignSchema", () => {
       summary: "x".repeat(2001),
     });
     expect(r.success).toBe(false);
+  });
+});
+
+describe("entity schemas", () => {
+  it("normalizes tags and accepts generic entity types", () => {
+    const parsed = createGenericEntitySchema.parse({
+      type: "FACTION",
+      name: "  Skull Empire  ",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: "war, sponsor, war",
+    });
+    expect(parsed.name).toBe("Skull Empire");
+    expect(parsed.tags).toEqual(["war", "sponsor", "war"]);
+  });
+
+  it("accepts already-normalized tag arrays from service callers", () => {
+    const parsed = createGenericEntitySchema.parse({
+      type: "NPC",
+      name: "Zev",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [" admin ", ""],
+    });
+    expect(parsed.tags).toEqual(["admin"]);
+  });
+
+  it("rejects CRAWLER in the generic entity schema", () => {
+    expect(
+      createGenericEntitySchema.safeParse({
+        type: "CRAWLER",
+        name: "Carl",
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: "",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("coerces crawler numeric fields from form values", () => {
+    const parsed = createCrawlerSchema.parse({
+      name: "Carl",
+      summary: "",
+      description: "",
+      visibility: "PLAYER_FACING",
+      tags: "",
+      level: "2",
+      hp: "30",
+      mp: "",
+      gold: "10",
+      fanCount: "500",
+      killCount: "3",
+      currentFloor: "1",
+      isAlive: "true",
+    });
+    expect(parsed.level).toBe(2);
+    expect(parsed.mp).toBeUndefined();
+    expect(parsed.fanCount).toBe(BigInt(500));
+  });
+
+  it("preserves large crawler fan counts as bigint values", () => {
+    const fanCount = "9007199254740993";
+    const parsed = createCrawlerSchema.parse({
+      name: "Carl",
+      summary: "",
+      description: "",
+      visibility: "PLAYER_FACING",
+      tags: "",
+      fanCount,
+    });
+    expect(parsed.fanCount).toBe(BigInt(fanCount));
+  });
+
+  it("rejects unsafe numeric fan counts before precision is lost", () => {
+    const r = createCrawlerSchema.safeParse({
+      name: "Carl",
+      summary: "",
+      description: "",
+      visibility: "PLAYER_FACING",
+      tags: "",
+      fanCount: 9007199254740992,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("keeps update type immutable by requiring the submitted type", () => {
+    expect(
+      updateEntitySchema.safeParse({
+        type: "NPC",
+        name: "Zev",
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: "",
+      }).success,
+    ).toBe(true);
+    expect(
+      updateEntitySchema.safeParse({
+        name: "Zev",
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: "",
+      }).success,
+    ).toBe(false);
   });
 });

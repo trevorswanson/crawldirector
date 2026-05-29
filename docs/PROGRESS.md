@@ -4,7 +4,40 @@ Running checklist of milestones/tasks, newest first. See
 [`11-roadmap.md`](./11-roadmap.md) for the full plan and
 [`12-working-sessions.md`](./12-working-sessions.md) for how to pick up work.
 
-## M0 — Project foundation 🚧 (in progress)
+## M1 — Entity core + one first-class type 🚧 (in progress)
+
+**Goal:** model and edit canon for the generic `Entity` plus `Crawler`.
+**Done when:** a DM can create/edit/browse crawlers and generic entities in a
+campaign, scoped by tenancy.
+
+### Done (2026-05-28)
+
+- [x] Added M1 Prisma schema + migration for `Entity`, `Crawler`, `EntityType`,
+      `CanonStatus`, and `Visibility`.
+- [x] Added lock/visibility/version columns now, with enforcement/provenance
+      intentionally deferred to M2 per roadmap.
+- [x] Added entity service-layer CRUD for generic entities and crawlers,
+      including membership tenancy checks and DM/co-DM write permissions.
+- [x] Added campaign world browser with keyword search and type filtering.
+- [x] Added create forms for crawlers and generic entities, plus entity detail,
+      edit, and soft-archive flows.
+- [x] Added DB-backed service tests plus page/form/action/validation coverage.
+- [x] Verified locally: `lint`, `typecheck`, `build`, `test`, and
+      `test:coverage` green against local Postgres.
+
+### Notes / follow-ups
+
+- M1 entity writes are direct service-layer canon writes by design. M2 must route
+  these internals through the review/provenance pipeline before further canon
+  write paths are added.
+- Local `prisma migrate deploy` still reports only `Schema engine error` in this
+  environment; the committed migration SQL was applied directly to the local
+  Postgres database for verification.
+- Remaining M1 polish: add richer crawler stat modeling/custom fields if needed,
+  improve browser search beyond basic keyword matching, and add e2e coverage for
+  create/edit once Playwright browsers are available locally.
+
+## M0 — Project foundation ✅ (complete)
 
 **Goal:** a running Next.js app with DB, auth, and CI.
 **Done when:** a user can sign up, create a campaign, and see an (empty)

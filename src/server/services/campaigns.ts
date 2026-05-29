@@ -51,7 +51,7 @@ export async function getCampaignForUser(userId: string, campaignId: string) {
         where: { userId },
         select: { role: true },
       },
-      _count: { select: { members: true } },
+      _count: { select: { members: true, entities: true } },
     },
   });
 }

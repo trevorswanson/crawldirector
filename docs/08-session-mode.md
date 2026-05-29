@@ -34,13 +34,19 @@ human-scale spine (most DMs think in "last session / next session").
 
 ## Live reveal (sharing at the table)
 
-- During a session the DM can **reveal** an entity or fact to players — flipping
-  its visibility to `SHARED_WITH_PLAYERS`/`PLAYER_FACING` — and it appears in
-  their crawler interface ([`10-ui-ux.md`](./10-ui-ux.md)) right away.
-- Each reveal is **logged**: *what* players learned and *when*. This reveal
-  history is the principled source for the player interface's "known world" and
-  complements agent fog-of-war ([`06-entity-agents.md`](./06-entity-agents.md)) —
-  the app always knows the gap between canon and what each table knows.
+- During a session the DM can **reveal** an entity or fact either broadly or to
+  specific recipients. A broad reveal updates the campaign-wide visibility to
+  `SHARED_WITH_PLAYERS` for ordinary known-world canon, or `PLAYER_FACING` when
+  the content is meant to appear as in-fiction crawler/System UI. A private
+  reveal creates knowledge grants for selected player memberships, crawlers,
+  NPCs, parties, guilds, or other actor entities without making the fact visible
+  to everyone.
+- Each reveal is **logged**: *what* was learned, *who* learned it, and *when*.
+  This reveal history is the principled source for the player interface's
+  "known world" and complements agent fog-of-war
+  ([`06-entity-agents.md`](./06-entity-agents.md)) — the app always knows the
+  gap between canon, what each player/crawler knows, and what each NPC/faction
+  knows.
 - Reveals are audited like any visibility change; nothing secret leaks by
   accident.
 
@@ -65,8 +71,8 @@ DCC is literally a TV show, so recaps aren't just utility — they're flavor.
 
 - **Capture is not canon.** Log entries never touch the graph until promoted
   through review — so the table's messy real-time notes never pollute canon.
-- **Reveals are deliberate and audited.** Visibility only changes via explicit DM
-  action, logged.
+- **Reveals are deliberate and audited.** Campaign-wide visibility and private
+  knowledge grants only change via explicit DM action, logged.
 - **Recaps respect visibility.** Player-facing recaps are built from the
   player-visible projection; they cannot surface DM-only or pending content.
 
