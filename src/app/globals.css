@@ -178,6 +178,20 @@ body {
 .fade-in { animation: fadeIn 0.35s ease; }
 @keyframes fadeIn { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
 
+/* brand glyph (mockup style: yellow post-it note with folded corner) */
+.brand-glyph {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 13px;
+  clip-path: polygon(0 0, 100% 0, 100% 70%, 70% 100%, 0 100%);
+}
+
 /* ------------------------- broadcast FX overlays ------------------------ */
 /* Hidden by default; shown only when <html class="fx"> (see FxToggle). */
 .fx-layer { position: fixed; inset: 0; pointer-events: none; z-index: 9000; display: none; }

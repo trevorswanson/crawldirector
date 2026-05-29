@@ -12,7 +12,7 @@ export default function AuthLayout({
           href="/"
           className="mb-8 flex items-center justify-center gap-[10px]"
         >
-          <span className="grid size-[28px] place-items-center border-[1.5px] border-[var(--accent)] font-display text-[17px] font-bold text-[var(--accent)]">
+          <span className="brand-glyph size-[28px] text-[16px]">
             C
           </span>
           <span className="font-display text-xl font-bold tracking-[.06em]">

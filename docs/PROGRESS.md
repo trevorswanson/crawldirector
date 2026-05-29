@@ -10,6 +10,16 @@ Running checklist of milestones/tasks, newest first. See
 **Done when:** every canon change has provenance; locked fields can't be
 overwritten; a DM can review/approve/reject a proposal end to end.
 
+### Done — navbar brand glyph & header user menu settings (2026-05-29)
+
+- [x] Implemented the `.brand-glyph` style in `src/app/globals.css` mimicking the yellow post-it folded-corner design from the mockup.
+- [x] Restyled the navbar brand logos in `src/app/(dm)/layout.tsx` and `src/app/(auth)/layout.tsx` to use the new `.brand-glyph` style.
+- [x] Replaced the top-right header controls (FX toggle, raw email text, static initials, and Sign Out button) in the DM console layout with a single initials button.
+- [x] Implemented the interactive `UserMenu` client component (`src/components/console/user-menu.tsx`) which shows a settings popup menu upon clicking the initials.
+- [x] Rendered the user's name in bold, their email, a separator, a tactile "Enable UI Effects" toggle switch, a disabled planned "Account Settings" option, and a "Sign Out" button inside the user settings menu.
+- [x] Made the settings menu lose focus (close) when clicking outside or blurring out, while keeping it open when interacting with the UI effects toggle switch.
+- [x] Added unit tests for the `UserMenu` component at `tests/unit/user-menu.test.tsx` to achieve full test verification and branch coverage.
+
 ### Done — slice 4: editable Review Queue field values (2026-05-29)
 
 - [x] Added a Review Queue edit path that saves `EDITED` operation decisions
