@@ -32,10 +32,10 @@ describe("DashboardPage", () => {
     listCampaignsForUser.mockResolvedValue([]);
     render(await DashboardPage());
 
-    expect(screen.getByText("Your campaigns")).toBeDefined();
+    expect(screen.getByText("Your crawls")).toBeDefined();
     expect(screen.getByTestId("create-campaign-form")).toBeDefined();
     expect(
-      screen.getByText("No campaigns yet. Create your first one above."),
+      screen.getByText("No crawls yet. Create your first one above."),
     ).toBeDefined();
   });
 

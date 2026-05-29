@@ -15,7 +15,7 @@ function SubmitButton() {
   const { pending } = useFormStatus();
   return (
     <Button type="submit" disabled={pending}>
-      {pending ? "Creating…" : "Create campaign"}
+      {pending ? "Creating…" : "Create crawl"}
     </Button>
   );
 }
@@ -29,7 +29,7 @@ export function CreateCampaignForm() {
   return (
     <form action={formAction} className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
-        <Label htmlFor="name">Campaign name</Label>
+        <Label htmlFor="name">Crawl name</Label>
         <Input
           id="name"
           name="name"

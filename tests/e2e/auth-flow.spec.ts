@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-// The M1 flow still starts from M0's sign-up → create campaign path, then lands
+// The M1 flow still starts from M0's sign-up → create crawl path, then lands
 // on the campaign's entity browser and creation surface.
-test("sign up, create a campaign, see the entity browser", async ({
+test("sign up, create a crawl, see the entity browser", async ({
   page,
 }) => {
   const email = `e2e-${Date.now()}@example.com`;
@@ -15,11 +15,11 @@ test("sign up, create a campaign, see the entity browser", async ({
 
   await expect(page).toHaveURL(/\/dashboard/);
   await expect(
-    page.getByRole("heading", { name: "Your campaigns" }),
+    page.getByRole("heading", { name: "Your crawls" }),
   ).toBeVisible();
 
-  await page.getByLabel("Campaign name").fill("Floor One");
-  await page.getByRole("button", { name: "Create campaign" }).click();
+  await page.getByLabel("Crawl name").fill("Floor One");
+  await page.getByRole("button", { name: "Create crawl" }).click();
 
   await expect(page).toHaveURL(/\/campaigns\//);
   await expect(page.getByRole("heading", { name: "Floor One" })).toBeVisible();

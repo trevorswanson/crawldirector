@@ -14,11 +14,16 @@ import {
 
 import { cn } from "@/lib/utils";
 
+function campaignIdFromPathname(pathname: string) {
+  const match = pathname.match(/^\/campaigns\/([^/]+)/);
+  return match?.[1] ?? null;
+}
+
 type NavItem = {
   label: string;
   icon: LucideIcon;
   group: "dm" | "player";
-  href?: string;
+  href?: string | ((campaignId: string | null) => string);
   /** Matches the current path → active highlight. */
   match?: (pathname: string) => boolean;
   /** Unbuilt: shown disabled with a milestone tooltip. */
@@ -33,7 +38,7 @@ const NAV: NavItem[] = [
     label: "World Browser",
     icon: Layers,
     group: "dm",
-    href: "/dashboard",
+    href: (campaignId) => (campaignId ? `/campaigns/${campaignId}` : "/dashboard"),
     match: (p) => p === "/dashboard" || p.startsWith("/campaigns"),
   },
   { label: "Review Queue", icon: ListChecks, group: "dm", planned: "M2 — Review pipeline" },
@@ -68,6 +73,9 @@ export function DmNav() {
 function NavRow({ item, pathname }: { item: NavItem; pathname: string }) {
   const Icon = item.icon;
   const active = item.match?.(pathname) ?? false;
+  const campaignId = campaignIdFromPathname(pathname);
+  const href =
+    typeof item.href === "function" ? item.href(campaignId) : (item.href ?? "#");
 
   if (item.planned) {
     return (
@@ -87,7 +95,7 @@ function NavRow({ item, pathname }: { item: NavItem; pathname: string }) {
 
   return (
     <Link
-      href={item.href ?? "#"}
+      href={href}
       className={cn(
         "flex items-center gap-3 border-l-2 px-[18px] py-[10px] transition-colors",
         active
