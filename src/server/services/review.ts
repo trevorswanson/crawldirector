@@ -681,8 +681,11 @@ export async function getEntityProvenance(
     where: {
       targetType: "ENTITY",
       targetId: entityId,
-      changeSet: { campaignId, status: ChangeSetStatus.APPROVED },
-      decision: OpDecision.ACCEPTED,
+      changeSet: {
+        campaignId,
+        status: { in: [ChangeSetStatus.APPROVED, ChangeSetStatus.PARTIALLY_APPLIED] },
+      },
+      decision: { in: [OpDecision.ACCEPTED, OpDecision.EDITED] },
     },
     orderBy: { changeSet: { createdAt: "asc" } },
     select: {

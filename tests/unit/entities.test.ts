@@ -558,6 +558,15 @@ describe("entity service", () => {
       status: "PARTIALLY_APPLIED",
       reviewedById: owner.id,
     });
+    await expect(getEntityProvenance(owner.id, campaign.id, zev.id)).resolves.toMatchObject({
+      lastChangeTitle: "Review two NPC updates",
+      changeCount: 2,
+    });
+    await expect(getEntityProvenance(owner.id, campaign.id, mordecai.id)).resolves
+      .toMatchObject({
+        lastChangeTitle: "Create Mordecai",
+        changeCount: 1,
+      });
   });
 
   it("applies an edited operation patch and clears lock blocking for omitted fields", async () => {
@@ -616,6 +625,11 @@ describe("entity service", () => {
         select: { field: true },
       }),
     ).resolves.toEqual([{ field: "summary" }]);
+    await expect(getEntityProvenance(owner.id, campaign.id, entity.id)).resolves
+      .toMatchObject({
+        lastChangeTitle: "Review edited NPC update",
+        changeCount: 2,
+      });
   });
 
   it("flags queued proposals that touch locked fields", async () => {
