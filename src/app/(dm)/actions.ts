@@ -11,13 +11,14 @@ import {
   createCampaignSchema,
   createCrawlerSchema,
   createGenericEntitySchema,
-  setEntityLockSchema,
+  lockFieldSchema,
   updateEntitySchema,
 } from "@/lib/validation";
 import {
   archiveEntity,
   createCrawler,
   createGenericEntity,
+  getEntityForUser,
   updateEntity,
 } from "@/server/services/entities";
 import {
@@ -174,30 +175,37 @@ export async function updateEntityAction(
   return { success: "Saved." };
 }
 
-export async function setEntityLockAction(
+export async function toggleEntityLockAction(
   campaignId: string,
   entityId: string,
-  _prev: EntityActionState,
-  formData: FormData,
-): Promise<EntityActionState> {
+): Promise<void> {
   const user = await requireUser();
-  const parsed = setEntityLockSchema.safeParse({
-    locked: formData.get("locked") ?? false,
-    lockedFields: formData.getAll("lockedFields"),
-  });
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
-  }
-
-  try {
-    await setEntityLock(user.id, campaignId, entityId, parsed.data);
-  } catch (error) {
-    if (error instanceof ServiceError) return { error: error.message };
-    return { error: "Could not update canon locks. Please try again." };
-  }
-
+  const entity = await getEntityForUser(user.id, campaignId, entityId);
+  if (!entity) return;
+  await setEntityLock(user.id, campaignId, entityId, { locked: !entity.locked });
   revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
-  return { success: "Canon locks updated." };
+}
+
+export async function toggleEntityFieldLockAction(
+  campaignId: string,
+  entityId: string,
+  formData: FormData,
+): Promise<void> {
+  const user = await requireUser();
+  const field = lockFieldSchema.safeParse(formData.get("field"));
+  if (!field.success) return;
+
+  const entity = await getEntityForUser(user.id, campaignId, entityId);
+  if (!entity) return;
+
+  const next = new Set(entity.lockedFields);
+  if (next.has(field.data)) next.delete(field.data);
+  else next.add(field.data);
+
+  await setEntityLock(user.id, campaignId, entityId, {
+    lockedFields: [...next],
+  });
+  revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
 }
 
 export async function archiveEntityAction(

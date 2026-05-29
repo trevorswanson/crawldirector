@@ -46,12 +46,37 @@ overwritten; a DM can review/approve/reject a proposal end to end.
       schema tests, and a page/form render test. Verified in-browser (lock a
       field → edit is blocked with the lock reason; canon unchanged).
 
+### Done — entity-detail redesign to the mockup (2026-05-29)
+
+The detail page had drifted from [`screen-world.jsx`](./design/mockup/screen-world.jsx)'s
+`EntityDetail`. Reworked it to match the mockup's vision:
+
+- [x] Full-bleed **two-column workspace** (main + 304px right rail). The console
+      `<main>` is now full-bleed/non-scrolling; "document" pages (dashboard,
+      campaign, review) opt into the centered column via the new `PageContainer`.
+- [x] Sticky **breadcrumb back-bar**, header (type-dot · type · status · stub),
+      description, and a **Fields table** whose rows carry per-field **lock
+      toggles** (server actions) + a whole-entity lock in the rail — replacing the
+      old stat grid and checkbox "Canon lock" card.
+- [x] **Read-first**: the page shows the read view by default; Edit is a control
+      that flips to the form via `?edit` (no always-open form).
+- [x] Right rail: **Controls** (lock + Edit) · **Visibility** (eye/eye-off list)
+      · **Connections** (honest "Planned · M3") · **Provenance** (real data from
+      `getEntityProvenance`: origin/author, created, model, approved-by, last
+      change + the permanence note).
+- [x] Lock UI now uses `toggleEntityLockAction` / `toggleEntityFieldLockAction`
+      (replacing the form-based `setEntityLockAction`); the `setEntityLock`
+      service is unchanged. Tests updated; lint/typecheck/build/coverage green;
+      verified in-browser against the mockup.
+
 ### Notes / follow-ups
 
 - Locking deliberately blocks **all** writers to a locked target (including the
       DM's own direct edit), matching the "unlock to edit" UX. If a source-aware
       policy is wanted later (locks bind AI/import but not deliberate DM edits),
       that's a review-service change, not a UI one.
+- Per-field **AI markers** and the connections/timeline panels are stubbed as
+      "Planned · M3/M4" — no fake data — and light up when that data exists.
 - Remaining before M2 is complete: per-operation / per-field accept-edit-reject
       decisions in the Review Queue, `supersede` for replaced/stale proposals,
       relationship/event operations (land with M3), and batch review actions.

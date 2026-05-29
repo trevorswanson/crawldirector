@@ -15,6 +15,7 @@ import {
 import {
   approveChangeSet,
   createPendingEntityChangeSet,
+  getEntityProvenance,
   listPendingChangeSetsForUser,
   rejectChangeSet,
   setEntityLock,
@@ -775,5 +776,54 @@ describe("entity locking", () => {
     await expect(
       setEntityLock(owner.id, campaign.id, "missing", { locked: true }),
     ).rejects.toThrow("Entity not found.");
+  });
+});
+
+describe("entity provenance", () => {
+  it("summarizes origin and latest change from the change history", async () => {
+    const owner = await makeUser("prov@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Mordecai",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    await updateEntity(owner.id, campaign.id, entity.id, {
+      type: "NPC",
+      name: "Mordecai the Guide",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    const prov = await getEntityProvenance(owner.id, campaign.id, entity.id);
+    expect(prov).not.toBeNull();
+    expect(prov?.source).toBe("DM");
+    expect(prov?.authorLabel).toBe("prov@test.com");
+    expect(prov?.approvedByLabel).toBe("prov@test.com");
+    expect(prov?.changeCount).toBe(2);
+    expect(prov?.lastChangeTitle).toBe("Update Mordecai");
+  });
+
+  it("returns null for a non-member", async () => {
+    const owner = await makeUser("prov-owner@test.com");
+    const stranger = await makeUser("prov-stranger@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Hidden NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    await expect(
+      getEntityProvenance(stranger.id, campaign.id, entity.id),
+    ).resolves.toBeNull();
   });
 });

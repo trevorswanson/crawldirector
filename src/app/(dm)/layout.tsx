@@ -71,9 +71,7 @@ export default async function DmLayout({
           </div>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-y-auto px-6 py-8">
-          <div className="mx-auto w-full max-w-6xl">{children}</div>
-        </main>
+        <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
       </div>
     </div>
   );

@@ -4,7 +4,7 @@ import {
   createCampaignSchema,
   createCrawlerSchema,
   createGenericEntitySchema,
-  setEntityLockSchema,
+  lockFieldSchema,
   signInSchema,
   signUpSchema,
   updateEntitySchema,
@@ -199,42 +199,16 @@ describe("entity schemas", () => {
   });
 });
 
-describe("setEntityLockSchema", () => {
-  it("treats a checked box as locked and an array of fields", () => {
-    const r = setEntityLockSchema.safeParse({
-      locked: "true",
-      lockedFields: ["name", "crawler.level"],
-    });
-    expect(r.success).toBe(true);
-    expect(r.data).toEqual({
-      locked: true,
-      lockedFields: ["name", "crawler.level"],
-    });
+describe("lockFieldSchema", () => {
+  it("accepts a core lockable field", () => {
+    expect(lockFieldSchema.safeParse("name").success).toBe(true);
   });
 
-  it("treats an absent box as unlocked and missing fields as empty", () => {
-    const r = setEntityLockSchema.safeParse({
-      locked: false,
-      lockedFields: undefined,
-    });
-    expect(r.success).toBe(true);
-    expect(r.data).toEqual({ locked: false, lockedFields: [] });
+  it("accepts a crawler lockable field", () => {
+    expect(lockFieldSchema.safeParse("crawler.level").success).toBe(true);
   });
 
-  it("parses a comma-delimited lockedFields string", () => {
-    const r = setEntityLockSchema.safeParse({
-      locked: "on",
-      lockedFields: "name, summary",
-    });
-    expect(r.success).toBe(true);
-    expect(r.data?.lockedFields).toEqual(["name", "summary"]);
-  });
-
-  it("rejects an unknown lock field", () => {
-    const r = setEntityLockSchema.safeParse({
-      locked: "true",
-      lockedFields: ["bogus"],
-    });
-    expect(r.success).toBe(false);
+  it("rejects an unknown field", () => {
+    expect(lockFieldSchema.safeParse("bogus").success).toBe(false);
   });
 });

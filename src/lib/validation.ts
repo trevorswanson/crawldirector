@@ -219,23 +219,5 @@ export const lockableFields = [
   ...lockableCrawlerFields,
 ] as const;
 
-export const setEntityLockSchema = z.object({
-  // Whole-entity lock. A bare checkbox submits "true" when checked and nothing
-  // when unchecked, so an absent value means "unlocked".
-  locked: z.preprocess(
-    (value) => value === true || value === "true" || value === "on",
-    z.boolean(),
-  ),
-  // Field-level locks. Accepts a checkbox array, a comma string, or nothing.
-  lockedFields: z.preprocess(
-    (value) => {
-      if (Array.isArray(value)) return value;
-      if (typeof value === "string") {
-        return value.length ? value.split(",").map((field) => field.trim()) : [];
-      }
-      return [];
-    },
-    z.array(z.enum(lockableFields)),
-  ),
-});
-export type SetEntityLockInput = z.infer<typeof setEntityLockSchema>;
+// A single lockable field key, validated where a per-field lock toggle posts it.
+export const lockFieldSchema = z.enum(lockableFields);

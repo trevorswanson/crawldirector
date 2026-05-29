@@ -515,6 +515,69 @@ export async function setEntityLock(
   });
 }
 
+export type EntityProvenance = {
+  source: ChangeSource;
+  authorLabel: string | null;
+  createdAt: Date;
+  model: string | null;
+  approvedByLabel: string | null;
+  approvedAt: Date | null;
+  lastChangeTitle: string;
+  lastChangeSource: ChangeSource;
+  changeCount: number;
+};
+
+/**
+ * Provenance summary for an entity, derived from the change operations that
+ * targeted it: origin (who/what created it, and who approved it) plus the most
+ * recent change. Provenance is permanent — this is the "where did this come
+ * from?" answer the product promises. Any campaign member may read it.
+ */
+export async function getEntityProvenance(
+  userId: string,
+  campaignId: string,
+  entityId: string,
+): Promise<EntityProvenance | null> {
+  const membership = await getMembership(userId, campaignId);
+  if (!membership) return null;
+
+  const ops = await prisma.changeOperation.findMany({
+    where: { targetType: "ENTITY", targetId: entityId, changeSet: { campaignId } },
+    orderBy: { changeSet: { createdAt: "asc" } },
+    select: {
+      changeSet: {
+        select: {
+          title: true,
+          source: true,
+          model: true,
+          createdAt: true,
+          reviewedAt: true,
+          actor: { select: { name: true, email: true } },
+          reviewer: { select: { name: true, email: true } },
+        },
+      },
+    },
+  });
+  if (ops.length === 0) return null;
+
+  const origin = ops[0].changeSet;
+  const last = ops[ops.length - 1].changeSet;
+  const label = (u: { name: string | null; email: string } | null) =>
+    u?.name || u?.email || null;
+
+  return {
+    source: origin.source,
+    authorLabel: label(origin.actor),
+    createdAt: origin.createdAt,
+    model: origin.model,
+    approvedByLabel: label(origin.reviewer),
+    approvedAt: origin.reviewedAt,
+    lastChangeTitle: last.title,
+    lastChangeSource: last.source,
+    changeCount: ops.length,
+  };
+}
+
 async function applyEntityOperation(
   tx: Prisma.TransactionClient,
   changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,

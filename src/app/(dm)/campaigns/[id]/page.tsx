@@ -20,6 +20,7 @@ import { HudTag } from "@/components/ui/hud-tag";
 import { TypeDot } from "@/components/ui/type-dot";
 import { SourceBadge } from "@/components/ui/source-badge";
 import { StatusPill } from "@/components/ui/status-pill";
+import { PageContainer } from "@/components/console/page-container";
 import {
   CreateCrawlerForm,
   CreateGenericEntityForm,
@@ -53,6 +54,7 @@ export default async function CampaignPage({
   });
 
   return (
+    <PageContainer>
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-1">
         <Link
@@ -201,5 +203,6 @@ export default async function CampaignPage({
         )}
       </section>
     </div>
+    </PageContainer>
   );
 }

@@ -5,6 +5,7 @@ const {
   createCampaign,
   createCrawler,
   createGenericEntity,
+  getEntityForUser,
   updateEntity,
   archiveEntity,
   approveChangeSet,
@@ -18,6 +19,7 @@ const {
   createCampaign: vi.fn(),
   createCrawler: vi.fn(),
   createGenericEntity: vi.fn(),
+  getEntityForUser: vi.fn(),
   updateEntity: vi.fn(),
   archiveEntity: vi.fn(),
   approveChangeSet: vi.fn(),
@@ -36,6 +38,7 @@ vi.mock("@/server/services/entities", () => ({
   archiveEntity,
   createCrawler,
   createGenericEntity,
+  getEntityForUser,
   updateEntity,
 }));
 vi.mock("@/server/services/review", () => ({
@@ -54,7 +57,8 @@ import {
   createCrawlerAction,
   createGenericEntityAction,
   rejectChangeSetAction,
-  setEntityLockAction,
+  toggleEntityFieldLockAction,
+  toggleEntityLockAction,
   signOutAction,
   updateEntityAction,
 } from "@/app/(dm)/actions";
@@ -333,71 +337,79 @@ describe("review queue actions", () => {
   });
 });
 
-describe("setEntityLockAction", () => {
-  function lockForm(locked: boolean, fields: string[]): FormData {
+describe("toggleEntityLockAction", () => {
+  it("flips the whole-entity lock and revalidates the entity page", async () => {
+    getEntityForUser.mockResolvedValue({
+      id: "e1",
+      locked: false,
+      lockedFields: [],
+    });
+
+    await toggleEntityLockAction("c1", "e1");
+
+    expect(setEntityLock).toHaveBeenCalledWith("u1", "c1", "e1", {
+      locked: true,
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+  });
+
+  it("is a no-op when the entity is inaccessible", async () => {
+    getEntityForUser.mockResolvedValue(null);
+
+    await toggleEntityLockAction("c1", "missing");
+
+    expect(setEntityLock).not.toHaveBeenCalled();
+  });
+});
+
+describe("toggleEntityFieldLockAction", () => {
+  function fieldForm(field: string): FormData {
     const fd = new FormData();
-    if (locked) fd.set("locked", "true");
-    for (const field of fields) fd.append("lockedFields", field);
+    fd.set("field", field);
     return fd;
   }
 
-  it("rejects an invalid lock field", async () => {
-    const result = await setEntityLockAction(
-      "c1",
-      "e1",
-      undefined,
-      lockForm(false, ["not-a-field"]),
-    );
+  it("adds a field lock when not already locked", async () => {
+    getEntityForUser.mockResolvedValue({
+      id: "e1",
+      locked: false,
+      lockedFields: ["summary"],
+    });
 
-    expect(result?.error).toBeTruthy();
-    expect(setEntityLock).not.toHaveBeenCalled();
+    await toggleEntityFieldLockAction("c1", "e1", fieldForm("name"));
+
+    expect(setEntityLock).toHaveBeenCalledWith("u1", "c1", "e1", {
+      lockedFields: ["summary", "name"],
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
   });
 
-  it("locks fields and revalidates the entity page", async () => {
-    setEntityLock.mockResolvedValue({
+  it("removes a field lock when already locked", async () => {
+    getEntityForUser.mockResolvedValue({
       id: "e1",
       locked: false,
       lockedFields: ["name", "summary"],
     });
 
-    const result = await setEntityLockAction(
-      "c1",
-      "e1",
-      undefined,
-      lockForm(false, ["name", "summary"]),
-    );
+    await toggleEntityFieldLockAction("c1", "e1", fieldForm("name"));
 
-    expect(result?.success).toBe("Canon locks updated.");
     expect(setEntityLock).toHaveBeenCalledWith("u1", "c1", "e1", {
-      locked: false,
-      lockedFields: ["name", "summary"],
+      lockedFields: ["summary"],
     });
-    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
   });
 
-  it("surfaces a service error message", async () => {
-    setEntityLock.mockRejectedValue(new ServiceError("You do not have permission."));
+  it("ignores an unknown field", async () => {
+    await toggleEntityFieldLockAction("c1", "e1", fieldForm("not-a-field"));
 
-    const result = await setEntityLockAction(
-      "c1",
-      "e1",
-      undefined,
-      lockForm(true, []),
-    );
-
-    expect(result?.error).toBe("You do not have permission.");
+    expect(getEntityForUser).not.toHaveBeenCalled();
+    expect(setEntityLock).not.toHaveBeenCalled();
   });
 
-  it("returns a generic error for unexpected failures", async () => {
-    setEntityLock.mockRejectedValue(new Error("db down"));
+  it("is a no-op when the entity is inaccessible", async () => {
+    getEntityForUser.mockResolvedValue(null);
 
-    const result = await setEntityLockAction(
-      "c1",
-      "e1",
-      undefined,
-      lockForm(true, []),
-    );
+    await toggleEntityFieldLockAction("c1", "missing", fieldForm("name"));
 
-    expect(result?.error).toBe("Could not update canon locks. Please try again.");
+    expect(setEntityLock).not.toHaveBeenCalled();
   });
 });

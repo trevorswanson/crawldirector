@@ -18,6 +18,7 @@ import { HudTag } from "@/components/ui/hud-tag";
 import { Kicker } from "@/components/ui/kicker";
 import { SourceBadge } from "@/components/ui/source-badge";
 import { StatusPill } from "@/components/ui/status-pill";
+import { PageContainer } from "@/components/console/page-container";
 import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
 import {
@@ -39,6 +40,7 @@ export default async function ReviewQueuePage({
   const changeSets = await listPendingChangeSetsForUser(user.id, id);
 
   return (
+    <PageContainer>
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-2">
         <Link
@@ -128,6 +130,7 @@ export default async function ReviewQueuePage({
         </section>
       )}
     </div>
+    </PageContainer>
   );
 }
 
