@@ -90,16 +90,16 @@ function CoreFields({
   values,
 }: {
   entity?: EntityDetail;
-  values?: Record<string, any>;
+  values?: Record<string, unknown>;
 }) {
   const isLocked = (fieldKey: string) => {
     if (!entity) return false;
     return entity.locked || entity.lockedFields.includes(fieldKey);
   };
 
-  const getVal = (key: string, dbVal: any) => {
+  const getVal = (key: string, dbVal: string | number | undefined) => {
     if (values && key in values) {
-      return values[key];
+      return values[key] as string | number | undefined;
     }
     return dbVal;
   };
@@ -140,7 +140,7 @@ function CoreFields({
         <div className="grid gap-2">
           <Label htmlFor="visibility">Visibility</Label>
           <VisibilitySelect
-            defaultValue={getVal("visibility", entity?.visibility ?? "DM_ONLY")}
+            defaultValue={getVal("visibility", entity?.visibility ?? "DM_ONLY") as string}
             disabled={isLocked("visibility")}
           />
           {isLocked("visibility") && (
@@ -152,7 +152,7 @@ function CoreFields({
           <Input
             id="tags"
             name="tags"
-            defaultValue={values ? values.tags : (entity ? formatTags(entity.tags) : "")}
+            defaultValue={values ? (values.tags as string) : (entity ? formatTags(entity.tags) : "")}
             readOnly={isLocked("tags")}
             placeholder="floor 1, sponsor, rumor"
           />
@@ -167,7 +167,7 @@ function CrawlerFields({
   values,
 }: {
   entity?: EntityDetail;
-  values?: Record<string, any>;
+  values?: Record<string, unknown>;
 }) {
   const crawler = entity?.crawler;
   const isLocked = (fieldKey: string) => {
@@ -175,9 +175,9 @@ function CrawlerFields({
     return entity.locked || entity.lockedFields.includes(fieldKey);
   };
 
-  const getVal = (key: string, dbVal: any) => {
+  const getVal = (key: string, dbVal: string | number | undefined) => {
     if (values && key in values) {
-      return values[key];
+      return values[key] as string | number | undefined;
     }
     return dbVal;
   };

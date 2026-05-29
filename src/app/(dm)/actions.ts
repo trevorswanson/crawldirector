@@ -29,7 +29,7 @@ import {
 
 export type CampaignActionState = { error?: string } | undefined;
 export type EntityActionState =
-  | { error?: string; success?: string; values?: Record<string, any>; timestamp?: number }
+  | { error?: string; success?: string; values?: Record<string, unknown>; timestamp?: number }
   | undefined;
 
 export async function createCampaignAction(
