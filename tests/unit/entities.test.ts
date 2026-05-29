@@ -512,10 +512,60 @@ describe("entity service", () => {
 
     await expect(
       approveChangeSet(owner.id, campaign.id, proposal.id),
-    ).rejects.toThrow("changed since this proposal");
+    ).rejects.toThrow("stale");
     await expect(
       prisma.entity.findUniqueOrThrow({ where: { id: entity.id } }),
     ).resolves.toMatchObject({ name: "Fresh canon name", version: 2 });
+  });
+
+  it("rejects stale queued archive proposals when canon changed underneath", async () => {
+    const owner = await makeUser("stale-archive@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Archive Stale NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const proposal = await createPendingEntityChangeSet(owner.id, campaign.id, {
+      title: "Archive stale NPC",
+      operations: [
+        {
+          op: "DELETE_ENTITY",
+          targetId: entity.id,
+          patch: {
+            _baseVersion: { to: 1 },
+            status: { from: "CANON", to: "ARCHIVED" },
+          },
+        },
+      ],
+    });
+    await updateEntity(owner.id, campaign.id, entity.id, {
+      type: "NPC",
+      name: "Archive Stale NPC",
+      summary: "Changed after proposal",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    await expect(
+      approveChangeSet(owner.id, campaign.id, proposal.id),
+    ).rejects.toThrow("stale");
+    await expect(
+      prisma.changeOperation.findFirstOrThrow({
+        where: { changeSetId: proposal.id },
+      }),
+    ).resolves.toMatchObject({ isStale: true });
+    await expect(
+      prisma.entity.findUniqueOrThrow({ where: { id: entity.id } }),
+    ).resolves.toMatchObject({
+      status: "CANON",
+      summary: "Changed after proposal",
+      version: 2,
+    });
   });
 
   it("rejects a pending entity proposal without applying canon", async () => {

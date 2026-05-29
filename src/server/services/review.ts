@@ -157,6 +157,14 @@ function operationBaseVersions(operations: EntityReviewOperationInput[]) {
   return baseVersions;
 }
 
+function isEntityReviewOp(op: OpKind): op is EntityReviewOperationInput["op"] {
+  return (
+    op === OpKind.CREATE_ENTITY ||
+    op === OpKind.UPDATE_ENTITY ||
+    op === OpKind.DELETE_ENTITY
+  );
+}
+
 export async function createPendingEntityChangeSet(
   userId: string,
   campaignId: string,
@@ -295,6 +303,7 @@ export async function approveChangeSet(
   changeSetId: string,
 ) {
   await assertCampaignDm(userId, campaignId);
+  await refreshPendingOperationFlags(campaignId, changeSetId);
 
   return prisma.$transaction(async (tx) => {
     const changeSet = await tx.changeSet.findFirst({
@@ -339,6 +348,44 @@ export async function approveChangeSet(
     });
 
     return { id: changeSet.id, targetIds: appliedIds };
+  });
+}
+
+async function refreshPendingOperationFlags(
+  campaignId: string,
+  changeSetId: string,
+) {
+  await prisma.$transaction(async (tx) => {
+    const changeSet = await tx.changeSet.findFirst({
+      where: { id: changeSetId, campaignId, status: ChangeSetStatus.PENDING },
+      include: { operations: true },
+    });
+    if (!changeSet) return;
+
+    const baseVersions = baseVersionsObject(changeSet.baseVersions);
+    for (const operation of changeSet.operations) {
+      if (
+        operation.targetType !== "ENTITY" ||
+        !isEntityReviewOp(operation.op)
+      ) {
+        continue;
+      }
+
+      const flags = await evaluateEntityOperationFlags(
+        tx,
+        {
+          op: operation.op,
+          targetId: operation.targetId ?? undefined,
+          patch: operation.patch as ReviewPatch,
+        },
+        campaignId,
+        baseVersions,
+      );
+      await tx.changeOperation.update({
+        where: { id: operation.id },
+        data: flags,
+      });
+    }
   });
 }
 
@@ -526,9 +573,19 @@ async function applyDeleteEntity(
       campaignId: changeSet.campaignId,
       status: { not: CanonStatus.ARCHIVED },
     },
-    select: { id: true, locked: true, lockedFields: true },
+    select: { id: true, version: true, locked: true, lockedFields: true },
   });
   if (!entity) throw new ServiceError("Entity not found.");
+
+  const expectedVersion = baseVersionsObject(changeSet.baseVersions)[entityId];
+  if (typeof expectedVersion === "number" && expectedVersion !== entity.version) {
+    await tx.changeOperation.update({
+      where: { id: operationId },
+      data: { isStale: true },
+    });
+    throw new ServiceError("Entity changed since this proposal was created.");
+  }
+
   if (entity.locked) {
     await tx.changeOperation.update({
       where: { id: operationId },
