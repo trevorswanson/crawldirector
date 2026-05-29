@@ -1,41 +1,56 @@
-# DCC Campaign Builder
+# CrawlDirector
 
-A campaign-management and worldbuilding tool for the **Dungeon Crawler Carl
-(DCC) tabletop RPG** (Renegade Game Studios, 2026).
+Build the Crawl. Curate the Chaos.
 
-DCC's world is unusually large for a TTRPG: an 18-floor World Dungeon broadcast
-as an alien game show, billions of displaced humans, countless mob types and
-bosses, nine warring sponsor factions, interstellar Syndicate politics, talk
-shows and hunters, and a dense web of cause-and-effect between all of it. A DM
-running a DCC campaign needs to track far more state than a typical D&D table.
+CrawlDirector is a world simulation and canon management platform for the Dungeon Crawler Carl tabletop RPG.
 
-This tool helps Game Masters:
+A Dungeon Crawler Carl campaign is larger than a typical fantasy adventure. Every crawler, sponsor, faction, floor, host, audience trend, and world-shaping event exists inside a single interconnected system. Actions have consequences. Consequences create stories. Stories reshape the world.
 
-- **Model the whole world** — crawlers, floors, neighborhoods, bosses, mobs,
-  factions, shows, sponsors, NPCs, and the typed relationships and causal links
-  between them.
-- **Lean on AI without losing control** — almost any AI-generated update lands
-  in a **pending** state. The DM reviews it, edits it, and *approves* it before
-  it becomes canon. Reviewed or hand-written data can be **locked** so AI can't
-  silently overwrite it.
-- **Run multiple campaigns** across multiple DMs, and **share player-facing
-  "crawler interfaces"** with players (the in-fiction System UI each crawler
-  sees).
-- **Drive generation with the evolving System AI** — model the in-fiction
-  dungeon AI as a living entity whose personality drifts over the campaign
-  (more sentient, less compliant, entangled in faction politics). Its current
-  persona compiles into the generation prompts, so generated encounters,
-  monsters, bosses, loot, and announcements reflect *who the System AI is right
-  now*.
-- **Simulate a world of motivated actors** — give factions, sponsors, gods, show
-  hosts, and crawlers their own values, goals, and voice, then let subagents
-  role-play them to propose believable actions and events. Every move lands as a
-  reviewable proposal, so the causal web populates itself under the DM's control.
-- **Find anything, ask anything** — hybrid search and a cited "Ask the Campaign"
-  Q&A over canon; the same retrieval feeds *relevant* context to every generator.
-- **Run the table** — a live session mode captures play as it happens, reveals
-  facts to players, promotes the good moments to canon, and generates in-voice
-  "previously on…" recaps.
+CrawlDirector helps Game Masters manage that complexity.
+
+Instead of storing a campaign as disconnected notes and documents, CrawlDirector models the crawl as a living graph of entities, relationships, motivations, and events. Crawlers interact with factions. Sponsors influence wars. The System changes the rules. Every decision can ripple across the dungeon.
+
+AI is a first-class collaborator—but never the authority.
+
+Generated content enters a review queue where the DM decides what becomes canon. Every change is tracked. Every fact records its provenance. Trusted content can be locked against future modification.
+
+Think of it as a control room for an interstellar death-game reality show.
+
+## What CrawlDirector Does
+
+### Model a Living World
+
+Track crawlers, factions, floors, bosses, mobs, sponsors, gods, talk shows, corporations, and galactic powers as connected entities inside a queryable relationship graph.
+
+### Protect Canon
+
+AI-generated content, player suggestions, imports, and manual edits all flow through a review pipeline. Nothing becomes canon until approved.
+
+### Simulate Motivated Actors
+
+Give major entities goals, values, personalities, and limited knowledge. Let AI agents role-play them to propose believable actions, conflicts, alliances, and world events.
+
+### Bring the System to Life
+
+Model the System itself as an evolving character. Its personality shifts over time and directly influences generated encounters, loot, announcements, quests, and world events.
+
+### Ask the Campaign
+
+Search canon, trace causal chains, inspect relationships, and answer questions about the world with citations back to source data.
+
+### Run the Show
+
+Capture live sessions, reveal information to players, maintain player-facing crawler interfaces, and generate in-universe recaps and broadcasts.
+
+## Core Philosophy
+
+The DM owns reality.
+
+AI proposes.
+
+The DM decides.
+
+Reality is pending review.
 
 ## Status
 
