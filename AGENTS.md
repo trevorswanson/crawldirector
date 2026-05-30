@@ -22,8 +22,9 @@ unit, e2e, coverage) plus security/quality gates (CodeQL, dependency review,
 browser, and entity detail/edit. M2 so far: all entity writes route through the
 `review` service as change sets with provenance + audit; a Review Queue approves/
 rejects proposals; and DMs can lock entities/fields (locked targets can't be
-overwritten). See [`docs/PROGRESS.md`](./docs/PROGRESS.md). Next up in **M2**:
-per-field accept/edit/reject in the queue, `supersede`, and batch actions.
+overwritten). Per-field accept/edit/reject and `supersede` (a DM retires a stale
+or replaced proposal) now work too. See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
+Next up in **M2**: batch review actions (bulk accept/reject of a generator run).
 
 ## Start here, every session
 

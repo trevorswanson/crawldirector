@@ -1,11 +1,12 @@
 import { notFound } from "next/navigation";
-import { Check, Save, X } from "lucide-react";
+import { Archive, Check, Save, X } from "lucide-react";
 
 import {
   approveChangeSetAction,
   editChangeOperationPatchAction,
   rejectChangeSetAction,
   setChangeOperationDecisionAction,
+  supersedeChangeSetAction,
 } from "@/app/(dm)/actions";
 import { Button } from "@/components/ui/button";
 import {
@@ -181,6 +182,18 @@ export default async function ReviewQueuePage({
                       Reject
                     </Button>
                   </form>
+                  {changeSet.operations.some((operation) => operation.isStale) && (
+                    <form
+                      action={supersedeChangeSetAction.bind(null, id, changeSet.id)}
+                    >
+                      {/* Stale proposals can't be approved; superseding retires
+                          them as obsolete (retained for history) instead. */}
+                      <Button type="submit" variant="outline">
+                        <Archive aria-hidden size={16} />
+                        Supersede
+                      </Button>
+                    </form>
+                  )}
                 </div>
               </CardContent>
             </Card>
