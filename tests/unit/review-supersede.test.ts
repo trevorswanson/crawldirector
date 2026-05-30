@@ -4,6 +4,7 @@ import { EntityType, Role } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
+import { archiveEntity } from "@/server/services/entities";
 import {
   applyAutoApprovedEntityChangeSet,
   createPendingEntityChangeSet,
@@ -191,5 +192,56 @@ describe("review service — supersede", () => {
       where: { id: set.id },
     });
     expect(afterSupersede?.status).toBe("SUPERSEDED");
+  });
+
+  it("keeps obsolete archived-target proposals visible for supersede", async () => {
+    const { dmId, campaignId } = await seed();
+    const updateTargetId = await createEntity(dmId, campaignId, "Update Target");
+    const deleteTargetId = await createEntity(dmId, campaignId, "Delete Target");
+    const updateBaseVersion = await versionOf(updateTargetId);
+    const deleteBaseVersion = await versionOf(deleteTargetId);
+    const set = await createPendingEntityChangeSet(dmId, campaignId, {
+      source: "AI",
+      title: "Obsolete target updates",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: updateTargetId,
+          patch: {
+            _baseVersion: { to: updateBaseVersion },
+            description: { to: "No longer relevant." },
+          },
+        },
+        {
+          op: "DELETE_ENTITY",
+          targetId: deleteTargetId,
+          patch: {
+            _baseVersion: { to: deleteBaseVersion },
+            status: { from: "CANON", to: "ARCHIVED" },
+          },
+        },
+      ],
+    });
+
+    await archiveEntity(dmId, campaignId, updateTargetId);
+    await archiveEntity(dmId, campaignId, deleteTargetId);
+
+    const pending = await listPendingChangeSetsForUser(dmId, campaignId);
+    expect(pending).toHaveLength(1);
+    expect(pending[0].id).toBe(set.id);
+    expect(pending[0].operations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          targetId: updateTargetId,
+          blockedByLock: false,
+          isStale: true,
+        }),
+        expect.objectContaining({
+          targetId: deleteTargetId,
+          blockedByLock: false,
+          isStale: true,
+        }),
+      ]),
+    );
   });
 });

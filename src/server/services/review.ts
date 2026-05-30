@@ -513,13 +513,14 @@ async function refreshPendingOperationFlags(
           continue;
         }
 
-        const flags = await evaluateEntityOperationFlags(
+        const operationInput = {
+          op: operation.op,
+          targetId: operation.targetId ?? undefined,
+          patch: effectiveOperationPatch(operation),
+        };
+        const flags = await evaluatePendingOperationFlagsForRefresh(
           tx,
-          {
-            op: operation.op,
-            targetId: operation.targetId ?? undefined,
-            patch: effectiveOperationPatch(operation),
-          },
+          operationInput,
           campaignId,
           baseVersions,
         );
@@ -530,6 +531,22 @@ async function refreshPendingOperationFlags(
       }
     }
   });
+}
+
+async function evaluatePendingOperationFlagsForRefresh(
+  tx: Prisma.TransactionClient,
+  operation: EntityReviewOperationInput,
+  campaignId: string,
+  baseVersions: Record<string, number>,
+) {
+  try {
+    return await evaluateEntityOperationFlags(tx, operation, campaignId, baseVersions);
+  } catch (error) {
+    if (error instanceof ServiceError && error.message === "Entity not found.") {
+      return { blockedByLock: false, isStale: true };
+    }
+    throw error;
+  }
 }
 
 export async function rejectChangeSet(
