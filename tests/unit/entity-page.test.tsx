@@ -6,12 +6,16 @@ const {
   requireUser,
   getCampaignForUser,
   getEntityForUser,
+  listEntitiesForUser,
+  listConnectionsForEntity,
   getEntityProvenance,
   notFound,
 } = vi.hoisted(() => ({
   requireUser: vi.fn(),
   getCampaignForUser: vi.fn(),
   getEntityForUser: vi.fn(),
+  listEntitiesForUser: vi.fn(),
+  listConnectionsForEntity: vi.fn(),
   getEntityProvenance: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
@@ -20,8 +24,17 @@ const {
 
 vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/campaigns", () => ({ getCampaignForUser }));
-vi.mock("@/server/services/entities", () => ({ getEntityForUser }));
+vi.mock("@/server/services/entities", () => ({
+  getEntityForUser,
+  listEntitiesForUser,
+}));
+vi.mock("@/server/services/relationships", () => ({ listConnectionsForEntity }));
 vi.mock("@/server/services/review", () => ({ getEntityProvenance }));
+vi.mock("@/components/entities/connections-panel", () => ({
+  ConnectionsPanel: ({ connections }: { connections: unknown[] }) => (
+    <div>Connections panel ({connections.length})</div>
+  ),
+}));
 vi.mock("@/app/(dm)/actions", () => ({
   toggleEntityLockAction: vi.fn(),
   toggleEntityFieldLockAction: vi.fn(),
@@ -73,6 +86,8 @@ beforeEach(() => {
     _count: { members: 1, entities: 1 },
   });
   getEntityProvenance.mockResolvedValue(crawlerProvenance);
+  listEntitiesForUser.mockResolvedValue({ entities: [], role: "OWNER" });
+  listConnectionsForEntity.mockResolvedValue([]);
 });
 
 afterEach(cleanup);
@@ -146,8 +161,9 @@ describe("EntityPage", () => {
     expect(screen.queryByText("Edit form Carl")).toBeNull();
     // lock button should be present in read-only mode
     expect(screen.getByRole("button", { name: "Lock" })).toBeDefined();
-    // planned panels for M3 data
-    expect(screen.getAllByText(/Planned · M3/).length).toBe(2);
+    // connections panel renders (relationships graph); timeline still planned
+    expect(screen.getByText("Connections panel (0)")).toBeDefined();
+    expect(screen.getAllByText(/Planned · M3/).length).toBe(1);
   });
 
   it("shows the edit form when ?edit is present", async () => {

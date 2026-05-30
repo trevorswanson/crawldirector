@@ -7,6 +7,10 @@ import {
   toggleEntityLockAction,
 } from "@/app/(dm)/actions";
 import {
+  ConnectionsPanel,
+  type ConnectionCandidate,
+} from "@/components/entities/connections-panel";
+import {
   ArchiveEntityForm,
   EditEntityForm,
   EditFormProvider,
@@ -23,7 +27,12 @@ import { cn } from "@/lib/utils";
 import { visibilityValues } from "@/lib/validation";
 import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
-import { getEntityForUser, type EntityDetail } from "@/server/services/entities";
+import {
+  getEntityForUser,
+  listEntitiesForUser,
+  type EntityDetail,
+} from "@/server/services/entities";
+import { listConnectionsForEntity } from "@/server/services/relationships";
 import { getEntityProvenance } from "@/server/services/review";
 
 export default async function EntityPage({
@@ -43,7 +52,18 @@ export default async function EntityPage({
 
   if (!campaign || !entity) notFound();
 
-  const provenance = await getEntityProvenance(user.id, id, entityId);
+  const [provenance, connections, candidateList] = await Promise.all([
+    getEntityProvenance(user.id, id, entityId),
+    listConnectionsForEntity(user.id, id, entityId),
+    listEntitiesForUser(user.id, id),
+  ]);
+  const candidates: ConnectionCandidate[] = candidateList.entities
+    .filter((candidate) => candidate.id !== entityId)
+    .map((candidate) => ({
+      id: candidate.id,
+      name: candidate.name,
+      type: candidate.type,
+    }));
   const fields = entityFields(entity);
   const detailHref = `/campaigns/${id}/entities/${entityId}`;
 
@@ -283,15 +303,14 @@ export default async function EntityPage({
           </div>
         </div>
 
-        {/* connections — relationships land in M3 */}
+        {/* connections — typed, any-to-any relationship edges */}
         <div className="border-b border-[var(--line)] px-[18px] py-4">
-          <Kicker dim noLead className="mb-3">
-            Connections
-          </Kicker>
-          <PlannedNote milestone="M3">
-            Typed relationships to other entities (any-to-any) appear here once
-            the graph lands.
-          </PlannedNote>
+          <ConnectionsPanel
+            campaignId={id}
+            entityId={entityId}
+            connections={connections}
+            candidates={candidates}
+          />
         </div>
 
         {/* provenance */}

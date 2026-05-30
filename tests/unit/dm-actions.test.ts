@@ -15,6 +15,8 @@ const {
   setChangeOperationDecision,
   supersedeChangeSet,
   setEntityLock,
+  createRelationship,
+  archiveRelationship,
   signOut,
   redirect,
   revalidatePath,
@@ -33,6 +35,8 @@ const {
   setChangeOperationDecision: vi.fn(),
   supersedeChangeSet: vi.fn(),
   setEntityLock: vi.fn(),
+  createRelationship: vi.fn(),
+  archiveRelationship: vi.fn(),
   signOut: vi.fn(),
   redirect: vi.fn(() => {
     throw new Error("NEXT_REDIRECT");
@@ -58,6 +62,10 @@ vi.mock("@/server/services/review", () => ({
   supersedeChangeSet,
   setEntityLock,
 }));
+vi.mock("@/server/services/relationships", () => ({
+  createRelationship,
+  archiveRelationship,
+}));
 vi.mock("@/server/auth", () => ({ signOut }));
 vi.mock("next/navigation", () => ({ redirect }));
 vi.mock("next/cache", () => ({ revalidatePath }));
@@ -76,6 +84,8 @@ import {
   supersedeChangeSetAction,
   toggleEntityFieldLockAction,
   toggleEntityLockAction,
+  createRelationshipAction,
+  archiveRelationshipAction,
   signOutAction,
   updateEntityAction,
 } from "@/app/(dm)/actions";
@@ -552,5 +562,76 @@ describe("toggleEntityFieldLockAction", () => {
     await toggleEntityFieldLockAction("c1", "missing", fieldForm("name"));
 
     expect(setEntityLock).not.toHaveBeenCalled();
+  });
+});
+
+describe("createRelationshipAction", () => {
+  it("returns a validation error when no target is selected", async () => {
+    const result = await createRelationshipAction(
+      "c1",
+      "e1",
+      undefined,
+      form({ type: "ALLY_OF", targetId: "" }),
+    );
+
+    expect(result?.error).toBeTruthy();
+    expect(createRelationship).not.toHaveBeenCalled();
+  });
+
+  it("creates the edge and revalidates both entity pages", async () => {
+    createRelationship.mockResolvedValue({ id: "r1" });
+
+    const result = await createRelationshipAction(
+      "c1",
+      "e1",
+      undefined,
+      form({ type: "ALLY_OF", targetId: "e2", secret: "true" }),
+    );
+
+    expect(result).toBeUndefined();
+    expect(createRelationship).toHaveBeenCalledWith("u1", "c1", "e1", {
+      type: "ALLY_OF",
+      targetId: "e2",
+      disposition: undefined,
+      notes: undefined,
+      secret: true,
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
+  });
+
+  it("surfaces a ServiceError message", async () => {
+    createRelationship.mockRejectedValue(new ServiceError("This relationship is locked."));
+
+    const result = await createRelationshipAction(
+      "c1",
+      "e1",
+      undefined,
+      form({ type: "ALLY_OF", targetId: "e2" }),
+    );
+
+    expect(result?.error).toBe("This relationship is locked.");
+  });
+
+  it("hides unexpected errors behind a generic message", async () => {
+    createRelationship.mockRejectedValue(new Error("boom"));
+
+    const result = await createRelationshipAction(
+      "c1",
+      "e1",
+      undefined,
+      form({ type: "ALLY_OF", targetId: "e2" }),
+    );
+
+    expect(result?.error).toMatch(/Could not add the connection/);
+  });
+});
+
+describe("archiveRelationshipAction", () => {
+  it("archives the edge and revalidates the source entity page", async () => {
+    await archiveRelationshipAction("c1", "e1", "r1");
+
+    expect(archiveRelationship).toHaveBeenCalledWith("u1", "c1", "r1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
   });
 });

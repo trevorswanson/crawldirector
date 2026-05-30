@@ -4,6 +4,52 @@ Running checklist of milestones/tasks, newest first. See
 [`11-roadmap.md`](./11-roadmap.md) for the full plan and
 [`12-working-sessions.md`](./12-working-sessions.md) for how to pick up work.
 
+## M3 — Relationships & events graph 🚧 (in progress)
+
+**Goal:** model the connective tissue and causality.
+**Done when:** a DM can link any entity to any other, build crawler→party→guild
+membership, log events with participants, and traverse cause→effect chains;
+relationships/events are reviewable + lockable.
+
+### Done — slice 1: relationships through the pipeline + Connections panel (2026-05-30)
+
+- [x] Added the M3 `Relationship` model + `RelationshipType` enum (any-to-any:
+      both endpoints FK to the generic `Entity`), `Entity.outEdges`/`inEdges`,
+      a `Provenance.relationship` relation, and migration
+      `20260530225126_m3_relationships`. Relationships carry `source`, `status`,
+      `locked`, `version`, `disposition`, `notes`, and a `secret` (DM-only) flag.
+- [x] Extended the review service with relationship operations:
+      `applyAutoApprovedRelationshipChangeSet` routes `CREATE_RELATIONSHIP` /
+      `DELETE_RELATIONSHIP` through the pipeline as auto-approved DM change sets,
+      validating both endpoints are live canon, writing relationship provenance
+      rows, and blocking deletes of locked edges. (Pending/AI relationship review
+      + edge locking/editing UI land in later slices.)
+- [x] Added the `relationships` service (`createRelationship`,
+      `listConnectionsForEntity`, `archiveRelationship`). Connections list is
+      visibility-scoped: players never see secret edges or edges whose other
+      endpoint they can't see; soft-archive retains history.
+- [x] Added `createRelationshipAction` / `archiveRelationshipAction` and the
+      `createRelationshipSchema` Zod schema (any-to-any: every type valid; UI
+      offers defaults, never hard rules).
+- [x] Replaced the entity-detail "Connections · Planned M3" stub with a real
+      `ConnectionsPanel`: lists outgoing/incoming edges (direction arrow, type
+      label, secret marker, link to the other entity), an add-connection form
+      (type + target picker + DM-only toggle), and a per-edge remove control.
+- [x] Added DB-backed service coverage (create+provenance, bidirectional list,
+      player visibility scoping, soft-archive, non-DM denial, self/missing-target
+      validation, non-member), plus component, action, and schema tests. Verified
+      in-browser: add edge → shows on both ends → remove → gone. lint, typecheck,
+      build, and coverage green.
+
+### Notes / follow-ups (M3)
+
+- Next slices: events + participants + causality; relationship locking/editing
+      and pending (AI/import) relationship proposals in the Review Queue; the
+      campaign-wide relationship graph view; group hierarchy (crawler→party→guild)
+      rollup view; knowledge/reveal grants for fog of war.
+- The connections add form lists current campaign entities as targets; at scale
+      this should become a typeahead/search (revisit with M5 search).
+
 ## M2 — Review pipeline ✅ (complete)
 
 **Goal:** all canon mutations flow through proposals; locking + provenance work.

@@ -4,6 +4,7 @@ import {
   createCampaignSchema,
   createCrawlerSchema,
   createGenericEntitySchema,
+  createRelationshipSchema,
   lockFieldSchema,
   signInSchema,
   signUpSchema,
@@ -210,5 +211,58 @@ describe("lockFieldSchema", () => {
 
   it("rejects an unknown field", () => {
     expect(lockFieldSchema.safeParse("bogus").success).toBe(false);
+  });
+});
+
+describe("createRelationshipSchema", () => {
+  it("parses a full edge and coerces secret + disposition", () => {
+    const parsed = createRelationshipSchema.parse({
+      type: "ALLY_OF",
+      targetId: "e2",
+      disposition: "75",
+      notes: "trusted",
+      secret: "on",
+    });
+    expect(parsed.type).toBe("ALLY_OF");
+    expect(parsed.targetId).toBe("e2");
+    expect(parsed.disposition).toBe(75);
+    expect(parsed.notes).toBe("trusted");
+    expect(parsed.secret).toBe(true);
+  });
+
+  it("defaults secret to false and leaves disposition undefined when blank", () => {
+    const parsed = createRelationshipSchema.parse({
+      type: "RIVAL_OF",
+      targetId: "e3",
+      disposition: "",
+      notes: "",
+    });
+    expect(parsed.secret).toBe(false);
+    expect(parsed.disposition).toBeUndefined();
+  });
+
+  it("requires a target entity", () => {
+    const result = createRelationshipSchema.safeParse({
+      type: "ALLY_OF",
+      targetId: "",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an out-of-range disposition", () => {
+    const result = createRelationshipSchema.safeParse({
+      type: "ALLY_OF",
+      targetId: "e2",
+      disposition: "500",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an unknown relationship type", () => {
+    const result = createRelationshipSchema.safeParse({
+      type: "NOT_A_TYPE",
+      targetId: "e2",
+    });
+    expect(result.success).toBe(false);
   });
 });

@@ -223,6 +223,69 @@ export const lockableFields = [
 // A single lockable field key, validated where a per-field lock toggle posts it.
 export const lockFieldSchema = z.enum(lockableFields);
 
+// Typed relationship edges (docs/01-domain-model.md). Any-to-any: the type is a
+// semantic label, not a structural constraint, so every value is valid between
+// any two entities. UI surfaces sensible defaults/warnings, never hard rules.
+export const relationshipTypeValues = [
+  "MEMBER_OF",
+  "LEADS",
+  "SPONSORS",
+  "EMPLOYS",
+  "ALLIED_WITH",
+  "RIVAL_OF",
+  "AT_WAR_WITH",
+  "PARENT_ORG_OF",
+  "USED_BY",
+  "MANIPULATES",
+  "CONTROLS",
+  "DEFIES",
+  "ALLY_OF",
+  "ENEMY_OF",
+  "MENTOR_OF",
+  "MANAGES",
+  "LOVES",
+  "FAMILY_OF",
+  "OWES",
+  "LOCATED_ON",
+  "PART_OF",
+  "CONTAINS",
+  "BOSS_OF",
+  "SPAWNS_ON",
+  "HAS_CLASS",
+  "HAS_SPECIES",
+  "OWNS_ITEM",
+  "KNOWS_SKILL",
+  "EARNED_ACHIEVEMENT",
+  "HOLDS_TITLE",
+  "APPEARS_ON",
+  "KNOWS_ABOUT",
+  "BETRAYED",
+  "KILLED",
+  "SAVED",
+] as const;
+
+// disposition: optional signed strength (-100..100). Empty/absent => null.
+const optionalDisposition = z.preprocess(
+  (value) => (value === "" || value === null || value === undefined ? undefined : value),
+  z.coerce
+    .number()
+    .int("Disposition must be a whole number.")
+    .min(-100, "Disposition must be between -100 and 100.")
+    .max(100, "Disposition must be between -100 and 100.")
+    .optional(),
+);
+
+export const createRelationshipSchema = z.object({
+  type: z.enum(relationshipTypeValues),
+  targetId: z.string().trim().min(1, "Pick an entity to connect to."),
+  disposition: optionalDisposition,
+  notes: optionalText(500),
+  secret: z
+    .preprocess((value) => value === true || value === "true" || value === "on", z.boolean())
+    .default(false),
+});
+export type CreateRelationshipInput = z.infer<typeof createRelationshipSchema>;
+
 export const changeOperationDecisionSchema = z.enum([
   "PENDING",
   "ACCEPTED",

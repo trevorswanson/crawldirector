@@ -95,6 +95,47 @@ enum OpDecision {
   REJECTED
 }
 
+// Typed, any-to-any relationship edges (docs/01-domain-model.md). The type is a
+// semantic label, never a structural constraint — both endpoints FK to the
+// generic Entity, so any type can relate to any other.
+enum RelationshipType {
+  MEMBER_OF
+  LEADS
+  SPONSORS
+  EMPLOYS
+  ALLIED_WITH
+  RIVAL_OF
+  AT_WAR_WITH
+  PARENT_ORG_OF
+  USED_BY
+  MANIPULATES
+  CONTROLS
+  DEFIES
+  ALLY_OF
+  ENEMY_OF
+  MENTOR_OF
+  MANAGES
+  LOVES
+  FAMILY_OF
+  OWES
+  LOCATED_ON
+  PART_OF
+  CONTAINS
+  BOSS_OF
+  SPAWNS_ON
+  HAS_CLASS
+  HAS_SPECIES
+  OWNS_ITEM
+  KNOWS_SKILL
+  EARNED_ACHIEVEMENT
+  HOLDS_TITLE
+  APPEARS_ON
+  KNOWS_ABOUT
+  BETRAYED
+  KILLED
+  SAVED
+}
+
 // ───────────── Identity & Auth.js adapter ─────────────
 model User {
   id            String    @id @default(cuid())
@@ -171,6 +212,7 @@ model Campaign {
 
   members  Membership[]
   entities Entity[]
+  relationships Relationship[]
   changeSets ChangeSet[]
   provenance Provenance[]
   auditLogs  AuditLog[]
@@ -220,6 +262,8 @@ model Entity {
   createdById String?
   createdBy   User?    @relation("CreatedEntities", fields: [createdById], references: [id], onDelete: SetNull)
   crawler     Crawler?
+  outEdges    Relationship[] @relation("SourceEntity")
+  inEdges     Relationship[] @relation("TargetEntity")
   provenance  Provenance[]
 
   createdAt DateTime @default(now())
@@ -247,6 +291,39 @@ model Crawler {
   killCount     Int     @default(0)
   isAlive       Boolean @default(true)
   currentFloor  Int?
+}
+
+// ───────────── Relationships (typed, any-to-any edges) ─────────────
+// Both endpoints FK to the generic Entity. Reviewable + lockable like any canon
+// (docs/03-review-pipeline.md): writes route through the review service, which
+// records provenance. Soft-archived (status ARCHIVED), never hard-deleted.
+model Relationship {
+  id          String           @id @default(cuid())
+  campaignId  String
+  type        RelationshipType
+  sourceId    String
+  targetId    String
+  disposition Int?
+  attributes  Json             @default("{}")
+  notes       String?
+  secret      Boolean          @default(false)
+  source      ChangeSource     @default(DM)
+  status      CanonStatus      @default(CANON)
+  locked      Boolean          @default(false)
+  version     Int              @default(1)
+
+  campaign       Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  sourceEntity   Entity   @relation("SourceEntity", fields: [sourceId], references: [id], onDelete: Cascade)
+  targetEntity   Entity   @relation("TargetEntity", fields: [targetId], references: [id], onDelete: Cascade)
+  provenance     Provenance[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([campaignId, sourceId])
+  @@index([campaignId, targetId])
+  @@index([campaignId, type])
+  @@index([campaignId, status])
 }
 
 // ───────────── Review pipeline ─────────────
@@ -315,14 +392,16 @@ model Provenance {
   promptId          String?
   runId             String?
 
-  campaign  Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  entity    Entity?   @relation(fields: [entityId], references: [id], onDelete: Cascade)
-  changeSet ChangeSet @relation(fields: [changeSetId], references: [id], onDelete: Cascade)
-  actor     User?     @relation("ActorProvenance", fields: [actorUserId], references: [id], onDelete: SetNull)
+  campaign     Campaign      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  entity       Entity?       @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  relationship Relationship? @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
+  changeSet    ChangeSet     @relation(fields: [changeSetId], references: [id], onDelete: Cascade)
+  actor        User?         @relation("ActorProvenance", fields: [actorUserId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
 
   @@index([entityId])
+  @@index([relationshipId])
   @@index([changeSetId])
 }
 
