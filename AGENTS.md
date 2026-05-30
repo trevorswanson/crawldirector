@@ -180,7 +180,7 @@ grows.
 - **Develop on the designated feature branch** for this work (see the task /
   branch instructions). Create it locally if needed.
 - Commit in coherent, descriptive chunks. Push with `git push -u origin <branch>`.
-- **Do not open a pull request unless explicitly asked.**
+- If a full, coherent slice of a milestone has been completed, open a PR.
 - Never force-push shared branches, skip hooks, or run destructive git commands
   without explicit instruction.
 
