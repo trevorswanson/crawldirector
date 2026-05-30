@@ -10,6 +10,37 @@ Running checklist of milestones/tasks, newest first. See
 **Done when:** every canon change has provenance; locked fields can't be
 overwritten; a DM can review/approve/reject a proposal end to end.
 
+### Done — campaign canon integrity meter in sidebar (2026-05-30)
+
+- [x] Implemented campaign canon integrity calculation in the campaign service (`getCampaignCanonIntegrity`), which analyzes all populated fields on active entities and crawlers, matches them against field-level and whole-entity locks, checks the latest field-level provenance, and classifies them into `DM`, `AI`, `PLAYER`, and `LOCKED`.
+- [x] Used the Largest Remainder Method (Hamilton method) to calculate integer percentages that sum to exactly 100% without rounding bias.
+- [x] Implemented the `getCampaignCanonIntegrityAction` server action to expose the calculation safely to client components.
+- [x] Integrated the integrity meter at the bottom of the `DmNav` console sidebar. It displays a segmented horizontal bar using semantic theme color variables (`var(--ink-dim)`, `var(--ai)`, `var(--player)`, and `var(--sys)`) along with a clean, monospace breakdown text (e.g. `64% DM · 22% AI-origin · 14% locked`).
+- [x] Fetched and updated the meter dynamically on mount, when changing active campaigns, or on page navigation.
+- [x] Added comprehensive unit tests in `tests/unit/campaigns.test.ts` covering access control, empty campaigns, mixed classifications, fallback to entity source, and largest remainder rounding.
+- [x] Updated rendering tests in `tests/unit/console-shell.test.tsx` to assert that the integrity meter displays the correct breakdown when a campaign is active.
+
+### Done — navbar brand glyph & header user menu settings (2026-05-29)
+
+- [x] Implemented the `.brand-glyph` style in `src/app/globals.css` mimicking the yellow post-it folded-corner design from the mockup.
+- [x] Restyled the navbar brand logos in `src/app/(dm)/layout.tsx` and `src/app/(auth)/layout.tsx` to use the new `.brand-glyph` style.
+- [x] Replaced the top-right header controls (FX toggle, raw email text, static initials, and Sign Out button) in the DM console layout with a single initials button.
+- [x] Implemented the interactive `UserMenu` client component (`src/components/console/user-menu.tsx`) which shows a settings popup menu upon clicking the initials.
+- [x] Rendered the user's name in bold, their email, a separator, a tactile "Enable UI Effects" toggle switch, a disabled planned "Account Settings" option, and a "Sign Out" button inside the user settings menu.
+- [x] Made the settings menu lose focus (close) when clicking outside or blurring out, while keeping it open when interacting with the UI effects toggle switch.
+- [x] Added unit tests for the `UserMenu` component at `tests/unit/user-menu.test.tsx` to achieve full test verification and branch coverage.
+
+### Done — slice 4: editable Review Queue field values (2026-05-29)
+
+- [x] Added a Review Queue edit path that saves `EDITED` operation decisions
+      with an `editedPatch` from the queue UI.
+- [x] Added per-field apply checkboxes so a DM can omit proposed fields while
+      editing the values that should be committed.
+- [x] Rendered existing edited patches back into the queue so saved field
+      decisions are visible before approval.
+- [x] Added action and page regression coverage for string, array, number, and
+      boolean edited field values.
+
 ### Done — slice 3: operation decisions in Review Queue (2026-05-29)
 
 - [x] Added `setChangeOperationDecision` in the review service so pending
@@ -155,9 +186,9 @@ The detail page had drifted from [`screen-world.jsx`](./design/mockup/screen-wor
 - Per-field **AI markers** and the connections/timeline panels are stubbed as
       "Planned · M3/M4" — no fake data — and light up when that data exists.
 - Remaining before M2 is complete: per-operation / per-field accept-edit-reject
-      UI refinements in the Review Queue (especially editing field values),
-      `supersede` for replaced/stale proposals, relationship/event operations
-      (land with M3), and batch review actions.
+      UI refinements in the Review Queue, `supersede` for replaced/stale
+      proposals, relationship/event operations (land with M3), and batch review
+      actions.
 - Local verification used the existing Postgres database. That database already
       contained an older local review-pipeline migration, so the new migration
       was marked applied after non-destructive local schema alignment; a fresh CI

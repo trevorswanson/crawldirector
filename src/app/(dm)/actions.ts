@@ -13,6 +13,7 @@ import {
   createGenericEntitySchema,
   changeOperationDecisionSchema,
   lockFieldSchema,
+  reviewEditValueKindSchema,
   updateEntitySchema,
 } from "@/lib/validation";
 import {
@@ -27,6 +28,7 @@ import {
   rejectChangeSet,
   setChangeOperationDecision,
   setEntityLock,
+  type ReviewPatch,
 } from "@/server/services/review";
 
 export type CampaignActionState = { error?: string } | undefined;
@@ -324,6 +326,23 @@ export async function setChangeOperationDecisionAction(
   revalidatePath(`/campaigns/${campaignId}/review`);
 }
 
+export async function editChangeOperationPatchAction(
+  campaignId: string,
+  changeSetId: string,
+  operationId: string,
+  formData: FormData,
+): Promise<void> {
+  const user = await requireUser();
+  const editedPatch = parseReviewEditedPatch(formData);
+  if (!editedPatch) return;
+
+  await setChangeOperationDecision(user.id, campaignId, changeSetId, operationId, {
+    decision: "EDITED",
+    editedPatch,
+  });
+  revalidatePath(`/campaigns/${campaignId}/review`);
+}
+
 export async function rejectChangeSetAction(
   campaignId: string,
   changeSetId: string,
@@ -332,3 +351,62 @@ export async function rejectChangeSetAction(
   await rejectChangeSet(user.id, campaignId, changeSetId);
   revalidatePath(`/campaigns/${campaignId}/review`);
 }
+
+function parseReviewEditedPatch(formData: FormData): ReviewPatch | null {
+  const fields = formData
+    .getAll("field")
+    .map((field) => (typeof field === "string" ? field.trim() : ""))
+    .filter(Boolean);
+  const uniqueFields = Array.from(new Set(fields));
+  const editedPatch: ReviewPatch = {};
+
+  for (const field of uniqueFields) {
+    if (formData.get(`apply:${field}`) !== "on") continue;
+
+    const kind = reviewEditValueKindSchema.safeParse(formData.get(`kind:${field}`));
+    const rawValue = formData.get(`value:${field}`);
+    if (!kind.success || typeof rawValue !== "string") return null;
+
+    const parsed = parseReviewEditedValue(kind.data, rawValue);
+    if (parsed === undefined) return null;
+    editedPatch[field] = { to: parsed };
+  }
+
+  return Object.keys(editedPatch).length > 0 ? editedPatch : null;
+}
+
+function parseReviewEditedValue(
+  kind: "array" | "boolean" | "json" | "number" | "string",
+  rawValue: string,
+) {
+  switch (kind) {
+    case "array":
+      return rawValue
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+    case "boolean":
+      return rawValue === "true";
+    case "json":
+      try {
+        return JSON.parse(rawValue);
+      } catch {
+        return undefined;
+      }
+    case "number": {
+      const trimmed = rawValue.trim();
+      if (trimmed === "") return undefined;
+      const value = Number(trimmed);
+      return Number.isFinite(value) ? value : undefined;
+    }
+    case "string":
+      return rawValue;
+  }
+}
+
+export async function getCampaignCanonIntegrityAction(campaignId: string) {
+  const user = await requireUser();
+  const { getCampaignCanonIntegrity } = await import("@/server/services/campaigns");
+  return getCampaignCanonIntegrity(user.id, campaignId);
+}
+

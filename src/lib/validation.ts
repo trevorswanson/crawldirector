@@ -229,3 +229,11 @@ export const changeOperationDecisionSchema = z.enum([
   "EDITED",
   "REJECTED",
 ]);
+
+export const reviewEditValueKindSchema = z.enum([
+  "array",
+  "boolean",
+  "json",
+  "number",
+  "string",
+]);

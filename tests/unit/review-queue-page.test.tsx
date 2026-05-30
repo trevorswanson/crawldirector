@@ -8,6 +8,7 @@ const {
   listPendingChangeSetsForUser,
   notFound,
   approveChangeSetAction,
+  editChangeOperationPatchAction,
   rejectChangeSetAction,
   setChangeOperationDecisionAction,
 } = vi.hoisted(() => ({
@@ -18,6 +19,7 @@ const {
     throw new Error("NEXT_NOT_FOUND");
   }),
   approveChangeSetAction: vi.fn(),
+  editChangeOperationPatchAction: vi.fn(),
   rejectChangeSetAction: vi.fn(),
   setChangeOperationDecisionAction: vi.fn(),
 }));
@@ -27,6 +29,7 @@ vi.mock("@/server/services/campaigns", () => ({ getCampaignForUser }));
 vi.mock("@/server/services/review", () => ({ listPendingChangeSetsForUser }));
 vi.mock("@/app/(dm)/actions", () => ({
   approveChangeSetAction,
+  editChangeOperationPatchAction,
   rejectChangeSetAction,
   setChangeOperationDecisionAction,
 }));
@@ -95,6 +98,13 @@ describe("ReviewQueuePage", () => {
               _baseVersion: { to: 1 },
               summary: { from: "Old", to: "New" },
               tags: { from: [], to: ["admin"] },
+              description: {
+                from: "",
+                to: "A very long edited proposal value that should render in a textarea for the DM to tune before approval.",
+              },
+              data: { from: {}, to: { threat: "high" } },
+              "crawler.level": { from: 1, to: 7 },
+              "crawler.isAlive": { from: true, to: false },
             },
             editedPatch: null,
             decision: "PENDING",
@@ -105,7 +115,7 @@ describe("ReviewQueuePage", () => {
       },
     ]);
 
-    render(await ReviewQueuePage({ params: Promise.resolve({ id: "c1" }) }));
+    const view = render(await ReviewQueuePage({ params: Promise.resolve({ id: "c1" }) }));
 
     expect(screen.getByText("Propose Zev update")).toBeDefined();
     expect(screen.getByText("Adds a better admin summary.")).toBeDefined();
@@ -116,10 +126,86 @@ describe("ReviewQueuePage", () => {
     expect(screen.getByText("summary")).toBeDefined();
     expect(screen.getByText("Old")).toBeDefined();
     expect(screen.getByText("New")).toBeDefined();
+    expect(screen.getByRole("checkbox", { name: "Apply summary" })).toBeDefined();
+    expect(screen.getByDisplayValue("New")).toBeDefined();
+    expect(screen.getByDisplayValue("admin")).toBeDefined();
+    expect(screen.getByDisplayValue(/very long edited proposal value/)).toBeDefined();
+    expect(
+      view.container.querySelector<HTMLTextAreaElement>('textarea[name="value:data"]')
+        ?.value,
+    ).toContain('"threat": "high"');
+    expect(screen.getByDisplayValue("7")).toBeDefined();
+    expect(screen.getByDisplayValue("false")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Save edits" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Accept op" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Reject op" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Approve" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Reject" })).toBeDefined();
+  });
+
+  it("renders saved edited patch values as the editable queue state", async () => {
+    listPendingChangeSetsForUser.mockResolvedValue([
+      {
+        id: "cs1",
+        campaignId: "c1",
+        source: "AI",
+        title: "Trim blocked fields",
+        summary: "",
+        status: "PENDING",
+        actorUserId: "u1",
+        providerId: null,
+        model: null,
+        promptId: null,
+        promptVersion: null,
+        runId: null,
+        baseVersions: {},
+        reviewedById: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        operations: [
+          {
+            id: "op1",
+            changeSetId: "cs1",
+            op: "UPDATE_ENTITY",
+            targetType: "ENTITY",
+            targetId: "entity-123456",
+            patch: {
+              _baseVersion: { to: 1 },
+              name: { from: "Locked", to: "AI name" },
+              summary: { from: "", to: "AI summary" },
+            },
+            editedPatch: {
+              summary: { to: "DM summary" },
+            },
+            decision: "EDITED",
+            blockedByLock: false,
+            isStale: false,
+          },
+        ],
+      },
+    ]);
+
+    render(await ReviewQueuePage({ params: Promise.resolve({ id: "c1" }) }));
+
+    expect(screen.getByText("EDITED")).toBeDefined();
+    expect(
+      (screen.getByRole("checkbox", { name: "Apply name" }) as HTMLInputElement)
+        .checked,
+    ).toBe(false);
+    expect(
+      (screen.getByRole("checkbox", { name: "Apply summary" }) as HTMLInputElement)
+        .checked,
+    ).toBe(true);
+    expect(screen.getByDisplayValue("DM summary")).toBeDefined();
+
+    // An EDITED op is already accepted-for-approval, so its accept button is
+    // disabled to avoid resetting the decision and discarding the edited patch.
+    const acceptButton = screen.getByRole("button", {
+      name: "Edited",
+    }) as HTMLButtonElement;
+    expect(acceptButton.disabled).toBe(true);
   });
 
   it("calls notFound when the campaign is unavailable", async () => {

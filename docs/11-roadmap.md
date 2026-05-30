@@ -139,12 +139,13 @@ drives the generation prompts.
 ## M9 — Hardening, deploy & data portability
 **Goal:** make it real and keep the DM's canon safe.
 - Choose host + managed Postgres; production auth/secrets; backups; rate limits;
-  audit/provenance review screens; performance pass on graph/search queries
+  audit/provenance review screens & a unified archive/trash bin (to view and restore
+  soft-deleted entities); performance pass on graph/search queries
   (indexes / materialized views); accessibility + responsive polish.
 - **Export/import:** campaign export to JSON + Markdown (provenance included);
   import as reviewable `IMPORT` change sets.
 - **Done when:** deployed, backed up, exportable; a real campaign can be run by a
-  DM + players.
+  DM + players; DMs can view and restore archived entities.
 
 ## M10 — Shared canon library & event-consequence AI
 **Goal:** leverage and scale.

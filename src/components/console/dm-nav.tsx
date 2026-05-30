@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -13,6 +14,9 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { getCampaignCanonIntegrityAction } from "@/app/(dm)/actions";
+import type { CanonIntegrity } from "@/server/services/campaigns";
+
 
 function campaignIdFromPathname(pathname: string) {
   const match = pathname.match(/^\/campaigns\/([^/]+)/);
@@ -57,6 +61,31 @@ const NAV: NavItem[] = [
 
 export function DmNav() {
   const pathname = usePathname();
+  const campaignId = campaignIdFromPathname(pathname);
+  const [integrity, setIntegrity] = useState<CanonIntegrity | null>(null);
+
+  useEffect(() => {
+    if (!campaignId) {
+      Promise.resolve().then(() => {
+        setIntegrity(null);
+      });
+      return;
+    }
+
+    let active = true;
+    getCampaignCanonIntegrityAction(campaignId)
+      .then((data) => {
+        if (active) setIntegrity(data);
+      })
+      .catch((err) => {
+        console.error("Error loading canon integrity:", err);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [campaignId, pathname]);
+
   const dm = NAV.filter((n) => n.group === "dm");
   const player = NAV.filter((n) => n.group === "player");
 
@@ -73,6 +102,43 @@ export function DmNav() {
           <NavRow key={n.label} item={n} pathname={pathname} />
         ))}
       </div>
+
+      {integrity && (
+        <div className="border-t border-[var(--line)] px-[18px] pt-[14px] pb-1">
+          <p className="kicker dim mb-2 text-[9px] nolead">Canon integrity</p>
+          <div className="mb-[7px] flex gap-[5px] items-center">
+            {[
+              { label: "DM", color: "var(--ink-dim)", weight: integrity.dmPercent },
+              { label: "AI", color: "var(--ai)", weight: integrity.aiPercent },
+              { label: "PLR", color: "var(--player)", weight: integrity.playerPercent },
+              { label: "LCK", color: "var(--sys)", weight: integrity.lockedPercent },
+            ]
+              .filter((item) => item.weight > 0)
+              .map(({ label, color, weight }) => (
+                <div
+                  key={label}
+                  className="opacity-70"
+                  title={`${label}: ${weight}%`}
+                  style={{
+                    flex: weight,
+                    height: "4px",
+                    backgroundColor: color,
+                  }}
+                />
+              ))}
+          </div>
+          <p className="font-mono text-[9px] text-[var(--ink-faint)] leading-none">
+            {[
+              integrity.dmPercent > 0 && `${integrity.dmPercent}% DM`,
+              integrity.aiPercent > 0 && `${integrity.aiPercent}% AI-origin`,
+              integrity.playerPercent > 0 && `${integrity.playerPercent}% Player`,
+              integrity.lockedPercent > 0 && `${integrity.lockedPercent}% locked`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+        </div>
+      )}
     </nav>
   );
 }

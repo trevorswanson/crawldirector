@@ -59,6 +59,7 @@ import {
   createCampaignAction,
   createCrawlerAction,
   createGenericEntityAction,
+  editChangeOperationPatchAction,
   rejectChangeSetAction,
   setChangeOperationDecisionAction,
   toggleEntityFieldLockAction,
@@ -358,6 +359,85 @@ describe("review queue actions", () => {
   it("ignores invalid operation decisions", async () => {
     await setChangeOperationDecisionAction("c1", "cs1", "op1", "EDITED");
     await setChangeOperationDecisionAction("c1", "cs1", "op1", "NOPE");
+
+    expect(setChangeOperationDecision).not.toHaveBeenCalled();
+  });
+
+  it("saves an edited operation patch and revalidates the queue", async () => {
+    const fd = new FormData();
+    fd.append("field", "summary");
+    fd.set("apply:summary", "on");
+    fd.set("kind:summary", "string");
+    fd.set("value:summary", "DM-edited summary");
+    fd.append("field", "tags");
+    fd.set("apply:tags", "on");
+    fd.set("kind:tags", "array");
+    fd.set("value:tags", "admin, crawler");
+    fd.append("field", "crawler.level");
+    fd.set("apply:crawler.level", "on");
+    fd.set("kind:crawler.level", "number");
+    fd.set("value:crawler.level", "12");
+    fd.append("field", "crawler.isAlive");
+    fd.set("apply:crawler.isAlive", "on");
+    fd.set("kind:crawler.isAlive", "boolean");
+    fd.set("value:crawler.isAlive", "false");
+    fd.append("field", "customFields");
+    fd.set("apply:customFields", "on");
+    fd.set("kind:customFields", "json");
+    fd.set("value:customFields", "{\"threat\":\"high\"}");
+    fd.append("field", "description");
+    fd.set("kind:description", "string");
+    fd.set("value:description", "unchecked value");
+
+    await editChangeOperationPatchAction("c1", "cs1", "op1", fd);
+
+    expect(setChangeOperationDecision).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      "cs1",
+      "op1",
+      {
+        decision: "EDITED",
+        editedPatch: {
+          summary: { to: "DM-edited summary" },
+          tags: { to: ["admin", "crawler"] },
+          "crawler.level": { to: 12 },
+          "crawler.isAlive": { to: false },
+          customFields: { to: { threat: "high" } },
+        },
+      },
+    );
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+  });
+
+  it("ignores invalid edited operation patch submissions", async () => {
+    const noneSelected = new FormData();
+    noneSelected.append("field", "summary");
+    noneSelected.set("kind:summary", "string");
+    noneSelected.set("value:summary", "DM-edited summary");
+
+    const badNumber = new FormData();
+    badNumber.append("field", "crawler.level");
+    badNumber.set("apply:crawler.level", "on");
+    badNumber.set("kind:crawler.level", "number");
+    badNumber.set("value:crawler.level", "not a number");
+
+    const emptyNumber = new FormData();
+    emptyNumber.append("field", "crawler.level");
+    emptyNumber.set("apply:crawler.level", "on");
+    emptyNumber.set("kind:crawler.level", "number");
+    emptyNumber.set("value:crawler.level", "  ");
+
+    const badJson = new FormData();
+    badJson.append("field", "customFields");
+    badJson.set("apply:customFields", "on");
+    badJson.set("kind:customFields", "json");
+    badJson.set("value:customFields", "{not json}");
+
+    await editChangeOperationPatchAction("c1", "cs1", "op1", noneSelected);
+    await editChangeOperationPatchAction("c1", "cs1", "op1", badNumber);
+    await editChangeOperationPatchAction("c1", "cs1", "op1", emptyNumber);
+    await editChangeOperationPatchAction("c1", "cs1", "op1", badJson);
 
     expect(setChangeOperationDecision).not.toHaveBeenCalled();
   });
