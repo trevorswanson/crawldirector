@@ -84,12 +84,13 @@ export async function createRelationship(
     throw new ServiceError("A relationship needs two different entities.");
   }
 
-  // Both endpoints must be live canon in this campaign.
+  // Both endpoints must be live canon in this campaign (not draft/pending/
+  // rejected/archived) — an edge never references unapproved content.
   const endpoints = await prisma.entity.findMany({
     where: {
       campaignId,
       id: { in: [sourceId, parsed.targetId] },
-      status: { not: CanonStatus.ARCHIVED },
+      status: CanonStatus.CANON,
     },
     select: { id: true },
   });

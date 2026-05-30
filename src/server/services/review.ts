@@ -1421,8 +1421,10 @@ async function assertCanonEntity(
   campaignId: string,
   entityId: string,
 ) {
+  // Relationship endpoints must be live canon — not draft/pending/rejected/
+  // archived — so an edge never references unapproved content.
   const entity = await tx.entity.findFirst({
-    where: { id: entityId, campaignId, status: { not: CanonStatus.ARCHIVED } },
+    where: { id: entityId, campaignId, status: CanonStatus.CANON },
     select: { id: true },
   });
   if (!entity) throw new ServiceError("Entity not found.");

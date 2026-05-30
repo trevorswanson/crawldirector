@@ -189,6 +189,30 @@ describe("relationship service", () => {
     ).rejects.toThrow(/Entity not found/);
   });
 
+  it("rejects an endpoint that is not live canon", async () => {
+    const owner = await makeUser("owner7@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const canon = await makeEntity(owner.id, campaign.id, "Canon");
+    // A non-canon entity row (e.g. draft) must not be a valid endpoint.
+    const pending = await prisma.entity.create({
+      data: {
+        campaignId: campaign.id,
+        type: "NPC",
+        name: "Draft NPC",
+        status: CanonStatus.PENDING,
+      },
+      select: { id: true },
+    });
+
+    await expect(
+      createRelationship(owner.id, campaign.id, canon.id, {
+        type: "ALLY_OF",
+        targetId: pending.id,
+        secret: false,
+      }),
+    ).rejects.toThrow(/Entity not found/);
+  });
+
   it("returns no connections for a non-member", async () => {
     const owner = await makeUser("owner6@test.com");
     const stranger = await makeUser("stranger@test.com");
