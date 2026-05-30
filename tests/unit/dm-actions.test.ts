@@ -422,6 +422,12 @@ describe("review queue actions", () => {
     badNumber.set("kind:crawler.level", "number");
     badNumber.set("value:crawler.level", "not a number");
 
+    const emptyNumber = new FormData();
+    emptyNumber.append("field", "crawler.level");
+    emptyNumber.set("apply:crawler.level", "on");
+    emptyNumber.set("kind:crawler.level", "number");
+    emptyNumber.set("value:crawler.level", "  ");
+
     const badJson = new FormData();
     badJson.append("field", "customFields");
     badJson.set("apply:customFields", "on");
@@ -430,6 +436,7 @@ describe("review queue actions", () => {
 
     await editChangeOperationPatchAction("c1", "cs1", "op1", noneSelected);
     await editChangeOperationPatchAction("c1", "cs1", "op1", badNumber);
+    await editChangeOperationPatchAction("c1", "cs1", "op1", emptyNumber);
     await editChangeOperationPatchAction("c1", "cs1", "op1", badJson);
 
     expect(setChangeOperationDecision).not.toHaveBeenCalled();

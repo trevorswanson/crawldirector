@@ -199,6 +199,13 @@ describe("ReviewQueuePage", () => {
         .checked,
     ).toBe(true);
     expect(screen.getByDisplayValue("DM summary")).toBeDefined();
+
+    // An EDITED op is already accepted-for-approval, so its accept button is
+    // disabled to avoid resetting the decision and discarding the edited patch.
+    const acceptButton = screen.getByRole("button", {
+      name: "Edited",
+    }) as HTMLButtonElement;
+    expect(acceptButton.disabled).toBe(true);
   });
 
   it("calls notFound when the campaign is unavailable", async () => {

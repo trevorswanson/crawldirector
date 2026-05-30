@@ -394,7 +394,9 @@ function parseReviewEditedValue(
         return undefined;
       }
     case "number": {
-      const value = Number(rawValue);
+      const trimmed = rawValue.trim();
+      if (trimmed === "") return undefined;
+      const value = Number(trimmed);
       return Number.isFinite(value) ? value : undefined;
     }
     case "string":

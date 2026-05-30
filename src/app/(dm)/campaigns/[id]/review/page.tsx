@@ -124,15 +124,22 @@ export default async function ReviewQueuePage({
                             "ACCEPTED",
                           )}
                         >
+                          {/* An EDITED op is already applied on approval, so it is
+                              treated as accepted here; disable the button so it can't
+                              reset the decision and discard the DM's edited patch. */}
                           <Button
                             type="submit"
                             size="sm"
+                            disabled={operation.decision === "EDITED"}
                             variant={
-                              operation.decision === "ACCEPTED" ? "ok" : "outline"
+                              operation.decision === "ACCEPTED" ||
+                              operation.decision === "EDITED"
+                                ? "ok"
+                                : "outline"
                             }
                           >
                             <Check aria-hidden size={14} />
-                            Accept op
+                            {operation.decision === "EDITED" ? "Edited" : "Accept op"}
                           </Button>
                         </form>
                         <form
