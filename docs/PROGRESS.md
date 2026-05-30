@@ -10,6 +10,24 @@ Running checklist of milestones/tasks, newest first. See
 **Done when:** every canon change has provenance; locked fields can't be
 overwritten; a DM can review/approve/reject a proposal end to end.
 
+### Done — Review Queue redesign to the console mockup (2026-05-30)
+
+- [x] Rebuilt `/campaigns/[id]/review` as the mockup's two-pane console:
+      source-filtered queue rail on the left, selected proposal workspace on the
+      right, semantic source/status badges, provenance tags, and run-level batch
+      actions.
+- [x] Enriched the review service's pending queue projection with target labels,
+      target entity types, lock state, locked fields, and current canon values so
+      the UI can show locked-field warnings and stale/conflicted proposals
+      without reaching around the service layer.
+- [x] Restyled operation diffs to match the mockup: compact operation headers,
+      red/green before/after rows, per-field apply toggles, inline edit controls,
+      lock warnings, and a three-way stale conflict panel with base/current/
+      proposed values.
+- [x] Added page regression coverage for the source rail, selected detail,
+      generator-run batch controls, edited patches, locked fields, and stale
+      three-way resolution affordances.
+
 ### Done — slice 6: batch review actions for generator runs (2026-05-30)
 
 - [x] Added run-scoped review service actions:

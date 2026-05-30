@@ -33,6 +33,22 @@ export type ChangeOperationDecisionInput =
   | { decision: "PENDING" | "ACCEPTED" | "REJECTED"; editedPatch?: never }
   | { decision: "EDITED"; editedPatch: ReviewPatch };
 
+export type ReviewQueueOperation =
+  Prisma.ChangeOperationGetPayload<object> & {
+    targetLabel: string | null;
+    targetEntityType: string | null;
+    targetLocked: boolean;
+    lockedFields: string[];
+    currentValues: Record<string, unknown>;
+  };
+
+export type ReviewQueueItem = Omit<
+  Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  "operations"
+> & {
+  operations: ReviewQueueOperation[];
+};
+
 const crawlerFields = new Set([
   "crawler.realName",
   "crawler.crawlerNo",
@@ -47,10 +63,6 @@ const crawlerFields = new Set([
   "crawler.isAlive",
   "crawler.currentFloor",
 ]);
-
-export type ReviewQueueItem = Awaited<
-  ReturnType<typeof listPendingChangeSetsForUser>
->[number];
 
 async function getMembership(userId: string, campaignId: string) {
   return prisma.membership.findUnique({
@@ -314,15 +326,104 @@ export async function applyAutoApprovedEntityChangeSet(
 export async function listPendingChangeSetsForUser(
   userId: string,
   campaignId: string,
-) {
+): Promise<ReviewQueueItem[]> {
   await assertCampaignDm(userId, campaignId);
   await refreshPendingOperationFlags(campaignId);
 
-  return prisma.changeSet.findMany({
+  const changeSets = await prisma.changeSet.findMany({
     where: { campaignId, status: ChangeSetStatus.PENDING },
     orderBy: { createdAt: "asc" },
     include: { operations: { orderBy: { id: "asc" } } },
   });
+
+  return enrichReviewQueueItems(campaignId, changeSets);
+}
+
+async function enrichReviewQueueItems(
+  campaignId: string,
+  changeSets: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>[],
+): Promise<ReviewQueueItem[]> {
+  const targetIds = Array.from(
+    new Set(
+      changeSets.flatMap((changeSet) =>
+        changeSet.operations
+          .map((operation) => operation.targetId)
+          .filter((targetId): targetId is string => Boolean(targetId)),
+      ),
+    ),
+  );
+  const targets = targetIds.length
+    ? await prisma.entity.findMany({
+        where: { campaignId, id: { in: targetIds } },
+        include: { crawler: true },
+      })
+    : [];
+  const targetById = new Map(targets.map((target) => [target.id, target]));
+
+  return changeSets.map((changeSet) => ({
+    ...changeSet,
+    operations: changeSet.operations.map((operation) => {
+      const patch = operation.patch as ReviewPatch;
+      const target =
+        operation.targetId ? targetById.get(operation.targetId) : undefined;
+      const targetEntityType =
+        target?.type ?? stringFromReviewValue(readTo(patch, "type"));
+      const fields = patchFields(patch).filter((field) => field !== "_baseVersion");
+      const currentValues: Record<string, unknown> = {};
+      for (const field of fields) {
+        const current = target ? currentEntityValue(target, field) : undefined;
+        if (current !== undefined) currentValues[field] = current;
+      }
+
+      return {
+        ...operation,
+        targetLabel:
+          target?.name ??
+          stringFromReviewValue(readTo(patch, "name")) ??
+          operation.targetId ??
+          null,
+        targetEntityType,
+        targetLocked: Boolean(target?.locked),
+        lockedFields: target?.lockedFields ?? [],
+        currentValues,
+      };
+    }),
+  }));
+}
+
+function stringFromReviewValue(value: JsonValue | undefined) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function currentEntityValue(
+  entity: Prisma.EntityGetPayload<{ include: { crawler: true } }>,
+  field: string,
+): unknown {
+  switch (field) {
+    case "type":
+      return entity.type;
+    case "name":
+      return entity.name;
+    case "summary":
+      return entity.summary;
+    case "description":
+      return entity.description;
+    case "visibility":
+      return entity.visibility;
+    case "tags":
+      return entity.tags;
+    case "isStub":
+      return entity.isStub;
+    case "data":
+      return entity.data;
+    case "customFields":
+      return entity.customFields;
+  }
+
+  if (!field.startsWith("crawler.") || !entity.crawler) return undefined;
+  const crawlerField = field.replace("crawler.", "") as keyof typeof entity.crawler;
+  const value = entity.crawler[crawlerField];
+  return typeof value === "bigint" ? value.toString() : value;
 }
 
 export async function setChangeOperationDecision(

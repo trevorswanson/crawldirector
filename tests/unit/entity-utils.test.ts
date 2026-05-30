@@ -24,8 +24,12 @@ describe("statusMeta", () => {
   it("maps each canon status to a label and color", () => {
     expect(statusMeta("CANON")).toEqual({ label: "Canon", color: "var(--ok)" });
     expect(statusMeta("PENDING").color).toBe("var(--accent)");
+    expect(statusMeta("STALE")).toEqual({ label: "Stale", color: "var(--hot)" });
     expect(statusMeta("DRAFT").label).toBe("Draft");
+    expect(statusMeta("APPROVED").label).toBe("Approved");
+    expect(statusMeta("PARTIALLY_APPLIED").label).toBe("Partial");
     expect(statusMeta("REJECTED").color).toBe("var(--no)");
+    expect(statusMeta("SUPERSEDED").label).toBe("Superseded");
     expect(statusMeta("ARCHIVED").label).toBe("Archived");
   });
 
