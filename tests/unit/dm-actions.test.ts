@@ -17,6 +17,8 @@ const {
   setEntityLock,
   createRelationship,
   archiveRelationship,
+  createEvent,
+  archiveEvent,
   signOut,
   redirect,
   revalidatePath,
@@ -37,6 +39,8 @@ const {
   setEntityLock: vi.fn(),
   createRelationship: vi.fn(),
   archiveRelationship: vi.fn(),
+  createEvent: vi.fn(),
+  archiveEvent: vi.fn(),
   signOut: vi.fn(),
   redirect: vi.fn(() => {
     throw new Error("NEXT_REDIRECT");
@@ -66,6 +70,10 @@ vi.mock("@/server/services/relationships", () => ({
   createRelationship,
   archiveRelationship,
 }));
+vi.mock("@/server/services/events", () => ({
+  createEvent,
+  archiveEvent,
+}));
 vi.mock("@/server/auth", () => ({ signOut }));
 vi.mock("next/navigation", () => ({ redirect }));
 vi.mock("next/cache", () => ({ revalidatePath }));
@@ -86,6 +94,8 @@ import {
   toggleEntityLockAction,
   createRelationshipAction,
   archiveRelationshipAction,
+  createEventAction,
+  archiveEventAction,
   signOutAction,
   updateEntityAction,
 } from "@/app/(dm)/actions";
@@ -632,6 +642,107 @@ describe("archiveRelationshipAction", () => {
     await archiveRelationshipAction("c1", "e1", "r1");
 
     expect(archiveRelationship).toHaveBeenCalledWith("u1", "c1", "r1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+  });
+});
+
+describe("createEventAction", () => {
+  it("returns a validation error when the title is empty", async () => {
+    const result = await createEventAction(
+      "c1",
+      "e1",
+      undefined,
+      form({ title: "" }),
+    );
+
+    expect(result?.error).toBeTruthy();
+    expect(createEvent).not.toHaveBeenCalled();
+  });
+
+  it("logs the event with the source entity as a participant", async () => {
+    createEvent.mockResolvedValue({ id: "ev1" });
+
+    const result = await createEventAction(
+      "c1",
+      "e1",
+      undefined,
+      form({ title: "Boss fight", floor: "9", timeLabel: "Day 3", secret: "true" }),
+    );
+
+    expect(result).toBeUndefined();
+    expect(createEvent).toHaveBeenCalledWith("u1", "c1", {
+      title: "Boss fight",
+      summary: undefined,
+      floor: 9,
+      timeLabel: "Day 3",
+      secret: true,
+      participants: [{ entityId: "e1", role: "ACTOR" }],
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+  });
+
+  it("includes an optional co-participant and revalidates both pages", async () => {
+    createEvent.mockResolvedValue({ id: "ev1" });
+
+    await createEventAction(
+      "c1",
+      "e1",
+      undefined,
+      form({
+        title: "Brawl",
+        sourceRole: "ACTOR",
+        otherId: "e2",
+        otherRole: "TARGET",
+      }),
+    );
+
+    expect(createEvent).toHaveBeenCalledWith("u1", "c1", {
+      title: "Brawl",
+      summary: undefined,
+      floor: undefined,
+      timeLabel: undefined,
+      secret: false,
+      participants: [
+        { entityId: "e1", role: "ACTOR" },
+        { entityId: "e2", role: "TARGET" },
+      ],
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
+  });
+
+  it("surfaces a ServiceError message", async () => {
+    createEvent.mockRejectedValue(new ServiceError("Participant entity not found."));
+
+    const result = await createEventAction(
+      "c1",
+      "e1",
+      undefined,
+      form({ title: "Ghost event" }),
+    );
+
+    expect(result?.error).toBe("Participant entity not found.");
+  });
+
+  it("hides unexpected errors behind a generic message", async () => {
+    createEvent.mockRejectedValue(new Error("boom"));
+
+    const result = await createEventAction(
+      "c1",
+      "e1",
+      undefined,
+      form({ title: "Boom event" }),
+    );
+
+    expect(result?.error).toMatch(/Could not log the event/);
+  });
+});
+
+describe("archiveEventAction", () => {
+  it("archives the event and revalidates the entity page", async () => {
+    await archiveEventAction("c1", "e1", "ev1");
+
+    expect(archiveEvent).toHaveBeenCalledWith("u1", "c1", "ev1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
   });
 });

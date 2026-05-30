@@ -25,11 +25,13 @@ rejects proposals; and DMs can lock entities/fields (locked targets can't be
 overwritten). Per-field accept/edit/reject and `supersede` (a DM retires a stale
 or replaced proposal) work too. Batch review actions let DMs bulk approve/reject
 pending generator runs while blocked/stale proposals remain held for manual
-review. **M3 has started**: typed any-to-any `Relationship` edges now route
-through the pipeline (auto-approved DM path with provenance), and the entity
-detail page's Connections panel shows real edges with add/remove. Still to come
-in M3: events + causality, the relationship graph view, edge locking/editing and
-pending relationship proposals, group hierarchies, and knowledge/reveal grants.
+review. **M3 is underway**: typed any-to-any `Relationship` edges and
+`Event`s (with participants) both route through the pipeline (auto-approved DM
+path with provenance); the entity detail page's Connections panel shows real
+edges and its Timeline panel shows real events, each with add/remove. Still to
+come in M3: event causality (cause→effect) + effects, the relationship graph
+view + campaign timeline page, edge/event locking/editing and pending
+relationship/event proposals, group hierarchies, and knowledge/reveal grants.
 See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
 ## Start here, every session

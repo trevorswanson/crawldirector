@@ -11,6 +11,43 @@ Running checklist of milestones/tasks, newest first. See
 membership, log events with participants, and traverse cause→effect chains;
 relationships/events are reviewable + lockable.
 
+### Done — slice 2: events + participants through the pipeline + Timeline panel (2026-05-30)
+
+- [x] Added the M3 `Event` + `EventParticipant` models and the
+      `EventParticipantRole` enum (`ACTOR`/`TARGET`/`WITNESS`/`LOCATION`/
+      `AFFECTED`; any-to-any like relationship types), wired
+      `Provenance.event`, `Entity.eventRoles`, and `Campaign.events`, and added
+      migration `20260530232431_m3_events`. Events carry a flexible `inGameTime`
+      JSON (`{ floor?, label? }`) plus an integer `orderKey` the timeline sorts
+      by (DCC time is irregular — no calendar dates), and `secret`, `source`,
+      `status`, `locked`, `version`.
+- [x] Extended the review service with event operations:
+      `applyAutoApprovedEventChangeSet` routes `CREATE_EVENT` / `UPDATE_EVENT`
+      through the pipeline as auto-approved DM change sets, validating every
+      participant is live canon, creating participant rows, writing event
+      provenance, and blocking `UPDATE_EVENT` (archive) on locked events.
+      `UPDATE_EVENT` handles only soft-archive for now; event field-editing
+      lands with the event locking/editing slice alongside its coverage.
+- [x] Added the `events` service (`createEvent`, `listEventsForEntity`,
+      `archiveEvent`). The per-entity timeline is visibility-scoped: players
+      never see secret events or co-participants they can't see; soft-archive
+      retains history (status `ARCHIVED`, version bump, provenance preserved).
+- [x] Added `createEventAction` / `archiveEventAction` and the
+      `createEventSchema` Zod schema (the viewed entity is always a participant;
+      one optional co-participant can be added from the same form — richer
+      multi-participant editing arrives with the campaign timeline view).
+- [x] Replaced the entity-detail "Timeline · Planned M3" stub with a real
+      `TimelinePanel`: lists events the entity is in (role, in-game time, summary,
+      co-participants with links + roles, secret marker), a log-event form (title
+      + summary + floor + time label + this entity's role + optional participant
+      + DM-only toggle), and a per-event remove control.
+- [x] Added DB-backed service coverage (create+provenance, bidirectional
+      timeline, floor ordering, player visibility scoping, participant dedupe,
+      soft-archive, non-member, non-DM denial, non-canon participant, locked-event
+      archive block), plus component, action, and schema tests. Verified
+      in-browser: log event → shows on both participants → remove → soft-archived
+      with history retained. lint, typecheck, build, and coverage green.
+
 ### Done — slice 1: relationships through the pipeline + Connections panel (2026-05-30)
 
 - [x] Added the M3 `Relationship` model + `RelationshipType` enum (any-to-any:
@@ -43,12 +80,17 @@ relationships/events are reviewable + lockable.
 
 ### Notes / follow-ups (M3)
 
-- Next slices: events + participants + causality; relationship locking/editing
-      and pending (AI/import) relationship proposals in the Review Queue; the
-      campaign-wide relationship graph view; group hierarchy (crawler→party→guild)
-      rollup view; knowledge/reveal grants for fog of war.
-- The connections add form lists current campaign entities as targets; at scale
-      this should become a typeahead/search (revisit with M5 search).
+- Next slices: event causality (cause→effect DAG + traversal view) and event
+      effects (structured deltas applied on approval); relationship/event
+      locking/editing and pending (AI/import) relationship/event proposals in the
+      Review Queue; the campaign-wide relationship graph view + a campaign
+      timeline page (with full multi-participant editing); group hierarchy
+      (crawler→party→guild) rollup view; knowledge/reveal grants for fog of war.
+- The connections/timeline add forms list current campaign entities as targets;
+      at scale this should become a typeahead/search (revisit with M5 search).
+- The Timeline panel currently logs events with the viewed entity plus one
+      optional co-participant. The campaign timeline page (a later slice) is the
+      natural home for arbitrary multi-participant editing.
 
 ## M2 — Review pipeline ✅ (complete)
 

@@ -8,6 +8,7 @@ const {
   getEntityForUser,
   listEntitiesForUser,
   listConnectionsForEntity,
+  listEventsForEntity,
   getEntityProvenance,
   notFound,
 } = vi.hoisted(() => ({
@@ -16,6 +17,7 @@ const {
   getEntityForUser: vi.fn(),
   listEntitiesForUser: vi.fn(),
   listConnectionsForEntity: vi.fn(),
+  listEventsForEntity: vi.fn(),
   getEntityProvenance: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
@@ -29,6 +31,7 @@ vi.mock("@/server/services/entities", () => ({
   listEntitiesForUser,
 }));
 vi.mock("@/server/services/relationships", () => ({ listConnectionsForEntity }));
+vi.mock("@/server/services/events", () => ({ listEventsForEntity }));
 vi.mock("@/server/services/review", () => ({ getEntityProvenance }));
 vi.mock("@/components/entities/connections-panel", () => ({
   ConnectionsPanel: ({
@@ -40,6 +43,19 @@ vi.mock("@/components/entities/connections-panel", () => ({
   }) => (
     <div>
       Connections panel ({connections.length}/{candidates.length})
+    </div>
+  ),
+}));
+vi.mock("@/components/entities/timeline-panel", () => ({
+  TimelinePanel: ({
+    events,
+    candidates,
+  }: {
+    events: unknown[];
+    candidates: unknown[];
+  }) => (
+    <div>
+      Timeline panel ({events.length}/{candidates.length})
     </div>
   ),
 }));
@@ -96,6 +112,7 @@ beforeEach(() => {
   getEntityProvenance.mockResolvedValue(crawlerProvenance);
   listEntitiesForUser.mockResolvedValue({ entities: [], role: "OWNER" });
   listConnectionsForEntity.mockResolvedValue([]);
+  listEventsForEntity.mockResolvedValue([]);
 });
 
 afterEach(cleanup);
@@ -178,10 +195,11 @@ describe("EntityPage", () => {
     expect(screen.queryByText("Edit form Carl")).toBeNull();
     // lock button should be present in read-only mode
     expect(screen.getByRole("button", { name: "Lock" })).toBeDefined();
-    // connections panel renders (relationships graph) with the current entity
-    // filtered out of the candidate list; timeline still planned
+    // connections + timeline panels render (relationships & events graph) with
+    // the current entity filtered out of the candidate list
     expect(screen.getByText("Connections panel (0/1)")).toBeDefined();
-    expect(screen.getAllByText(/Planned · M3/).length).toBe(1);
+    expect(screen.getByText("Timeline panel (0/1)")).toBeDefined();
+    expect(screen.queryAllByText(/Planned · M3/).length).toBe(0);
   });
 
   it("shows the edit form when ?edit is present", async () => {
