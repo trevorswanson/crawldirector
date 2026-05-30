@@ -635,8 +635,19 @@ export async function approveChangeSetRun(
       continue;
     }
 
-    await approveChangeSet(userId, campaignId, changeSet.id);
-    approvedIds.push(changeSet.id);
+    try {
+      await approveChangeSet(userId, campaignId, changeSet.id);
+      approvedIds.push(changeSet.id);
+    } catch (error) {
+      if (
+        error instanceof ServiceError &&
+        (error.message.includes("stale") || error.message.includes("lock"))
+      ) {
+        heldIds.push(changeSet.id);
+      } else {
+        throw error;
+      }
+    }
   }
 
   await prisma.auditLog.create({

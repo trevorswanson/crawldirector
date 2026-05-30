@@ -181,6 +181,49 @@ describe("review service - batch run actions", () => {
     ]);
   });
 
+  it("handles newly stale proposals during run approval", async () => {
+    const { dmId, campaignId } = await seed();
+    const entityId = await createEntity(dmId, campaignId, "Conflict NPC");
+    const runId = "generator-run-conflict";
+
+    const first = await pendingRunUpdate(
+      dmId,
+      campaignId,
+      runId,
+      entityId,
+      "First update",
+    );
+    const second = await pendingRunUpdate(
+      dmId,
+      campaignId,
+      runId,
+      entityId,
+      "Second update",
+    );
+
+    const result = await approveChangeSetRun(dmId, campaignId, runId);
+
+    expect(result).toEqual({
+      runId,
+      approvedIds: [first.id],
+      rejectedIds: [],
+      heldIds: [second.id],
+    });
+
+    // The first one should be applied and the version incremented
+    await expect(
+      prisma.entity.findUniqueOrThrow({ where: { id: entityId } }),
+    ).resolves.toMatchObject({ summary: "First update", version: 2 });
+
+    // The second one should still be pending and marked stale in the database
+    const pendingChangeSet = await prisma.changeSet.findUniqueOrThrow({
+      where: { id: second.id },
+      include: { operations: true },
+    });
+    expect(pendingChangeSet.status).toBe("PENDING");
+    expect(pendingChangeSet.operations[0].isStale).toBe(true);
+  });
+
   it("rejects batch actions without a pending run or DM permission", async () => {
     const { dmId, campaignId } = await seed();
     await expect(

@@ -34,7 +34,9 @@ overwritten; a DM can review/approve/reject a proposal end to end.
       `approveChangeSetRun` bulk-approves clean pending change sets in a
       generator run while leaving blocked/stale change sets pending for manual
       review, and `rejectChangeSetRun` rejects every pending change set in a run
-      without touching canon.
+      without touching canon. Fixed run-approval flow to catch newly stale
+      proposals (e.g. from entity version changes caused by earlier approvals in
+      the same batch run) so they are held instead of throwing an unhandled error.
 - [x] Extended pending entity change-set creation to preserve `runId`, so future
       generators/importers can group their proposals into honest Review Queue
       batches.
