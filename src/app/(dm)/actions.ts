@@ -11,11 +11,16 @@ import {
   createCampaignSchema,
   createCrawlerSchema,
   createGenericEntitySchema,
+  createRelationshipSchema,
   changeOperationDecisionSchema,
   lockFieldSchema,
   reviewEditValueKindSchema,
   updateEntitySchema,
 } from "@/lib/validation";
+import {
+  archiveRelationship,
+  createRelationship,
+} from "@/server/services/relationships";
 import {
   archiveEntity,
   createCrawler,
@@ -434,6 +439,48 @@ function parseReviewEditedValue(
     case "string":
       return rawValue;
   }
+}
+
+export type RelationshipActionState = { error?: string } | undefined;
+
+export async function createRelationshipAction(
+  campaignId: string,
+  sourceId: string,
+  _prev: RelationshipActionState,
+  formData: FormData,
+): Promise<RelationshipActionState> {
+  const user = await requireUser();
+  const parsed = createRelationshipSchema.safeParse({
+    type: formData.get("type"),
+    targetId: formData.get("targetId"),
+    disposition: formData.get("disposition"),
+    notes: formData.get("notes"),
+    secret: formData.get("secret"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  try {
+    await createRelationship(user.id, campaignId, sourceId, parsed.data);
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    return { error: "Could not add the connection. Please try again." };
+  }
+
+  revalidatePath(`/campaigns/${campaignId}/entities/${sourceId}`);
+  revalidatePath(`/campaigns/${campaignId}/entities/${parsed.data.targetId}`);
+  return undefined;
+}
+
+export async function archiveRelationshipAction(
+  campaignId: string,
+  entityId: string,
+  relationshipId: string,
+): Promise<void> {
+  const user = await requireUser();
+  await archiveRelationship(user.id, campaignId, relationshipId);
+  revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
 }
 
 export async function getCampaignCanonIntegrityAction(campaignId: string) {

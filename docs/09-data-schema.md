@@ -22,12 +22,14 @@
 - **Review pipeline tables** (`ChangeSet`, `ChangeOperation`, `Provenance`,
   `Lock`, `AuditLog`) are central and referenced by everything mutable.
 
-> **Implementation note (M2):** the committed schema includes the identity/
-> tenancy foundation, `Entity`/`Crawler`, and the first review-pipeline tables.
-> Direct DM/co-DM entity writes still feel instant in the UI, but the service
-> layer now records them as auto-approved `DM` change sets with provenance and
-> audit rows. Pending proposal support currently covers entity operations first;
-> relationship/event operations arrive with their milestones.
+> **Implementation note (M2 → M3):** the committed schema includes the identity/
+> tenancy foundation, `Entity`/`Crawler`, the review-pipeline tables, and (M3
+> slice 1) the any-to-any `Relationship` table. Direct DM/co-DM writes still feel
+> instant in the UI, but the service layer records them as auto-approved `DM`
+> change sets with provenance and audit rows. `CREATE_RELATIONSHIP` /
+> `DELETE_RELATIONSHIP` now flow through the pipeline (auto-approved DM path);
+> pending (AI/import) relationship review, relationship `UPDATE`/locking, and
+> `Event`/causality tables arrive with the rest of M3.
 
 ## Sketch
 

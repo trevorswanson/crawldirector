@@ -14,7 +14,7 @@ pitch and [`docs/`](./docs) for the full plan.
 
 ## Current status
 
-✅ **M0 + M1 + M2 complete; M3 (relationships & events graph) next.** The app is scaffolded
+🚧 **M0 + M1 + M2 complete; M3 (relationships & events graph) in progress.** The app is scaffolded
 and runnable: Next.js 16 (App Router, TS, Tailwind) + Postgres/Prisma 7 +
 Auth.js, with sign-up → create campaign working, and CI (lint, typecheck, build,
 unit, e2e, coverage) plus security/quality gates (CodeQL, dependency review,
@@ -25,8 +25,12 @@ rejects proposals; and DMs can lock entities/fields (locked targets can't be
 overwritten). Per-field accept/edit/reject and `supersede` (a DM retires a stale
 or replaced proposal) work too. Batch review actions let DMs bulk approve/reject
 pending generator runs while blocked/stale proposals remain held for manual
-review. See [`docs/PROGRESS.md`](./docs/PROGRESS.md). Next up is **M3**:
-relationships and events.
+review. **M3 has started**: typed any-to-any `Relationship` edges now route
+through the pipeline (auto-approved DM path with provenance), and the entity
+detail page's Connections panel shows real edges with add/remove. Still to come
+in M3: events + causality, the relationship graph view, edge locking/editing and
+pending relationship proposals, group hierarchies, and knowledge/reveal grants.
+See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
 ## Start here, every session
 

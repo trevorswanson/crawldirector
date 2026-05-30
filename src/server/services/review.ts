@@ -6,6 +6,7 @@ import {
   OpDecision,
   OpKind,
   Prisma,
+  RelationshipType,
   Role,
   Visibility,
 } from "@/generated/prisma/client";
@@ -25,6 +26,12 @@ export type ReviewPatch = Record<
 
 export type EntityReviewOperationInput = {
   op: "CREATE_ENTITY" | "UPDATE_ENTITY" | "DELETE_ENTITY";
+  targetId?: string;
+  patch: ReviewPatch;
+};
+
+export type RelationshipReviewOperationInput = {
+  op: "CREATE_RELATIONSHIP" | "UPDATE_RELATIONSHIP" | "DELETE_RELATIONSHIP";
   targetId?: string;
   patch: ReviewPatch;
 };
@@ -297,6 +304,70 @@ export async function applyAutoApprovedEntityChangeSet(
           targetId,
           decision: OpDecision.ACCEPTED,
         },
+      });
+    }
+
+    await tx.changeSet.update({
+      where: { id: changeSet.id },
+      data: {
+        status: ChangeSetStatus.APPROVED,
+        reviewedById: userId,
+        reviewedAt: new Date(),
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        campaignId,
+        actorUserId: userId,
+        action: "AUTO_APPROVE",
+        targetType: "CHANGE_SET",
+        targetId: changeSet.id,
+        detail: { appliedIds },
+      },
+    });
+
+    return { changeSetId: changeSet.id, targetIds: appliedIds };
+  });
+}
+
+export async function applyAutoApprovedRelationshipChangeSet(
+  userId: string,
+  campaignId: string,
+  input: {
+    title: string;
+    summary?: string;
+    operations: RelationshipReviewOperationInput[];
+  },
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  return prisma.$transaction(async (tx) => {
+    const changeSet = await tx.changeSet.create({
+      data: {
+        campaignId,
+        source: ChangeSource.DM,
+        title: input.title,
+        summary: input.summary,
+        actorUserId: userId,
+        operations: {
+          create: input.operations.map((operation) => ({
+            op: operation.op,
+            targetType: "RELATIONSHIP",
+            targetId: operation.targetId,
+            patch: operation.patch as Prisma.InputJsonValue,
+          })),
+        },
+      },
+      include: { operations: true },
+    });
+
+    const appliedIds: string[] = [];
+    for (const operation of changeSet.operations) {
+      const targetId = await applyRelationshipOperation(tx, changeSet, operation);
+      appliedIds.push(targetId);
+      await tx.changeOperation.update({
+        where: { id: operation.id },
+        data: { targetId, decision: OpDecision.ACCEPTED },
       });
     }
 
@@ -1311,6 +1382,155 @@ async function writeEntityProvenance(
     data: fields.map((field) => ({
       campaignId: changeSet.campaignId,
       entityId,
+      changeSetId: changeSet.id,
+      source: changeSet.source,
+      field,
+      actorUserId: changeSet.actorUserId,
+      providerId: changeSet.providerId,
+      model: changeSet.model,
+      promptId: changeSet.promptId,
+      runId: changeSet.runId,
+    })),
+  });
+}
+
+async function applyRelationshipOperation(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operation: Prisma.ChangeOperationGetPayload<object>,
+  patchOverride?: ReviewPatch,
+) {
+  if (operation.targetType !== "RELATIONSHIP") {
+    throw new ServiceError("Unsupported operation target.");
+  }
+  const patch = patchOverride ?? (operation.patch as ReviewPatch);
+
+  switch (operation.op) {
+    case OpKind.CREATE_RELATIONSHIP:
+      return applyCreateRelationship(tx, changeSet, operation.id, patch);
+    case OpKind.DELETE_RELATIONSHIP:
+      if (!operation.targetId) throw new ServiceError("Missing relationship target.");
+      return applyDeleteRelationship(tx, changeSet, operation.id, operation.targetId);
+    default:
+      throw new ServiceError("Unsupported relationship operation.");
+  }
+}
+
+async function assertCanonEntity(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  entityId: string,
+) {
+  // Relationship endpoints must be live canon — not draft/pending/rejected/
+  // archived — so an edge never references unapproved content.
+  const entity = await tx.entity.findFirst({
+    where: { id: entityId, campaignId, status: CanonStatus.CANON },
+    select: { id: true },
+  });
+  if (!entity) throw new ServiceError("Entity not found.");
+}
+
+async function applyCreateRelationship(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operationId: string,
+  patch: ReviewPatch,
+) {
+  const type = readTo(patch, "type");
+  const sourceId = readTo(patch, "sourceId");
+  const targetId = readTo(patch, "targetId");
+  if (typeof type !== "string") throw new ServiceError("Relationship type is required.");
+  if (typeof sourceId !== "string" || typeof targetId !== "string") {
+    throw new ServiceError("Relationship endpoints are required.");
+  }
+  if (sourceId === targetId) {
+    throw new ServiceError("A relationship needs two different entities.");
+  }
+  await assertCanonEntity(tx, changeSet.campaignId, sourceId);
+  await assertCanonEntity(tx, changeSet.campaignId, targetId);
+
+  const relationship = await tx.relationship.create({
+    data: {
+      campaignId: changeSet.campaignId,
+      type: type as RelationshipType,
+      sourceId,
+      targetId,
+      disposition: optionalNumber(readTo(patch, "disposition")),
+      notes: nullableString(readTo(patch, "notes")),
+      secret: booleanWithDefault(readTo(patch, "secret"), false),
+      source: changeSet.source,
+      status: CanonStatus.CANON,
+    },
+    select: { id: true },
+  });
+
+  await writeRelationshipProvenance(tx, changeSet, relationship.id, patch);
+  await tx.auditLog.create({
+    data: {
+      campaignId: changeSet.campaignId,
+      actorUserId: changeSet.reviewedById ?? changeSet.actorUserId ?? "",
+      action: "APPLY_OPERATION",
+      targetType: "CHANGE_OPERATION",
+      targetId: operationId,
+      detail: { relationshipId: relationship.id, op: OpKind.CREATE_RELATIONSHIP },
+    },
+  });
+  return relationship.id;
+}
+
+async function applyDeleteRelationship(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operationId: string,
+  relationshipId: string,
+) {
+  const relationship = await tx.relationship.findFirst({
+    where: {
+      id: relationshipId,
+      campaignId: changeSet.campaignId,
+      status: { not: CanonStatus.ARCHIVED },
+    },
+    select: { id: true, locked: true },
+  });
+  if (!relationship) throw new ServiceError("Relationship not found.");
+
+  if (relationship.locked) {
+    await tx.changeOperation.update({
+      where: { id: operationId },
+      data: { blockedByLock: true },
+    });
+    throw new ServiceError("This relationship is locked.");
+  }
+
+  await tx.relationship.update({
+    where: { id: relationshipId },
+    data: { status: CanonStatus.ARCHIVED, version: { increment: 1 } },
+    select: { id: true },
+  });
+  await tx.auditLog.create({
+    data: {
+      campaignId: changeSet.campaignId,
+      actorUserId: changeSet.reviewedById ?? changeSet.actorUserId ?? "",
+      action: "APPLY_OPERATION",
+      targetType: "CHANGE_OPERATION",
+      targetId: operationId,
+      detail: { relationshipId, op: OpKind.DELETE_RELATIONSHIP },
+    },
+  });
+  return relationshipId;
+}
+
+async function writeRelationshipProvenance(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  relationshipId: string,
+  patch: ReviewPatch,
+) {
+  const fields = patchFields(patch).filter((field) => field !== "_baseVersion");
+  await tx.provenance.createMany({
+    data: fields.map((field) => ({
+      campaignId: changeSet.campaignId,
+      relationshipId,
       changeSetId: changeSet.id,
       source: changeSet.source,
       field,
