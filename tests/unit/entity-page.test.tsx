@@ -31,8 +31,16 @@ vi.mock("@/server/services/entities", () => ({
 vi.mock("@/server/services/relationships", () => ({ listConnectionsForEntity }));
 vi.mock("@/server/services/review", () => ({ getEntityProvenance }));
 vi.mock("@/components/entities/connections-panel", () => ({
-  ConnectionsPanel: ({ connections }: { connections: unknown[] }) => (
-    <div>Connections panel ({connections.length})</div>
+  ConnectionsPanel: ({
+    connections,
+    candidates,
+  }: {
+    connections: unknown[];
+    candidates: unknown[];
+  }) => (
+    <div>
+      Connections panel ({connections.length}/{candidates.length})
+    </div>
   ),
 }));
 vi.mock("@/app/(dm)/actions", () => ({
@@ -141,6 +149,15 @@ async function renderPage(entityId = "e1", edit?: string) {
 describe("EntityPage", () => {
   it("renders the two-column detail with fields table and provenance", async () => {
     getEntityForUser.mockResolvedValue(crawler());
+    // Candidate list includes the current entity (filtered out) and one other,
+    // so the connection-target candidate mapping is exercised.
+    listEntitiesForUser.mockResolvedValue({
+      entities: [
+        { id: "e1", name: "Carl", type: "CRAWLER" },
+        { id: "e2", name: "Donut", type: "CRAWLER" },
+      ],
+      role: "OWNER",
+    });
 
     await renderPage();
 
@@ -161,8 +178,9 @@ describe("EntityPage", () => {
     expect(screen.queryByText("Edit form Carl")).toBeNull();
     // lock button should be present in read-only mode
     expect(screen.getByRole("button", { name: "Lock" })).toBeDefined();
-    // connections panel renders (relationships graph); timeline still planned
-    expect(screen.getByText("Connections panel (0)")).toBeDefined();
+    // connections panel renders (relationships graph) with the current entity
+    // filtered out of the candidate list; timeline still planned
+    expect(screen.getByText("Connections panel (0/1)")).toBeDefined();
     expect(screen.getAllByText(/Planned · M3/).length).toBe(1);
   });
 
