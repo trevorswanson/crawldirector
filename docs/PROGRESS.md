@@ -4,11 +4,48 @@ Running checklist of milestones/tasks, newest first. See
 [`11-roadmap.md`](./11-roadmap.md) for the full plan and
 [`12-working-sessions.md`](./12-working-sessions.md) for how to pick up work.
 
-## M2 — Review pipeline 🚧 (in progress)
+## M2 — Review pipeline ✅ (complete)
 
 **Goal:** all canon mutations flow through proposals; locking + provenance work.
 **Done when:** every canon change has provenance; locked fields can't be
 overwritten; a DM can review/approve/reject a proposal end to end.
+
+### Done — Review Queue redesign to the console mockup (2026-05-30)
+
+- [x] Rebuilt `/campaigns/[id]/review` as the mockup's two-pane console:
+      source-filtered queue rail on the left, selected proposal workspace on the
+      right, semantic source/status badges, provenance tags, and run-level batch
+      actions.
+- [x] Enriched the review service's pending queue projection with target labels,
+      target entity types, lock state, locked fields, and current canon values so
+      the UI can show locked-field warnings and stale/conflicted proposals
+      without reaching around the service layer.
+- [x] Restyled operation diffs to match the mockup: compact operation headers,
+      red/green before/after rows, per-field apply toggles, inline edit controls,
+      lock warnings, and a three-way stale conflict panel with base/current/
+      proposed values.
+- [x] Added page regression coverage for the source rail, selected detail,
+      generator-run batch controls, edited patches, locked fields, and stale
+      three-way resolution affordances.
+
+### Done — slice 6: batch review actions for generator runs (2026-05-30)
+
+- [x] Added run-scoped review service actions:
+      `approveChangeSetRun` bulk-approves clean pending change sets in a
+      generator run while leaving blocked/stale change sets pending for manual
+      review, and `rejectChangeSetRun` rejects every pending change set in a run
+      without touching canon. Fixed run-approval flow to catch newly stale
+      proposals (e.g. from entity version changes caused by earlier approvals in
+      the same batch run) so they are held instead of throwing an unhandled error.
+- [x] Extended pending entity change-set creation to preserve `runId`, so future
+      generators/importers can group their proposals into honest Review Queue
+      batches.
+- [x] Added server actions and Review Queue run controls. The queue now shows a
+      generator-run summary with proposal/operation counts and **Approve run** /
+      **Reject run** controls when pending proposals share a `runId`.
+- [x] Added DB-backed service coverage for clean-run approval, locked/stale hold
+      behavior, run rejection, missing-run validation, and non-DM denial. Added
+      action and page coverage for the new batch controls.
 
 ### Done — slice 5: supersede stale/replaced proposals (2026-05-30)
 
@@ -207,10 +244,8 @@ The detail page had drifted from [`screen-world.jsx`](./design/mockup/screen-wor
       kept for a future dedicated "new entity" page; their tests still run.
 - Per-field **AI markers** and the connections/timeline panels are stubbed as
       "Planned · M3/M4" — no fake data — and light up when that data exists.
-- Remaining before M2 is complete: per-operation / per-field accept-edit-reject
-      UI refinements in the Review Queue, `supersede` for replaced/stale
-      proposals, relationship/event operations (land with M3), and batch review
-      actions.
+- M2 is complete. Relationship/event operations, connections, and timeline work
+      land with M3.
 - Local verification used the existing Postgres database. That database already
       contained an older local review-pipeline migration, so the new migration
       was marked applied after non-destructive local schema alignment; a fresh CI

@@ -25,7 +25,9 @@ import {
 } from "@/server/services/entities";
 import {
   approveChangeSet,
+  approveChangeSetRun,
   rejectChangeSet,
+  rejectChangeSetRun,
   setChangeOperationDecision,
   setEntityLock,
   supersedeChangeSet,
@@ -311,6 +313,16 @@ export async function approveChangeSetAction(
   revalidatePath(`/campaigns/${campaignId}/review`);
 }
 
+export async function approveChangeSetRunAction(
+  campaignId: string,
+  runId: string,
+): Promise<void> {
+  const user = await requireUser();
+  await approveChangeSetRun(user.id, campaignId, runId);
+  revalidatePath(`/campaigns/${campaignId}`);
+  revalidatePath(`/campaigns/${campaignId}/review`);
+}
+
 export async function setChangeOperationDecisionAction(
   campaignId: string,
   changeSetId: string,
@@ -350,6 +362,15 @@ export async function rejectChangeSetAction(
 ): Promise<void> {
   const user = await requireUser();
   await rejectChangeSet(user.id, campaignId, changeSetId);
+  revalidatePath(`/campaigns/${campaignId}/review`);
+}
+
+export async function rejectChangeSetRunAction(
+  campaignId: string,
+  runId: string,
+): Promise<void> {
+  const user = await requireUser();
+  await rejectChangeSetRun(user.id, campaignId, runId);
   revalidatePath(`/campaigns/${campaignId}/review`);
 }
 
@@ -420,4 +441,3 @@ export async function getCampaignCanonIntegrityAction(campaignId: string) {
   const { getCampaignCanonIntegrity } = await import("@/server/services/campaigns");
   return getCampaignCanonIntegrity(user.id, campaignId);
 }
-

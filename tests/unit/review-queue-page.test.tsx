@@ -8,8 +8,10 @@ const {
   listPendingChangeSetsForUser,
   notFound,
   approveChangeSetAction,
+  approveChangeSetRunAction,
   editChangeOperationPatchAction,
   rejectChangeSetAction,
+  rejectChangeSetRunAction,
   setChangeOperationDecisionAction,
   supersedeChangeSetAction,
 } = vi.hoisted(() => ({
@@ -20,8 +22,10 @@ const {
     throw new Error("NEXT_NOT_FOUND");
   }),
   approveChangeSetAction: vi.fn(),
+  approveChangeSetRunAction: vi.fn(),
   editChangeOperationPatchAction: vi.fn(),
   rejectChangeSetAction: vi.fn(),
+  rejectChangeSetRunAction: vi.fn(),
   setChangeOperationDecisionAction: vi.fn(),
   supersedeChangeSetAction: vi.fn(),
 }));
@@ -31,8 +35,10 @@ vi.mock("@/server/services/campaigns", () => ({ getCampaignForUser }));
 vi.mock("@/server/services/review", () => ({ listPendingChangeSetsForUser }));
 vi.mock("@/app/(dm)/actions", () => ({
   approveChangeSetAction,
+  approveChangeSetRunAction,
   editChangeOperationPatchAction,
   rejectChangeSetAction,
+  rejectChangeSetRunAction,
   setChangeOperationDecisionAction,
   supersedeChangeSetAction,
 }));
@@ -64,8 +70,10 @@ describe("ReviewQueuePage", () => {
   it("renders the empty review queue state", async () => {
     render(await ReviewQueuePage({ params: Promise.resolve({ id: "c1" }) }));
 
-    expect(screen.getByRole("heading", { name: "Review Queue" })).toBeDefined();
-    expect(screen.getByText("No pending proposals")).toBeDefined();
+    expect(screen.getByText("Review Queue")).toBeDefined();
+    expect(
+      screen.getByRole("heading", { name: "No pending proposals" }),
+    ).toBeDefined();
     expect(listPendingChangeSetsForUser).toHaveBeenCalledWith("u1", "c1");
   });
 
@@ -97,6 +105,13 @@ describe("ReviewQueuePage", () => {
             op: "UPDATE_ENTITY",
             targetType: "ENTITY",
             targetId: "entity-123456",
+            targetLabel: "Zev",
+            targetEntityType: "NPC",
+            targetLocked: false,
+            lockedFields: ["crawler.level"],
+            currentValues: {
+              summary: "Current canon summary",
+            },
             patch: {
               _baseVersion: { to: 1 },
               summary: { from: "Old", to: "New" },
@@ -120,15 +135,20 @@ describe("ReviewQueuePage", () => {
 
     const view = render(await ReviewQueuePage({ params: Promise.resolve({ id: "c1" }) }));
 
-    expect(screen.getByText("Propose Zev update")).toBeDefined();
+    expect(
+      screen.getByRole("heading", { name: "Propose Zev update" }),
+    ).toBeDefined();
     expect(screen.getByText("Adds a better admin summary.")).toBeDefined();
-    expect(screen.getByText("Blocked")).toBeDefined();
-    expect(screen.getByText("Stale")).toBeDefined();
-    expect(screen.getByText("Target · entity-1")).toBeDefined();
-    expect(screen.getByText("PENDING")).toBeDefined();
+    expect(screen.getAllByText("Stale").length).toBeGreaterThan(0);
+    expect(screen.getByText("Update")).toBeDefined();
+    expect(screen.getByText("NPC")).toBeDefined();
+    expect(screen.getByText("Zev")).toBeDefined();
+    expect(screen.getByText("Conflict on summary — choose a resolution")).toBeDefined();
+    expect(screen.getByText("Current canon summary")).toBeDefined();
+    expect(screen.getByText("BLOCKED BY LOCK — UNLOCK TARGET TO APPLY")).toBeDefined();
     expect(screen.getByText("summary")).toBeDefined();
-    expect(screen.getByText("Old")).toBeDefined();
-    expect(screen.getByText("New")).toBeDefined();
+    expect(screen.getAllByText("Old").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("New").length).toBeGreaterThan(0);
     expect(screen.getByRole("checkbox", { name: "Apply summary" })).toBeDefined();
     expect(screen.getByDisplayValue("New")).toBeDefined();
     expect(screen.getByDisplayValue("admin")).toBeDefined();
@@ -140,11 +160,307 @@ describe("ReviewQueuePage", () => {
     expect(screen.getByDisplayValue("7")).toBeDefined();
     expect(screen.getByDisplayValue("false")).toBeDefined();
     expect(screen.getByRole("button", { name: "Save edits" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "Accept op" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Accept all" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Reject op" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "Approve" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "Reject" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Approve 0 accepted" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Reject set" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Supersede" })).toBeDefined();
+  });
+
+  it("renders the mockup queue rail with source filters and selected detail", async () => {
+    listPendingChangeSetsForUser.mockResolvedValue([
+      {
+        id: "cs-ai",
+        campaignId: "c1",
+        source: "AI",
+        title: "AI faction proposal",
+        summary: "AI summary",
+        status: "PENDING",
+        actorUserId: "u1",
+        providerId: null,
+        model: "claude-sonnet-4.6",
+        promptId: null,
+        promptVersion: null,
+        runId: "run-ai",
+        baseVersions: {},
+        reviewedById: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        operations: [
+          {
+            id: "op-ai",
+            changeSetId: "cs-ai",
+            op: "CREATE_ENTITY",
+            targetType: "ENTITY",
+            targetId: null,
+            targetLabel: "Grull Trench-Hound",
+            targetEntityType: "MOB_TYPE",
+            targetLocked: false,
+            lockedFields: [],
+            currentValues: {},
+            patch: { name: { to: "Grull Trench-Hound" } },
+            editedPatch: null,
+            decision: "PENDING",
+            blockedByLock: false,
+            isStale: false,
+          },
+        ],
+      },
+      {
+        id: "cs-player",
+        campaignId: "c1",
+        source: "PLAYER_SUGGESTION",
+        title: "Player suggestion — Carl bio update",
+        summary: "Player summary",
+        status: "PENDING",
+        actorUserId: "u2",
+        providerId: null,
+        model: null,
+        promptId: null,
+        promptVersion: null,
+        runId: null,
+        baseVersions: {},
+        reviewedById: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        operations: [],
+      },
+      {
+        id: "cs-import",
+        campaignId: "c1",
+        source: "IMPORT",
+        title: "Import — Canonical Floors 10-12 pack",
+        summary: "Import summary",
+        status: "PENDING",
+        actorUserId: null,
+        providerId: null,
+        model: null,
+        promptId: null,
+        promptVersion: null,
+        runId: null,
+        baseVersions: {},
+        reviewedById: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        operations: [],
+      },
+    ]);
+
+    render(
+      await ReviewQueuePage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({ selected: "cs-player" }),
+      }),
+    );
+
+    expect(
+      screen.getAllByText(
+        (_, element) => element?.textContent === "Review Queue · 3 sets",
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "ALL" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "AI" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "PLAYER" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "IMPORT" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("AI faction proposal").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("Player suggestion — Carl bio update").length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("Import — Canonical Floors 10-12 pack").length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { name: "Player suggestion — Carl bio update" })).toBeDefined();
+    expect(screen.getByText("Player summary")).toBeDefined();
+  });
+
+  it("filters the queue rail by review source", async () => {
+    listPendingChangeSetsForUser.mockResolvedValue([
+      {
+        id: "cs-ai",
+        campaignId: "c1",
+        source: "AI",
+        title: "AI only",
+        summary: "AI summary",
+        status: "PENDING",
+        actorUserId: "u1",
+        providerId: null,
+        model: null,
+        promptId: null,
+        promptVersion: null,
+        runId: null,
+        baseVersions: { entity: 4 },
+        reviewedById: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(Date.now() - 90_000),
+        updatedAt: new Date(),
+        operations: [],
+      },
+      {
+        id: "cs-player",
+        campaignId: "c1",
+        source: "PLAYER_SUGGESTION",
+        title: "Player hidden by AI filter",
+        summary: "Player summary",
+        status: "PENDING",
+        actorUserId: "u2",
+        providerId: null,
+        model: null,
+        promptId: null,
+        promptVersion: null,
+        runId: null,
+        baseVersions: {},
+        reviewedById: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        operations: [],
+      },
+    ]);
+
+    render(
+      await ReviewQueuePage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({ source: "AI", selected: "cs-player" }),
+      }),
+    );
+
+    expect(screen.getByRole("heading", { name: "AI only" })).toBeDefined();
+    expect(screen.getByText("1m ago")).toBeDefined();
+    expect(screen.getByText("base v4")).toBeDefined();
+    expect(screen.queryByText("Player hidden by AI filter")).toBeNull();
+  });
+
+  it("shows an empty filtered state when a source has no proposals", async () => {
+    listPendingChangeSetsForUser.mockResolvedValue([
+      {
+        id: "cs-ai",
+        campaignId: "c1",
+        source: "AI",
+        title: "AI proposal",
+        summary: null,
+        status: "PENDING",
+        actorUserId: "u1",
+        providerId: null,
+        model: null,
+        promptId: null,
+        promptVersion: null,
+        runId: null,
+        baseVersions: {},
+        reviewedById: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(Date.now() - 3 * 60 * 60 * 1000),
+        updatedAt: new Date(),
+        operations: [],
+      },
+    ]);
+
+    render(
+      await ReviewQueuePage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({ source: "IMPORT" }),
+      }),
+    );
+
+    expect(screen.getAllByText("No pending import proposals.").length).toBeGreaterThan(0);
+    expect(screen.getByText("Select a proposal to review.")).toBeDefined();
+    expect(screen.queryByRole("heading", { name: "AI proposal" })).toBeNull();
+  });
+
+  it("renders generator run batch controls for pending run proposals", async () => {
+    listPendingChangeSetsForUser.mockResolvedValue([
+      {
+        id: "cs1",
+        campaignId: "c1",
+        source: "AI",
+        title: "Generate first faction",
+        summary: "",
+        status: "PENDING",
+        actorUserId: "u1",
+        providerId: null,
+        model: null,
+        promptId: null,
+        promptVersion: null,
+        runId: "run-123456",
+        baseVersions: {},
+        reviewedById: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        operations: [
+          {
+            id: "op1",
+            changeSetId: "cs1",
+            op: "CREATE_ENTITY",
+            targetType: "ENTITY",
+            targetId: null,
+            patch: {
+              type: { to: "FACTION" },
+              name: { to: "Skull Empire" },
+            },
+            editedPatch: null,
+            decision: "PENDING",
+            blockedByLock: false,
+            isStale: false,
+          },
+        ],
+      },
+      {
+        id: "cs2",
+        campaignId: "c1",
+        source: "AI",
+        title: "Generate second faction",
+        summary: "",
+        status: "PENDING",
+        actorUserId: "u1",
+        providerId: null,
+        model: null,
+        promptId: null,
+        promptVersion: null,
+        runId: "run-123456",
+        baseVersions: {},
+        reviewedById: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        operations: [
+          {
+            id: "op2",
+            changeSetId: "cs2",
+            op: "CREATE_ENTITY",
+            targetType: "ENTITY",
+            targetId: null,
+            patch: {
+              type: { to: "FACTION" },
+              name: { to: "Bloom Queens" },
+            },
+            editedPatch: null,
+            decision: "PENDING",
+            blockedByLock: false,
+            isStale: false,
+          },
+        ],
+      },
+    ]);
+
+    render(await ReviewQueuePage({ params: Promise.resolve({ id: "c1" }) }));
+
+    expect(screen.getByText("Generator run · run-1234")).toBeDefined();
+    expect(screen.getByText("2 pending proposals")).toBeDefined();
+    expect(
+      screen.getByRole("button", { name: "Accept all non-conflicting" }),
+    ).toBeDefined();
+    expect(screen.getByRole("button", { name: "Reject run" })).toBeDefined();
   });
 
   it("renders saved edited patch values as the editable queue state", async () => {

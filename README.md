@@ -54,12 +54,14 @@ Reality is pending review.
 
 ## Status
 
-🚧 **M1 in progress.** M0 foundation is implemented: the app is scaffolded and
-runnable with auth, campaigns, Prisma/Postgres, CI, and coverage gates. M1 has
-started with the generic Entity core, Crawler satellite, service-layer CRUD, and
-a world browser/detail UI. The app now wears the CrawlDirector "broadcast HUD"
-design language ([`docs/13-design-language.md`](./docs/13-design-language.md)).
-See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
+✅ **M0 + M1 + M2 complete.** The app is scaffolded and runnable with auth,
+campaigns, Prisma/Postgres, CI, and coverage gates. M1 ships the generic Entity
+core, Crawler satellite, service-layer CRUD, and a world browser/detail UI. M2
+routes canon writes through the review pipeline with provenance, locks,
+per-operation decisions, supersede, and batch run approval/rejection. The app
+wears the CrawlDirector "broadcast HUD" design language
+([`docs/13-design-language.md`](./docs/13-design-language.md)). See
+[`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
 ## Where to start
 

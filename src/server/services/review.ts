@@ -33,6 +33,22 @@ export type ChangeOperationDecisionInput =
   | { decision: "PENDING" | "ACCEPTED" | "REJECTED"; editedPatch?: never }
   | { decision: "EDITED"; editedPatch: ReviewPatch };
 
+export type ReviewQueueOperation =
+  Prisma.ChangeOperationGetPayload<object> & {
+    targetLabel: string | null;
+    targetEntityType: string | null;
+    targetLocked: boolean;
+    lockedFields: string[];
+    currentValues: Record<string, unknown>;
+  };
+
+export type ReviewQueueItem = Omit<
+  Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  "operations"
+> & {
+  operations: ReviewQueueOperation[];
+};
+
 const crawlerFields = new Set([
   "crawler.realName",
   "crawler.crawlerNo",
@@ -47,10 +63,6 @@ const crawlerFields = new Set([
   "crawler.isAlive",
   "crawler.currentFloor",
 ]);
-
-export type ReviewQueueItem = Awaited<
-  ReturnType<typeof listPendingChangeSetsForUser>
->[number];
 
 async function getMembership(userId: string, campaignId: string) {
   return prisma.membership.findUnique({
@@ -196,6 +208,7 @@ export async function createPendingEntityChangeSet(
     source?: ChangeSource;
     title: string;
     summary?: string;
+    runId?: string;
     operations: EntityReviewOperationInput[];
   },
 ) {
@@ -222,6 +235,7 @@ export async function createPendingEntityChangeSet(
         source: input.source ?? ChangeSource.DM,
         title: input.title,
         summary: input.summary,
+        runId: input.runId,
         actorUserId: userId,
         baseVersions,
         operations: {
@@ -312,15 +326,104 @@ export async function applyAutoApprovedEntityChangeSet(
 export async function listPendingChangeSetsForUser(
   userId: string,
   campaignId: string,
-) {
+): Promise<ReviewQueueItem[]> {
   await assertCampaignDm(userId, campaignId);
   await refreshPendingOperationFlags(campaignId);
 
-  return prisma.changeSet.findMany({
+  const changeSets = await prisma.changeSet.findMany({
     where: { campaignId, status: ChangeSetStatus.PENDING },
     orderBy: { createdAt: "asc" },
     include: { operations: { orderBy: { id: "asc" } } },
   });
+
+  return enrichReviewQueueItems(campaignId, changeSets);
+}
+
+async function enrichReviewQueueItems(
+  campaignId: string,
+  changeSets: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>[],
+): Promise<ReviewQueueItem[]> {
+  const targetIds = Array.from(
+    new Set(
+      changeSets.flatMap((changeSet) =>
+        changeSet.operations
+          .map((operation) => operation.targetId)
+          .filter((targetId): targetId is string => Boolean(targetId)),
+      ),
+    ),
+  );
+  const targets = targetIds.length
+    ? await prisma.entity.findMany({
+        where: { campaignId, id: { in: targetIds } },
+        include: { crawler: true },
+      })
+    : [];
+  const targetById = new Map(targets.map((target) => [target.id, target]));
+
+  return changeSets.map((changeSet) => ({
+    ...changeSet,
+    operations: changeSet.operations.map((operation) => {
+      const patch = operation.patch as ReviewPatch;
+      const target =
+        operation.targetId ? targetById.get(operation.targetId) : undefined;
+      const targetEntityType =
+        target?.type ?? stringFromReviewValue(readTo(patch, "type"));
+      const fields = patchFields(patch).filter((field) => field !== "_baseVersion");
+      const currentValues: Record<string, unknown> = {};
+      for (const field of fields) {
+        const current = target ? currentEntityValue(target, field) : undefined;
+        if (current !== undefined) currentValues[field] = current;
+      }
+
+      return {
+        ...operation,
+        targetLabel:
+          target?.name ??
+          stringFromReviewValue(readTo(patch, "name")) ??
+          operation.targetId ??
+          null,
+        targetEntityType,
+        targetLocked: Boolean(target?.locked),
+        lockedFields: target?.lockedFields ?? [],
+        currentValues,
+      };
+    }),
+  }));
+}
+
+function stringFromReviewValue(value: JsonValue | undefined) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function currentEntityValue(
+  entity: Prisma.EntityGetPayload<{ include: { crawler: true } }>,
+  field: string,
+): unknown {
+  switch (field) {
+    case "type":
+      return entity.type;
+    case "name":
+      return entity.name;
+    case "summary":
+      return entity.summary;
+    case "description":
+      return entity.description;
+    case "visibility":
+      return entity.visibility;
+    case "tags":
+      return entity.tags;
+    case "isStub":
+      return entity.isStub;
+    case "data":
+      return entity.data;
+    case "customFields":
+      return entity.customFields;
+  }
+
+  if (!field.startsWith("crawler.") || !entity.crawler) return undefined;
+  const crawlerField = field.replace("crawler.", "") as keyof typeof entity.crawler;
+  const value = entity.crawler[crawlerField];
+  return typeof value === "bigint" ? value.toString() : value;
 }
 
 export async function setChangeOperationDecision(
@@ -482,6 +585,90 @@ export async function approveChangeSet(
   });
 }
 
+export type ChangeSetRunReviewResult = {
+  runId: string;
+  approvedIds: string[];
+  rejectedIds: string[];
+  heldIds: string[];
+};
+
+function normalizeRunId(runId: string) {
+  const normalized = runId.trim();
+  if (!normalized) throw new ServiceError("Run id is required.");
+  return normalized;
+}
+
+async function pendingChangeSetsForRun(campaignId: string, runId: string) {
+  return prisma.changeSet.findMany({
+    where: { campaignId, runId, status: ChangeSetStatus.PENDING },
+    orderBy: { createdAt: "asc" },
+    include: { operations: { orderBy: { id: "asc" } } },
+  });
+}
+
+export async function approveChangeSetRun(
+  userId: string,
+  campaignId: string,
+  runId: string,
+): Promise<ChangeSetRunReviewResult> {
+  await assertCampaignDm(userId, campaignId);
+  const normalizedRunId = normalizeRunId(runId);
+  await refreshPendingOperationFlags(campaignId);
+
+  const changeSets = await pendingChangeSetsForRun(campaignId, normalizedRunId);
+  if (changeSets.length === 0) {
+    throw new ServiceError("Pending generator run not found.");
+  }
+
+  const approvedIds: string[] = [];
+  const heldIds: string[] = [];
+
+  for (const changeSet of changeSets) {
+    const applicableOperations = changeSet.operations.filter(
+      (operation) => operation.decision !== OpDecision.REJECTED,
+    );
+    const held = applicableOperations.some(
+      (operation) => operation.blockedByLock || operation.isStale,
+    );
+    if (held) {
+      heldIds.push(changeSet.id);
+      continue;
+    }
+
+    try {
+      await approveChangeSet(userId, campaignId, changeSet.id);
+      approvedIds.push(changeSet.id);
+    } catch (error) {
+      if (
+        error instanceof ServiceError &&
+        (error.message.includes("stale") || error.message.includes("lock"))
+      ) {
+        heldIds.push(changeSet.id);
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      campaignId,
+      actorUserId: userId,
+      action: "BULK_APPROVE_RUN",
+      targetType: "CHANGE_SET_RUN",
+      targetId: normalizedRunId,
+      detail: { approvedIds, heldIds },
+    },
+  });
+
+  return {
+    runId: normalizedRunId,
+    approvedIds,
+    rejectedIds: [],
+    heldIds,
+  };
+}
+
 async function refreshPendingOperationFlags(
   campaignId: string,
   changeSetId?: string,
@@ -588,6 +775,44 @@ export async function rejectChangeSet(
 
     return { id: changeSetId };
   });
+}
+
+export async function rejectChangeSetRun(
+  userId: string,
+  campaignId: string,
+  runId: string,
+): Promise<ChangeSetRunReviewResult> {
+  await assertCampaignDm(userId, campaignId);
+  const normalizedRunId = normalizeRunId(runId);
+
+  const changeSets = await pendingChangeSetsForRun(campaignId, normalizedRunId);
+  if (changeSets.length === 0) {
+    throw new ServiceError("Pending generator run not found.");
+  }
+
+  const rejectedIds: string[] = [];
+  for (const changeSet of changeSets) {
+    await rejectChangeSet(userId, campaignId, changeSet.id);
+    rejectedIds.push(changeSet.id);
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      campaignId,
+      actorUserId: userId,
+      action: "BULK_REJECT_RUN",
+      targetType: "CHANGE_SET_RUN",
+      targetId: normalizedRunId,
+      detail: { rejectedIds },
+    },
+  });
+
+  return {
+    runId: normalizedRunId,
+    approvedIds: [],
+    rejectedIds,
+    heldIds: [],
+  };
 }
 
 /**

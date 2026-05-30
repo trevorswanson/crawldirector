@@ -14,7 +14,7 @@ pitch and [`docs/`](./docs) for the full plan.
 
 ## Current status
 
-🚧 **M0 + M1 complete; M2 (review pipeline) in progress.** The app is scaffolded
+✅ **M0 + M1 + M2 complete; M3 (relationships & events graph) next.** The app is scaffolded
 and runnable: Next.js 16 (App Router, TS, Tailwind) + Postgres/Prisma 7 +
 Auth.js, with sign-up → create campaign working, and CI (lint, typecheck, build,
 unit, e2e, coverage) plus security/quality gates (CodeQL, dependency review,
@@ -23,8 +23,10 @@ browser, and entity detail/edit. M2 so far: all entity writes route through the
 `review` service as change sets with provenance + audit; a Review Queue approves/
 rejects proposals; and DMs can lock entities/fields (locked targets can't be
 overwritten). Per-field accept/edit/reject and `supersede` (a DM retires a stale
-or replaced proposal) now work too. See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
-Next up in **M2**: batch review actions (bulk accept/reject of a generator run).
+or replaced proposal) work too. Batch review actions let DMs bulk approve/reject
+pending generator runs while blocked/stale proposals remain held for manual
+review. See [`docs/PROGRESS.md`](./docs/PROGRESS.md). Next up is **M3**:
+relationships and events.
 
 ## Start here, every session
 
@@ -178,7 +180,7 @@ grows.
 - **Develop on the designated feature branch** for this work (see the task /
   branch instructions). Create it locally if needed.
 - Commit in coherent, descriptive chunks. Push with `git push -u origin <branch>`.
-- **Do not open a pull request unless explicitly asked.**
+- If a full, coherent slice of a milestone has been completed, open a PR.
 - Never force-push shared branches, skip hooks, or run destructive git commands
   without explicit instruction.
 

@@ -37,10 +37,18 @@ export function statusMeta(status: string): StatusMeta {
       return { label: "Canon", color: "var(--ok)" };
     case "PENDING":
       return { label: "Pending", color: "var(--accent)" };
+    case "STALE":
+      return { label: "Stale", color: "var(--hot)" };
     case "DRAFT":
       return { label: "Draft", color: "var(--ink-dim)" };
+    case "APPROVED":
+      return { label: "Approved", color: "var(--ok)" };
+    case "PARTIALLY_APPLIED":
+      return { label: "Partial", color: "var(--ok)" };
     case "REJECTED":
       return { label: "Rejected", color: "var(--no)" };
+    case "SUPERSEDED":
+      return { label: "Superseded", color: "var(--hot)" };
     case "ARCHIVED":
       return { label: "Archived", color: "var(--ink-faint)" };
     default:
