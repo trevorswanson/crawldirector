@@ -18,6 +18,19 @@ vi.mock("next/link", () => ({
     </a>
   ),
 }));
+vi.mock("@/app/(dm)/actions", () => ({
+  getCampaignCanonIntegrityAction: vi.fn().mockResolvedValue({
+    dmPercent: 64,
+    aiPercent: 22,
+    playerPercent: 0,
+    lockedPercent: 14,
+    dmCount: 64,
+    aiCount: 22,
+    playerCount: 0,
+    lockedCount: 14,
+    totalFields: 100,
+  }),
+}));
 
 import { DmNav } from "@/components/console/dm-nav";
 import { CampaignSwitcher } from "@/components/console/campaign-switcher";
@@ -57,6 +70,18 @@ describe("DmNav", () => {
     expect(screen.getByRole("link", { name: /World Browser/ }).getAttribute("href")).toBe(
       "/dashboard",
     );
+  });
+
+  it("renders the canon integrity meter when a campaign is active", async () => {
+    usePathname.mockReturnValue("/campaigns/c1");
+
+    render(<DmNav />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Canon integrity")).toBeDefined();
+    });
+
+    expect(screen.getByText(/64% DM · 22% AI-origin · 14% locked/)).toBeDefined();
   });
 });
 

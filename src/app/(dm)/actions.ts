@@ -401,3 +401,10 @@ function parseReviewEditedValue(
       return rawValue;
   }
 }
+
+export async function getCampaignCanonIntegrityAction(campaignId: string) {
+  const user = await requireUser();
+  const { getCampaignCanonIntegrity } = await import("@/server/services/campaigns");
+  return getCampaignCanonIntegrity(user.id, campaignId);
+}
+
