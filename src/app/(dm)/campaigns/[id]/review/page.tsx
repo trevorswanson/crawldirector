@@ -3,8 +3,10 @@ import { Archive, Check, Save, X } from "lucide-react";
 
 import {
   approveChangeSetAction,
+  approveChangeSetRunAction,
   editChangeOperationPatchAction,
   rejectChangeSetAction,
+  rejectChangeSetRunAction,
   setChangeOperationDecisionAction,
   supersedeChangeSetAction,
 } from "@/app/(dm)/actions";
@@ -27,6 +29,7 @@ import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
 import {
   listPendingChangeSetsForUser,
+  type ReviewQueueItem,
   type ReviewPatch,
 } from "@/server/services/review";
 
@@ -42,6 +45,7 @@ export default async function ReviewQueuePage({
   if (!campaign) notFound();
 
   const changeSets = await listPendingChangeSetsForUser(user.id, id);
+  const runGroups = groupPendingRuns(changeSets);
 
   return (
     <PageContainer>
@@ -70,6 +74,45 @@ export default async function ReviewQueuePage({
         </Card>
       ) : (
         <section className="grid gap-4">
+          {runGroups.map((run) => (
+            <div key={run.runId} className="panel grid gap-3 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="grid gap-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <HudTag>Generator run · {shortRunId(run.runId)}</HudTag>
+                    <HudTag>
+                      {run.proposalCount} pending proposal
+                      {run.proposalCount === 1 ? "" : "s"}
+                    </HudTag>
+                    <HudTag>
+                      {run.operationCount} operation
+                      {run.operationCount === 1 ? "" : "s"}
+                    </HudTag>
+                    {run.blockedCount > 0 && <HudTag>{run.blockedCount} blocked</HudTag>}
+                    {run.staleCount > 0 && <HudTag>{run.staleCount} stale</HudTag>}
+                  </div>
+                  <p className="text-xs text-[var(--ink-faint)]">
+                    Approve applies clean proposals and keeps blocked or stale
+                    ones pending for manual review.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <form action={approveChangeSetRunAction.bind(null, id, run.runId)}>
+                    <Button type="submit" size="sm">
+                      <Check aria-hidden size={14} />
+                      Approve run
+                    </Button>
+                  </form>
+                  <form action={rejectChangeSetRunAction.bind(null, id, run.runId)}>
+                    <Button type="submit" size="sm" variant="outline">
+                      <X aria-hidden size={14} />
+                      Reject run
+                    </Button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          ))}
           {changeSets.map((changeSet) => (
             <Card key={changeSet.id}>
               <CardHeader className="gap-3">
@@ -203,6 +246,47 @@ export default async function ReviewQueuePage({
     </div>
     </PageContainer>
   );
+}
+
+function shortRunId(runId: string) {
+  return runId.length > 8 ? runId.slice(0, 8) : runId;
+}
+
+function groupPendingRuns(changeSets: ReviewQueueItem[]) {
+  const groups = new Map<
+    string,
+    {
+      runId: string;
+      proposalCount: number;
+      operationCount: number;
+      blockedCount: number;
+      staleCount: number;
+    }
+  >();
+
+  for (const changeSet of changeSets) {
+    if (!changeSet.runId) continue;
+    const group =
+      groups.get(changeSet.runId) ??
+      {
+        runId: changeSet.runId,
+        proposalCount: 0,
+        operationCount: 0,
+        blockedCount: 0,
+        staleCount: 0,
+      };
+    group.proposalCount += 1;
+    group.operationCount += changeSet.operations.length;
+    group.blockedCount += changeSet.operations.filter(
+      (operation) => operation.blockedByLock,
+    ).length;
+    group.staleCount += changeSet.operations.filter(
+      (operation) => operation.isStale,
+    ).length;
+    groups.set(changeSet.runId, group);
+  }
+
+  return Array.from(groups.values());
 }
 
 function EditableDiffForm({

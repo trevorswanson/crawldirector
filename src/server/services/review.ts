@@ -196,6 +196,7 @@ export async function createPendingEntityChangeSet(
     source?: ChangeSource;
     title: string;
     summary?: string;
+    runId?: string;
     operations: EntityReviewOperationInput[];
   },
 ) {
@@ -222,6 +223,7 @@ export async function createPendingEntityChangeSet(
         source: input.source ?? ChangeSource.DM,
         title: input.title,
         summary: input.summary,
+        runId: input.runId,
         actorUserId: userId,
         baseVersions,
         operations: {
@@ -482,6 +484,79 @@ export async function approveChangeSet(
   });
 }
 
+export type ChangeSetRunReviewResult = {
+  runId: string;
+  approvedIds: string[];
+  rejectedIds: string[];
+  heldIds: string[];
+};
+
+function normalizeRunId(runId: string) {
+  const normalized = runId.trim();
+  if (!normalized) throw new ServiceError("Run id is required.");
+  return normalized;
+}
+
+async function pendingChangeSetsForRun(campaignId: string, runId: string) {
+  return prisma.changeSet.findMany({
+    where: { campaignId, runId, status: ChangeSetStatus.PENDING },
+    orderBy: { createdAt: "asc" },
+    include: { operations: { orderBy: { id: "asc" } } },
+  });
+}
+
+export async function approveChangeSetRun(
+  userId: string,
+  campaignId: string,
+  runId: string,
+): Promise<ChangeSetRunReviewResult> {
+  await assertCampaignDm(userId, campaignId);
+  const normalizedRunId = normalizeRunId(runId);
+  await refreshPendingOperationFlags(campaignId);
+
+  const changeSets = await pendingChangeSetsForRun(campaignId, normalizedRunId);
+  if (changeSets.length === 0) {
+    throw new ServiceError("Pending generator run not found.");
+  }
+
+  const approvedIds: string[] = [];
+  const heldIds: string[] = [];
+
+  for (const changeSet of changeSets) {
+    const applicableOperations = changeSet.operations.filter(
+      (operation) => operation.decision !== OpDecision.REJECTED,
+    );
+    const held = applicableOperations.some(
+      (operation) => operation.blockedByLock || operation.isStale,
+    );
+    if (held) {
+      heldIds.push(changeSet.id);
+      continue;
+    }
+
+    await approveChangeSet(userId, campaignId, changeSet.id);
+    approvedIds.push(changeSet.id);
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      campaignId,
+      actorUserId: userId,
+      action: "BULK_APPROVE_RUN",
+      targetType: "CHANGE_SET_RUN",
+      targetId: normalizedRunId,
+      detail: { approvedIds, heldIds },
+    },
+  });
+
+  return {
+    runId: normalizedRunId,
+    approvedIds,
+    rejectedIds: [],
+    heldIds,
+  };
+}
+
 async function refreshPendingOperationFlags(
   campaignId: string,
   changeSetId?: string,
@@ -588,6 +663,44 @@ export async function rejectChangeSet(
 
     return { id: changeSetId };
   });
+}
+
+export async function rejectChangeSetRun(
+  userId: string,
+  campaignId: string,
+  runId: string,
+): Promise<ChangeSetRunReviewResult> {
+  await assertCampaignDm(userId, campaignId);
+  const normalizedRunId = normalizeRunId(runId);
+
+  const changeSets = await pendingChangeSetsForRun(campaignId, normalizedRunId);
+  if (changeSets.length === 0) {
+    throw new ServiceError("Pending generator run not found.");
+  }
+
+  const rejectedIds: string[] = [];
+  for (const changeSet of changeSets) {
+    await rejectChangeSet(userId, campaignId, changeSet.id);
+    rejectedIds.push(changeSet.id);
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      campaignId,
+      actorUserId: userId,
+      action: "BULK_REJECT_RUN",
+      targetType: "CHANGE_SET_RUN",
+      targetId: normalizedRunId,
+      detail: { rejectedIds },
+    },
+  });
+
+  return {
+    runId: normalizedRunId,
+    approvedIds: [],
+    rejectedIds,
+    heldIds: [],
+  };
 }
 
 /**

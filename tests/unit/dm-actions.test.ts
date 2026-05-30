@@ -9,7 +9,9 @@ const {
   updateEntity,
   archiveEntity,
   approveChangeSet,
+  approveChangeSetRun,
   rejectChangeSet,
+  rejectChangeSetRun,
   setChangeOperationDecision,
   supersedeChangeSet,
   setEntityLock,
@@ -25,7 +27,9 @@ const {
   updateEntity: vi.fn(),
   archiveEntity: vi.fn(),
   approveChangeSet: vi.fn(),
+  approveChangeSetRun: vi.fn(),
   rejectChangeSet: vi.fn(),
+  rejectChangeSetRun: vi.fn(),
   setChangeOperationDecision: vi.fn(),
   supersedeChangeSet: vi.fn(),
   setEntityLock: vi.fn(),
@@ -47,7 +51,9 @@ vi.mock("@/server/services/entities", () => ({
 }));
 vi.mock("@/server/services/review", () => ({
   approveChangeSet,
+  approveChangeSetRun,
   rejectChangeSet,
+  rejectChangeSetRun,
   setChangeOperationDecision,
   supersedeChangeSet,
   setEntityLock,
@@ -59,11 +65,13 @@ vi.mock("next/cache", () => ({ revalidatePath }));
 import {
   archiveEntityAction,
   approveChangeSetAction,
+  approveChangeSetRunAction,
   createCampaignAction,
   createCrawlerAction,
   createGenericEntityAction,
   editChangeOperationPatchAction,
   rejectChangeSetAction,
+  rejectChangeSetRunAction,
   setChangeOperationDecisionAction,
   supersedeChangeSetAction,
   toggleEntityFieldLockAction,
@@ -340,10 +348,25 @@ describe("review queue actions", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
   });
 
+  it("approves a generator run and revalidates campaign surfaces", async () => {
+    await approveChangeSetRunAction("c1", "run-1");
+
+    expect(approveChangeSetRun).toHaveBeenCalledWith("u1", "c1", "run-1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+  });
+
   it("rejects a change set and revalidates the queue", async () => {
     await rejectChangeSetAction("c1", "cs1");
 
     expect(rejectChangeSet).toHaveBeenCalledWith("u1", "c1", "cs1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+  });
+
+  it("rejects a generator run and revalidates the queue", async () => {
+    await rejectChangeSetRunAction("c1", "run-1");
+
+    expect(rejectChangeSetRun).toHaveBeenCalledWith("u1", "c1", "run-1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
   });
 

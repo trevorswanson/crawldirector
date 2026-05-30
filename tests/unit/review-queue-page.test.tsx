@@ -8,8 +8,10 @@ const {
   listPendingChangeSetsForUser,
   notFound,
   approveChangeSetAction,
+  approveChangeSetRunAction,
   editChangeOperationPatchAction,
   rejectChangeSetAction,
+  rejectChangeSetRunAction,
   setChangeOperationDecisionAction,
   supersedeChangeSetAction,
 } = vi.hoisted(() => ({
@@ -20,8 +22,10 @@ const {
     throw new Error("NEXT_NOT_FOUND");
   }),
   approveChangeSetAction: vi.fn(),
+  approveChangeSetRunAction: vi.fn(),
   editChangeOperationPatchAction: vi.fn(),
   rejectChangeSetAction: vi.fn(),
+  rejectChangeSetRunAction: vi.fn(),
   setChangeOperationDecisionAction: vi.fn(),
   supersedeChangeSetAction: vi.fn(),
 }));
@@ -31,8 +35,10 @@ vi.mock("@/server/services/campaigns", () => ({ getCampaignForUser }));
 vi.mock("@/server/services/review", () => ({ listPendingChangeSetsForUser }));
 vi.mock("@/app/(dm)/actions", () => ({
   approveChangeSetAction,
+  approveChangeSetRunAction,
   editChangeOperationPatchAction,
   rejectChangeSetAction,
+  rejectChangeSetRunAction,
   setChangeOperationDecisionAction,
   supersedeChangeSetAction,
 }));
@@ -145,6 +151,92 @@ describe("ReviewQueuePage", () => {
     expect(screen.getByRole("button", { name: "Approve" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Reject" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Supersede" })).toBeDefined();
+  });
+
+  it("renders generator run batch controls for pending run proposals", async () => {
+    listPendingChangeSetsForUser.mockResolvedValue([
+      {
+        id: "cs1",
+        campaignId: "c1",
+        source: "AI",
+        title: "Generate first faction",
+        summary: "",
+        status: "PENDING",
+        actorUserId: "u1",
+        providerId: null,
+        model: null,
+        promptId: null,
+        promptVersion: null,
+        runId: "run-123456",
+        baseVersions: {},
+        reviewedById: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        operations: [
+          {
+            id: "op1",
+            changeSetId: "cs1",
+            op: "CREATE_ENTITY",
+            targetType: "ENTITY",
+            targetId: null,
+            patch: {
+              type: { to: "FACTION" },
+              name: { to: "Skull Empire" },
+            },
+            editedPatch: null,
+            decision: "PENDING",
+            blockedByLock: false,
+            isStale: false,
+          },
+        ],
+      },
+      {
+        id: "cs2",
+        campaignId: "c1",
+        source: "AI",
+        title: "Generate second faction",
+        summary: "",
+        status: "PENDING",
+        actorUserId: "u1",
+        providerId: null,
+        model: null,
+        promptId: null,
+        promptVersion: null,
+        runId: "run-123456",
+        baseVersions: {},
+        reviewedById: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        operations: [
+          {
+            id: "op2",
+            changeSetId: "cs2",
+            op: "CREATE_ENTITY",
+            targetType: "ENTITY",
+            targetId: null,
+            patch: {
+              type: { to: "FACTION" },
+              name: { to: "Bloom Queens" },
+            },
+            editedPatch: null,
+            decision: "PENDING",
+            blockedByLock: false,
+            isStale: false,
+          },
+        ],
+      },
+    ]);
+
+    render(await ReviewQueuePage({ params: Promise.resolve({ id: "c1" }) }));
+
+    expect(screen.getByText("Generator run · run-1234")).toBeDefined();
+    expect(screen.getByText("2 pending proposals")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Approve run" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Reject run" })).toBeDefined();
   });
 
   it("renders saved edited patch values as the editable queue state", async () => {
