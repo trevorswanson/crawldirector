@@ -10,6 +10,16 @@ Running checklist of milestones/tasks, newest first. See
 **Done when:** every canon change has provenance; locked fields can't be
 overwritten; a DM can review/approve/reject a proposal end to end.
 
+### Done — campaign canon integrity meter in sidebar (2026-05-30)
+
+- [x] Implemented campaign canon integrity calculation in the campaign service (`getCampaignCanonIntegrity`), which analyzes all populated fields on active entities and crawlers, matches them against field-level and whole-entity locks, checks the latest field-level provenance, and classifies them into `DM`, `AI`, `PLAYER`, and `LOCKED`.
+- [x] Used the Largest Remainder Method (Hamilton method) to calculate integer percentages that sum to exactly 100% without rounding bias.
+- [x] Implemented the `getCampaignCanonIntegrityAction` server action to expose the calculation safely to client components.
+- [x] Integrated the integrity meter at the bottom of the `DmNav` console sidebar. It displays a segmented horizontal bar using semantic theme color variables (`var(--ink-dim)`, `var(--ai)`, `var(--player)`, and `var(--sys)`) along with a clean, monospace breakdown text (e.g. `64% DM · 22% AI-origin · 14% locked`).
+- [x] Fetched and updated the meter dynamically on mount, when changing active campaigns, or on page navigation.
+- [x] Added comprehensive unit tests in `tests/unit/campaigns.test.ts` covering access control, empty campaigns, mixed classifications, fallback to entity source, and largest remainder rounding.
+- [x] Updated rendering tests in `tests/unit/console-shell.test.tsx` to assert that the integrity meter displays the correct breakdown when a campaign is active.
+
 ### Done — navbar brand glyph & header user menu settings (2026-05-29)
 
 - [x] Implemented the `.brand-glyph` style in `src/app/globals.css` mimicking the yellow post-it folded-corner design from the mockup.
