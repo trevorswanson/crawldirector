@@ -28,6 +28,7 @@ import {
   rejectChangeSet,
   setChangeOperationDecision,
   setEntityLock,
+  supersedeChangeSet,
   type ReviewPatch,
 } from "@/server/services/review";
 
@@ -349,6 +350,16 @@ export async function rejectChangeSetAction(
 ): Promise<void> {
   const user = await requireUser();
   await rejectChangeSet(user.id, campaignId, changeSetId);
+  revalidatePath(`/campaigns/${campaignId}/review`);
+}
+
+export async function supersedeChangeSetAction(
+  campaignId: string,
+  changeSetId: string,
+): Promise<void> {
+  const user = await requireUser();
+  await supersedeChangeSet(user.id, campaignId, changeSetId);
+  revalidatePath(`/campaigns/${campaignId}`);
   revalidatePath(`/campaigns/${campaignId}/review`);
 }
 

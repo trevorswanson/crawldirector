@@ -314,6 +314,8 @@ export async function listPendingChangeSetsForUser(
   campaignId: string,
 ) {
   await assertCampaignDm(userId, campaignId);
+  await refreshPendingOperationFlags(campaignId);
+
   return prisma.changeSet.findMany({
     where: { campaignId, status: ChangeSetStatus.PENDING },
     orderBy: { createdAt: "asc" },
@@ -482,47 +484,69 @@ export async function approveChangeSet(
 
 async function refreshPendingOperationFlags(
   campaignId: string,
-  changeSetId: string,
+  changeSetId?: string,
 ) {
   await prisma.$transaction(async (tx) => {
-    const changeSet = await tx.changeSet.findFirst({
-      where: { id: changeSetId, campaignId, status: ChangeSetStatus.PENDING },
+    const changeSets = await tx.changeSet.findMany({
+      where: {
+        campaignId,
+        status: ChangeSetStatus.PENDING,
+        ...(changeSetId ? { id: changeSetId } : {}),
+      },
       include: { operations: true },
     });
-    if (!changeSet) return;
 
-    const baseVersions = baseVersionsObject(changeSet.baseVersions);
-    for (const operation of changeSet.operations) {
-      if (operation.decision === OpDecision.REJECTED) {
-        await tx.changeOperation.update({
-          where: { id: operation.id },
-          data: { blockedByLock: false, isStale: false },
-        });
-        continue;
-      }
-      if (
-        operation.targetType !== "ENTITY" ||
-        !isEntityReviewOp(operation.op)
-      ) {
-        continue;
-      }
+    for (const changeSet of changeSets) {
+      const baseVersions = baseVersionsObject(changeSet.baseVersions);
+      for (const operation of changeSet.operations) {
+        if (operation.decision === OpDecision.REJECTED) {
+          await tx.changeOperation.update({
+            where: { id: operation.id },
+            data: { blockedByLock: false, isStale: false },
+          });
+          continue;
+        }
+        if (
+          operation.targetType !== "ENTITY" ||
+          !isEntityReviewOp(operation.op)
+        ) {
+          continue;
+        }
 
-      const flags = await evaluateEntityOperationFlags(
-        tx,
-        {
+        const operationInput = {
           op: operation.op,
           targetId: operation.targetId ?? undefined,
           patch: effectiveOperationPatch(operation),
-        },
-        campaignId,
-        baseVersions,
-      );
-      await tx.changeOperation.update({
-        where: { id: operation.id },
-        data: flags,
-      });
+        };
+        const flags = await evaluatePendingOperationFlagsForRefresh(
+          tx,
+          operationInput,
+          campaignId,
+          baseVersions,
+        );
+        await tx.changeOperation.update({
+          where: { id: operation.id },
+          data: flags,
+        });
+      }
     }
   });
+}
+
+async function evaluatePendingOperationFlagsForRefresh(
+  tx: Prisma.TransactionClient,
+  operation: EntityReviewOperationInput,
+  campaignId: string,
+  baseVersions: Record<string, number>,
+) {
+  try {
+    return await evaluateEntityOperationFlags(tx, operation, campaignId, baseVersions);
+  } catch (error) {
+    if (error instanceof ServiceError && error.message === "Entity not found.") {
+      return { blockedByLock: false, isStale: true };
+    }
+    throw error;
+  }
 }
 
 export async function rejectChangeSet(
@@ -559,6 +583,49 @@ export async function rejectChangeSet(
         targetType: "CHANGE_SET",
         targetId: changeSetId,
         detail: {},
+      },
+    });
+
+    return { id: changeSetId };
+  });
+}
+
+/**
+ * Retire a pending proposal as SUPERSEDED — obsolete or replaced, rather than
+ * judged unwanted (that's reject). The set is retained for history (invariant:
+ * superseded proposals are never hard-deleted); its operations keep whatever
+ * decisions they carried. DM-only.
+ */
+export async function supersedeChangeSet(
+  userId: string,
+  campaignId: string,
+  changeSetId: string,
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  return prisma.$transaction(async (tx) => {
+    const changeSet = await tx.changeSet.findFirst({
+      where: { id: changeSetId, campaignId, status: ChangeSetStatus.PENDING },
+      select: { id: true },
+    });
+    if (!changeSet) throw new ServiceError("Change set not found.");
+
+    await tx.changeSet.update({
+      where: { id: changeSetId },
+      data: {
+        status: ChangeSetStatus.SUPERSEDED,
+        reviewedById: userId,
+        reviewedAt: new Date(),
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        campaignId,
+        actorUserId: userId,
+        action: "SUPERSEDE",
+        targetType: "CHANGE_SET",
+        targetId: changeSetId,
+        detail: { reason: "manual" },
       },
     });
 

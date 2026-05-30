@@ -11,6 +11,7 @@ const {
   approveChangeSet,
   rejectChangeSet,
   setChangeOperationDecision,
+  supersedeChangeSet,
   setEntityLock,
   signOut,
   redirect,
@@ -26,6 +27,7 @@ const {
   approveChangeSet: vi.fn(),
   rejectChangeSet: vi.fn(),
   setChangeOperationDecision: vi.fn(),
+  supersedeChangeSet: vi.fn(),
   setEntityLock: vi.fn(),
   signOut: vi.fn(),
   redirect: vi.fn(() => {
@@ -47,6 +49,7 @@ vi.mock("@/server/services/review", () => ({
   approveChangeSet,
   rejectChangeSet,
   setChangeOperationDecision,
+  supersedeChangeSet,
   setEntityLock,
 }));
 vi.mock("@/server/auth", () => ({ signOut }));
@@ -62,6 +65,7 @@ import {
   editChangeOperationPatchAction,
   rejectChangeSetAction,
   setChangeOperationDecisionAction,
+  supersedeChangeSetAction,
   toggleEntityFieldLockAction,
   toggleEntityLockAction,
   signOutAction,
@@ -340,6 +344,14 @@ describe("review queue actions", () => {
     await rejectChangeSetAction("c1", "cs1");
 
     expect(rejectChangeSet).toHaveBeenCalledWith("u1", "c1", "cs1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+  });
+
+  it("supersedes a change set and revalidates campaign surfaces", async () => {
+    await supersedeChangeSetAction("c1", "cs1");
+
+    expect(supersedeChangeSet).toHaveBeenCalledWith("u1", "c1", "cs1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
   });
 

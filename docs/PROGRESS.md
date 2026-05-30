@@ -10,6 +10,28 @@ Running checklist of milestones/tasks, newest first. See
 **Done when:** every canon change has provenance; locked fields can't be
 overwritten; a DM can review/approve/reject a proposal end to end.
 
+### Done — slice 5: supersede stale/replaced proposals (2026-05-30)
+
+- [x] Added `supersedeChangeSet` to the review service: a DM retires a PENDING
+      proposal as `SUPERSEDED` (obsolete or replaced) instead of rejecting it.
+      The change set and its operations are retained for history (invariant:
+      superseded proposals are never hard-deleted) and a `SUPERSEDE` audit row is
+      written. DM-only.
+- [x] No migration needed: `ChangeSetStatus.SUPERSEDED` already existed and
+      `AuditLog.action` is a free-form string.
+- [x] Added `supersedeChangeSetAction` and a **Supersede** control in the Review
+      Queue, shown on proposals that carry stale operations — which can no longer
+      be approved — so a DM has an honest way to retire them. Stale proposals
+      still stay pending for the DM to resolve; nothing is auto-dismissed.
+- [x] Added DB-backed coverage in `tests/unit/review-supersede.test.ts` (manual
+      supersede retains + audits, drops out of the pending queue, non-DM blocked,
+      not-found, and superseding a proposal that has gone stale under a direct DM
+      edit). Verification: lint, typecheck, build, and coverage green.
+- [ ] Follow-up (not this slice): auto-superseding fully-obsolete proposals when
+      canon changes underneath. Deferred on purpose — the current design keeps
+      stale proposals pending so the DM resolves them (three-way view), per
+      [`03-review-pipeline.md`](./03-review-pipeline.md).
+
 ### Done — campaign canon integrity meter in sidebar (2026-05-30)
 
 - [x] Implemented campaign canon integrity calculation in the campaign service (`getCampaignCanonIntegrity`), which analyzes all populated fields on active entities and crawlers, matches them against field-level and whole-entity locks, checks the latest field-level provenance, and classifies them into `DM`, `AI`, `PLAYER`, and `LOCKED`.

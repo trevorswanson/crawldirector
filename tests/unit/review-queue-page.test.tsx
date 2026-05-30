@@ -11,6 +11,7 @@ const {
   editChangeOperationPatchAction,
   rejectChangeSetAction,
   setChangeOperationDecisionAction,
+  supersedeChangeSetAction,
 } = vi.hoisted(() => ({
   requireUser: vi.fn(),
   getCampaignForUser: vi.fn(),
@@ -22,6 +23,7 @@ const {
   editChangeOperationPatchAction: vi.fn(),
   rejectChangeSetAction: vi.fn(),
   setChangeOperationDecisionAction: vi.fn(),
+  supersedeChangeSetAction: vi.fn(),
 }));
 
 vi.mock("@/server/auth/session", () => ({ requireUser }));
@@ -32,6 +34,7 @@ vi.mock("@/app/(dm)/actions", () => ({
   editChangeOperationPatchAction,
   rejectChangeSetAction,
   setChangeOperationDecisionAction,
+  supersedeChangeSetAction,
 }));
 vi.mock("next/navigation", () => ({ notFound }));
 vi.mock("next/link", () => ({
@@ -141,6 +144,7 @@ describe("ReviewQueuePage", () => {
     expect(screen.getByRole("button", { name: "Reject op" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Approve" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Reject" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Supersede" })).toBeDefined();
   });
 
   it("renders saved edited patch values as the editable queue state", async () => {
