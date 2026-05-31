@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 
 const {
   createEventAction,
@@ -146,6 +152,15 @@ describe("TimelinePanel", () => {
       screen.getByRole("link", { name: "Arena stunt" }).getAttribute("href"),
     ).toBe("/campaigns/c1/entities/e1?event=ev2");
     expect(screen.queryByRole("option", { name: "Arena stunt" })).toBeNull();
+
+    // opening the other end surfaces the downstream "Causes" chain
+    fireEvent.click(screen.getByRole("button", { name: /Arena stunt/ }));
+    expect(screen.getByText("Causes")).toBeDefined();
+    expect(
+      screen
+        .getByRole("link", { name: "Sponsor stock drops" })
+        .getAttribute("href"),
+    ).toBe("/campaigns/c1/entities/e1?event=ev1");
   });
 
   it("opens an event's details on load when initialEventId is set", () => {
@@ -162,6 +177,89 @@ describe("TimelinePanel", () => {
     // details are visible without a click because the deep link targets this event
     expect(screen.getByText("They beat the boss.")).toBeDefined();
     expect(screen.getByRole("button", { name: /Remove event/ })).toBeDefined();
+  });
+
+  it("re-opens the targeted event when the deep link changes", () => {
+    const events = [
+      event({ id: "ev1", title: "First event", summary: "First summary." }),
+      event({ id: "ev2", title: "Second event", summary: "Second summary." }),
+    ];
+    const { rerender } = render(
+      <TimelinePanel
+        campaignId="c1"
+        entityId="e1"
+        events={events}
+        candidates={candidates}
+        initialEventId="ev1"
+      />,
+    );
+    expect(screen.getByText("First summary.")).toBeDefined();
+    expect(screen.queryByText("Second summary.")).toBeNull();
+
+    // a soft navigation to ?event=ev2 re-renders with a new prop
+    rerender(
+      <TimelinePanel
+        campaignId="c1"
+        entityId="e1"
+        events={events}
+        candidates={candidates}
+        initialEventId="ev2"
+      />,
+    );
+    expect(screen.getByText("Second summary.")).toBeDefined();
+    expect(screen.queryByText("First summary.")).toBeNull();
+  });
+
+  it("logs an event and closes the form on success", async () => {
+    createEventAction.mockResolvedValue(undefined);
+    render(
+      <TimelinePanel
+        campaignId="c1"
+        entityId="e1"
+        events={[]}
+        candidates={candidates}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Log event/ }));
+    const titleInput = screen.getByPlaceholderText("What happened?");
+    fireEvent.change(titleInput, { target: { value: "A new event" } });
+    fireEvent.submit(titleInput.closest("form")!);
+
+    await waitFor(() => expect(createEventAction).toHaveBeenCalledTimes(1));
+    expect(createEventAction).toHaveBeenCalledWith(
+      "c1",
+      "e1",
+      undefined,
+      expect.any(FormData),
+    );
+    // the form closes once the action resolves without error
+    await waitFor(() =>
+      expect(screen.queryByPlaceholderText("What happened?")).toBeNull(),
+    );
+  });
+
+  it("keeps the form open and surfaces the error when logging fails", async () => {
+    createEventAction.mockResolvedValue({ error: "Could not log the event." });
+    render(
+      <TimelinePanel
+        campaignId="c1"
+        entityId="e1"
+        events={[]}
+        candidates={candidates}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Log event/ }));
+    const titleInput = screen.getByPlaceholderText("What happened?");
+    fireEvent.change(titleInput, { target: { value: "A new event" } });
+    fireEvent.submit(titleInput.closest("form")!);
+
+    await waitFor(() =>
+      expect(screen.getByText("Could not log the event.")).toBeDefined(),
+    );
+    // the form stays open so the DM can correct and retry
+    expect(screen.getByPlaceholderText("What happened?")).toBeDefined();
   });
 
   it("opens the log form with role selects and a participant picker", () => {
