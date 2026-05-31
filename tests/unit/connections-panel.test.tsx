@@ -2,14 +2,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
-const { createRelationshipAction, archiveRelationshipAction } = vi.hoisted(() => ({
+const {
+  createRelationshipAction,
+  archiveRelationshipAction,
+  toggleRelationshipLockAction,
+} = vi.hoisted(() => ({
   createRelationshipAction: vi.fn(),
   archiveRelationshipAction: vi.fn(),
+  toggleRelationshipLockAction: vi.fn(),
 }));
 
 vi.mock("@/app/(dm)/actions", () => ({
   createRelationshipAction,
   archiveRelationshipAction,
+  toggleRelationshipLockAction,
 }));
 vi.mock("next/link", () => ({
   default: ({ href, children }: { href: string; children: React.ReactNode }) => (
@@ -36,6 +42,7 @@ function connection(overrides: Partial<EntityConnection> = {}): EntityConnection
     disposition: 50,
     notes: null,
     secret: false,
+    locked: false,
     source: "DM",
     other: { id: "e2", name: "Donut", type: "CRAWLER" },
     ...overrides,
@@ -96,6 +103,59 @@ describe("ConnectionsPanel", () => {
     expect(screen.getByText("Donut").closest("a")?.getAttribute("href")).toBe(
       "/campaigns/c1/entities/e2",
     );
+  });
+
+  it("renders connection lock controls with field-lock affordances", () => {
+    const { rerender } = render(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="e1"
+        sourceType="CRAWLER"
+        connections={[connection()]}
+        candidates={candidates}
+      />,
+    );
+
+    const unlockedButton = screen.getByRole("button", { name: "Lock connection" });
+    expect(unlockedButton.className).toContain("border");
+    expect(unlockedButton.style.borderColor).toBe("var(--line)");
+    expect(unlockedButton.style.color).toBe("var(--ink-faint)");
+    expect(unlockedButton.querySelector("svg")?.className.baseVal).toContain(
+      "lucide-lock-open",
+    );
+
+    rerender(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="e1"
+        sourceType="CRAWLER"
+        connections={[connection({ locked: true })]}
+        candidates={candidates}
+      />,
+    );
+
+    const lockedButton = screen.getByRole("button", { name: "Unlock connection" });
+    expect(screen.queryByText("Locked")).toBeNull();
+    expect(lockedButton.style.borderColor).toBe("var(--sys)");
+    expect(lockedButton.style.color).toBe("var(--sys)");
+    expect(lockedButton.querySelector("svg")?.className.baseVal).toContain(
+      "lucide-lock",
+    );
+    expect(screen.queryByRole("button", { name: "Remove connection" })).toBeNull();
+  });
+
+  it("hides destructive remove controls for locked edges", () => {
+    render(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="e1"
+        sourceType="CRAWLER"
+        connections={[connection({ locked: true })]}
+        candidates={candidates}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Remove connection" })).toBeNull();
   });
 
   it("opens the add form, searches a target, then shows ranked types", () => {

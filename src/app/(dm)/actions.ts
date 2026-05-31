@@ -23,12 +23,14 @@ import {
 import {
   archiveRelationship,
   createRelationship,
+  setRelationshipLock,
 } from "@/server/services/relationships";
 import {
   archiveEvent,
   archiveEventCausality,
   createEvent,
   linkEventCause,
+  setEventLock,
 } from "@/server/services/events";
 import {
   archiveEntity,
@@ -510,6 +512,17 @@ export async function archiveRelationshipAction(
   revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
 }
 
+export async function toggleRelationshipLockAction(
+  campaignId: string,
+  entityId: string,
+  relationshipId: string,
+  locked: boolean,
+): Promise<void> {
+  const user = await requireUser();
+  await setRelationshipLock(user.id, campaignId, relationshipId, !locked);
+  revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
+}
+
 export type EventActionState = { error?: string } | undefined;
 export type EventCausalityActionState = { error?: string } | undefined;
 
@@ -577,6 +590,17 @@ export async function archiveEventAction(
   for (const participantId of participantIds) {
     revalidatePath(`/campaigns/${campaignId}/entities/${participantId}`);
   }
+}
+
+export async function toggleEventLockAction(
+  campaignId: string,
+  entityId: string,
+  eventId: string,
+  locked: boolean,
+): Promise<void> {
+  const user = await requireUser();
+  await setEventLock(user.id, campaignId, eventId, !locked);
+  revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
 }
 
 export async function linkEventCauseAction(

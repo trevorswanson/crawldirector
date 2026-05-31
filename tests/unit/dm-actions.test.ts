@@ -18,8 +18,10 @@ const {
   setEntityLock,
   createRelationship,
   archiveRelationship,
+  setRelationshipLock,
   createEvent,
   archiveEvent,
+  setEventLock,
   linkEventCause,
   archiveEventCausality,
   signOut,
@@ -43,8 +45,10 @@ const {
   setEntityLock: vi.fn(),
   createRelationship: vi.fn(),
   archiveRelationship: vi.fn(),
+  setRelationshipLock: vi.fn(),
   createEvent: vi.fn(),
   archiveEvent: vi.fn(),
+  setEventLock: vi.fn(),
   linkEventCause: vi.fn(),
   archiveEventCausality: vi.fn(),
   signOut: vi.fn(),
@@ -78,10 +82,12 @@ vi.mock("@/server/services/review", () => ({
 vi.mock("@/server/services/relationships", () => ({
   createRelationship,
   archiveRelationship,
+  setRelationshipLock,
 }));
 vi.mock("@/server/services/events", () => ({
   createEvent,
   archiveEvent,
+  setEventLock,
   linkEventCause,
   archiveEventCausality,
 }));
@@ -107,8 +113,10 @@ import {
   toggleEntityLockAction,
   createRelationshipAction,
   archiveRelationshipAction,
+  toggleRelationshipLockAction,
   createEventAction,
   archiveEventAction,
+  toggleEventLockAction,
   linkEventCauseAction,
   archiveEventCausalityAction,
   signOutAction,
@@ -766,6 +774,15 @@ describe("archiveRelationshipAction", () => {
   });
 });
 
+describe("toggleRelationshipLockAction", () => {
+  it("toggles the edge lock and revalidates the current entity page", async () => {
+    await toggleRelationshipLockAction("c1", "e1", "r1", true);
+
+    expect(setRelationshipLock).toHaveBeenCalledWith("u1", "c1", "r1", false);
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+  });
+});
+
 describe("createEventAction", () => {
   it("returns a validation error when the title is empty", async () => {
     const result = await createEventAction(
@@ -876,6 +893,15 @@ describe("archiveEventAction", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e3");
+  });
+});
+
+describe("toggleEventLockAction", () => {
+  it("toggles the event lock and revalidates the current entity page", async () => {
+    await toggleEventLockAction("c1", "e1", "ev1", false);
+
+    expect(setEventLock).toHaveBeenCalledWith("u1", "c1", "ev1", true);
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
   });
 });
 

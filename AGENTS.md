@@ -31,8 +31,8 @@ pipeline (auto-approved DM path with provenance); the entity detail page's
 Connections panel shows real edges, and its Timeline panel shows real events
 plus simple cause/effect traversal and add/remove. Still to come in M3:
 structured event effects, the relationship graph view + campaign timeline page,
-edge/event locking/editing and pending relationship/event proposals, group
-hierarchies, and knowledge/reveal grants.
+edge/event editing and pending relationship/event proposals, group hierarchies,
+and knowledge/reveal grants.
 See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
 ## Start here, every session
