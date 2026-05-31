@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, Eye, EyeOff, Lock, Pencil, Unlock } from "lucide-react";
+import { ChevronLeft, Lock, Pencil, Unlock } from "lucide-react";
 
 import {
   toggleEntityFieldLockAction,
@@ -19,6 +19,7 @@ import {
   EditEntityForm,
   EditFormProvider,
   EditRailControls,
+  VisibilitySidebarControl,
 } from "@/components/entities/entity-forms";
 import { HudTag } from "@/components/ui/hud-tag";
 import { Kicker } from "@/components/ui/kicker";
@@ -26,9 +27,8 @@ import { Markdown } from "@/components/ui/markdown";
 import { SourceBadge } from "@/components/ui/source-badge";
 import { StatusPill } from "@/components/ui/status-pill";
 import { TypeDot } from "@/components/ui/type-dot";
-import { formatEntityType, formatVisibility } from "@/lib/entities";
+import { formatEntityType } from "@/lib/entities";
 import { cn } from "@/lib/utils";
-import { visibilityValues } from "@/lib/validation";
 import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
 import {
@@ -45,10 +45,12 @@ export default async function EntityPage({
   searchParams,
 }: {
   params: Promise<{ id: string; entityId: string }>;
-  searchParams?: Promise<{ edit?: string }>;
+  searchParams?: Promise<{ edit?: string; event?: string }>;
 }) {
   const { id, entityId } = await params;
-  const editing = Boolean((await searchParams)?.edit);
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const editing = Boolean(resolvedSearchParams.edit);
+  const openEventId = resolvedSearchParams.event;
   const user = await requireUser();
   const [campaign, entity] = await Promise.all([
     getCampaignForUser(user.id, id),
@@ -94,7 +96,7 @@ export default async function EntityPage({
   }
 
   return (
-    <EditFormProvider>
+    <EditFormProvider initialVisibility={entity.visibility} isEditing={editing}>
       <div className="grid h-full grid-cols-1 lg:grid-cols-[minmax(0,1fr)_304px]">
       {/* MAIN COLUMN */}
       <div className="order-2 min-w-0 overflow-y-auto lg:order-1">
@@ -286,6 +288,7 @@ export default async function EntityPage({
                   entityId={entityId}
                   events={events}
                   candidates={timelineCandidates}
+                  initialEventId={openEventId}
                 />
               </div>
             </>
@@ -358,32 +361,53 @@ export default async function EntityPage({
             </p>
           )}
 
-          <div className="mt-3 mb-[6px] font-mono text-[10px] uppercase tracking-[.06em] text-[var(--ink-faint)]">
-            Visibility
+          <div className="mt-3 mb-[6px] flex items-center justify-between">
+            <span className="font-mono text-[10px] uppercase tracking-[.06em] text-[var(--ink-faint)]">
+              Visibility
+            </span>
+            <form
+              action={toggleEntityFieldLockAction.bind(
+                null,
+                id,
+                entityId,
+              )}
+            >
+              <input type="hidden" name="field" value="visibility" />
+              <button
+                type="submit"
+                disabled={editing || entity.locked}
+                title={
+                  editing
+                    ? "Finish or discard edits before changing the visibility lock"
+                    : entity.locked
+                    ? "Whole entity is locked"
+                    : entity.lockedFields.includes("visibility")
+                      ? "Visibility is locked — click to unlock"
+                      : "Click to lock visibility"
+                }
+                className="inline-flex items-center border px-[5px] py-[3px] transition-colors disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+                style={{
+                  borderColor: (entity.locked || entity.lockedFields.includes("visibility"))
+                    ? "var(--sys)"
+                    : "var(--line)",
+                  color: (entity.locked || entity.lockedFields.includes("visibility"))
+                    ? "var(--sys)"
+                    : "var(--ink-faint)",
+                }}
+              >
+                {(entity.locked || entity.lockedFields.includes("visibility")) ? (
+                  <Lock aria-hidden size={11} />
+                ) : (
+                  <Unlock aria-hidden size={11} />
+                )}
+              </button>
+            </form>
           </div>
-          <div className="flex flex-col gap-1">
-            {visibilityValues.map((v) => {
-              const active = entity.visibility === v;
-              return (
-                <div
-                  key={v}
-                  className="flex items-center gap-2 text-[11.5px]"
-                  style={{ color: active ? "var(--ink)" : "var(--ink-faint)" }}
-                >
-                  {active ? (
-                    <Eye
-                      aria-hidden
-                      size={13}
-                      style={{ color: "var(--ok)" }}
-                    />
-                  ) : (
-                    <EyeOff aria-hidden size={13} />
-                  )}
-                  {formatVisibility(v).toLowerCase()}
-                </div>
-              );
-            })}
-          </div>
+          <VisibilitySidebarControl
+            initialVisibility={entity.visibility}
+            isEditing={editing}
+            isLocked={entity.locked || entity.lockedFields.includes("visibility")}
+          />
         </div>
 
         {/* connections — typed, any-to-any relationship edges */}
@@ -391,6 +415,7 @@ export default async function EntityPage({
           <ConnectionsPanel
             campaignId={id}
             entityId={entityId}
+            sourceType={entity.type}
             connections={connections}
             candidates={candidates}
           />
@@ -509,11 +534,6 @@ function entityFields(
     );
   }
   rows.push(
-    {
-      key: "visibility",
-      label: "Visibility",
-      value: formatVisibility(entity.visibility),
-    },
     {
       key: "tags",
       label: "Tags",

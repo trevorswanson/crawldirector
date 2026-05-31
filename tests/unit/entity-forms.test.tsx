@@ -43,10 +43,36 @@ import {
   EditFormProvider,
   QuickCreateStub,
   EditRailControls,
+  VisibilitySidebarControl,
+  useEditForm,
 } from "@/components/entities/entity-forms";
 import type { EntityDetail } from "@/server/services/entities";
 
 const noopAction = vi.fn();
+
+function CurrentVisibilityProbe() {
+  const { visibility } = useEditForm();
+  return (
+    <input
+      aria-label="current visibility"
+      readOnly
+      value={visibility ?? ""}
+    />
+  );
+}
+
+function VisibilityHarness({ editing }: { editing: boolean }) {
+  return (
+    <EditFormProvider initialVisibility="PLAYER_FACING" isEditing={editing}>
+      <VisibilitySidebarControl
+        initialVisibility="PLAYER_FACING"
+        isEditing={editing}
+        isLocked={false}
+      />
+      <CurrentVisibilityProbe />
+    </EditFormProvider>
+  );
+}
 
 const crawlerEntity: EntityDetail = {
   id: "e1",
@@ -154,9 +180,15 @@ describe("entity forms", () => {
     const realNameInput = screen.getByLabelText("Real name");
     expect(realNameInput.getAttribute("readonly")).not.toBeNull();
 
-    // visibility is locked
-    const visibilitySelect = screen.getByLabelText("Visibility");
-    expect(visibilitySelect.getAttribute("disabled")).not.toBeNull();
+    // visibility is no longer an in-form select; it is carried as a hidden
+    // input and edited via the sidebar control. The hidden input preserves the
+    // entity's current visibility value.
+    const visibilityInput = document.querySelector(
+      'input[name="visibility"]',
+    ) as HTMLInputElement | null;
+    expect(visibilityInput).not.toBeNull();
+    expect(visibilityInput?.getAttribute("type")).toBe("hidden");
+    expect(visibilityInput?.getAttribute("value")).toBe("PLAYER_FACING");
 
     // name is not locked
     const nameInput = screen.getByLabelText("Name");
@@ -363,6 +395,23 @@ describe("entity forms", () => {
     expect(screen.getByRole("link", { name: /Discard/ })).toBeDefined();
     expect(screen.getByRole("link", { name: /Discard/ }).getAttribute("href")).toBe(
       "/campaigns/c1/entities/e1",
+    );
+  });
+
+  it("resets unsaved sidebar visibility when edit mode is discarded", () => {
+    const { rerender } = render(<VisibilityHarness editing />);
+
+    fireEvent.click(screen.getByRole("button", { name: /dm only/i }));
+    expect(
+      (screen.getByLabelText("current visibility") as HTMLInputElement).value,
+    ).toBe("DM_ONLY");
+
+    rerender(<VisibilityHarness editing={false} />);
+
+    expect(
+      (screen.getByLabelText("current visibility") as HTMLInputElement).value,
+    ).toBe(
+      "PLAYER_FACING",
     );
   });
 });

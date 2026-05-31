@@ -247,6 +247,11 @@ Edge attributes: `strength`/`disposition` (-100..100), `since`/`until`,
 > Relationships are bidirectionally queryable. The UI presents an entity's
 > "connections" panel and a campaign-wide **relationship graph** view.
 
+The connections-panel create UX (target-first entity search, applicability-ranked
+type list, and directional inverse labels — e.g. `OWNS_ITEM` reads as `OWNED_BY`
+from the target's page) is specified in
+[`adr/0003-relationship-create-ux-and-inverse-labels.md`](./adr/0003-relationship-create-ux-and-inverse-labels.md).
+
 ## Events & causality (the "why")
 
 An **Event** is something that happened (or is scheduled): a stat boost, a

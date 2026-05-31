@@ -5,7 +5,9 @@ import type { ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Archive, Plus, Save, X } from "lucide-react";
+import { Archive, Plus, Save, X, Eye, EyeOff } from "lucide-react";
+
+import { cn } from "@/lib/utils";
 
 import {
   archiveEntityAction,
@@ -92,6 +94,9 @@ function CoreFields({
   entity?: EntityDetail;
   values?: Record<string, unknown>;
 }) {
+  const editCtx = useContext(EditFormContext);
+  const visibility = editCtx?.visibility;
+
   const isLocked = (fieldKey: string) => {
     if (!entity) return false;
     return entity.locked || entity.lockedFields.includes(fieldKey);
@@ -152,16 +157,20 @@ function CoreFields({
         />
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
-        <div className="grid gap-2">
-          <Label htmlFor="visibility">Visibility</Label>
-          <VisibilitySelect
-            defaultValue={getVal("visibility", entity?.visibility ?? "DM_ONLY") as string}
-            disabled={isLocked("visibility")}
+        {!entity ? (
+          <div className="grid gap-2">
+            <Label htmlFor="visibility">Visibility</Label>
+            <VisibilitySelect
+              defaultValue={getVal("visibility", "DM_ONLY") as string}
+            />
+          </div>
+        ) : (
+          <input
+            type="hidden"
+            name="visibility"
+            value={visibility ?? (getVal("visibility", entity.visibility) as string)}
           />
-          {isLocked("visibility") && (
-            <input type="hidden" name="visibility" value={entity?.visibility} />
-          )}
-        </div>
+        )}
         <div className="grid gap-2">
           <Label htmlFor="tags">Tags</Label>
           <Input
@@ -607,12 +616,34 @@ export function ArchiveEntityForm({
 const EditFormContext = createContext<{
   error: string | undefined;
   setError: (err: string | undefined) => void;
+  visibility: string | undefined;
+  setVisibility: (v: string) => void;
 } | null>(null);
 
-export function EditFormProvider({ children }: { children: ReactNode }) {
+export function EditFormProvider({
+  children,
+  initialVisibility,
+  isEditing = false,
+}: {
+  children: ReactNode;
+  initialVisibility?: string;
+  isEditing?: boolean;
+}) {
   const [error, setError] = useState<string | undefined>(undefined);
+  const [prevInitialVisibility, setPrevInitialVisibility] = useState(initialVisibility);
+  const [prevIsEditing, setPrevIsEditing] = useState(isEditing);
+  const [visibility, setVisibility] = useState(initialVisibility);
+
+  if (initialVisibility !== prevInitialVisibility || (!isEditing && prevIsEditing)) {
+    setPrevInitialVisibility(initialVisibility);
+    setPrevIsEditing(isEditing);
+    setVisibility(initialVisibility);
+  } else if (isEditing !== prevIsEditing) {
+    setPrevIsEditing(isEditing);
+  }
+
   return (
-    <EditFormContext.Provider value={{ error, setError }}>
+    <EditFormContext.Provider value={{ error, setError, visibility, setVisibility }}>
       {children}
     </EditFormContext.Provider>
   );
@@ -622,6 +653,64 @@ export function useEditForm() {
   const ctx = useContext(EditFormContext);
   if (!ctx) throw new Error("useEditForm must be used within EditFormProvider");
   return ctx;
+}
+
+export function VisibilitySidebarControl({
+  initialVisibility,
+  isEditing,
+  isLocked,
+}: {
+  initialVisibility: string;
+  isEditing: boolean;
+  isLocked: boolean;
+}) {
+  const ctx = useContext(EditFormContext);
+  const visibility = ctx?.visibility;
+  const setVisibility = ctx?.setVisibility;
+
+  const currentVal = visibility ?? initialVisibility;
+
+  return (
+    <div className="flex flex-col gap-1">
+      {visibilityValues.map((v) => {
+        const active = currentVal === v;
+        const disabled = isLocked;
+
+        const handleClick = () => {
+          if (isEditing && !disabled && setVisibility) {
+            setVisibility(v);
+          }
+        };
+
+        return (
+          <button
+            key={v}
+            type="button"
+            onClick={handleClick}
+            disabled={!isEditing || disabled}
+            className={cn(
+              "flex items-center gap-2 text-[11.5px] text-left w-full transition-colors",
+              isEditing && !disabled
+                ? "cursor-pointer hover:text-[var(--ink)]"
+                : "cursor-default"
+            )}
+            style={{ color: active ? "var(--ink)" : "var(--ink-faint)" }}
+          >
+            {active ? (
+              <Eye
+                aria-hidden
+                size={13}
+                style={{ color: "var(--ok)" }}
+              />
+            ) : (
+              <EyeOff aria-hidden size={13} />
+            )}
+            {formatVisibility(v).toLowerCase()}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 export function EditRailControls({ detailHref }: { detailHref: string }) {

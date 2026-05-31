@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useMemo, useState } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { ArrowRight, Plus, X } from "lucide-react";
@@ -8,21 +8,35 @@ import { ArrowRight, Plus, X } from "lucide-react";
 import {
   archiveRelationshipAction,
   createRelationshipAction,
-  type RelationshipActionState,
 } from "@/app/(dm)/actions";
+import {
+  EntityTypeahead,
+  type EntityCandidate,
+} from "@/components/entities/entity-typeahead";
 import { Kicker } from "@/components/ui/kicker";
 import { TypeDot } from "@/components/ui/type-dot";
-import { relationshipTypeValues } from "@/lib/validation";
+import {
+  defaultRelationshipType,
+  isSuggestedRelationship,
+  relationshipEdgeLabel,
+  relationshipOptionLabel,
+  relationshipPickerOptions,
+  type EntityTypeValue,
+  type RelationshipTypeValue,
+} from "@/lib/relationship-types";
 import type { EntityConnection } from "@/server/services/relationships";
 
-export type ConnectionCandidate = { id: string; name: string; type: string };
+export type ConnectionCandidate = EntityCandidate;
 
-function AddButton() {
+// Sentinel option value that expands the type picker to the full grouped list.
+const SHOW_ALL_TYPES = "__SHOW_ALL_TYPES__";
+
+function AddButton({ disabled }: { disabled?: boolean }) {
   const { pending } = useFormStatus();
   return (
     <button
       type="submit"
-      disabled={pending}
+      disabled={pending || disabled}
       className="inline-flex w-full items-center justify-center gap-[6px] border border-[var(--line-strong)] bg-[var(--bg-3)] px-[10px] py-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-dim)] transition-[filter,color] hover:text-[var(--ink)] hover:brightness-110 disabled:opacity-50"
     >
       <Plus aria-hidden size={12} />
@@ -31,22 +45,169 @@ function AddButton() {
   );
 }
 
+function AddConnectionForm({
+  sourceType,
+  candidates,
+  onSubmit,
+  onCancel,
+  error,
+}: {
+  sourceType: EntityTypeValue;
+  candidates: ConnectionCandidate[];
+  onSubmit: (formData: FormData) => Promise<void>;
+  onCancel: () => void;
+  error: string | null;
+}) {
+  const [target, setTarget] = useState<ConnectionCandidate | null>(null);
+  const [type, setType] = useState<RelationshipTypeValue>("ALLY_OF");
+  // Collapsed by default: show only the applicable types until the DM opts into
+  // the full list, so the picker stays short and strongly steers toward sense.
+  const [showAll, setShowAll] = useState(false);
+
+  // Target-first: the type picker is only meaningful once we know both ends.
+  const targetType = target?.type as EntityTypeValue | undefined;
+  const options = useMemo(
+    () =>
+      targetType
+        ? relationshipPickerOptions(sourceType, targetType)
+        : null,
+    [sourceType, targetType],
+  );
+
+  const selectTarget = (candidate: ConnectionCandidate | null) => {
+    setTarget(candidate);
+    setShowAll(false);
+    if (candidate) {
+      setType(
+        defaultRelationshipType(sourceType, candidate.type as EntityTypeValue),
+      );
+    }
+  };
+
+  const unusual =
+    targetType !== undefined &&
+    options !== null &&
+    options.suggested.length > 0 &&
+    !isSuggestedRelationship(type, sourceType, targetType);
+
+  return (
+    <form action={onSubmit} className="mt-3 flex flex-col gap-2">
+      {/* Step 1 — pick the target entity */}
+      <EntityTypeahead
+        name="targetId"
+        candidates={candidates}
+        value={target}
+        onChange={selectTarget}
+        placeholder="Search entity to connect…"
+        autoFocus
+      />
+
+      {/* Step 2 — pick the relationship type, ranked by the chosen pairing.
+          Collapsed to suggested-only until the DM picks "Show all…". */}
+      {target && options && (
+        <>
+          <select
+            name="type"
+            value={type}
+            onChange={(e) => {
+              if (e.target.value === SHOW_ALL_TYPES) {
+                setShowAll(true);
+                return;
+              }
+              setType(e.target.value as RelationshipTypeValue);
+            }}
+            className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] font-mono text-[11px] text-[var(--ink)]"
+          >
+            <optgroup label="Suggested">
+              {options.suggested.map((t) => (
+                <option key={t} value={t}>
+                  {relationshipOptionLabel(t)}
+                </option>
+              ))}
+            </optgroup>
+            {showAll ? (
+              options.categories.map((cat) => (
+                <optgroup key={cat.group} label={cat.label}>
+                  {cat.types.map((t) => (
+                    <option key={t} value={t}>
+                      {relationshipOptionLabel(t)}
+                    </option>
+                  ))}
+                </optgroup>
+              ))
+            ) : options.categories.length > 0 ? (
+              <optgroup label="─────────">
+                <option value={SHOW_ALL_TYPES}>
+                  Show all relationship types…
+                </option>
+              </optgroup>
+            ) : null}
+          </select>
+          {showAll && options.categories.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAll(false)}
+              className="self-start font-mono text-[9.5px] uppercase tracking-[.06em] text-[var(--ink-faint)] hover:text-[var(--ink-dim)]"
+            >
+              Show suggested only
+            </button>
+          )}
+          {unusual && (
+            <p className="font-mono text-[9.5px] leading-[1.5] text-[var(--hot)]">
+              Unusual pairing — allowed, just uncommon.
+            </p>
+          )}
+        </>
+      )}
+
+      <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
+        <input type="checkbox" name="secret" value="true" />
+        DM-only (secret)
+      </label>
+      {error && (
+        <p role="alert" className="text-[11px] text-[var(--no)]">
+          {error}
+        </p>
+      )}
+      <div className="flex gap-2">
+        <AddButton disabled={!target} />
+        <button
+          type="button"
+          onClick={onCancel}
+          className="border border-[var(--line)] px-[10px] py-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:text-[var(--ink-dim)]"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export function ConnectionsPanel({
   campaignId,
   entityId,
+  sourceType,
   connections,
   candidates,
 }: {
   campaignId: string;
   entityId: string;
+  sourceType: string;
   connections: EntityConnection[];
   candidates: ConnectionCandidate[];
 }) {
   const [open, setOpen] = useState(false);
-  const [state, formAction] = useActionState<RelationshipActionState, FormData>(
-    createRelationshipAction.bind(null, campaignId, entityId),
-    undefined,
-  );
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (formData: FormData) => {
+    setError(null);
+    const res = await createRelationshipAction(campaignId, entityId, undefined, formData);
+    if (res?.error) {
+      setError(res.error);
+    } else {
+      setOpen(false);
+    }
+  };
 
   return (
     <div>
@@ -76,10 +237,10 @@ export function ConnectionsPanel({
                   style={{ color: "var(--ink-faint)" }}
                 />
                 <span
-                  className="font-mono text-[9.5px] tracking-[.04em]"
+                  className="font-mono text-[9.5px] uppercase tracking-[.04em]"
                   style={{ color: c.secret ? "var(--hot)" : "var(--accent)" }}
                 >
-                  {c.type}
+                  {relationshipEdgeLabel(c.type, c.direction)}
                   {c.secret ? " · secret" : ""}
                 </span>
               </div>
@@ -115,57 +276,23 @@ export function ConnectionsPanel({
           Create another entity to connect this one to it.
         </p>
       ) : open ? (
-        <form action={formAction} className="mt-3 flex flex-col gap-2">
-          <select
-            name="type"
-            defaultValue="ALLY_OF"
-            className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] font-mono text-[11px] text-[var(--ink)]"
-          >
-            {relationshipTypeValues.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-          <select
-            name="targetId"
-            defaultValue=""
-            required
-            className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[11.5px] text-[var(--ink)]"
-          >
-            <option value="" disabled>
-              Select entity…
-            </option>
-            {candidates.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.name}
-              </option>
-            ))}
-          </select>
-          <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
-            <input type="checkbox" name="secret" value="true" />
-            DM-only (secret)
-          </label>
-          {state?.error && (
-            <p role="alert" className="text-[11px] text-[var(--no)]">
-              {state.error}
-            </p>
-          )}
-          <div className="flex gap-2">
-            <AddButton />
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              className="border border-[var(--line)] px-[10px] py-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:text-[var(--ink-dim)]"
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
+        <AddConnectionForm
+          sourceType={sourceType as EntityTypeValue}
+          candidates={candidates}
+          onSubmit={handleSubmit}
+          onCancel={() => {
+            setError(null);
+            setOpen(false);
+          }}
+          error={error}
+        />
       ) : (
         <button
           type="button"
-          onClick={() => setOpen(true)}
+          onClick={() => {
+            setError(null);
+            setOpen(true);
+          }}
           className="mt-3 inline-flex items-center gap-[6px] border border-[var(--line-strong)] bg-[var(--bg-3)] px-[10px] py-[5px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-dim)] transition-[filter,color] hover:text-[var(--ink)] hover:brightness-110"
         >
           <Plus aria-hidden size={12} />

@@ -82,6 +82,11 @@ vi.mock("@/components/entities/entity-forms", () => ({
   EditRailControls: ({ detailHref }: { detailHref: string }) => (
     <div>Edit controls {detailHref}</div>
   ),
+  VisibilitySidebarControl: ({
+    initialVisibility,
+  }: {
+    initialVisibility: string;
+  }) => <div>Visibility control {initialVisibility}</div>,
 }));
 
 import EntityPage from "@/app/(dm)/campaigns/[id]/entities/[entityId]/page";
@@ -217,6 +222,17 @@ describe("EntityPage", () => {
     // lock button should be hidden in edit mode
     expect(screen.queryByRole("button", { name: "Lock" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Locked" })).toBeNull();
+  });
+
+  it("disables the visibility lock toggle while editing", async () => {
+    getEntityForUser.mockResolvedValue(crawler());
+
+    await renderPage("e1", "1");
+
+    const visibilityLock = screen.getByTitle(
+      "Finish or discard edits before changing the visibility lock",
+    );
+    expect(visibilityLock.getAttribute("disabled")).not.toBeNull();
   });
 
   it("renders a locked generic entity without crawler fields", async () => {
