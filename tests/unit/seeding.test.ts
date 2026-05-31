@@ -7,14 +7,14 @@ import fs from "fs";
 const originalExistsSync = fs.existsSync;
 const originalReadFileSync = fs.readFileSync;
 
-vi.spyOn(fs, "existsSync").mockImplementation((filePath: string) => {
+vi.spyOn(fs, "existsSync").mockImplementation((filePath: fs.PathLike) => {
   if (typeof filePath === "string" && filePath.endsWith("dungeon-crawler-carl.jsonl")) {
     return true;
   }
   return originalExistsSync(filePath);
 });
 
-vi.spyOn(fs, "readFileSync").mockImplementation(((filePath: string, encoding: any) => {
+vi.spyOn(fs, "readFileSync").mockImplementation(((filePath: fs.PathOrFileDescriptor, encoding: Parameters<typeof fs.readFileSync>[1]) => {
   if (typeof filePath === "string" && filePath.endsWith("dungeon-crawler-carl.jsonl")) {
     const mockJsonLines = [
       JSON.stringify({ text: "#Carl\nis a crawler from Seattle. level 32", meta: "url" }),
@@ -27,7 +27,7 @@ vi.spyOn(fs, "readFileSync").mockImplementation(((filePath: string, encoding: an
     return mockJsonLines.join("\n");
   }
   return originalReadFileSync(filePath, encoding);
-}) as any);
+}) as unknown as typeof fs.readFileSync);
 
 import { seedCampaignFromLore, classifyEntity, extractSummaryAndDescription } from "@/server/services/seeding";
 
