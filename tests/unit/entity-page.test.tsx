@@ -355,4 +355,31 @@ describe("EntityPage", () => {
     // Check escaped code block
     expect(screen.getByText("<div>Hello</div>")).toBeDefined();
   });
+
+  it("renders the AI description on an ITEM entity without the italic class on the quote block", async () => {
+    getEntityForUser.mockResolvedValue(
+      crawler({
+        type: "ITEM",
+        data: {
+          aiDescription: "AI generated item details",
+          divine: true,
+          unique: true,
+          fleeting: true,
+        },
+      }),
+    );
+
+    await renderPage();
+
+    // Verify item descriptions prefix and description are rendered
+    expect(screen.getByText(/This is a divine item\./)).toBeDefined();
+    expect(screen.getByText(/This is a unique item\./)).toBeDefined();
+    expect(screen.getByText(/This is a fleeting item\./)).toBeDefined();
+    expect(screen.getByText(/AI generated item details/)).toBeDefined();
+
+    // The enclosing blockquote should not be italic
+    const blockquote = screen.getByText(/AI generated item details/).closest("blockquote");
+    expect(blockquote).not.toBeNull();
+    expect(blockquote?.className).not.toContain("italic");
+  });
 });

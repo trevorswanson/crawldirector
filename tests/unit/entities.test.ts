@@ -1051,6 +1051,116 @@ describe("entity locking", () => {
       setEntityLock(owner.id, campaign.id, "missing", { locked: true }),
     ).rejects.toThrow("Entity not found.");
   });
+
+  it("manages ITEM and ITEM_TYPE entities with custom metadata fields and field locks", async () => {
+    const owner = await makeUser("items-test@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    // 1. Create ITEM_TYPE entity
+    const weaponType = await createGenericEntity(owner.id, campaign.id, {
+      type: "ITEM_TYPE",
+      name: "Weapon",
+      summary: "A type for weapon items",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    expect(weaponType.id).toBeTruthy();
+    expect(weaponType.type).toBe("ITEM_TYPE");
+
+    // 2. Create ITEM entity referencing the item type
+    const item = await createGenericEntity(owner.id, campaign.id, {
+      type: "ITEM",
+      name: "Excalibur",
+      summary: "Legendary sword",
+      description: "King Arthur's sword.",
+      visibility: "PLAYER_FACING",
+      tags: ["legendary", "sword"],
+      itemTypeId: weaponType.id,
+      divine: true,
+      unique: true,
+      fleeting: false,
+      aiDescription: "A legendary sword of myth.",
+    });
+
+    expect(item.id).toBeTruthy();
+
+    // Verify it can be read back with correct custom data properties
+    const fetchedItem = await getEntityForUser(owner.id, campaign.id, item.id);
+    expect(fetchedItem).not.toBeNull();
+    expect(fetchedItem?.type).toBe("ITEM");
+    const itemData = (fetchedItem?.data as Record<string, unknown>) || {};
+    expect(itemData["itemTypeId"]).toBe(weaponType.id);
+    expect(itemData["divine"]).toBe(true);
+    expect(itemData["unique"]).toBe(true);
+    expect(itemData["fleeting"]).toBe(false);
+    expect(itemData["aiDescription"]).toBe("A legendary sword of myth.");
+
+    // 3. Update the custom fields via updateEntity
+    await updateEntity(owner.id, campaign.id, item.id, {
+      type: "ITEM",
+      name: "Excalibur",
+      summary: "Legendary sword",
+      description: "King Arthur's sword.",
+      visibility: "PLAYER_FACING",
+      tags: ["legendary", "sword"],
+      itemTypeId: weaponType.id,
+      divine: false,
+      unique: true,
+      fleeting: true,
+      aiDescription: "A rusty, fleeting sword.",
+    });
+
+    const updatedItem = await getEntityForUser(owner.id, campaign.id, item.id);
+    const updatedData = (updatedItem?.data as Record<string, unknown>) || {};
+    expect(updatedData["divine"]).toBe(false);
+    expect(updatedData["unique"]).toBe(true);
+    expect(updatedData["fleeting"]).toBe(true);
+    expect(updatedData["aiDescription"]).toBe("A rusty, fleeting sword.");
+
+    // 4. Lock data.divine and verify that it rejects updates to that field
+    await setEntityLock(owner.id, campaign.id, item.id, {
+      lockedFields: ["data.divine"],
+    });
+
+    // An update that tries to change data.divine back to true should fail
+    await expect(
+      updateEntity(owner.id, campaign.id, item.id, {
+        type: "ITEM",
+        name: "Excalibur",
+        summary: "Legendary sword",
+        description: "King Arthur's sword.",
+        visibility: "PLAYER_FACING",
+        tags: ["legendary", "sword"],
+        itemTypeId: weaponType.id,
+        divine: true, // attempting to change a locked field
+        unique: true,
+        fleeting: true,
+        aiDescription: "A rusty, fleeting sword.",
+      }),
+    ).rejects.toThrow("locked entity fields");
+
+    // An update that doesn't change data.divine should succeed
+    await updateEntity(owner.id, campaign.id, item.id, {
+      type: "ITEM",
+      name: "Excalibur (Modified)",
+      summary: "Legendary sword",
+      description: "King Arthur's sword.",
+      visibility: "PLAYER_FACING",
+      tags: ["legendary", "sword"],
+      itemTypeId: weaponType.id,
+      divine: false, // same as current value
+      unique: false, // changed, not locked
+      fleeting: true,
+      aiDescription: "A rusty, fleeting sword.",
+    });
+
+    const finalItem = await getEntityForUser(owner.id, campaign.id, item.id);
+    expect(finalItem?.name).toBe("Excalibur (Modified)");
+    const finalData = (finalItem?.data as Record<string, unknown>) || {};
+    expect(finalData["unique"]).toBe(false);
+  });
 });
 
 describe("world-browser facets", () => {

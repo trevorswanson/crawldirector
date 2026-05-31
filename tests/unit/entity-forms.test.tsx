@@ -62,6 +62,7 @@ const crawlerEntity: EntityDetail = {
   locked: false,
   lockedFields: [],
   isStub: false,
+  data: null,
   agentEnabled: false,
   createdAt: new Date(),
   updatedAt: new Date(),

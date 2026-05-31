@@ -39,6 +39,7 @@ enum EntityType {
   SHOW
   SYSTEM_AI
   ITEM
+  ITEM_TYPE
   SKILL
   SPELL
   ACHIEVEMENT

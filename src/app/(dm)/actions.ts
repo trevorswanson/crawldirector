@@ -71,7 +71,8 @@ export async function createCampaignAction(
   try {
     const campaign = await createCampaign(user.id, parsed.data);
     campaignId = campaign.id;
-  } catch {
+  } catch (err) {
+    console.error("Campaign creation failed:", err);
     return { error: "Could not create the campaign. Please try again." };
   }
 
@@ -95,6 +96,11 @@ export async function createGenericEntityAction(
     description: formData.get("description"),
     visibility: formData.get("visibility") || "DM_ONLY",
     tags: formData.get("tags"),
+    itemTypeId: formData.get("itemTypeId"),
+    divine: formData.get("divine"),
+    unique: formData.get("unique"),
+    fleeting: formData.get("fleeting"),
+    aiDescription: formData.get("aiDescription"),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -104,7 +110,8 @@ export async function createGenericEntityAction(
   try {
     const entity = await createGenericEntity(user.id, campaignId, parsed.data);
     entityId = entity.id;
-  } catch {
+  } catch (error) {
+    console.error("Create generic entity action failed:", error);
     return { error: "Could not create the entity. Please try again." };
   }
 
@@ -192,6 +199,7 @@ export async function quickCreateEntityAction(
       entityId = entity.id;
     }
   } catch (error) {
+    console.error("Quick-create entity failed:", error);
     if (error instanceof ServiceError) return { error: error.message };
     return { error: "Could not create the entity. Please try again." };
   }
@@ -224,6 +232,11 @@ export async function updateEntityAction(
     killCount: formData.get("killCount") ? Number(formData.get("killCount")) : undefined,
     currentFloor: formData.get("currentFloor") ? Number(formData.get("currentFloor")) : undefined,
     isAlive: formData.get("isAlive") === "false" ? false : true,
+    itemTypeId: formData.get("itemTypeId")?.toString() ?? "",
+    divine: formData.get("divine") === "true" || formData.get("divine") === "on",
+    unique: formData.get("unique") === "true" || formData.get("unique") === "on",
+    fleeting: formData.get("fleeting") === "true" || formData.get("fleeting") === "on",
+    aiDescription: formData.get("aiDescription")?.toString() ?? "",
   };
 
   const parsed = updateEntitySchema.safeParse({
@@ -245,6 +258,11 @@ export async function updateEntityAction(
     killCount: formData.get("killCount"),
     currentFloor: formData.get("currentFloor"),
     isAlive: formData.get("isAlive"),
+    itemTypeId: formData.get("itemTypeId"),
+    divine: formData.get("divine"),
+    unique: formData.get("unique"),
+    fleeting: formData.get("fleeting"),
+    aiDescription: formData.get("aiDescription"),
   });
   if (!parsed.success) {
     return {

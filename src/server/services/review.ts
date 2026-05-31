@@ -82,6 +82,14 @@ const crawlerFields = new Set([
   "crawler.currentFloor",
 ]);
 
+const dataFields = new Set([
+  "data.itemTypeId",
+  "data.divine",
+  "data.unique",
+  "data.fleeting",
+  "data.aiDescription",
+]);
+
 async function getMembership(userId: string, campaignId: string) {
   return prisma.membership.findUnique({
     where: { userId_campaignId: { userId, campaignId } },
@@ -568,6 +576,25 @@ function currentEntityValue(
       return entity.data;
     case "customFields":
       return entity.customFields;
+    case "data.itemTypeId":
+    case "data.divine":
+    case "data.unique":
+    case "data.fleeting":
+    case "data.aiDescription": {
+      const metadata = entity.data as {
+        itemTypeId?: string | null;
+        divine?: boolean;
+        unique?: boolean;
+        fleeting?: boolean;
+        aiDescription?: string | null;
+      } | null;
+      if (field === "data.itemTypeId") return metadata?.itemTypeId ?? null;
+      if (field === "data.divine") return metadata?.divine ?? false;
+      if (field === "data.unique") return metadata?.unique ?? false;
+      if (field === "data.fleeting") return metadata?.fleeting ?? false;
+      if (field === "data.aiDescription") return metadata?.aiDescription ?? null;
+      return undefined;
+    }
   }
 
   if (!field.startsWith("crawler.") || !entity.crawler) return undefined;
@@ -1211,6 +1238,13 @@ async function applyCreateEntity(
       tags: stringArray(readTo(patch, "tags")),
       status: CanonStatus.CANON,
       isStub: Boolean(readTo(patch, "isStub") ?? false),
+      data: {
+        itemTypeId: nullableString(readTo(patch, "data.itemTypeId")),
+        divine: booleanWithDefault(readTo(patch, "data.divine"), false),
+        unique: booleanWithDefault(readTo(patch, "data.unique"), false),
+        fleeting: booleanWithDefault(readTo(patch, "data.fleeting"), false),
+        aiDescription: nullableString(readTo(patch, "data.aiDescription")),
+      } as Prisma.InputJsonValue,
       ...(type === EntityType.CRAWLER
         ? {
             crawler: {
@@ -1255,6 +1289,7 @@ async function applyUpdateEntity(
       version: true,
       locked: true,
       lockedFields: true,
+      data: true,
     },
   });
   if (!entity) throw new ServiceError("Entity not found.");
@@ -1281,7 +1316,7 @@ async function applyUpdateEntity(
     throw new ServiceError(`This proposal touches locked entity fields: ${fieldsText}`);
   }
 
-  const data = entityUpdateData(patch, entity.type);
+  const data = entityUpdateData(patch, entity.type, entity.data);
   await tx.entity.update({
     where: { id: entityId },
     data,
@@ -1377,7 +1412,7 @@ function crawlerCreateData(patch: ReviewPatch) {
   };
 }
 
-function entityUpdateData(patch: ReviewPatch, type: EntityType): Prisma.EntityUpdateInput {
+function entityUpdateData(patch: ReviewPatch, type: EntityType, existingData?: unknown): Prisma.EntityUpdateInput {
   const data: Prisma.EntityUpdateInput = {
     version: { increment: 1 },
   };
@@ -1445,6 +1480,33 @@ function entityUpdateData(patch: ReviewPatch, type: EntityType): Prisma.EntityUp
       );
     }
     data.crawler = { update: crawlerData };
+  }
+
+  const dataPatch = Object.keys(patch).some((field) => dataFields.has(field));
+  if (dataPatch) {
+    const currentData = (existingData && typeof existingData === "object" ? { ...existingData } : {}) as {
+      itemTypeId?: string | null;
+      divine?: boolean;
+      unique?: boolean;
+      fleeting?: boolean;
+      aiDescription?: string | null;
+    };
+    if ("data.itemTypeId" in patch) {
+      currentData.itemTypeId = nullableString(readTo(patch, "data.itemTypeId"));
+    }
+    if ("data.divine" in patch) {
+      currentData.divine = booleanWithDefault(readTo(patch, "data.divine"), false);
+    }
+    if ("data.unique" in patch) {
+      currentData.unique = booleanWithDefault(readTo(patch, "data.unique"), false);
+    }
+    if ("data.fleeting" in patch) {
+      currentData.fleeting = booleanWithDefault(readTo(patch, "data.fleeting"), false);
+    }
+    if ("data.aiDescription" in patch) {
+      currentData.aiDescription = nullableString(readTo(patch, "data.aiDescription"));
+    }
+    data.data = currentData;
   }
 
   return data;

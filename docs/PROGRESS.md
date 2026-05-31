@@ -11,6 +11,14 @@ Running checklist of milestones/tasks, newest first. See
 membership, log events with participants, and traverse cause→effect chains;
 relationships/events are reviewable + lockable.
 
+### Seeding cleanup & security (2026-05-31)
+
+- [x] Removed in-UI seeding checkbox and `seedLore` option during campaign creation.
+- [x] Added `dungeon-crawler-carl.jsonl` to `.gitignore` to prevent committing massive seed data to GitHub.
+- [x] Updated `tests/unit/seeding.test.ts` to mock filesystem reading, making unit tests self-contained, fast, and CI/CD friendly without requiring local seed data files.
+- [x] Repositioned the AI Description input field in the entity edit form for items so that it sits directly between the Summary and Description fields, mirroring the read-only page layout.
+- [x] Removed italic styling from the AI Description quote block on the item details page, keeping it non-italicized as designed.
+
 ### Done — slice 3: event causality links through the pipeline + Timeline traversal (2026-05-31)
 
 - [x] Added the M3 `EventCausality` model and migration
