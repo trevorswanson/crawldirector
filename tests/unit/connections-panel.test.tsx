@@ -54,6 +54,7 @@ describe("ConnectionsPanel", () => {
       <ConnectionsPanel
         campaignId="c1"
         entityId="e1"
+        sourceType="CRAWLER"
         connections={[]}
         candidates={candidates}
       />,
@@ -65,11 +66,12 @@ describe("ConnectionsPanel", () => {
     expect(screen.queryByText("DM-only (secret)")).toBeNull();
   });
 
-  it("lists outgoing and incoming edges with direction and secret marker", () => {
+  it("lists outgoing and incoming edges with directional labels and secret marker", () => {
     render(
       <ConnectionsPanel
         campaignId="c1"
         entityId="e1"
+        sourceType="CRAWLER"
         connections={[
           connection(),
           connection({
@@ -86,20 +88,22 @@ describe("ConnectionsPanel", () => {
 
     expect(screen.getByText("Connections · 2")).toBeDefined();
     expect(screen.getByText("Donut")).toBeDefined();
-    expect(screen.getByText("ALLY_OF")).toBeDefined();
-    // secret edges are flagged
-    expect(screen.getByText("BETRAYED · secret")).toBeDefined();
+    // outgoing edge reads forward
+    expect(screen.getByText("ally of")).toBeDefined();
+    // incoming edge reads the inverse label, and secret edges are flagged
+    expect(screen.getByText("betrayed by · secret")).toBeDefined();
     // links point at the other entity
     expect(screen.getByText("Donut").closest("a")?.getAttribute("href")).toBe(
       "/campaigns/c1/entities/e2",
     );
   });
 
-  it("opens the add form and lists candidate entities", () => {
+  it("opens the add form, searches a target, then shows ranked types", () => {
     render(
       <ConnectionsPanel
         campaignId="c1"
         entityId="e1"
+        sourceType="CRAWLER"
         connections={[]}
         candidates={candidates}
       />,
@@ -107,8 +111,33 @@ describe("ConnectionsPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Add connection/ }));
     expect(screen.getByText("DM-only (secret)")).toBeDefined();
-    expect(screen.getByRole("option", { name: "Donut" })).toBeDefined();
-    expect(screen.getByRole("option", { name: "Mordecai" })).toBeDefined();
+    // target-first: candidates are searchable, no type picker yet
+    expect(
+      screen.getByPlaceholderText("Search entity to connect…"),
+    ).toBeDefined();
+    expect(screen.queryByRole("combobox")).toBeNull();
+
+    // filter and pick a target
+    fireEvent.change(
+      screen.getByPlaceholderText("Search entity to connect…"),
+      { target: { value: "Don" } },
+    );
+    fireEvent.click(screen.getByText("Donut"));
+
+    // once a target is chosen the type picker appears, collapsed to suggested
+    expect(screen.getByRole("combobox")).toBeDefined();
+    expect(screen.getByRole("option", { name: "Ally Of" })).toBeDefined();
+    // non-suggested types are hidden behind "Show all…" until expanded
+    expect(screen.queryByRole("option", { name: "Sponsors" })).toBeNull();
+    expect(
+      screen.getByRole("option", { name: "Show all relationship types…" }),
+    ).toBeDefined();
+
+    // expanding reveals the full grouped list
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "__SHOW_ALL_TYPES__" },
+    });
+    expect(screen.getByRole("option", { name: "Sponsors" })).toBeDefined();
 
     // cancel hides it again
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -120,6 +149,7 @@ describe("ConnectionsPanel", () => {
       <ConnectionsPanel
         campaignId="c1"
         entityId="e1"
+        sourceType="CRAWLER"
         connections={[]}
         candidates={[]}
       />,

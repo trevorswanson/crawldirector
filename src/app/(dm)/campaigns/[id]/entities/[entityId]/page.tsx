@@ -410,6 +410,7 @@ export default async function EntityPage({
           <ConnectionsPanel
             campaignId={id}
             entityId={entityId}
+            sourceType={entity.type}
             connections={connections}
             candidates={candidates}
           />
