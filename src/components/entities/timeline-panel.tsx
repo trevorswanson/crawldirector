@@ -6,8 +6,11 @@ import Link from "next/link";
 import { Plus, X } from "lucide-react";
 
 import {
+  archiveEventCausalityAction,
   archiveEventAction,
   createEventAction,
+  linkEventCauseAction,
+  type EventCausalityActionState,
   type EventActionState,
 } from "@/app/(dm)/actions";
 import { Kicker } from "@/components/ui/kicker";
@@ -23,6 +26,25 @@ function formatTime(time: EntityEvent["time"]) {
   return null;
 }
 
+function EventLink({
+  campaignId,
+  entityId,
+  event,
+}: {
+  campaignId: string;
+  entityId: string;
+  event: { id: string; title: string };
+}) {
+  return (
+    <Link
+      href={`/campaigns/${campaignId}/entities/${entityId}?event=${event.id}`}
+      className="text-[11px] text-[var(--ink-dim)] hover:text-[var(--ink)]"
+    >
+      {event.title}
+    </Link>
+  );
+}
+
 function LogButton() {
   const { pending } = useFormStatus();
   return (
@@ -34,6 +56,57 @@ function LogButton() {
       <Plus aria-hidden size={12} />
       {pending ? "Logging..." : "Log event"}
     </button>
+  );
+}
+
+function CauseLinkForm({
+  campaignId,
+  entityId,
+  effectId,
+  effectTitle,
+  candidates,
+}: {
+  campaignId: string;
+  entityId: string;
+  effectId: string;
+  effectTitle: string;
+  candidates: EntityEvent[];
+}) {
+  const [state, formAction] = useActionState<
+    EventCausalityActionState,
+    FormData
+  >(
+    linkEventCauseAction.bind(null, campaignId, entityId, effectId),
+    undefined,
+  );
+
+  return (
+    <form action={formAction} className="mt-[8px] flex flex-wrap gap-[6px]">
+      <select
+        name="causeId"
+        aria-label={`Cause event for ${effectTitle}`}
+        defaultValue=""
+        className="min-w-0 flex-1 border border-[var(--line)] bg-[var(--bg)] px-2 py-[5px] text-[11px] text-[var(--ink-dim)]"
+      >
+        <option value="">Link a cause...</option>
+        {candidates.map((candidate) => (
+          <option key={candidate.id} value={candidate.id}>
+            {candidate.title}
+          </option>
+        ))}
+      </select>
+      <button
+        type="submit"
+        className="border border-[var(--line)] px-[8px] py-[5px] font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:text-[var(--ink-dim)]"
+      >
+        Add cause
+      </button>
+      {state?.error && (
+        <p role="alert" className="basis-full text-[10.5px] text-[var(--no)]">
+          {state.error}
+        </p>
+      )}
+    </form>
   );
 }
 
@@ -69,6 +142,14 @@ export function TimelinePanel({
       <div className="flex flex-col gap-[6px]">
         {events.map((e) => {
           const when = formatTime(e.time);
+          const unavailableCauseIds = new Set([
+            e.id,
+            ...e.causedBy.map((cause) => cause.id),
+            ...e.causes.map((effect) => effect.id),
+          ]);
+          const causeCandidates = events.filter(
+            (candidate) => !unavailableCauseIds.has(candidate.id),
+          );
           return (
             <div
               key={e.id}
@@ -120,6 +201,89 @@ export function TimelinePanel({
                       </Link>
                     ))}
                   </div>
+                )}
+                {(e.causedBy.length > 0 || e.causes.length > 0) && (
+                  <div className="mt-[8px] flex flex-col gap-[4px] border-l border-[var(--line)] pl-[9px]">
+                    {e.causedBy.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-x-[8px] gap-y-[3px]">
+                        <span className="font-mono text-[8.5px] uppercase tracking-[.06em] text-[var(--ink-faint)]">
+                          Caused by
+                        </span>
+                        {e.causedBy.map((cause) => (
+                          <span
+                            key={cause.linkId}
+                            className="inline-flex items-center gap-[4px]"
+                          >
+                            <EventLink
+                              campaignId={campaignId}
+                              entityId={entityId}
+                              event={cause}
+                            />
+                            <form
+                              action={archiveEventCausalityAction.bind(
+                                null,
+                                campaignId,
+                                entityId,
+                                cause.linkId,
+                              )}
+                            >
+                              <button
+                                type="submit"
+                                title="Remove cause link"
+                                className="inline-flex p-[2px] text-[var(--ink-faint)] hover:text-[var(--no)]"
+                              >
+                                <X aria-hidden size={10} />
+                              </button>
+                            </form>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {e.causes.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-x-[8px] gap-y-[3px]">
+                        <span className="font-mono text-[8.5px] uppercase tracking-[.06em] text-[var(--ink-faint)]">
+                          Causes
+                        </span>
+                        {e.causes.map((effect) => (
+                          <span
+                            key={effect.linkId}
+                            className="inline-flex items-center gap-[4px]"
+                          >
+                            <EventLink
+                              campaignId={campaignId}
+                              entityId={entityId}
+                              event={effect}
+                            />
+                            <form
+                              action={archiveEventCausalityAction.bind(
+                                null,
+                                campaignId,
+                                entityId,
+                                effect.linkId,
+                              )}
+                            >
+                              <button
+                                type="submit"
+                                title="Remove cause link"
+                                className="inline-flex p-[2px] text-[var(--ink-faint)] hover:text-[var(--no)]"
+                              >
+                                <X aria-hidden size={10} />
+                              </button>
+                            </form>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {causeCandidates.length > 0 && (
+                  <CauseLinkForm
+                    campaignId={campaignId}
+                    entityId={entityId}
+                    effectId={e.id}
+                    effectTitle={e.title}
+                    candidates={causeCandidates}
+                  />
                 )}
               </div>
               <form

@@ -57,7 +57,9 @@ ChangeOperation {
   id
   op: CREATE_ENTITY | UPDATE_ENTITY | DELETE_ENTITY
     | CREATE_RELATIONSHIP | UPDATE_RELATIONSHIP | DELETE_RELATIONSHIP
-    | CREATE_EVENT | UPDATE_EVENT | APPLY_EVENT_EFFECTS
+    | CREATE_EVENT | UPDATE_EVENT
+    | CREATE_EVENT_CAUSALITY | DELETE_EVENT_CAUSALITY
+    | APPLY_EVENT_EFFECTS
   targetType, targetId?           // null targetId => create
   patch: { field -> { from?, to } }   // field-level diff
   decision: PENDING | ACCEPTED | EDITED | REJECTED   // per-operation

@@ -11,6 +11,31 @@ Running checklist of milestones/tasks, newest first. See
 membership, log events with participants, and traverse cause→effect chains;
 relationships/events are reviewable + lockable.
 
+### Done — slice 3: event causality links through the pipeline + Timeline traversal (2026-05-31)
+
+- [x] Added the M3 `EventCausality` model and migration
+      `20260531005412_m3_event_causality`. Cause/effect links are directed
+      `Event` → `Event` edges with optional `weight`/`note`, `source`, `status`,
+      `locked`, `version`, campaign scoping, uniqueness on `(causeId, effectId)`,
+      and their own provenance via `Provenance.eventCausality`.
+- [x] Extended the review service with `CREATE_EVENT_CAUSALITY` /
+      `DELETE_EVENT_CAUSALITY` operations under `applyAutoApprovedEventChangeSet`.
+      The service validates both endpoints are live canon events in the same
+      campaign, rejects self-links and links that would create a cycle, writes
+      causality provenance, and soft-archives links instead of deleting them.
+- [x] Added `linkEventCause` / `archiveEventCausality` to the `events` service
+      and projected causality into `listEventsForEntity`. Player reads remain
+      visibility-scoped: secret linked events are omitted from the cause/effect
+      lists, so public events do not reveal hidden upstream canon.
+- [x] Added `linkEventCauseAction` / `archiveEventCausalityAction` and expanded
+      the `TimelinePanel` with a simple list-based traversal surface: each event
+      shows `Caused by` and `Causes` links, can link another visible timeline
+      event as a cause, and can remove an existing cause/effect edge.
+- [x] Added DB-backed service coverage for provenance, timeline projection,
+      cycle rejection, player visibility scoping, and soft-archive; added action
+      and component coverage for the Timeline controls. Focused event/action/UI
+      tests are green.
+
 ### Done — slice 2: events + participants through the pipeline + Timeline panel (2026-05-30)
 
 - [x] Added the M3 `Event` + `EventParticipant` models and the
@@ -80,12 +105,12 @@ relationships/events are reviewable + lockable.
 
 ### Notes / follow-ups (M3)
 
-- Next slices: event causality (cause→effect DAG + traversal view) and event
-      effects (structured deltas applied on approval); relationship/event
-      locking/editing and pending (AI/import) relationship/event proposals in the
-      Review Queue; the campaign-wide relationship graph view + a campaign
-      timeline page (with full multi-participant editing); group hierarchy
-      (crawler→party→guild) rollup view; knowledge/reveal grants for fog of war.
+- Next slices: event effects (structured deltas applied on approval);
+      relationship/event locking/editing and pending (AI/import) relationship/
+      event proposals in the Review Queue; the campaign-wide relationship graph
+      view + a campaign timeline page (with full multi-participant editing);
+      group hierarchy (crawler→party→guild) rollup view; knowledge/reveal grants
+      for fog of war.
 - The connections/timeline add forms list current campaign entities as targets;
       at scale this should become a typeahead/search (revisit with M5 search).
 - The Timeline panel currently logs events with the viewed entity plus one

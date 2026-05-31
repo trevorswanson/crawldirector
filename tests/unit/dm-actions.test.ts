@@ -20,6 +20,8 @@ const {
   archiveRelationship,
   createEvent,
   archiveEvent,
+  linkEventCause,
+  archiveEventCausality,
   signOut,
   redirect,
   revalidatePath,
@@ -43,6 +45,8 @@ const {
   archiveRelationship: vi.fn(),
   createEvent: vi.fn(),
   archiveEvent: vi.fn(),
+  linkEventCause: vi.fn(),
+  archiveEventCausality: vi.fn(),
   signOut: vi.fn(),
   redirect: vi.fn(() => {
     throw new Error("NEXT_REDIRECT");
@@ -78,6 +82,8 @@ vi.mock("@/server/services/relationships", () => ({
 vi.mock("@/server/services/events", () => ({
   createEvent,
   archiveEvent,
+  linkEventCause,
+  archiveEventCausality,
 }));
 vi.mock("@/server/auth", () => ({ signOut }));
 vi.mock("next/navigation", () => ({ redirect }));
@@ -103,6 +109,8 @@ import {
   archiveRelationshipAction,
   createEventAction,
   archiveEventAction,
+  linkEventCauseAction,
+  archiveEventCausalityAction,
   signOutAction,
   updateEntityAction,
 } from "@/app/(dm)/actions";
@@ -854,5 +862,56 @@ describe("archiveEventAction", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e3");
+  });
+});
+
+describe("linkEventCauseAction", () => {
+  it("links a selected cause event and revalidates the current entity", async () => {
+    linkEventCause.mockResolvedValue({ id: "ec1" });
+
+    const result = await linkEventCauseAction(
+      "c1",
+      "entity1",
+      "effect1",
+      undefined,
+      form({ causeId: "cause1", weight: "75", note: "Broadcast backlash" }),
+    );
+
+    expect(result).toBeUndefined();
+    expect(linkEventCause).toHaveBeenCalledWith("u1", "c1", {
+      causeId: "cause1",
+      effectId: "effect1",
+      weight: 75,
+      note: "Broadcast backlash",
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/entity1");
+  });
+
+  it("surfaces causality ServiceError messages", async () => {
+    linkEventCause.mockRejectedValue(new ServiceError("This causality link would create a cycle."));
+
+    const result = await linkEventCauseAction(
+      "c1",
+      "entity1",
+      "effect1",
+      undefined,
+      form({ causeId: "cause1" }),
+    );
+
+    expect(result?.error).toMatch(/cycle/);
+  });
+});
+
+describe("archiveEventCausalityAction", () => {
+  it("archives a causality link and revalidates the current entity page", async () => {
+    archiveEventCausality.mockResolvedValue({
+      id: "ec1",
+      affectedEventIds: ["cause1", "effect1"],
+    });
+
+    await archiveEventCausalityAction("c1", "entity1", "ec1");
+
+    expect(archiveEventCausality).toHaveBeenCalledWith("u1", "c1", "ec1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/entity1");
   });
 });

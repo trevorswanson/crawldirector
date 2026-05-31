@@ -2,14 +2,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
-const { createEventAction, archiveEventAction } = vi.hoisted(() => ({
+const {
+  createEventAction,
+  archiveEventAction,
+  linkEventCauseAction,
+  archiveEventCausalityAction,
+} = vi.hoisted(() => ({
   createEventAction: vi.fn(),
   archiveEventAction: vi.fn(),
+  linkEventCauseAction: vi.fn(),
+  archiveEventCausalityAction: vi.fn(),
 }));
 
 vi.mock("@/app/(dm)/actions", () => ({
   createEventAction,
   archiveEventAction,
+  linkEventCauseAction,
+  archiveEventCausalityAction,
 }));
 vi.mock("next/link", () => ({
   default: ({ href, children }: { href: string; children: React.ReactNode }) => (
@@ -38,6 +47,8 @@ function event(overrides: Partial<EntityEvent> = {}): EntityEvent {
     source: "DM",
     role: "ACTOR",
     others: [{ id: "e2", name: "Donut", type: "CRAWLER", role: "ACTOR" }],
+    causedBy: [],
+    causes: [],
     ...overrides,
   };
 }
@@ -86,7 +97,7 @@ describe("TimelinePanel", () => {
     );
 
     expect(screen.getByText("Timeline · 2")).toBeDefined();
-    expect(screen.getByText("Floor 9 boss fight")).toBeDefined();
+    expect(screen.getAllByText("Floor 9 boss fight")[0]).toBeDefined();
     expect(screen.getByText("Day 3")).toBeDefined();
     expect(screen.getByText("They beat the boss.")).toBeDefined();
     // secret events are flagged
@@ -95,6 +106,36 @@ describe("TimelinePanel", () => {
     expect(screen.getByText("Donut").closest("a")?.getAttribute("href")).toBe(
       "/campaigns/c1/entities/e2",
     );
+  });
+
+  it("renders cause/effect chains and a cause selector for other timeline events", () => {
+    render(
+      <TimelinePanel
+        campaignId="c1"
+        entityId="e1"
+        events={[
+          event({
+            id: "ev1",
+            title: "Sponsor stock drops",
+            causedBy: [{ id: "ev2", title: "Arena stunt", linkId: "ec1" }],
+          }),
+          event({
+            id: "ev2",
+            title: "Arena stunt",
+            causes: [{ id: "ev1", title: "Sponsor stock drops", linkId: "ec1" }],
+          }),
+        ]}
+        candidates={candidates}
+      />,
+    );
+
+    expect(screen.getByText("Caused by")).toBeDefined();
+    expect(screen.getByText("Causes")).toBeDefined();
+    expect(screen.getAllByRole("link", { name: "Arena stunt" })[0].getAttribute("href")).toBe(
+      "/campaigns/c1/entities/e1?event=ev2",
+    );
+    expect(screen.queryByRole("button", { name: "Add cause" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "Arena stunt" })).toBeNull();
   });
 
   it("opens the log form with role selects and a participant picker", () => {

@@ -23,13 +23,15 @@
   `Lock`, `AuditLog`) are central and referenced by everything mutable.
 
 > **Implementation note (M2 → M3):** the committed schema includes the identity/
-> tenancy foundation, `Entity`/`Crawler`, the review-pipeline tables, and (M3
-> slice 1) the any-to-any `Relationship` table. Direct DM/co-DM writes still feel
-> instant in the UI, but the service layer records them as auto-approved `DM`
-> change sets with provenance and audit rows. `CREATE_RELATIONSHIP` /
-> `DELETE_RELATIONSHIP` now flow through the pipeline (auto-approved DM path);
-> pending (AI/import) relationship review, relationship `UPDATE`/locking, and
-> `Event`/causality tables arrive with the rest of M3.
+> tenancy foundation, `Entity`/`Crawler`, the review-pipeline tables, M3
+> `Relationship`, `Event`/`EventParticipant`, and `EventCausality`. Direct
+> DM/co-DM writes still feel instant in the UI, but the service layer records
+> them as auto-approved `DM` change sets with provenance and audit rows.
+> `CREATE_RELATIONSHIP` / `DELETE_RELATIONSHIP`, `CREATE_EVENT` /
+> `UPDATE_EVENT` (archive), and `CREATE_EVENT_CAUSALITY` /
+> `DELETE_EVENT_CAUSALITY` now flow through the pipeline. Pending (AI/import)
+> relationship/event review, relationship/event field editing + locking UI, and
+> structured event effects remain future M3 slices.
 
 ## Sketch
 
@@ -211,17 +213,19 @@ model Event {
   id          String   @id @default(cuid())
   campaignId  String
   title       String
+  summary     String?
   description String?
   inGameTime  Json     @default("{}")   // { floor?, dayInFloor?, absoluteDay?, label? }
-  orderKey    Float?                     // sortable timeline position
-  loggedAt    DateTime @default(now())
-  status      CanonStatus @default(PENDING)
+  orderKey    Int      @default(0)       // sortable timeline position
+  secret      Boolean  @default(false)
+  source      ChangeSource @default(DM)
+  status      CanonStatus @default(CANON)
   locked      Boolean  @default(false)
-  visibility  Visibility @default(DM_ONLY)
+  version     Int      @default(1)
   participants EventParticipant[]
   causedBy    EventCausality[] @relation("Effect")
   causes      EventCausality[] @relation("Cause")
-  effects     Json     @default("[]")    // structured deltas (optionally applied)
+  // Future M3/M6: structured deltas (optionally applied), including PERSONA_SHIFT.
   provenance  Provenance[]
   @@index([campaignId, orderKey])
 }
@@ -237,14 +241,22 @@ model EventParticipant {
   @@index([entityId])
 }
 
-model EventCausality {     // DAG edge between events
-  id        String @id @default(cuid())
-  causeId   String
-  effectId  String
-  weight    Int?   // optional strength of causal contribution
-  cause     Event  @relation("Cause",  fields: [causeId],  references: [id])
-  effect    Event  @relation("Effect", fields: [effectId], references: [id])
-  @@unique([causeId, effectId])
+model EventCausality {     // DAG edge between events; cycles blocked in service logic
+  id         String @id @default(cuid())
+  campaignId String
+  causeId    String
+  effectId   String
+  weight     Int?   // optional strength of causal contribution
+  note       String?
+  source     ChangeSource @default(DM)
+  status     CanonStatus @default(CANON)
+  locked     Boolean @default(false)
+  version    Int @default(1)
+  cause      Event  @relation("Cause",  fields: [causeId],  references: [id])
+  effect     Event  @relation("Effect", fields: [effectId], references: [id])
+  provenance Provenance[]
+  @@index([causeId, effectId])
+  @@index([campaignId, status])
 }
 
 // ───────────── Review pipeline ─────────────
