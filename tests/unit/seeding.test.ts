@@ -2,33 +2,32 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Role } from "@/generated/prisma/client";
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
+import fs from "fs";
 
-vi.mock("fs", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs")>();
-  return {
-    ...actual,
-    existsSync: vi.fn((filePath: string) => {
-      if (filePath.endsWith("dungeon-crawler-carl.jsonl")) {
-        return true;
-      }
-      return actual.existsSync(filePath);
-    }),
-    readFileSync: vi.fn((filePath: string, encoding: Parameters<typeof actual.readFileSync>[1]) => {
-      if (filePath.endsWith("dungeon-crawler-carl.jsonl")) {
-        const mockJsonLines = [
-          JSON.stringify({ text: "#Carl\nis a crawler from Seattle. level 32", meta: "url" }),
-          JSON.stringify({ text: "#Donut\nis a crawler. level 31", meta: "url" }),
-          JSON.stringify({ text: "#Katia Grim\nis a crawler. level 28", meta: "url" }),
-        ];
-        for (let i = 4; i <= 100; i++) {
-          mockJsonLines.push(JSON.stringify({ text: `#Entity ${i}\nis an item.`, meta: "url" }));
-        }
-        return mockJsonLines.join("\n");
-      }
-      return actual.readFileSync(filePath, encoding);
-    }),
-  };
+const originalExistsSync = fs.existsSync;
+const originalReadFileSync = fs.readFileSync;
+
+vi.spyOn(fs, "existsSync").mockImplementation((filePath: string) => {
+  if (typeof filePath === "string" && filePath.endsWith("dungeon-crawler-carl.jsonl")) {
+    return true;
+  }
+  return originalExistsSync(filePath);
 });
+
+vi.spyOn(fs, "readFileSync").mockImplementation(((filePath: string, encoding: any) => {
+  if (typeof filePath === "string" && filePath.endsWith("dungeon-crawler-carl.jsonl")) {
+    const mockJsonLines = [
+      JSON.stringify({ text: "#Carl\nis a crawler from Seattle. level 32", meta: "url" }),
+      JSON.stringify({ text: "#Donut\nis a crawler. level 31", meta: "url" }),
+      JSON.stringify({ text: "#Katia Grim\nis a crawler. level 28", meta: "url" }),
+    ];
+    for (let i = 4; i <= 100; i++) {
+      mockJsonLines.push(JSON.stringify({ text: `#Entity ${i}\nis an item.`, meta: "url" }));
+    }
+    return mockJsonLines.join("\n");
+  }
+  return originalReadFileSync(filePath, encoding);
+}) as any);
 
 import { seedCampaignFromLore, classifyEntity, extractSummaryAndDescription } from "@/server/services/seeding";
 
