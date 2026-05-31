@@ -623,17 +623,23 @@ const EditFormContext = createContext<{
 export function EditFormProvider({
   children,
   initialVisibility,
+  isEditing = false,
 }: {
   children: ReactNode;
   initialVisibility?: string;
+  isEditing?: boolean;
 }) {
   const [error, setError] = useState<string | undefined>(undefined);
   const [prevInitialVisibility, setPrevInitialVisibility] = useState(initialVisibility);
+  const [prevIsEditing, setPrevIsEditing] = useState(isEditing);
   const [visibility, setVisibility] = useState(initialVisibility);
 
-  if (initialVisibility !== prevInitialVisibility) {
+  if (initialVisibility !== prevInitialVisibility || (!isEditing && prevIsEditing)) {
     setPrevInitialVisibility(initialVisibility);
+    setPrevIsEditing(isEditing);
     setVisibility(initialVisibility);
+  } else if (isEditing !== prevIsEditing) {
+    setPrevIsEditing(isEditing);
   }
 
   return (

@@ -96,7 +96,7 @@ export default async function EntityPage({
   }
 
   return (
-    <EditFormProvider initialVisibility={entity.visibility}>
+    <EditFormProvider initialVisibility={entity.visibility} isEditing={editing}>
       <div className="grid h-full grid-cols-1 lg:grid-cols-[minmax(0,1fr)_304px]">
       {/* MAIN COLUMN */}
       <div className="order-2 min-w-0 overflow-y-auto lg:order-1">
@@ -375,15 +375,17 @@ export default async function EntityPage({
               <input type="hidden" name="field" value="visibility" />
               <button
                 type="submit"
-                disabled={entity.locked}
+                disabled={editing || entity.locked}
                 title={
-                  entity.locked
+                  editing
+                    ? "Finish or discard edits before changing the visibility lock"
+                    : entity.locked
                     ? "Whole entity is locked"
                     : entity.lockedFields.includes("visibility")
                       ? "Visibility is locked — click to unlock"
                       : "Click to lock visibility"
                 }
-                className="inline-flex items-center border px-[5px] py-[3px] transition-colors disabled:opacity-50 cursor-pointer"
+                className="inline-flex items-center border px-[5px] py-[3px] transition-colors disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
                 style={{
                   borderColor: (entity.locked || entity.lockedFields.includes("visibility"))
                     ? "var(--sys)"
