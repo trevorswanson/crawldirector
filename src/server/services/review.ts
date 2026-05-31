@@ -1892,6 +1892,19 @@ async function applyCreateEventCausality(
     throw new ServiceError("This causality link would create a cycle.");
   }
 
+  const existingActive = await tx.eventCausality.findFirst({
+    where: {
+      campaignId: changeSet.campaignId,
+      causeId,
+      effectId,
+      status: { not: CanonStatus.ARCHIVED },
+    },
+    select: { id: true },
+  });
+  if (existingActive) {
+    throw new ServiceError("This causality link already exists.");
+  }
+
   const edge = await tx.eventCausality.create({
     data: {
       campaignId: changeSet.campaignId,

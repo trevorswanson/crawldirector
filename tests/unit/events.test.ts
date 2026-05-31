@@ -423,4 +423,42 @@ describe("event service", () => {
     expect(timeline.flatMap((event) => event.causes)).toEqual([]);
     expect(timeline.flatMap((event) => event.causedBy)).toEqual([]);
   });
+
+  it("allows relinking after archiving a causality link", async () => {
+    const owner = await makeUser("owner-relink@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const cause = await createEvent(owner.id, campaign.id, {
+      title: "Cause",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const effect = await createEvent(owner.id, campaign.id, {
+      title: "Effect",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "AFFECTED" }],
+    });
+
+    const link1 = await linkEventCause(owner.id, campaign.id, {
+      causeId: cause.id,
+      effectId: effect.id,
+    });
+    expect(link1.id).toBeDefined();
+
+    await archiveEventCausality(owner.id, campaign.id, link1.id);
+
+    const link2 = await linkEventCause(owner.id, campaign.id, {
+      causeId: cause.id,
+      effectId: effect.id,
+    });
+    expect(link2.id).toBeDefined();
+    expect(link2.id).not.toBe(link1.id);
+
+    await expect(
+      linkEventCause(owner.id, campaign.id, {
+        causeId: cause.id,
+        effectId: effect.id,
+      }),
+    ).rejects.toThrow(/already exists/i);
+  });
 });

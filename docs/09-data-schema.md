@@ -255,7 +255,7 @@ model EventCausality {     // DAG edge between events; cycles blocked in service
   cause      Event  @relation("Cause",  fields: [causeId],  references: [id])
   effect     Event  @relation("Effect", fields: [effectId], references: [id])
   provenance Provenance[]
-  @@unique([causeId, effectId])
+  @@index([causeId, effectId])
   @@index([campaignId, status])
 }
 

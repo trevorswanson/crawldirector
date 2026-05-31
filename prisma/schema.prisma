@@ -416,7 +416,7 @@ model EventCausality {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([causeId, effectId])
+  @@index([causeId, effectId])
   @@index([campaignId, status])
   @@index([causeId])
   @@index([effectId])
