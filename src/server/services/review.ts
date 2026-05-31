@@ -38,7 +38,11 @@ export type RelationshipReviewOperationInput = {
 };
 
 export type EventReviewOperationInput = {
-  op: "CREATE_EVENT" | "UPDATE_EVENT";
+  op:
+    | "CREATE_EVENT"
+    | "UPDATE_EVENT"
+    | "CREATE_EVENT_CAUSALITY"
+    | "DELETE_EVENT_CAUSALITY";
   targetId?: string;
   patch: ReviewPatch;
 };
@@ -423,7 +427,11 @@ export async function applyAutoApprovedEventChangeSet(
         operations: {
           create: input.operations.map((operation) => ({
             op: operation.op,
-            targetType: "EVENT",
+            targetType:
+              operation.op === OpKind.CREATE_EVENT_CAUSALITY ||
+              operation.op === OpKind.DELETE_EVENT_CAUSALITY
+                ? "EVENT_CAUSALITY"
+                : "EVENT",
             targetId: operation.targetId,
             patch: operation.patch as Prisma.InputJsonValue,
           })),
@@ -1655,17 +1663,36 @@ async function applyEventOperation(
   operation: Prisma.ChangeOperationGetPayload<object>,
   patchOverride?: ReviewPatch,
 ) {
-  if (operation.targetType !== "EVENT") {
-    throw new ServiceError("Unsupported operation target.");
-  }
   const patch = patchOverride ?? (operation.patch as ReviewPatch);
 
   switch (operation.op) {
     case OpKind.CREATE_EVENT:
+      if (operation.targetType !== "EVENT") {
+        throw new ServiceError("Unsupported operation target.");
+      }
       return applyCreateEvent(tx, changeSet, operation.id, patch);
     case OpKind.UPDATE_EVENT:
+      if (operation.targetType !== "EVENT") {
+        throw new ServiceError("Unsupported operation target.");
+      }
       if (!operation.targetId) throw new ServiceError("Missing event target.");
       return applyUpdateEvent(tx, changeSet, operation.id, operation.targetId, patch);
+    case OpKind.CREATE_EVENT_CAUSALITY:
+      if (operation.targetType !== "EVENT_CAUSALITY") {
+        throw new ServiceError("Unsupported operation target.");
+      }
+      return applyCreateEventCausality(tx, changeSet, operation.id, patch);
+    case OpKind.DELETE_EVENT_CAUSALITY:
+      if (operation.targetType !== "EVENT_CAUSALITY") {
+        throw new ServiceError("Unsupported operation target.");
+      }
+      if (!operation.targetId) throw new ServiceError("Missing causality target.");
+      return applyDeleteEventCausality(
+        tx,
+        changeSet,
+        operation.id,
+        operation.targetId,
+      );
     default:
       throw new ServiceError("Unsupported event operation.");
   }
@@ -1784,6 +1811,173 @@ async function writeEventProvenance(
     data: fields.map((field) => ({
       campaignId: changeSet.campaignId,
       eventId,
+      changeSetId: changeSet.id,
+      source: changeSet.source,
+      field,
+      actorUserId: changeSet.actorUserId,
+      providerId: changeSet.providerId,
+      model: changeSet.model,
+      promptId: changeSet.promptId,
+      runId: changeSet.runId,
+    })),
+  });
+}
+
+async function assertCanonEvent(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  eventId: string,
+) {
+  const event = await tx.event.findFirst({
+    where: { id: eventId, campaignId, status: CanonStatus.CANON },
+    select: { id: true },
+  });
+  if (!event) throw new ServiceError("Event not found.");
+  return event;
+}
+
+async function wouldCreateEventCausalityCycle(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  causeId: string,
+  effectId: string,
+) {
+  const visited = new Set<string>();
+  const stack = [effectId];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current || visited.has(current)) continue;
+    if (current === causeId) return true;
+    visited.add(current);
+
+    const next = await tx.eventCausality.findMany({
+      where: {
+        campaignId,
+        causeId: current,
+        status: { not: CanonStatus.ARCHIVED },
+      },
+      select: { effectId: true },
+    });
+    stack.push(...next.map((edge) => edge.effectId));
+  }
+
+  return false;
+}
+
+async function applyCreateEventCausality(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operationId: string,
+  patch: ReviewPatch,
+) {
+  const causeId = readTo(patch, "causeId");
+  const effectId = readTo(patch, "effectId");
+  if (typeof causeId !== "string" || typeof effectId !== "string") {
+    throw new ServiceError("Causality endpoints are required.");
+  }
+  if (causeId === effectId) {
+    throw new ServiceError("An event cannot cause itself.");
+  }
+
+  await assertCanonEvent(tx, changeSet.campaignId, causeId);
+  await assertCanonEvent(tx, changeSet.campaignId, effectId);
+  const createsCycle = await wouldCreateEventCausalityCycle(
+    tx,
+    changeSet.campaignId,
+    causeId,
+    effectId,
+  );
+  if (createsCycle) {
+    throw new ServiceError("This causality link would create a cycle.");
+  }
+
+  const edge = await tx.eventCausality.create({
+    data: {
+      campaignId: changeSet.campaignId,
+      causeId,
+      effectId,
+      weight: optionalNumber(readTo(patch, "weight")),
+      note: nullableString(readTo(patch, "note")),
+      source: changeSet.source,
+      status: CanonStatus.CANON,
+    },
+    select: { id: true },
+  });
+
+  await writeEventCausalityProvenance(tx, changeSet, edge.id, patch);
+  await tx.auditLog.create({
+    data: {
+      campaignId: changeSet.campaignId,
+      actorUserId: changeSet.reviewedById ?? changeSet.actorUserId ?? "",
+      action: "APPLY_OPERATION",
+      targetType: "CHANGE_OPERATION",
+      targetId: operationId,
+      detail: { eventCausalityId: edge.id, op: OpKind.CREATE_EVENT_CAUSALITY },
+    },
+  });
+  return edge.id;
+}
+
+async function applyDeleteEventCausality(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operationId: string,
+  eventCausalityId: string,
+) {
+  const edge = await tx.eventCausality.findFirst({
+    where: {
+      id: eventCausalityId,
+      campaignId: changeSet.campaignId,
+      status: { not: CanonStatus.ARCHIVED },
+    },
+    select: { id: true, locked: true },
+  });
+  if (!edge) throw new ServiceError("Causality link not found.");
+  if (edge.locked) {
+    await tx.changeOperation.update({
+      where: { id: operationId },
+      data: { blockedByLock: true },
+    });
+    throw new ServiceError("This causality link is locked.");
+  }
+
+  const patch: ReviewPatch = {
+    status: { to: CanonStatus.ARCHIVED },
+  };
+  await tx.eventCausality.update({
+    where: { id: eventCausalityId },
+    data: { status: CanonStatus.ARCHIVED, version: { increment: 1 } },
+    select: { id: true },
+  });
+  await writeEventCausalityProvenance(tx, changeSet, eventCausalityId, patch);
+  await tx.auditLog.create({
+    data: {
+      campaignId: changeSet.campaignId,
+      actorUserId: changeSet.reviewedById ?? changeSet.actorUserId ?? "",
+      action: "APPLY_OPERATION",
+      targetType: "CHANGE_OPERATION",
+      targetId: operationId,
+      detail: {
+        eventCausalityId,
+        op: OpKind.DELETE_EVENT_CAUSALITY,
+      },
+    },
+  });
+  return eventCausalityId;
+}
+
+async function writeEventCausalityProvenance(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  eventCausalityId: string,
+  patch: ReviewPatch,
+) {
+  const fields = patchFields(patch).filter((field) => field !== "_baseVersion");
+  await tx.provenance.createMany({
+    data: fields.map((field) => ({
+      campaignId: changeSet.campaignId,
+      eventCausalityId,
       changeSetId: changeSet.id,
       source: changeSet.source,
       field,

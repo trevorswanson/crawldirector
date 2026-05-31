@@ -24,7 +24,12 @@ import {
   archiveRelationship,
   createRelationship,
 } from "@/server/services/relationships";
-import { archiveEvent, createEvent } from "@/server/services/events";
+import {
+  archiveEvent,
+  archiveEventCausality,
+  createEvent,
+  linkEventCause,
+} from "@/server/services/events";
 import {
   archiveEntity,
   createCrawler,
@@ -488,6 +493,7 @@ export async function archiveRelationshipAction(
 }
 
 export type EventActionState = { error?: string } | undefined;
+export type EventCausalityActionState = { error?: string } | undefined;
 
 function parseParticipantRole(value: FormDataEntryValue | null) {
   const parsed = z.enum(eventParticipantRoleValues).safeParse(value);
@@ -553,6 +559,49 @@ export async function archiveEventAction(
   for (const participantId of participantIds) {
     revalidatePath(`/campaigns/${campaignId}/entities/${participantId}`);
   }
+}
+
+export async function linkEventCauseAction(
+  campaignId: string,
+  entityId: string,
+  effectId: string,
+  _prev: EventCausalityActionState,
+  formData: FormData,
+): Promise<EventCausalityActionState> {
+  const user = await requireUser();
+  const causeId = formData.get("causeId")?.toString().trim();
+  if (!causeId) {
+    return { error: "Choose a cause event." };
+  }
+  const rawWeight = formData.get("weight")?.toString().trim();
+  const weight =
+    rawWeight && Number.isFinite(Number(rawWeight)) ? Number(rawWeight) : undefined;
+  const note = formData.get("note")?.toString().trim() || undefined;
+
+  try {
+    await linkEventCause(user.id, campaignId, {
+      causeId,
+      effectId,
+      weight,
+      note,
+    });
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    return { error: "Could not link the events. Please try again." };
+  }
+
+  revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
+  return undefined;
+}
+
+export async function archiveEventCausalityAction(
+  campaignId: string,
+  entityId: string,
+  eventCausalityId: string,
+): Promise<void> {
+  const user = await requireUser();
+  await archiveEventCausality(user.id, campaignId, eventCausalityId);
+  revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
 }
 
 export async function getCampaignCanonIntegrityAction(campaignId: string) {

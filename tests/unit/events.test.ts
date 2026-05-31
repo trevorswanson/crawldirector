@@ -7,7 +7,9 @@ import { createCampaign } from "@/server/services/campaigns";
 import { createGenericEntity } from "@/server/services/entities";
 import {
   archiveEvent,
+  archiveEventCausality,
   createEvent,
+  linkEventCause,
   listEventsForEntity,
 } from "@/server/services/events";
 
@@ -267,5 +269,158 @@ describe("event service", () => {
     ).rejects.toThrow(/locked/);
     const row = await prisma.event.findUnique({ where: { id: event.id } });
     expect(row?.status).toBe(CanonStatus.CANON);
+  });
+
+  it("links events into a cause/effect chain through the pipeline with provenance", async () => {
+    const owner = await makeUser("owner-cause@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const stunt = await createEvent(owner.id, campaign.id, {
+      title: "Carl blows up the arena",
+      floor: 3,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const stockDrop = await createEvent(owner.id, campaign.id, {
+      title: "Sponsor stock drops",
+      floor: 4,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "AFFECTED" }],
+    });
+
+    const link = await linkEventCause(owner.id, campaign.id, {
+      causeId: stunt.id,
+      effectId: stockDrop.id,
+      weight: 80,
+      note: "Broadcast backlash.",
+    });
+
+    const row = await prisma.eventCausality.findUnique({
+      where: { id: link.id },
+    });
+    expect(row?.status).toBe(CanonStatus.CANON);
+    expect(row?.causeId).toBe(stunt.id);
+    expect(row?.effectId).toBe(stockDrop.id);
+    expect(row?.weight).toBe(80);
+    expect(row?.note).toBe("Broadcast backlash.");
+
+    const provenance = await prisma.provenance.findMany({
+      where: { eventCausalityId: link.id },
+    });
+    expect(provenance.map((p) => p.field).sort()).toEqual([
+      "causeId",
+      "effectId",
+      "note",
+      "weight",
+    ]);
+
+    const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    const effect = timeline.find((event) => event.id === stockDrop.id);
+    const cause = timeline.find((event) => event.id === stunt.id);
+    expect(effect?.causedBy).toEqual([
+      { id: stunt.id, title: "Carl blows up the arena", linkId: link.id },
+    ]);
+    expect(cause?.causes).toEqual([
+      { id: stockDrop.id, title: "Sponsor stock drops", linkId: link.id },
+    ]);
+  });
+
+  it("rejects causality links that would create a cycle", async () => {
+    const owner = await makeUser("owner-cycle@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const first = await createEvent(owner.id, campaign.id, {
+      title: "First",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const second = await createEvent(owner.id, campaign.id, {
+      title: "Second",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const third = await createEvent(owner.id, campaign.id, {
+      title: "Third",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await linkEventCause(owner.id, campaign.id, {
+      causeId: first.id,
+      effectId: second.id,
+    });
+    await linkEventCause(owner.id, campaign.id, {
+      causeId: second.id,
+      effectId: third.id,
+    });
+
+    await expect(
+      linkEventCause(owner.id, campaign.id, {
+        causeId: third.id,
+        effectId: first.id,
+      }),
+    ).rejects.toThrow(/cycle/i);
+  });
+
+  it("hides causality links to secret events from players", async () => {
+    const owner = await makeUser("owner-cause-visibility@test.com");
+    const player = await makeUser("player-cause-visibility@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl", "SHARED_WITH_PLAYERS");
+    const publicEvent = await createEvent(owner.id, campaign.id, {
+      title: "Public consequence",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "AFFECTED" }],
+    });
+    const secretEvent = await createEvent(owner.id, campaign.id, {
+      title: "Secret cause",
+      secret: true,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await linkEventCause(owner.id, campaign.id, {
+      causeId: secretEvent.id,
+      effectId: publicEvent.id,
+    });
+
+    const asDm = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    expect(asDm.find((event) => event.id === publicEvent.id)?.causedBy[0]).toMatchObject(
+      { id: secretEvent.id, title: "Secret cause" },
+    );
+
+    const asPlayer = await listEventsForEntity(player.id, campaign.id, carl.id);
+    expect(asPlayer.find((event) => event.id === publicEvent.id)?.causedBy).toEqual(
+      [],
+    );
+  });
+
+  it("soft-archives a causality link and drops it from timelines", async () => {
+    const owner = await makeUser("owner-cause-archive@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const cause = await createEvent(owner.id, campaign.id, {
+      title: "Cause",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const effect = await createEvent(owner.id, campaign.id, {
+      title: "Effect",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "AFFECTED" }],
+    });
+    const link = await linkEventCause(owner.id, campaign.id, {
+      causeId: cause.id,
+      effectId: effect.id,
+    });
+
+    const result = await archiveEventCausality(owner.id, campaign.id, link.id);
+
+    expect(result.affectedEventIds.sort()).toEqual([cause.id, effect.id].sort());
+    const row = await prisma.eventCausality.findUnique({ where: { id: link.id } });
+    expect(row?.status).toBe(CanonStatus.ARCHIVED);
+    const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    expect(timeline.flatMap((event) => event.causes)).toEqual([]);
+    expect(timeline.flatMap((event) => event.causedBy)).toEqual([]);
   });
 });

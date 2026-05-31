@@ -85,6 +85,8 @@ enum OpKind {
   DELETE_RELATIONSHIP
   CREATE_EVENT
   UPDATE_EVENT
+  CREATE_EVENT_CAUSALITY
+  DELETE_EVENT_CAUSALITY
   APPLY_EVENT_EFFECTS
 }
 
@@ -156,16 +158,16 @@ model User {
   // Credentials sign-in: bcrypt hash. Null for OAuth-only users.
   passwordHash  String?
 
-  accounts        Account[]
-  sessions        Session[]
-  memberships     Membership[]
+  accounts           Account[]
+  sessions           Session[]
+  memberships        Membership[]
   // Campaigns this user owns (also represented by an OWNER membership).
-  ownedCampaigns  Campaign[]   @relation("OwnedCampaigns")
-  createdEntities Entity[]     @relation("CreatedEntities")
-  authoredChangeSets ChangeSet[] @relation("AuthoredChangeSets")
-  reviewedChangeSets ChangeSet[] @relation("ReviewedChangeSets")
-  provenanceRows Provenance[] @relation("ActorProvenance")
-  auditLogs      AuditLog[]   @relation("ActorAuditLogs")
+  ownedCampaigns     Campaign[]   @relation("OwnedCampaigns")
+  createdEntities    Entity[]     @relation("CreatedEntities")
+  authoredChangeSets ChangeSet[]  @relation("AuthoredChangeSets")
+  reviewedChangeSets ChangeSet[]  @relation("ReviewedChangeSets")
+  provenanceRows     Provenance[] @relation("ActorProvenance")
+  auditLogs          AuditLog[]   @relation("ActorAuditLogs")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -220,13 +222,14 @@ model Campaign {
   ownerId String
   owner   User   @relation("OwnedCampaigns", fields: [ownerId], references: [id])
 
-  members  Membership[]
-  entities Entity[]
-  relationships Relationship[]
-  events     Event[]
-  changeSets ChangeSet[]
-  provenance Provenance[]
-  auditLogs  AuditLog[]
+  members          Membership[]
+  entities         Entity[]
+  relationships    Relationship[]
+  events           Event[]
+  eventCausalities EventCausality[]
+  changeSets       ChangeSet[]
+  provenance       Provenance[]
+  auditLogs        AuditLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -251,30 +254,30 @@ model Membership {
 
 // ───────────── Entity core ─────────────
 model Entity {
-  id           String      @id @default(cuid())
+  id           String       @id @default(cuid())
   campaignId   String
   type         EntityType
   name         String
   summary      String?
   description  String?
-  status       CanonStatus @default(CANON)
-  visibility   Visibility  @default(DM_ONLY)
+  status       CanonStatus  @default(CANON)
+  visibility   Visibility   @default(DM_ONLY)
   source       ChangeSource @default(DM)
-  data         Json        @default("{}")
-  customFields Json        @default("{}")
-  tags         String[]    @default([])
-  version      Int         @default(1)
-  locked       Boolean     @default(false)
-  lockedFields String[]    @default([])
-  isStub       Boolean     @default(false)
-  agentEnabled Boolean     @default(false)
+  data         Json         @default("{}")
+  customFields Json         @default("{}")
+  tags         String[]     @default([])
+  version      Int          @default(1)
+  locked       Boolean      @default(false)
+  lockedFields String[]     @default([])
+  isStub       Boolean      @default(false)
+  agentEnabled Boolean      @default(false)
 
-  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  campaign    Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   createdById String?
-  createdBy   User?    @relation("CreatedEntities", fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy   User?              @relation("CreatedEntities", fields: [createdById], references: [id], onDelete: SetNull)
   crawler     Crawler?
-  outEdges    Relationship[] @relation("SourceEntity")
-  inEdges     Relationship[] @relation("TargetEntity")
+  outEdges    Relationship[]     @relation("SourceEntity")
+  inEdges     Relationship[]     @relation("TargetEntity")
   eventRoles  EventParticipant[]
   provenance  Provenance[]
 
@@ -324,10 +327,10 @@ model Relationship {
   locked      Boolean          @default(false)
   version     Int              @default(1)
 
-  campaign       Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  sourceEntity   Entity   @relation("SourceEntity", fields: [sourceId], references: [id], onDelete: Cascade)
-  targetEntity   Entity   @relation("TargetEntity", fields: [targetId], references: [id], onDelete: Cascade)
-  provenance     Provenance[]
+  campaign     Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  sourceEntity Entity       @relation("SourceEntity", fields: [sourceId], references: [id], onDelete: Cascade)
+  targetEntity Entity       @relation("TargetEntity", fields: [targetId], references: [id], onDelete: Cascade)
+  provenance   Provenance[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -361,6 +364,8 @@ model Event {
 
   campaign     Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   participants EventParticipant[]
+  causedBy     EventCausality[]   @relation("Effect")
+  causes       EventCausality[]   @relation("Cause")
   provenance   Provenance[]
 
   createdAt DateTime @default(now())
@@ -389,21 +394,49 @@ model EventParticipant {
   @@index([entityId])
 }
 
+// Directed cause -> effect edge between two Events. These form a DAG in service
+// logic so DMs can traverse why something happened and what it caused.
+model EventCausality {
+  id         String       @id @default(cuid())
+  campaignId String
+  causeId    String
+  effectId   String
+  weight     Int?
+  note       String?
+  source     ChangeSource @default(DM)
+  status     CanonStatus  @default(CANON)
+  locked     Boolean      @default(false)
+  version    Int          @default(1)
+
+  campaign   Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  cause      Event        @relation("Cause", fields: [causeId], references: [id], onDelete: Cascade)
+  effect     Event        @relation("Effect", fields: [effectId], references: [id], onDelete: Cascade)
+  provenance Provenance[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([causeId, effectId])
+  @@index([campaignId, status])
+  @@index([causeId])
+  @@index([effectId])
+}
+
 // ───────────── Review pipeline ─────────────
 model ChangeSet {
-  id            String          @id @default(cuid())
+  id            String            @id @default(cuid())
   campaignId    String
   source        ChangeSource
   title         String
   summary       String?
-  status        ChangeSetStatus @default(PENDING)
+  status        ChangeSetStatus   @default(PENDING)
   actorUserId   String?
   providerId    String?
   model         String?
   promptId      String?
   promptVersion String?
   runId         String?
-  baseVersions  Json            @default("{}")
+  baseVersions  Json              @default("{}")
   operations    ChangeOperation[]
   reviewedById  String?
   reviewedAt    DateTime?
@@ -445,6 +478,7 @@ model Provenance {
   entityId          String?
   relationshipId    String?
   eventId           String?
+  eventCausalityId  String?
   personaSnapshotId String?
   changeSetId       String
   source            ChangeSource
@@ -455,18 +489,20 @@ model Provenance {
   promptId          String?
   runId             String?
 
-  campaign     Campaign      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  entity       Entity?       @relation(fields: [entityId], references: [id], onDelete: Cascade)
-  relationship Relationship? @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
-  event        Event?        @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  changeSet    ChangeSet     @relation(fields: [changeSetId], references: [id], onDelete: Cascade)
-  actor        User?         @relation("ActorProvenance", fields: [actorUserId], references: [id], onDelete: SetNull)
+  campaign       Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  entity         Entity?         @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  relationship   Relationship?   @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
+  event          Event?          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  eventCausality EventCausality? @relation(fields: [eventCausalityId], references: [id], onDelete: Cascade)
+  changeSet      ChangeSet       @relation(fields: [changeSetId], references: [id], onDelete: Cascade)
+  actor          User?           @relation("ActorProvenance", fields: [actorUserId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
 
   @@index([entityId])
   @@index([relationshipId])
   @@index([eventId])
+  @@index([eventCausalityId])
   @@index([changeSetId])
 }
 

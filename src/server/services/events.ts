@@ -35,6 +35,8 @@ function nullIfEmpty(value: string | undefined) {
 
 export type EventTimeInfo = { floor: number | null; label: string | null };
 
+export type EventCausalitySummary = { id: string; title: string; linkId: string };
+
 export type EntityEvent = {
   id: string;
   title: string;
@@ -47,6 +49,8 @@ export type EntityEvent = {
   role: EventParticipantRole;
   // Other participants (the viewed entity excluded), visibility-scoped.
   others: { id: string; name: string; type: string; role: EventParticipantRole }[];
+  causedBy: EventCausalitySummary[];
+  causes: EventCausalitySummary[];
 };
 
 const otherEntitySelect = {
@@ -88,6 +92,10 @@ function readTimeInfo(value: unknown): EventTimeInfo {
     floor: typeof record.floor === "number" ? record.floor : null,
     label: typeof record.label === "string" ? record.label : null,
   };
+}
+
+function isPlayerVisibleEvent(event: { status: CanonStatus; secret: boolean }) {
+  return event.status !== CanonStatus.ARCHIVED && !event.secret;
 }
 
 /**
@@ -174,6 +182,20 @@ export async function listEventsForEntity(
           entity: { select: otherEntitySelect },
         },
       },
+      causedBy: {
+        where: { status: { not: CanonStatus.ARCHIVED } },
+        select: {
+          id: true,
+          cause: { select: { id: true, title: true, status: true, secret: true } },
+        },
+      },
+      causes: {
+        where: { status: { not: CanonStatus.ARCHIVED } },
+        select: {
+          id: true,
+          effect: { select: { id: true, title: true, status: true, secret: true } },
+        },
+      },
     },
   });
 
@@ -201,9 +223,87 @@ export async function listEventsForEntity(
       source: event.source,
       role: self.role,
       others,
+      causedBy: event.causedBy
+        .filter((edge) => !isPlayer || isPlayerVisibleEvent(edge.cause))
+        .map((edge) => ({
+          id: edge.cause.id,
+          title: edge.cause.title,
+          linkId: edge.id,
+        })),
+      causes: event.causes
+        .filter((edge) => !isPlayer || isPlayerVisibleEvent(edge.effect))
+        .map((edge) => ({
+          id: edge.effect.id,
+          title: edge.effect.title,
+          linkId: edge.id,
+        })),
     });
   }
   return timeline;
+}
+
+export async function linkEventCause(
+  userId: string,
+  campaignId: string,
+  input: {
+    causeId: string;
+    effectId: string;
+    weight?: number | null;
+    note?: string | null;
+  },
+) {
+  await assertCampaignDm(userId, campaignId);
+  const patch: ReviewPatch = {
+    causeId: { to: input.causeId },
+    effectId: { to: input.effectId },
+  };
+  if (typeof input.weight === "number") {
+    patch.weight = { to: input.weight };
+  }
+  const note = input.note?.trim();
+  if (note) {
+    patch.note = { to: note };
+  }
+
+  const result = await applyAutoApprovedEventChangeSet(userId, campaignId, {
+    title: "Link event causality",
+    operations: [{ op: OpKind.CREATE_EVENT_CAUSALITY, patch }],
+  });
+  return { id: result.targetIds[0] };
+}
+
+export async function archiveEventCausality(
+  userId: string,
+  campaignId: string,
+  eventCausalityId: string,
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  const existing = await prisma.eventCausality.findFirst({
+    where: {
+      id: eventCausalityId,
+      campaignId,
+      status: { not: CanonStatus.ARCHIVED },
+    },
+    select: { id: true, causeId: true, effectId: true },
+  });
+  if (!existing) throw new ServiceError("Causality link not found.");
+
+  await applyAutoApprovedEventChangeSet(userId, campaignId, {
+    title: "Remove event causality",
+    operations: [
+      {
+        op: OpKind.DELETE_EVENT_CAUSALITY,
+        targetId: eventCausalityId,
+        patch: { status: { from: CanonStatus.CANON, to: CanonStatus.ARCHIVED } },
+      },
+    ],
+  });
+
+  return {
+    id: eventCausalityId,
+    affectedEventIds: [existing.causeId, existing.effectId],
+  };
 }
 
 /**
