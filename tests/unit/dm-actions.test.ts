@@ -838,9 +838,21 @@ describe("createEventAction", () => {
 
 describe("archiveEventAction", () => {
   it("archives the event and revalidates the entity page", async () => {
+    archiveEvent.mockResolvedValue({ id: "ev1", participantIds: ["e1"] });
+
     await archiveEventAction("c1", "e1", "ev1");
 
     expect(archiveEvent).toHaveBeenCalledWith("u1", "c1", "ev1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+  });
+
+  it("revalidates every participant timeline when archiving an event", async () => {
+    archiveEvent.mockResolvedValue({ id: "ev1", participantIds: ["e1", "e2", "e3"] });
+
+    await archiveEventAction("c1", "e1", "ev1");
+
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e3");
   });
 });

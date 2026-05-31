@@ -219,7 +219,7 @@ export async function archiveEvent(
 
   const existing = await prisma.event.findFirst({
     where: { id: eventId, campaignId, status: { not: CanonStatus.ARCHIVED } },
-    select: { id: true, status: true },
+    select: { id: true, status: true, participants: { select: { entityId: true } } },
   });
   if (!existing) throw new ServiceError("Event not found.");
 
@@ -233,5 +233,8 @@ export async function archiveEvent(
       },
     ],
   });
-  return { id: eventId };
+  return {
+    id: eventId,
+    participantIds: existing.participants.map((participant) => participant.entityId),
+  };
 }

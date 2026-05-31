@@ -189,10 +189,11 @@ describe("event service", () => {
       participants: [{ entityId: carl.id, role: "ACTOR" }],
     });
 
-    await archiveEvent(owner.id, campaign.id, event.id);
+    const result = await archiveEvent(owner.id, campaign.id, event.id);
 
     const row = await prisma.event.findUnique({ where: { id: event.id } });
     expect(row?.status).toBe(CanonStatus.ARCHIVED);
+    expect(result.participantIds).toEqual([carl.id]);
     const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
     expect(timeline).toHaveLength(0);
   });

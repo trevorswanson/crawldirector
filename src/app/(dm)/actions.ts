@@ -548,8 +548,11 @@ export async function archiveEventAction(
   eventId: string,
 ): Promise<void> {
   const user = await requireUser();
-  await archiveEvent(user.id, campaignId, eventId);
-  revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
+  const result = await archiveEvent(user.id, campaignId, eventId);
+  const participantIds = new Set([...result.participantIds, entityId]);
+  for (const participantId of participantIds) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${participantId}`);
+  }
 }
 
 export async function getCampaignCanonIntegrityAction(campaignId: string) {
