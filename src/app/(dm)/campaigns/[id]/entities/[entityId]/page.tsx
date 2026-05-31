@@ -151,7 +151,7 @@ export default async function EntityPage({
                     id,
                     entityId,
                   )}
-                  className="shrink-0 self-center"
+                  className="shrink-0 self-start"
                 >
                   <input type="hidden" name="field" value="data.aiDescription" />
                   <button
