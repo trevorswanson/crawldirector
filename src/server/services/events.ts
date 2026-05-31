@@ -264,18 +264,30 @@ export async function setEventLock(
         campaignId,
         status: { not: CanonStatus.ARCHIVED },
       },
-      select: { id: true, locked: true },
+      select: {
+        id: true,
+        locked: true,
+        participants: { select: { entityId: true } },
+      },
     });
     if (!event) throw new ServiceError("Event not found.");
 
     if (event.locked === locked) {
-      return event;
+      return {
+        id: event.id,
+        locked: event.locked,
+        participantIds: event.participants.map((participant) => participant.entityId),
+      };
     }
 
     const updated = await tx.event.update({
       where: { id: eventId },
       data: { locked },
-      select: { id: true, locked: true },
+      select: {
+        id: true,
+        locked: true,
+        participants: { select: { entityId: true } },
+      },
     });
 
     await tx.auditLog.create({
@@ -292,7 +304,11 @@ export async function setEventLock(
       },
     });
 
-    return updated;
+    return {
+      id: updated.id,
+      locked: updated.locked,
+      participantIds: updated.participants.map((participant) => participant.entityId),
+    };
   });
 }
 

@@ -194,7 +194,7 @@ export async function setRelationshipLock(
         campaignId,
         status: { not: CanonStatus.ARCHIVED },
       },
-      select: { id: true, locked: true },
+      select: { id: true, locked: true, sourceId: true, targetId: true },
     });
     if (!relationship) throw new ServiceError("Relationship not found.");
 
@@ -205,7 +205,7 @@ export async function setRelationshipLock(
     const updated = await tx.relationship.update({
       where: { id: relationshipId },
       data: { locked },
-      select: { id: true, locked: true },
+      select: { id: true, locked: true, sourceId: true, targetId: true },
     });
 
     await tx.auditLog.create({

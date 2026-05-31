@@ -519,8 +519,16 @@ export async function toggleRelationshipLockAction(
   locked: boolean,
 ): Promise<void> {
   const user = await requireUser();
-  await setRelationshipLock(user.id, campaignId, relationshipId, !locked);
-  revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
+  const result = await setRelationshipLock(
+    user.id,
+    campaignId,
+    relationshipId,
+    !locked,
+  );
+  const endpointIds = new Set([entityId, result.sourceId, result.targetId]);
+  for (const endpointId of endpointIds) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${endpointId}`);
+  }
 }
 
 export type EventActionState = { error?: string } | undefined;
@@ -599,8 +607,11 @@ export async function toggleEventLockAction(
   locked: boolean,
 ): Promise<void> {
   const user = await requireUser();
-  await setEventLock(user.id, campaignId, eventId, !locked);
-  revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
+  const result = await setEventLock(user.id, campaignId, eventId, !locked);
+  const participantIds = new Set([...result.participantIds, entityId]);
+  for (const participantId of participantIds) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${participantId}`);
+  }
 }
 
 export async function linkEventCauseAction(

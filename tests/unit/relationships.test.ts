@@ -162,6 +162,8 @@ describe("relationship service", () => {
 
     const locked = await setRelationshipLock(owner.id, campaign.id, edge.id, true);
     expect(locked.locked).toBe(true);
+    expect(locked.sourceId).toBe(source.id);
+    expect(locked.targetId).toBe(target.id);
     await expect(
       archiveRelationship(owner.id, campaign.id, edge.id),
     ).rejects.toThrow(/locked/);

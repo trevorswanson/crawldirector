@@ -213,6 +213,7 @@ describe("event service", () => {
 
     const locked = await setEventLock(owner.id, campaign.id, event.id, true);
     expect(locked.locked).toBe(true);
+    expect(locked.participantIds).toEqual([carl.id]);
     await expect(archiveEvent(owner.id, campaign.id, event.id)).rejects.toThrow(
       /locked/,
     );
