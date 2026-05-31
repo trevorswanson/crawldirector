@@ -33,7 +33,8 @@ Two distinct surfaces share one app and one data layer but feel different:
 - **Entity detail** — structured fields + markdown description, the
   **connections panel** (in/out relationships), a **timeline** of events the
   entity participated in, provenance ("authored by you" vs "AI-generated, model
-  X, approved by you on …"), and lock controls.
+  X, approved by you on …"), lock controls, and an **entity history / audit trail panel**
+  (to view previous versions, edit history, and change attribution).
 - **Relationship graph** — interactive node-link view of the campaign (filter by
   type/faction/floor). Central to feeling the "web."
   _Mockup: `design/mockup/screen-graph.jsx` (M3)._

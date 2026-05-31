@@ -61,6 +61,7 @@ const entityDetailSelect = {
   locked: true,
   lockedFields: true,
   isStub: true,
+  data: true,
   agentEnabled: true,
   createdAt: true,
   updatedAt: true,
@@ -169,7 +170,7 @@ function entityCreatePatch(
   type: EntityType,
   input: Pick<
     CreateGenericEntityInput,
-    "name" | "summary" | "description" | "visibility" | "tags" | "isStub"
+    "name" | "summary" | "description" | "visibility" | "tags" | "isStub" | "itemTypeId" | "divine" | "unique" | "fleeting" | "aiDescription"
   >,
 ) {
   const core = entityCoreData(userId, campaignId, input);
@@ -184,6 +185,11 @@ function entityCreatePatch(
     tags: { to: core.tags },
     status: { to: core.status },
     ...(input.isStub !== undefined ? { isStub: { to: input.isStub } } : {}),
+    "data.itemTypeId": { to: input.itemTypeId ?? null },
+    "data.divine": { to: input.divine ?? false },
+    "data.unique": { to: input.unique ?? false },
+    "data.fleeting": { to: input.fleeting ?? false },
+    "data.aiDescription": { to: input.aiDescription ?? null },
   } satisfies ReviewPatch;
 }
 
@@ -382,6 +388,7 @@ export async function updateEntity(
       tags: true,
       version: true,
       isStub: true,
+      data: true,
       crawler: {
         select: {
           realName: true,
@@ -423,6 +430,19 @@ export async function updateEntity(
   if (existing.isStub) {
     addPatch(patch, "isStub", true, false);
   }
+
+  const existingData = (existing.data as {
+    itemTypeId?: string | null;
+    divine?: boolean;
+    unique?: boolean;
+    fleeting?: boolean;
+    aiDescription?: string | null;
+  }) || {};
+  addPatch(patch, "data.itemTypeId", existingData.itemTypeId ?? null, parsed.itemTypeId ?? null);
+  addPatch(patch, "data.divine", existingData.divine ?? false, parsed.divine ?? false);
+  addPatch(patch, "data.unique", existingData.unique ?? false, parsed.unique ?? false);
+  addPatch(patch, "data.fleeting", existingData.fleeting ?? false, parsed.fleeting ?? false);
+  addPatch(patch, "data.aiDescription", existingData.aiDescription ?? null, parsed.aiDescription ?? null);
 
   if (existing.type === EntityType.CRAWLER && existing.crawler) {
     addPatch(patch, "crawler.realName", existing.crawler.realName, nullIfEmpty(parsed.realName));

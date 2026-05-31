@@ -204,6 +204,10 @@ describe("EntityPage", () => {
 
   it("shows the edit form when ?edit is present", async () => {
     getEntityForUser.mockResolvedValue(crawler());
+    listEntitiesForUser.mockResolvedValue({
+      entities: [{ id: "it1", name: "Gourd Type", type: "ITEM_TYPE" }],
+      role: "OWNER",
+    });
 
     await renderPage("e1", "1");
 
@@ -354,5 +358,88 @@ describe("EntityPage", () => {
 
     // Check escaped code block
     expect(screen.getByText("<div>Hello</div>")).toBeDefined();
+  });
+
+  it("renders the AI description on an ITEM entity without the italic class on the quote block", async () => {
+    getEntityForUser.mockResolvedValue(
+      crawler({
+        type: "ITEM",
+        data: {
+          itemTypeId: "it1",
+          aiDescription: "AI generated item details",
+          divine: true,
+          unique: true,
+          fleeting: true,
+        },
+      }),
+    );
+    listEntitiesForUser.mockResolvedValue({
+      entities: [
+        { id: "e1", name: "Carl", type: "CRAWLER" },
+        { id: "it1", name: "Gourd Type", type: "ITEM_TYPE" },
+      ],
+      role: "OWNER",
+    });
+
+    await renderPage();
+
+    // Verify item descriptions prefix and description are rendered
+    expect(screen.getByText(/This is a divine item\./)).toBeDefined();
+    expect(screen.getByText(/This is a unique item\./)).toBeDefined();
+    expect(screen.getByText(/This is a fleeting item\./)).toBeDefined();
+    expect(screen.getByText(/AI generated item details/)).toBeDefined();
+    expect(screen.getByText("Gourd Type")).toBeDefined();
+
+    // The enclosing blockquote should not be italic
+    const blockquote = screen.getByText(/AI generated item details/).closest("blockquote");
+    expect(blockquote).not.toBeNull();
+    expect(blockquote?.className).not.toContain("italic");
+  });
+
+  it("renders a lock button next to the AI description, reflecting its lock status", async () => {
+    getEntityForUser.mockResolvedValue(
+      crawler({
+        type: "ITEM",
+        lockedFields: ["data.aiDescription"],
+        data: {
+          itemTypeId: "it1",
+          aiDescription: "AI generated item details",
+        },
+      }),
+    );
+    listEntitiesForUser.mockResolvedValue({
+      entities: [{ id: "it1", name: "Gourd Type", type: "ITEM_TYPE" }],
+      role: "OWNER",
+    });
+
+    await renderPage();
+
+    // Verify the lock button is rendered with the locked field title
+    const lockBtn = screen.getByTitle("Locked field — click to unlock");
+    expect(lockBtn).toBeDefined();
+  });
+
+  it("renders the AI description section even if empty, when it is locked, so it can be unlocked", async () => {
+    getEntityForUser.mockResolvedValue(
+      crawler({
+        type: "ITEM",
+        lockedFields: ["data.aiDescription"],
+        data: {
+          itemTypeId: "it1",
+          aiDescription: null,
+        },
+      }),
+    );
+    listEntitiesForUser.mockResolvedValue({
+      entities: [{ id: "it1", name: "Gourd Type", type: "ITEM_TYPE" }],
+      role: "OWNER",
+    });
+
+    await renderPage();
+
+    // Verify placeholder text is shown
+    expect(screen.getByText("Empty AI description (locked)")).toBeDefined();
+    // Verify lock button is present
+    expect(screen.getByTitle("Locked field — click to unlock")).toBeDefined();
   });
 });

@@ -53,7 +53,7 @@ afterEach(() => {
 });
 
 describe("DmNav", () => {
-  it("keeps the world browser link scoped to the current campaign", () => {
+  it("keeps the world browser link scoped to the current campaign", async () => {
     usePathname.mockReturnValue("/campaigns/c1/entities/e1");
 
     render(<DmNav />);
@@ -61,9 +61,10 @@ describe("DmNav", () => {
     expect(screen.getByRole("link", { name: /World Browser/ }).getAttribute("href")).toBe(
       "/campaigns/c1",
     );
+    await waitFor(() => {});
   });
 
-  it("links world browser to the campaign picker when no campaign is active", () => {
+  it("links world browser to the campaign picker when no campaign is active", async () => {
     usePathname.mockReturnValue("/dashboard");
 
     render(<DmNav />);
@@ -71,6 +72,7 @@ describe("DmNav", () => {
     expect(screen.getByRole("link", { name: /World Browser/ }).getAttribute("href")).toBe(
       "/dashboard",
     );
+    await waitFor(() => {});
   });
 
   it("renders the canon integrity meter when a campaign is active", async () => {
@@ -85,7 +87,7 @@ describe("DmNav", () => {
     expect(screen.getByText(/64% DM · 22% AI-origin · 14% locked/)).toBeDefined();
   });
 
-  it("shows unbuilt sections as disabled roadmap entries", () => {
+  it("shows unbuilt sections as disabled roadmap entries", async () => {
     usePathname.mockReturnValue("/dashboard");
 
     render(<DmNav />);
@@ -93,6 +95,7 @@ describe("DmNav", () => {
     const planned = screen.getByTitle(/M6 — System AI persona engine/);
     expect(planned.getAttribute("aria-disabled")).toBe("true");
     expect(planned.textContent).toContain("Planned");
+    await waitFor(() => {});
   });
 
   it("logs and recovers when canon integrity fails to load", async () => {
@@ -124,7 +127,7 @@ describe("CampaignSwitcher", () => {
     { id: "c2", name: "Faction Wars" },
   ];
 
-  it("shows the active campaign and lists every campaign plus the new crawl link", () => {
+  it("shows the active campaign and lists every campaign plus the new crawl link", async () => {
     usePathname.mockReturnValue("/campaigns/c2/entities/e1");
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
@@ -146,14 +149,16 @@ describe("CampaignSwitcher", () => {
     expect(
       screen.getByRole("link", { name: "Start New Crawl" }).getAttribute("href"),
     ).toBe("/dashboard#new-crawl");
+    await waitFor(() => {});
   });
 
-  it("falls back to the campaigns label outside a campaign", () => {
+  it("falls back to the campaigns label outside a campaign", async () => {
     usePathname.mockReturnValue("/dashboard");
 
     render(<CampaignSwitcher campaigns={campaigns} />);
 
     expect(screen.getByLabelText("Switch campaign").textContent).toContain("Campaigns");
+    await waitFor(() => {});
   });
 
   it("refreshes stale campaign props after route changes", async () => {
@@ -172,7 +177,7 @@ describe("CampaignSwitcher", () => {
     });
   });
 
-  it("closes when focus leaves the switcher", () => {
+  it("closes when focus leaves the switcher", async () => {
     usePathname.mockReturnValue("/campaigns/c2");
 
     render(
@@ -190,6 +195,7 @@ describe("CampaignSwitcher", () => {
     fireEvent.blur(switcher, { relatedTarget: screen.getByRole("button", { name: "Outside" }) });
 
     expect(details?.hasAttribute("open")).toBe(false);
+    await waitFor(() => {});
   });
 
   it("closes on route changes", async () => {

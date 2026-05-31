@@ -40,6 +40,7 @@ export const entityTypeValues = [
   "SHOW",
   "SYSTEM_AI",
   "ITEM",
+  "ITEM_TYPE",
   "SKILL",
   "SPELL",
   "ACHIEVEMENT",
@@ -65,6 +66,7 @@ export const genericEntityTypeValues = [
   "SHOW",
   "SYSTEM_AI",
   "ITEM",
+  "ITEM_TYPE",
   "SKILL",
   "SPELL",
   "ACHIEVEMENT",
@@ -143,6 +145,11 @@ const entityCoreSchema = z.object({
   visibility: z.enum(visibilityValues).default("DM_ONLY"),
   tags: tagsSchema,
   isStub: z.boolean().optional(),
+  itemTypeId: optionalText(100).nullable(),
+  divine: z.preprocess((val) => (val === undefined || val === null || val === "" ? undefined : val === "true" || val === true || val === "on"), z.boolean().optional()),
+  unique: z.preprocess((val) => (val === undefined || val === null || val === "" ? undefined : val === "true" || val === true || val === "on"), z.boolean().optional()),
+  fleeting: z.preprocess((val) => (val === undefined || val === null || val === "" ? undefined : val === "true" || val === true || val === "on"), z.boolean().optional()),
+  aiDescription: optionalText(10000).nullable(),
 });
 
 export const createGenericEntitySchema = entityCoreSchema.extend({
@@ -200,28 +207,31 @@ export const lockableEntityFields = [
   "tags",
 ] as const;
 
-export const lockableCrawlerFields = [
-  "crawler.realName",
-  "crawler.crawlerNo",
-  "crawler.level",
-  "crawler.hp",
-  "crawler.mp",
-  "crawler.gold",
-  "crawler.viewCount",
-  "crawler.followerCount",
-  "crawler.favoriteCount",
-  "crawler.killCount",
-  "crawler.isAlive",
-  "crawler.currentFloor",
-] as const;
+export const crawlerOnlyKeys = Object.keys(createCrawlerSchema.shape).filter(
+  (k) => !Object.keys(entityCoreSchema.shape).includes(k)
+);
+
+export const itemKeys = ["itemTypeId", "divine", "unique", "fleeting", "aiDescription"];
 
 export const lockableFields = [
   ...lockableEntityFields,
-  ...lockableCrawlerFields,
-] as const;
+  ...crawlerOnlyKeys.map((k) => `crawler.${k}`),
+  ...itemKeys.map((k) => `data.${k}`),
+];
 
 // A single lockable field key, validated where a per-field lock toggle posts it.
-export const lockFieldSchema = z.enum(lockableFields);
+export const lockFieldSchema = z.string().refine((field) => {
+  if ((lockableEntityFields as readonly string[]).includes(field)) return true;
+  if (field.startsWith("crawler.")) {
+    const sub = field.substring(8);
+    return crawlerOnlyKeys.includes(sub);
+  }
+  if (field.startsWith("data.")) {
+    const sub = field.substring(5);
+    return itemKeys.includes(sub);
+  }
+  return false;
+});
 
 // Typed relationship edges (docs/01-domain-model.md). Any-to-any: the type is a
 // semantic label, not a structural constraint, so every value is valid between

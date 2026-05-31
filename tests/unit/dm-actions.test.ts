@@ -196,14 +196,14 @@ describe("createGenericEntityAction", () => {
       ),
     ).rejects.toThrow("NEXT_REDIRECT");
 
-    expect(createGenericEntity).toHaveBeenCalledWith("u1", "c1", {
+    expect(createGenericEntity).toHaveBeenCalledWith("u1", "c1", expect.objectContaining({
       type: "NPC",
       name: "Zev",
       summary: "",
       description: "",
       visibility: "DM_ONLY",
       tags: ["admin"],
-    });
+    }));
     expect(redirect).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
   });
 
@@ -662,6 +662,20 @@ describe("toggleEntityFieldLockAction", () => {
 
     expect(setEntityLock).toHaveBeenCalledWith("u1", "c1", "e1", {
       lockedFields: ["summary"],
+    });
+  });
+
+  it("allows locking item data fields", async () => {
+    getEntityForUser.mockResolvedValue({
+      id: "e1",
+      locked: false,
+      lockedFields: [],
+    });
+
+    await toggleEntityFieldLockAction("c1", "e1", fieldForm("data.itemTypeId"));
+
+    expect(setEntityLock).toHaveBeenCalledWith("u1", "c1", "e1", {
+      lockedFields: ["data.itemTypeId"],
     });
   });
 

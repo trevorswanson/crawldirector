@@ -71,8 +71,27 @@ export default async function EntityPage({
       type: candidate.type,
     }));
   const timelineCandidates: TimelineCandidate[] = candidates;
-  const fields = entityFields(entity);
+  const fields = entityFields(entity, candidateList.entities);
   const detailHref = `/campaigns/${id}/entities/${entityId}`;
+  const existingData = (entity.data as {
+    itemTypeId?: string | null;
+    divine?: boolean;
+    unique?: boolean;
+    fleeting?: boolean;
+    aiDescription?: string | null;
+  }) || {};
+
+  const renderedDescription = entity.description || "";
+  let renderedAiDescription = "";
+  if (entity.type === "ITEM") {
+    let prefix = "";
+    if (existingData.divine) prefix += "This is a divine item.\n";
+    if (existingData.unique) prefix += "This is a unique item.\n";
+    if (existingData.fleeting) prefix += "This is a fleeting item.\n";
+    if (prefix || existingData.aiDescription) {
+      renderedAiDescription = prefix + (prefix && existingData.aiDescription ? "\n" : "") + (existingData.aiDescription || "");
+    }
+  }
 
   return (
     <EditFormProvider>
@@ -112,6 +131,60 @@ export default async function EntityPage({
             </p>
           )}
 
+          {!editing && entity.type === "ITEM" && (renderedAiDescription || entity.lockedFields.includes("data.aiDescription")) && (() => {
+            const fieldLocked = entity.locked || entity.lockedFields.includes("data.aiDescription");
+            return (
+              <div className="mt-4 flex items-start justify-between gap-4">
+                <blockquote
+                  className="border-l-2 pl-4 text-[var(--ink-dim)] font-mono flex-1 min-h-[24px]"
+                  style={{ borderLeftColor: "var(--accent)" }}
+                >
+                  {renderedAiDescription ? (
+                    <Markdown content={renderedAiDescription} />
+                  ) : (
+                    <span className="text-[var(--ink-faint)] italic">Empty AI description (locked)</span>
+                  )}
+                </blockquote>
+                <form
+                  action={toggleEntityFieldLockAction.bind(
+                    null,
+                    id,
+                    entityId,
+                  )}
+                  className="shrink-0 self-start"
+                >
+                  <input type="hidden" name="field" value="data.aiDescription" />
+                  <button
+                    type="submit"
+                    disabled={entity.locked}
+                    title={
+                      entity.locked
+                        ? "Whole entity is locked"
+                        : fieldLocked
+                          ? "Locked field — click to unlock"
+                          : "Click to lock this field"
+                    }
+                    className="inline-flex items-center border px-[5px] py-[3px] transition-colors disabled:opacity-50 cursor-pointer"
+                    style={{
+                      borderColor: fieldLocked
+                        ? "var(--sys)"
+                        : "var(--line)",
+                      color: fieldLocked
+                        ? "var(--sys)"
+                        : "var(--ink-faint)",
+                    }}
+                  >
+                    {fieldLocked ? (
+                      <Lock aria-hidden size={11} />
+                    ) : (
+                      <Unlock aria-hidden size={11} />
+                    )}
+                  </button>
+                </form>
+              </div>
+            );
+          })()}
+
           {editing ? (
             <section className="mt-7">
               <Kicker dim noLead className="mb-3">
@@ -123,16 +196,20 @@ export default async function EntityPage({
                 {(entity.locked || entity.lockedFields.length > 0) &&
                   "Locked fields are protected — unlock them in the rail first."}
               </p>
-              <EditEntityForm campaignId={id} entity={entity} />
+              <EditEntityForm
+                campaignId={id}
+                entity={entity}
+                itemTypes={candidateList.entities.filter((e) => e.type === "ITEM_TYPE")}
+              />
             </section>
           ) : (
             <>
-              {entity.description && (
+              {renderedDescription && (
                 <div className="mt-[22px]">
                   <Kicker dim noLead className="mb-[10px]">
                     Description
                   </Kicker>
-                  <Markdown content={entity.description} />
+                  <Markdown content={renderedDescription} />
                 </div>
               )}
 
@@ -374,8 +451,30 @@ type FieldRow = { key: string; label: string; value: string };
 // Structured fields for the Fields table. Keys match the review service's patch
 // field names so each row's lock toggle maps to the same `lockedFields` entry.
 // Name/summary/description live in the header/description, not here (per mockup).
-function entityFields(entity: EntityDetail): FieldRow[] {
+function entityFields(
+  entity: EntityDetail,
+  allEntities: Array<{ id: string; name: string; type: string }>,
+): FieldRow[] {
   const rows: FieldRow[] = [];
+  const existingData = (entity.data as {
+    itemTypeId?: string | null;
+    divine?: boolean;
+    unique?: boolean;
+    fleeting?: boolean;
+    aiDescription?: string | null;
+  }) || {};
+
+  if (entity.type === "ITEM") {
+    const itemTypeEntity = allEntities.find(
+      (e) => e.id === existingData.itemTypeId && e.type === "ITEM_TYPE",
+    );
+    rows.push(
+      { key: "data.itemTypeId", label: "Item Type", value: itemTypeEntity?.name ?? "—" },
+      { key: "data.divine", label: "Divine", value: existingData.divine ? "Yes" : "No" },
+      { key: "data.unique", label: "Unique", value: existingData.unique ? "Yes" : "No" },
+      { key: "data.fleeting", label: "Fleeting", value: existingData.fleeting ? "Yes" : "No" },
+    );
+  }
   if (entity.type === "CRAWLER" && entity.crawler) {
     const c = entity.crawler;
     rows.push(
