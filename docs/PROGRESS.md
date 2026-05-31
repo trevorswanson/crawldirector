@@ -11,6 +11,22 @@ Running checklist of milestones/tasks, newest first. See
 membership, log events with participants, and traverse cause→effect chains;
 relationships/events are reviewable + lockable.
 
+### Done — slice 4: relationship + event lock controls (2026-05-31)
+
+- [x] Added audited lock/unlock service functions for live relationship edges
+      and events. Locks remain deliberate DM actions rather than proposals, do
+      not bump record versions, and write `LOCK` / `UNLOCK` audit rows against
+      `RELATIONSHIP` or `EVENT`.
+- [x] Projected relationship/event `locked` state into the entity detail
+      Connections and Timeline panels. Locked relationships light up the lock
+      control in the system/locked color, locked events show the lock chip, and
+      destructive remove controls stay hidden until unlocked.
+- [x] Added server actions for toggling relationship/event locks and
+      revalidating the current entity page.
+- [x] Added service, action, and component regression coverage for lock/unlock
+      auditing, player denial, archive blocking, projected locked state, and UI
+      control rendering.
+
 ### Seeding cleanup & security (2026-05-31)
 
 - [x] Removed in-UI seeding checkbox and `seedLore` option during campaign creation.
@@ -114,8 +130,8 @@ relationships/events are reviewable + lockable.
 ### Notes / follow-ups (M3)
 
 - Next slices: event effects (structured deltas applied on approval);
-      relationship/event locking/editing and pending (AI/import) relationship/
-      event proposals in the Review Queue; the campaign-wide relationship graph
+      relationship/event editing and pending (AI/import) relationship/event
+      proposals in the Review Queue; the campaign-wide relationship graph
       view + a campaign timeline page (with full multi-participant editing);
       group hierarchy (crawler→party→guild) rollup view; knowledge/reveal grants
       for fog of war.

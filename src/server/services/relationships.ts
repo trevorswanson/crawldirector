@@ -43,6 +43,7 @@ export type EntityConnection = {
   disposition: number | null;
   notes: string | null;
   secret: boolean;
+  locked: boolean;
   source: ChangeSource;
   other: { id: string; name: string; type: string };
 };
@@ -145,6 +146,7 @@ export async function listConnectionsForEntity(
       disposition: true,
       notes: true,
       secret: true,
+      locked: true,
       source: true,
       sourceEntity: { select: otherEntitySelect },
       targetEntity: { select: otherEntitySelect },
@@ -165,11 +167,63 @@ export async function listConnectionsForEntity(
       disposition: edge.disposition,
       notes: edge.notes,
       secret: edge.secret,
+      locked: edge.locked,
       source: edge.source,
       other: { id: other.id, name: other.name, type: other.type },
     });
   }
   return connections;
+}
+
+/**
+ * Place or release a canon lock on a relationship edge. Locking is a deliberate
+ * DM action, not a proposal; it is audited and does not bump the edge version.
+ */
+export async function setRelationshipLock(
+  userId: string,
+  campaignId: string,
+  relationshipId: string,
+  locked: boolean,
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  return prisma.$transaction(async (tx) => {
+    const relationship = await tx.relationship.findFirst({
+      where: {
+        id: relationshipId,
+        campaignId,
+        status: { not: CanonStatus.ARCHIVED },
+      },
+      select: { id: true, locked: true, sourceId: true, targetId: true },
+    });
+    if (!relationship) throw new ServiceError("Relationship not found.");
+
+    if (relationship.locked === locked) {
+      return relationship;
+    }
+
+    const updated = await tx.relationship.update({
+      where: { id: relationshipId },
+      data: { locked },
+      select: { id: true, locked: true, sourceId: true, targetId: true },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        campaignId,
+        actorUserId: userId,
+        action: locked ? "LOCK" : "UNLOCK",
+        targetType: "RELATIONSHIP",
+        targetId: relationshipId,
+        detail: {
+          locked: updated.locked,
+          previousLocked: relationship.locked,
+        },
+      },
+    });
+
+    return updated;
+  });
 }
 
 /**

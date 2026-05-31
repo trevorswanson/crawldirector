@@ -44,6 +44,7 @@ export type EntityEvent = {
   time: EventTimeInfo;
   orderKey: number;
   secret: boolean;
+  locked: boolean;
   source: ChangeSource;
   // The viewed entity's role in this event.
   role: EventParticipantRole;
@@ -174,6 +175,7 @@ export async function listEventsForEntity(
       inGameTime: true,
       orderKey: true,
       secret: true,
+      locked: true,
       source: true,
       participants: {
         select: {
@@ -220,6 +222,7 @@ export async function listEventsForEntity(
       time: readTimeInfo(event.inGameTime),
       orderKey: event.orderKey,
       secret: event.secret,
+      locked: event.locked,
       source: event.source,
       role: self.role,
       others,
@@ -240,6 +243,73 @@ export async function listEventsForEntity(
     });
   }
   return timeline;
+}
+
+/**
+ * Place or release a canon lock on an event. Locking is audited and does not
+ * bump `version`; it protects the event from later archived/edit operations.
+ */
+export async function setEventLock(
+  userId: string,
+  campaignId: string,
+  eventId: string,
+  locked: boolean,
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  return prisma.$transaction(async (tx) => {
+    const event = await tx.event.findFirst({
+      where: {
+        id: eventId,
+        campaignId,
+        status: { not: CanonStatus.ARCHIVED },
+      },
+      select: {
+        id: true,
+        locked: true,
+        participants: { select: { entityId: true } },
+      },
+    });
+    if (!event) throw new ServiceError("Event not found.");
+
+    if (event.locked === locked) {
+      return {
+        id: event.id,
+        locked: event.locked,
+        participantIds: event.participants.map((participant) => participant.entityId),
+      };
+    }
+
+    const updated = await tx.event.update({
+      where: { id: eventId },
+      data: { locked },
+      select: {
+        id: true,
+        locked: true,
+        participants: { select: { entityId: true } },
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        campaignId,
+        actorUserId: userId,
+        action: locked ? "LOCK" : "UNLOCK",
+        targetType: "EVENT",
+        targetId: eventId,
+        detail: {
+          locked: updated.locked,
+          previousLocked: event.locked,
+        },
+      },
+    });
+
+    return {
+      id: updated.id,
+      locked: updated.locked,
+      participantIds: updated.participants.map((participant) => participant.entityId),
+    };
+  });
 }
 
 export async function linkEventCause(

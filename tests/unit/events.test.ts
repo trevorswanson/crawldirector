@@ -11,6 +11,7 @@ import {
   createEvent,
   linkEventCause,
   listEventsForEntity,
+  setEventLock,
 } from "@/server/services/events";
 
 function makeUser(email: string) {
@@ -200,6 +201,36 @@ describe("event service", () => {
     expect(timeline).toHaveLength(0);
   });
 
+  it("locks and unlocks an event with audit history", async () => {
+    const owner = await makeUser("owner-event-lock@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Protected lore",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    const locked = await setEventLock(owner.id, campaign.id, event.id, true);
+    expect(locked.locked).toBe(true);
+    expect(locked.participantIds).toEqual([carl.id]);
+    await expect(archiveEvent(owner.id, campaign.id, event.id)).rejects.toThrow(
+      /locked/,
+    );
+
+    const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    expect(timeline[0].locked).toBe(true);
+
+    const unlocked = await setEventLock(owner.id, campaign.id, event.id, false);
+    expect(unlocked.locked).toBe(false);
+
+    const audit = await prisma.auditLog.findMany({
+      where: { targetType: "EVENT", targetId: event.id },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(audit.map((entry) => entry.action)).toEqual(["LOCK", "UNLOCK"]);
+  });
+
   it("returns no events for a non-member", async () => {
     const owner = await makeUser("owner-nm@test.com");
     const outsider = await makeUser("outsider@test.com");
@@ -230,6 +261,25 @@ describe("event service", () => {
         secret: false,
         participants: [{ entityId: carl.id, role: "ACTOR" }],
       }),
+    ).rejects.toBeInstanceOf(ServiceError);
+  });
+
+  it("blocks players from locking events", async () => {
+    const owner = await makeUser("owner-event-player-lock@test.com");
+    const player = await makeUser("player-event-lock@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Canon event",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    await expect(
+      setEventLock(player.id, campaign.id, event.id, true),
     ).rejects.toBeInstanceOf(ServiceError);
   });
 

@@ -23,12 +23,14 @@ import {
 import {
   archiveRelationship,
   createRelationship,
+  setRelationshipLock,
 } from "@/server/services/relationships";
 import {
   archiveEvent,
   archiveEventCausality,
   createEvent,
   linkEventCause,
+  setEventLock,
 } from "@/server/services/events";
 import {
   archiveEntity,
@@ -510,6 +512,25 @@ export async function archiveRelationshipAction(
   revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
 }
 
+export async function toggleRelationshipLockAction(
+  campaignId: string,
+  entityId: string,
+  relationshipId: string,
+  locked: boolean,
+): Promise<void> {
+  const user = await requireUser();
+  const result = await setRelationshipLock(
+    user.id,
+    campaignId,
+    relationshipId,
+    !locked,
+  );
+  const endpointIds = new Set([entityId, result.sourceId, result.targetId]);
+  for (const endpointId of endpointIds) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${endpointId}`);
+  }
+}
+
 export type EventActionState = { error?: string } | undefined;
 export type EventCausalityActionState = { error?: string } | undefined;
 
@@ -573,6 +594,20 @@ export async function archiveEventAction(
 ): Promise<void> {
   const user = await requireUser();
   const result = await archiveEvent(user.id, campaignId, eventId);
+  const participantIds = new Set([...result.participantIds, entityId]);
+  for (const participantId of participantIds) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${participantId}`);
+  }
+}
+
+export async function toggleEventLockAction(
+  campaignId: string,
+  entityId: string,
+  eventId: string,
+  locked: boolean,
+): Promise<void> {
+  const user = await requireUser();
+  const result = await setEventLock(user.id, campaignId, eventId, !locked);
   const participantIds = new Set([...result.participantIds, entityId]);
   for (const participantId of participantIds) {
     revalidatePath(`/campaigns/${campaignId}/entities/${participantId}`);

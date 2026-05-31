@@ -9,6 +9,7 @@ import {
   archiveRelationship,
   createRelationship,
   listConnectionsForEntity,
+  setRelationshipLock,
 } from "@/server/services/relationships";
 
 function makeUser(email: string) {
@@ -148,6 +149,38 @@ describe("relationship service", () => {
     expect(connections).toHaveLength(0);
   });
 
+  it("locks and unlocks an edge with audit history", async () => {
+    const owner = await makeUser("owner-lock@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const source = await makeEntity(owner.id, campaign.id, "A");
+    const target = await makeEntity(owner.id, campaign.id, "B");
+    const edge = await createRelationship(owner.id, campaign.id, source.id, {
+      type: "ALLY_OF",
+      targetId: target.id,
+      secret: false,
+    });
+
+    const locked = await setRelationshipLock(owner.id, campaign.id, edge.id, true);
+    expect(locked.locked).toBe(true);
+    expect(locked.sourceId).toBe(source.id);
+    expect(locked.targetId).toBe(target.id);
+    await expect(
+      archiveRelationship(owner.id, campaign.id, edge.id),
+    ).rejects.toThrow(/locked/);
+
+    const connections = await listConnectionsForEntity(owner.id, campaign.id, source.id);
+    expect(connections[0].locked).toBe(true);
+
+    const unlocked = await setRelationshipLock(owner.id, campaign.id, edge.id, false);
+    expect(unlocked.locked).toBe(false);
+
+    const audit = await prisma.auditLog.findMany({
+      where: { targetType: "RELATIONSHIP", targetId: edge.id },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(audit.map((entry) => entry.action)).toEqual(["LOCK", "UNLOCK"]);
+  });
+
   it("blocks players from creating edges", async () => {
     const owner = await makeUser("owner4@test.com");
     const player = await makeUser("player4@test.com");
@@ -164,6 +197,26 @@ describe("relationship service", () => {
         targetId: b.id,
         secret: false,
       }),
+    ).rejects.toBeInstanceOf(ServiceError);
+  });
+
+  it("blocks players from locking edges", async () => {
+    const owner = await makeUser("owner-player-lock@test.com");
+    const player = await makeUser("player-lock@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const a = await makeEntity(owner.id, campaign.id, "A");
+    const b = await makeEntity(owner.id, campaign.id, "B");
+    const edge = await createRelationship(owner.id, campaign.id, a.id, {
+      type: "ALLY_OF",
+      targetId: b.id,
+      secret: false,
+    });
+
+    await expect(
+      setRelationshipLock(player.id, campaign.id, edge.id, true),
     ).rejects.toBeInstanceOf(ServiceError);
   });
 
