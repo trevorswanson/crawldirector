@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const {
   requireUser,
   createCampaign,
+  getCampaignCanonIntegrity,
   createCrawler,
   createGenericEntity,
   getEntityForUser,
@@ -17,12 +18,15 @@ const {
   setEntityLock,
   createRelationship,
   archiveRelationship,
+  createEvent,
+  archiveEvent,
   signOut,
   redirect,
   revalidatePath,
 } = vi.hoisted(() => ({
   requireUser: vi.fn(),
   createCampaign: vi.fn(),
+  getCampaignCanonIntegrity: vi.fn(),
   createCrawler: vi.fn(),
   createGenericEntity: vi.fn(),
   getEntityForUser: vi.fn(),
@@ -37,6 +41,8 @@ const {
   setEntityLock: vi.fn(),
   createRelationship: vi.fn(),
   archiveRelationship: vi.fn(),
+  createEvent: vi.fn(),
+  archiveEvent: vi.fn(),
   signOut: vi.fn(),
   redirect: vi.fn(() => {
     throw new Error("NEXT_REDIRECT");
@@ -45,7 +51,10 @@ const {
 }));
 
 vi.mock("@/server/auth/session", () => ({ requireUser }));
-vi.mock("@/server/services/campaigns", () => ({ createCampaign }));
+vi.mock("@/server/services/campaigns", () => ({
+  createCampaign,
+  getCampaignCanonIntegrity,
+}));
 vi.mock("@/server/services/entities", () => ({
   archiveEntity,
   createCrawler,
@@ -66,6 +75,10 @@ vi.mock("@/server/services/relationships", () => ({
   createRelationship,
   archiveRelationship,
 }));
+vi.mock("@/server/services/events", () => ({
+  createEvent,
+  archiveEvent,
+}));
 vi.mock("@/server/auth", () => ({ signOut }));
 vi.mock("next/navigation", () => ({ redirect }));
 vi.mock("next/cache", () => ({ revalidatePath }));
@@ -77,6 +90,8 @@ import {
   createCampaignAction,
   createCrawlerAction,
   createGenericEntityAction,
+  quickCreateEntityAction,
+  getCampaignCanonIntegrityAction,
   editChangeOperationPatchAction,
   rejectChangeSetAction,
   rejectChangeSetRunAction,
@@ -86,6 +101,8 @@ import {
   toggleEntityLockAction,
   createRelationshipAction,
   archiveRelationshipAction,
+  createEventAction,
+  archiveEventAction,
   signOutAction,
   updateEntityAction,
 } from "@/app/(dm)/actions";
@@ -191,6 +208,90 @@ describe("createGenericEntityAction", () => {
     );
 
     expect(result?.error).toBe("Could not create the entity. Please try again.");
+  });
+});
+
+describe("quickCreateEntityAction", () => {
+  it("quick-creates a stub crawler and redirects to detail", async () => {
+    createCrawler.mockResolvedValue({ id: "e9" });
+
+    await expect(
+      quickCreateEntityAction("c1", undefined, form({ type: "CRAWLER", name: "Carl" })),
+    ).rejects.toThrow("NEXT_REDIRECT");
+
+    expect(createCrawler).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      expect.objectContaining({ name: "Carl", isStub: true }),
+    );
+    expect(redirect).toHaveBeenCalledWith("/campaigns/c1/entities/e9");
+  });
+
+  it("quick-creates a stub generic entity and redirects to detail", async () => {
+    createGenericEntity.mockResolvedValue({ id: "e10" });
+
+    await expect(
+      quickCreateEntityAction("c1", undefined, form({ type: "NPC", name: "Zev" })),
+    ).rejects.toThrow("NEXT_REDIRECT");
+
+    expect(createGenericEntity).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      expect.objectContaining({ type: "NPC", name: "Zev", isStub: true }),
+    );
+    expect(redirect).toHaveBeenCalledWith("/campaigns/c1/entities/e10");
+  });
+
+  it("returns a validation error for a blank crawler name", async () => {
+    const result = await quickCreateEntityAction(
+      "c1",
+      undefined,
+      form({ type: "CRAWLER", name: "" }),
+    );
+    expect(result?.error).toBeTruthy();
+    expect(createCrawler).not.toHaveBeenCalled();
+  });
+
+  it("returns a validation error for a blank generic-entity name", async () => {
+    const result = await quickCreateEntityAction(
+      "c1",
+      undefined,
+      form({ type: "NPC", name: "" }),
+    );
+    expect(result?.error).toBeTruthy();
+    expect(createGenericEntity).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a ServiceError message", async () => {
+    createGenericEntity.mockRejectedValue(new ServiceError("Campaign not found."));
+    const result = await quickCreateEntityAction(
+      "c1",
+      undefined,
+      form({ type: "NPC", name: "Zev" }),
+    );
+    expect(result?.error).toBe("Campaign not found.");
+  });
+
+  it("hides unexpected errors behind a generic message", async () => {
+    createCrawler.mockRejectedValue(new Error("db down"));
+    const result = await quickCreateEntityAction(
+      "c1",
+      undefined,
+      form({ type: "CRAWLER", name: "Carl" }),
+    );
+    expect(result?.error).toBe("Could not create the entity. Please try again.");
+  });
+});
+
+describe("getCampaignCanonIntegrityAction", () => {
+  it("delegates to the campaigns service for the current user", async () => {
+    const integrity = { dmPercent: 100, aiPercent: 0, playerPercent: 0, lockedPercent: 0 };
+    getCampaignCanonIntegrity.mockResolvedValue(integrity);
+
+    const result = await getCampaignCanonIntegrityAction("c1");
+
+    expect(getCampaignCanonIntegrity).toHaveBeenCalledWith("u1", "c1");
+    expect(result).toBe(integrity);
   });
 });
 
@@ -479,10 +580,17 @@ describe("review queue actions", () => {
     badJson.set("kind:customFields", "json");
     badJson.set("value:customFields", "{not json}");
 
+    const badKind = new FormData();
+    badKind.append("field", "summary");
+    badKind.set("apply:summary", "on");
+    badKind.set("kind:summary", "not-a-kind");
+    badKind.set("value:summary", "whatever");
+
     await editChangeOperationPatchAction("c1", "cs1", "op1", noneSelected);
     await editChangeOperationPatchAction("c1", "cs1", "op1", badNumber);
     await editChangeOperationPatchAction("c1", "cs1", "op1", emptyNumber);
     await editChangeOperationPatchAction("c1", "cs1", "op1", badJson);
+    await editChangeOperationPatchAction("c1", "cs1", "op1", badKind);
 
     expect(setChangeOperationDecision).not.toHaveBeenCalled();
   });
@@ -633,5 +741,118 @@ describe("archiveRelationshipAction", () => {
 
     expect(archiveRelationship).toHaveBeenCalledWith("u1", "c1", "r1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+  });
+});
+
+describe("createEventAction", () => {
+  it("returns a validation error when the title is empty", async () => {
+    const result = await createEventAction(
+      "c1",
+      "e1",
+      undefined,
+      form({ title: "" }),
+    );
+
+    expect(result?.error).toBeTruthy();
+    expect(createEvent).not.toHaveBeenCalled();
+  });
+
+  it("logs the event with the source entity as a participant", async () => {
+    createEvent.mockResolvedValue({ id: "ev1" });
+
+    const result = await createEventAction(
+      "c1",
+      "e1",
+      undefined,
+      form({ title: "Boss fight", floor: "9", timeLabel: "Day 3", secret: "true" }),
+    );
+
+    expect(result).toBeUndefined();
+    expect(createEvent).toHaveBeenCalledWith("u1", "c1", {
+      title: "Boss fight",
+      summary: undefined,
+      floor: 9,
+      timeLabel: "Day 3",
+      secret: true,
+      participants: [{ entityId: "e1", role: "ACTOR" }],
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+  });
+
+  it("includes an optional co-participant and revalidates both pages", async () => {
+    createEvent.mockResolvedValue({ id: "ev1" });
+
+    await createEventAction(
+      "c1",
+      "e1",
+      undefined,
+      form({
+        title: "Brawl",
+        sourceRole: "ACTOR",
+        otherId: "e2",
+        otherRole: "TARGET",
+      }),
+    );
+
+    expect(createEvent).toHaveBeenCalledWith("u1", "c1", {
+      title: "Brawl",
+      summary: undefined,
+      floor: undefined,
+      timeLabel: undefined,
+      secret: false,
+      participants: [
+        { entityId: "e1", role: "ACTOR" },
+        { entityId: "e2", role: "TARGET" },
+      ],
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
+  });
+
+  it("surfaces a ServiceError message", async () => {
+    createEvent.mockRejectedValue(new ServiceError("Participant entity not found."));
+
+    const result = await createEventAction(
+      "c1",
+      "e1",
+      undefined,
+      form({ title: "Ghost event" }),
+    );
+
+    expect(result?.error).toBe("Participant entity not found.");
+  });
+
+  it("hides unexpected errors behind a generic message", async () => {
+    createEvent.mockRejectedValue(new Error("boom"));
+
+    const result = await createEventAction(
+      "c1",
+      "e1",
+      undefined,
+      form({ title: "Boom event" }),
+    );
+
+    expect(result?.error).toMatch(/Could not log the event/);
+  });
+});
+
+describe("archiveEventAction", () => {
+  it("archives the event and revalidates the entity page", async () => {
+    archiveEvent.mockResolvedValue({ id: "ev1", participantIds: ["e1"] });
+
+    await archiveEventAction("c1", "e1", "ev1");
+
+    expect(archiveEvent).toHaveBeenCalledWith("u1", "c1", "ev1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+  });
+
+  it("revalidates every participant timeline when archiving an event", async () => {
+    archiveEvent.mockResolvedValue({ id: "ev1", participantIds: ["e1", "e2", "e3"] });
+
+    await archiveEventAction("c1", "e1", "ev1");
+
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e3");
   });
 });

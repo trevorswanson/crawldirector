@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 
 import { signOut } from "@/server/auth";
 import { requireUser } from "@/server/auth/session";
@@ -10,9 +11,11 @@ import { createCampaign } from "@/server/services/campaigns";
 import {
   createCampaignSchema,
   createCrawlerSchema,
+  createEventSchema,
   createGenericEntitySchema,
   createRelationshipSchema,
   changeOperationDecisionSchema,
+  eventParticipantRoleValues,
   lockFieldSchema,
   reviewEditValueKindSchema,
   updateEntitySchema,
@@ -21,6 +24,7 @@ import {
   archiveRelationship,
   createRelationship,
 } from "@/server/services/relationships";
+import { archiveEvent, createEvent } from "@/server/services/events";
 import {
   archiveEntity,
   createCrawler,
@@ -481,6 +485,74 @@ export async function archiveRelationshipAction(
   const user = await requireUser();
   await archiveRelationship(user.id, campaignId, relationshipId);
   revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
+}
+
+export type EventActionState = { error?: string } | undefined;
+
+function parseParticipantRole(value: FormDataEntryValue | null) {
+  const parsed = z.enum(eventParticipantRoleValues).safeParse(value);
+  return parsed.success ? parsed.data : "ACTOR";
+}
+
+export async function createEventAction(
+  campaignId: string,
+  sourceId: string,
+  _prev: EventActionState,
+  formData: FormData,
+): Promise<EventActionState> {
+  const user = await requireUser();
+
+  // The viewed entity is always a participant; one optional co-participant may
+  // be added from the same form. Richer multi-participant editing arrives with
+  // the campaign timeline view (later M3 slice).
+  const participants = [
+    { entityId: sourceId, role: parseParticipantRole(formData.get("sourceRole")) },
+  ];
+  const otherId = formData.get("otherId")?.toString().trim();
+  if (otherId) {
+    participants.push({
+      entityId: otherId,
+      role: parseParticipantRole(formData.get("otherRole")),
+    });
+  }
+
+  const parsed = createEventSchema.safeParse({
+    title: formData.get("title"),
+    summary: formData.get("summary"),
+    floor: formData.get("floor"),
+    timeLabel: formData.get("timeLabel"),
+    secret: formData.get("secret"),
+    participants,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  try {
+    await createEvent(user.id, campaignId, parsed.data);
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    return { error: "Could not log the event. Please try again." };
+  }
+
+  revalidatePath(`/campaigns/${campaignId}/entities/${sourceId}`);
+  if (otherId) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${otherId}`);
+  }
+  return undefined;
+}
+
+export async function archiveEventAction(
+  campaignId: string,
+  entityId: string,
+  eventId: string,
+): Promise<void> {
+  const user = await requireUser();
+  const result = await archiveEvent(user.id, campaignId, eventId);
+  const participantIds = new Set([...result.participantIds, entityId]);
+  for (const participantId of participantIds) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${participantId}`);
+  }
 }
 
 export async function getCampaignCanonIntegrityAction(campaignId: string) {

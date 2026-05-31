@@ -95,6 +95,16 @@ enum OpDecision {
   REJECTED
 }
 
+// How an entity participates in an Event (docs/01-domain-model.md). Like
+// relationship types, this is a semantic label — any entity can take any role.
+enum EventParticipantRole {
+  ACTOR
+  TARGET
+  WITNESS
+  LOCATION
+  AFFECTED
+}
+
 // Typed, any-to-any relationship edges (docs/01-domain-model.md). The type is a
 // semantic label, never a structural constraint — both endpoints FK to the
 // generic Entity, so any type can relate to any other.
@@ -213,6 +223,7 @@ model Campaign {
   members  Membership[]
   entities Entity[]
   relationships Relationship[]
+  events     Event[]
   changeSets ChangeSet[]
   provenance Provenance[]
   auditLogs  AuditLog[]
@@ -264,6 +275,7 @@ model Entity {
   crawler     Crawler?
   outEdges    Relationship[] @relation("SourceEntity")
   inEdges     Relationship[] @relation("TargetEntity")
+  eventRoles  EventParticipant[]
   provenance  Provenance[]
 
   createdAt DateTime @default(now())
@@ -324,6 +336,57 @@ model Relationship {
   @@index([campaignId, targetId])
   @@index([campaignId, type])
   @@index([campaignId, status])
+}
+
+// ───────────── Events & causality (the "why") ─────────────
+// Something that happened (or is scheduled): a death, a sponsorship signed, a
+// Floor-9 battle. Reviewable + lockable like any canon; writes route through the
+// review service, which records provenance. Soft-archived, never hard-deleted.
+// In-game time is a flexible structure ({ floor?, dayInFloor?, absoluteDay?,
+// label? }) plus an integer `orderKey` the timeline sorts by — DCC time is
+// irregular, so we never force calendar dates (docs/01-domain-model.md).
+model Event {
+  id          String       @id @default(cuid())
+  campaignId  String
+  title       String
+  summary     String?
+  description String?
+  inGameTime  Json         @default("{}")
+  orderKey    Int          @default(0)
+  secret      Boolean      @default(false)
+  source      ChangeSource @default(DM)
+  status      CanonStatus  @default(CANON)
+  locked      Boolean      @default(false)
+  version     Int          @default(1)
+
+  campaign     Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  participants EventParticipant[]
+  provenance   Provenance[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([campaignId, status])
+  @@index([campaignId, orderKey])
+}
+
+// Typed link between an Event and an Entity (any-to-any: any entity can hold any
+// role). Cascades with both endpoints so archived events keep their participant
+// rows but a hard-deleted entity drops its participations.
+model EventParticipant {
+  id       String               @id @default(cuid())
+  eventId  String
+  entityId String
+  role     EventParticipantRole @default(ACTOR)
+
+  event  Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([eventId, entityId, role])
+  @@index([eventId])
+  @@index([entityId])
 }
 
 // ───────────── Review pipeline ─────────────
@@ -395,6 +458,7 @@ model Provenance {
   campaign     Campaign      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   entity       Entity?       @relation(fields: [entityId], references: [id], onDelete: Cascade)
   relationship Relationship? @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
+  event        Event?        @relation(fields: [eventId], references: [id], onDelete: Cascade)
   changeSet    ChangeSet     @relation(fields: [changeSetId], references: [id], onDelete: Cascade)
   actor        User?         @relation("ActorProvenance", fields: [actorUserId], references: [id], onDelete: SetNull)
 
@@ -402,6 +466,7 @@ model Provenance {
 
   @@index([entityId])
   @@index([relationshipId])
+  @@index([eventId])
   @@index([changeSetId])
 }
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createCampaignSchema,
   createCrawlerSchema,
+  createEventSchema,
   createGenericEntitySchema,
   createRelationshipSchema,
   lockFieldSchema,
@@ -262,6 +263,69 @@ describe("createRelationshipSchema", () => {
     const result = createRelationshipSchema.safeParse({
       type: "NOT_A_TYPE",
       targetId: "e2",
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("createEventSchema", () => {
+  it("parses an event, coerces floor + secret, and defaults the role", () => {
+    const parsed = createEventSchema.parse({
+      title: "Floor 9 boss fight",
+      summary: "They won",
+      floor: "9",
+      timeLabel: "Day 3",
+      secret: "on",
+      participants: [{ entityId: "e1" }, { entityId: "e2", role: "TARGET" }],
+    });
+    expect(parsed.title).toBe("Floor 9 boss fight");
+    expect(parsed.floor).toBe(9);
+    expect(parsed.secret).toBe(true);
+    expect(parsed.participants[0].role).toBe("ACTOR");
+    expect(parsed.participants[1].role).toBe("TARGET");
+  });
+
+  it("defaults secret to false and leaves floor undefined when blank", () => {
+    const parsed = createEventSchema.parse({
+      title: "Quiet moment",
+      summary: "",
+      floor: "",
+      timeLabel: "",
+      participants: [{ entityId: "e1", role: "WITNESS" }],
+    });
+    expect(parsed.secret).toBe(false);
+    expect(parsed.floor).toBeUndefined();
+  });
+
+  it("requires a title", () => {
+    const result = createEventSchema.safeParse({
+      title: "",
+      participants: [{ entityId: "e1", role: "ACTOR" }],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("requires at least one participant", () => {
+    const result = createEventSchema.safeParse({
+      title: "Lonely event",
+      participants: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an out-of-range floor", () => {
+    const result = createEventSchema.safeParse({
+      title: "Bad floor",
+      floor: "99",
+      participants: [{ entityId: "e1", role: "ACTOR" }],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an unknown participant role", () => {
+    const result = createEventSchema.safeParse({
+      title: "Bad role",
+      participants: [{ entityId: "e1", role: "NOPE" }],
     });
     expect(result.success).toBe(false);
   });

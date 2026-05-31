@@ -34,6 +34,7 @@ vi.mock("@/app/(dm)/actions", () => ({
 
 import { DmNav } from "@/components/console/dm-nav";
 import { CampaignSwitcher } from "@/components/console/campaign-switcher";
+import { getCampaignCanonIntegrityAction } from "@/app/(dm)/actions";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -82,6 +83,38 @@ describe("DmNav", () => {
     });
 
     expect(screen.getByText(/64% DM · 22% AI-origin · 14% locked/)).toBeDefined();
+  });
+
+  it("shows unbuilt sections as disabled roadmap entries", () => {
+    usePathname.mockReturnValue("/dashboard");
+
+    render(<DmNav />);
+
+    const planned = screen.getByTitle(/M6 — System AI persona engine/);
+    expect(planned.getAttribute("aria-disabled")).toBe("true");
+    expect(planned.textContent).toContain("Planned");
+  });
+
+  it("logs and recovers when canon integrity fails to load", async () => {
+    usePathname.mockReturnValue("/campaigns/c1");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(getCampaignCanonIntegrityAction).mockRejectedValueOnce(
+      new Error("boom"),
+    );
+
+    render(<DmNav />);
+
+    await waitFor(() => {
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Error loading canon integrity:",
+        expect.any(Error),
+      );
+    });
+    // The meter never appears, but the nav still renders.
+    expect(screen.queryByText("Canon integrity")).toBeNull();
+    expect(screen.getByRole("link", { name: /World Browser/ })).toBeDefined();
+
+    errorSpy.mockRestore();
   });
 });
 

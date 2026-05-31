@@ -11,6 +11,10 @@ import {
   type ConnectionCandidate,
 } from "@/components/entities/connections-panel";
 import {
+  TimelinePanel,
+  type TimelineCandidate,
+} from "@/components/entities/timeline-panel";
+import {
   ArchiveEntityForm,
   EditEntityForm,
   EditFormProvider,
@@ -33,6 +37,7 @@ import {
   type EntityDetail,
 } from "@/server/services/entities";
 import { listConnectionsForEntity } from "@/server/services/relationships";
+import { listEventsForEntity } from "@/server/services/events";
 import { getEntityProvenance } from "@/server/services/review";
 
 export default async function EntityPage({
@@ -52,9 +57,10 @@ export default async function EntityPage({
 
   if (!campaign || !entity) notFound();
 
-  const [provenance, connections, candidateList] = await Promise.all([
+  const [provenance, connections, events, candidateList] = await Promise.all([
     getEntityProvenance(user.id, id, entityId),
     listConnectionsForEntity(user.id, id, entityId),
+    listEventsForEntity(user.id, id, entityId),
     listEntitiesForUser(user.id, id),
   ]);
   const candidates: ConnectionCandidate[] = candidateList.entities
@@ -64,6 +70,7 @@ export default async function EntityPage({
       name: candidate.name,
       type: candidate.type,
     }));
+  const timelineCandidates: TimelineCandidate[] = candidates;
   const fields = entityFields(entity);
   const detailHref = `/campaigns/${id}/entities/${entityId}`;
 
@@ -195,15 +202,14 @@ export default async function EntityPage({
                 </div>
               )}
 
-              {/* timeline — events land in M3 */}
+              {/* timeline — events this entity participates in */}
               <div className="mt-[26px]">
-                <Kicker dim noLead className="mb-3">
-                  Timeline
-                </Kicker>
-                <PlannedNote milestone="M3">
-                  Events and cause→effect history attach here once the
-                  relationships &amp; events graph lands.
-                </PlannedNote>
+                <TimelinePanel
+                  campaignId={id}
+                  entityId={entityId}
+                  events={events}
+                  candidates={timelineCandidates}
+                />
               </div>
             </>
           )}
@@ -427,25 +433,6 @@ function ProvRow({ k, children }: { k: string; children: React.ReactNode }) {
       <span className="flex flex-wrap items-center gap-[6px] text-[var(--ink-dim)]">
         {children}
       </span>
-    </div>
-  );
-}
-
-function PlannedNote({
-  milestone,
-  children,
-}: {
-  milestone: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="border border-dashed border-[var(--line-strong)] bg-[var(--bg-2)] px-3 py-3">
-      <div className="font-mono text-[9px] uppercase tracking-[.1em] text-[var(--ink-faint)]">
-        Planned · {milestone}
-      </div>
-      <p className="mt-1 text-[11.5px] leading-[1.5] text-[var(--ink-faint)]">
-        {children}
-      </p>
     </div>
   );
 }

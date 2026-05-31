@@ -3,6 +3,7 @@ import {
   ChangeSetStatus,
   ChangeSource,
   EntityType,
+  EventParticipantRole,
   OpDecision,
   OpKind,
   Prisma,
@@ -32,6 +33,12 @@ export type EntityReviewOperationInput = {
 
 export type RelationshipReviewOperationInput = {
   op: "CREATE_RELATIONSHIP" | "UPDATE_RELATIONSHIP" | "DELETE_RELATIONSHIP";
+  targetId?: string;
+  patch: ReviewPatch;
+};
+
+export type EventReviewOperationInput = {
+  op: "CREATE_EVENT" | "UPDATE_EVENT";
   targetId?: string;
   patch: ReviewPatch;
 };
@@ -364,6 +371,70 @@ export async function applyAutoApprovedRelationshipChangeSet(
     const appliedIds: string[] = [];
     for (const operation of changeSet.operations) {
       const targetId = await applyRelationshipOperation(tx, changeSet, operation);
+      appliedIds.push(targetId);
+      await tx.changeOperation.update({
+        where: { id: operation.id },
+        data: { targetId, decision: OpDecision.ACCEPTED },
+      });
+    }
+
+    await tx.changeSet.update({
+      where: { id: changeSet.id },
+      data: {
+        status: ChangeSetStatus.APPROVED,
+        reviewedById: userId,
+        reviewedAt: new Date(),
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        campaignId,
+        actorUserId: userId,
+        action: "AUTO_APPROVE",
+        targetType: "CHANGE_SET",
+        targetId: changeSet.id,
+        detail: { appliedIds },
+      },
+    });
+
+    return { changeSetId: changeSet.id, targetIds: appliedIds };
+  });
+}
+
+export async function applyAutoApprovedEventChangeSet(
+  userId: string,
+  campaignId: string,
+  input: {
+    title: string;
+    summary?: string;
+    operations: EventReviewOperationInput[];
+  },
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  return prisma.$transaction(async (tx) => {
+    const changeSet = await tx.changeSet.create({
+      data: {
+        campaignId,
+        source: ChangeSource.DM,
+        title: input.title,
+        summary: input.summary,
+        actorUserId: userId,
+        operations: {
+          create: input.operations.map((operation) => ({
+            op: operation.op,
+            targetType: "EVENT",
+            targetId: operation.targetId,
+            patch: operation.patch as Prisma.InputJsonValue,
+          })),
+        },
+      },
+      include: { operations: true },
+    });
+
+    const appliedIds: string[] = [];
+    for (const operation of changeSet.operations) {
+      const targetId = await applyEventOperation(tx, changeSet, operation);
       appliedIds.push(targetId);
       await tx.changeOperation.update({
         where: { id: operation.id },
@@ -1531,6 +1602,188 @@ async function writeRelationshipProvenance(
     data: fields.map((field) => ({
       campaignId: changeSet.campaignId,
       relationshipId,
+      changeSetId: changeSet.id,
+      source: changeSet.source,
+      field,
+      actorUserId: changeSet.actorUserId,
+      providerId: changeSet.providerId,
+      model: changeSet.model,
+      promptId: changeSet.promptId,
+      runId: changeSet.runId,
+    })),
+  });
+}
+
+const eventParticipantRoles = new Set<string>(
+  Object.values(EventParticipantRole),
+);
+
+type ParsedParticipant = { entityId: string; role: EventParticipantRole };
+
+function parseEventParticipants(value: JsonValue | undefined): ParsedParticipant[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const participants: ParsedParticipant[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const entityId = item.entityId;
+    const role = item.role;
+    if (typeof entityId !== "string" || entityId.length === 0) continue;
+    const resolvedRole =
+      typeof role === "string" && eventParticipantRoles.has(role)
+        ? (role as EventParticipantRole)
+        : EventParticipantRole.ACTOR;
+    // Dedupe on (entity, role) to respect the unique constraint.
+    const key = `${entityId}:${resolvedRole}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    participants.push({ entityId, role: resolvedRole });
+  }
+  return participants;
+}
+
+function jsonObject(value: JsonValue | undefined): Prisma.InputJsonValue {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Prisma.InputJsonValue;
+  }
+  return {};
+}
+
+async function applyEventOperation(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operation: Prisma.ChangeOperationGetPayload<object>,
+  patchOverride?: ReviewPatch,
+) {
+  if (operation.targetType !== "EVENT") {
+    throw new ServiceError("Unsupported operation target.");
+  }
+  const patch = patchOverride ?? (operation.patch as ReviewPatch);
+
+  switch (operation.op) {
+    case OpKind.CREATE_EVENT:
+      return applyCreateEvent(tx, changeSet, operation.id, patch);
+    case OpKind.UPDATE_EVENT:
+      if (!operation.targetId) throw new ServiceError("Missing event target.");
+      return applyUpdateEvent(tx, changeSet, operation.id, operation.targetId, patch);
+    default:
+      throw new ServiceError("Unsupported event operation.");
+  }
+}
+
+async function applyCreateEvent(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operationId: string,
+  patch: ReviewPatch,
+) {
+  const title = readTo(patch, "title");
+  if (typeof title !== "string" || title.length === 0) {
+    throw new ServiceError("Event title is required.");
+  }
+  const participants = parseEventParticipants(readTo(patch, "participants"));
+  if (participants.length === 0) {
+    throw new ServiceError("An event needs at least one participant.");
+  }
+  // Participants must be live canon entities in this campaign.
+  for (const participant of participants) {
+    await assertCanonEntity(tx, changeSet.campaignId, participant.entityId);
+  }
+
+  const event = await tx.event.create({
+    data: {
+      campaignId: changeSet.campaignId,
+      title,
+      summary: nullableString(readTo(patch, "summary")),
+      description: nullableString(readTo(patch, "description")),
+      inGameTime: jsonObject(readTo(patch, "inGameTime")),
+      orderKey: numberWithDefault(readTo(patch, "orderKey"), 0),
+      secret: booleanWithDefault(readTo(patch, "secret"), false),
+      source: changeSet.source,
+      status: CanonStatus.CANON,
+      participants: {
+        create: participants.map((participant) => ({
+          entityId: participant.entityId,
+          role: participant.role,
+        })),
+      },
+    },
+    select: { id: true },
+  });
+
+  await writeEventProvenance(tx, changeSet, event.id, patch);
+  await tx.auditLog.create({
+    data: {
+      campaignId: changeSet.campaignId,
+      actorUserId: changeSet.reviewedById ?? changeSet.actorUserId ?? "",
+      action: "APPLY_OPERATION",
+      targetType: "CHANGE_OPERATION",
+      targetId: operationId,
+      detail: { eventId: event.id, op: OpKind.CREATE_EVENT },
+    },
+  });
+  return event.id;
+}
+
+async function applyUpdateEvent(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operationId: string,
+  eventId: string,
+  patch: ReviewPatch,
+) {
+  const event = await tx.event.findFirst({
+    where: {
+      id: eventId,
+      campaignId: changeSet.campaignId,
+      status: { not: CanonStatus.ARCHIVED },
+    },
+    select: { id: true, locked: true },
+  });
+  if (!event) throw new ServiceError("Event not found.");
+
+  if (event.locked) {
+    await tx.changeOperation.update({
+      where: { id: operationId },
+      data: { blockedByLock: true },
+    });
+    throw new ServiceError("This event is locked.");
+  }
+
+  // This slice's only UPDATE_EVENT use is soft-archive (a status change).
+  // Editing event fields (title/time/secret) lands with the event
+  // locking/editing slice, alongside its own coverage.
+  const data: Prisma.EventUpdateInput = { version: { increment: 1 } };
+  if ("status" in patch) {
+    data.status = (readTo(patch, "status") as CanonStatus) ?? CanonStatus.CANON;
+  }
+
+  await tx.event.update({ where: { id: eventId }, data, select: { id: true } });
+  await writeEventProvenance(tx, changeSet, eventId, patch);
+  await tx.auditLog.create({
+    data: {
+      campaignId: changeSet.campaignId,
+      actorUserId: changeSet.reviewedById ?? changeSet.actorUserId ?? "",
+      action: "APPLY_OPERATION",
+      targetType: "CHANGE_OPERATION",
+      targetId: operationId,
+      detail: { eventId, op: OpKind.UPDATE_EVENT },
+    },
+  });
+  return eventId;
+}
+
+async function writeEventProvenance(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  eventId: string,
+  patch: ReviewPatch,
+) {
+  const fields = patchFields(patch).filter((field) => field !== "_baseVersion");
+  await tx.provenance.createMany({
+    data: fields.map((field) => ({
+      campaignId: changeSet.campaignId,
+      eventId,
       changeSetId: changeSet.id,
       source: changeSet.source,
       field,

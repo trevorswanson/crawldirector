@@ -836,6 +836,87 @@ describe("entity service", () => {
     const stored = await prisma.entity.findUnique({ where: { id: entity.id } });
     expect(stored?.status).toBe("ARCHIVED");
   });
+
+  it("is a no-op when an update changes nothing", async () => {
+    const owner = await makeUser("noop@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Zev",
+      summary: "Unchanged",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: ["a"],
+    });
+
+    const result = await updateEntity(owner.id, campaign.id, entity.id, {
+      type: "NPC",
+      name: "Zev",
+      summary: "Unchanged",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: ["a"],
+    });
+
+    expect(result.id).toBe(entity.id);
+    const stored = await prisma.entity.findUniqueOrThrow({ where: { id: entity.id } });
+    // No change set was applied, so the version stays put.
+    expect(stored.version).toBe(1);
+  });
+
+  it("rejects updating an entity that does not exist", async () => {
+    const owner = await makeUser("missing-update@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    await expect(
+      updateEntity(owner.id, campaign.id, "nope", {
+        type: "NPC",
+        name: "Ghost",
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: [],
+      }),
+    ).rejects.toThrow("Entity not found.");
+  });
+
+  it("rejects archiving an entity that does not exist", async () => {
+    const owner = await makeUser("missing-archive@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    await expect(
+      archiveEntity(owner.id, campaign.id, "nope"),
+    ).rejects.toThrow("Entity not found.");
+  });
+
+  it("filters the world browser to pending entities", async () => {
+    const owner = await makeUser("pending-filter@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Canon NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    // Drop a PENDING entity straight into the table to exercise the status facet.
+    await prisma.entity.create({
+      data: {
+        campaignId: campaign.id,
+        createdById: owner.id,
+        type: "NPC",
+        name: "Pending NPC",
+        visibility: "DM_ONLY",
+        status: "PENDING",
+      },
+    });
+
+    const list = await listEntitiesForUser(owner.id, campaign.id, {
+      status: "PENDING",
+    });
+    expect(list.entities.map((e) => e.name)).toEqual(["Pending NPC"]);
+  });
 });
 
 describe("entity locking", () => {

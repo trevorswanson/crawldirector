@@ -286,6 +286,48 @@ export const createRelationshipSchema = z.object({
 });
 export type CreateRelationshipInput = z.infer<typeof createRelationshipSchema>;
 
+// Event participant roles (docs/01-domain-model.md). Any-to-any, like
+// relationship types — every role is valid for any entity.
+export const eventParticipantRoleValues = [
+  "ACTOR",
+  "TARGET",
+  "WITNESS",
+  "LOCATION",
+  "AFFECTED",
+] as const;
+
+const eventParticipantSchema = z.object({
+  entityId: z.string().trim().min(1, "Participant entity is required."),
+  role: z.enum(eventParticipantRoleValues).default("ACTOR"),
+});
+
+// floor: optional in-game floor number. Empty/absent => undefined.
+const optionalFloor = z.preprocess(
+  (value) => (value === "" || value === null || value === undefined ? undefined : value),
+  z.coerce
+    .number()
+    .int("Floor must be a whole number.")
+    .min(1, "Floor must be 1 or greater.")
+    .max(18, "Floor must be 18 or less.")
+    .optional(),
+);
+
+export const createEventSchema = z.object({
+  title: z.string().trim().min(1, "Event title is required.").max(200),
+  summary: optionalText(2000),
+  floor: optionalFloor,
+  timeLabel: optionalText(120),
+  secret: z
+    .preprocess((value) => value === true || value === "true" || value === "on", z.boolean())
+    .default(false),
+  // At least one participant; the source entity is always included by the action.
+  participants: z
+    .array(eventParticipantSchema)
+    .min(1, "An event needs at least one participant.")
+    .max(20, "Too many participants."),
+});
+export type CreateEventInput = z.infer<typeof createEventSchema>;
+
 export const changeOperationDecisionSchema = z.enum([
   "PENDING",
   "ACCEPTED",
