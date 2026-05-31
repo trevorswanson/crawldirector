@@ -3,15 +3,18 @@
 import { useMemo, useState } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
-import { ArrowRight, Plus, Search, X } from "lucide-react";
+import { ArrowRight, Plus, X } from "lucide-react";
 
 import {
   archiveRelationshipAction,
   createRelationshipAction,
 } from "@/app/(dm)/actions";
+import {
+  EntityTypeahead,
+  type EntityCandidate,
+} from "@/components/entities/entity-typeahead";
 import { Kicker } from "@/components/ui/kicker";
 import { TypeDot } from "@/components/ui/type-dot";
-import { formatEntityType } from "@/lib/entities";
 import {
   defaultRelationshipType,
   isSuggestedRelationship,
@@ -23,7 +26,7 @@ import {
 } from "@/lib/relationship-types";
 import type { EntityConnection } from "@/server/services/relationships";
 
-export type ConnectionCandidate = { id: string; name: string; type: string };
+export type ConnectionCandidate = EntityCandidate;
 
 // Sentinel option value that expands the type picker to the full grouped list.
 const SHOW_ALL_TYPES = "__SHOW_ALL_TYPES__";
@@ -55,20 +58,11 @@ function AddConnectionForm({
   onCancel: () => void;
   error: string | null;
 }) {
-  const [query, setQuery] = useState("");
   const [target, setTarget] = useState<ConnectionCandidate | null>(null);
   const [type, setType] = useState<RelationshipTypeValue>("ALLY_OF");
   // Collapsed by default: show only the applicable types until the DM opts into
   // the full list, so the picker stays short and strongly steers toward sense.
   const [showAll, setShowAll] = useState(false);
-
-  const matches = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const pool = q
-      ? candidates.filter((c) => c.name.toLowerCase().includes(q))
-      : candidates;
-    return pool.slice(0, 8);
-  }, [candidates, query]);
 
   // Target-first: the type picker is only meaningful once we know both ends.
   const targetType = target?.type as EntityTypeValue | undefined;
@@ -80,12 +74,14 @@ function AddConnectionForm({
     [sourceType, targetType],
   );
 
-  const selectTarget = (candidate: ConnectionCandidate) => {
+  const selectTarget = (candidate: ConnectionCandidate | null) => {
     setTarget(candidate);
     setShowAll(false);
-    setType(
-      defaultRelationshipType(sourceType, candidate.type as EntityTypeValue),
-    );
+    if (candidate) {
+      setType(
+        defaultRelationshipType(sourceType, candidate.type as EntityTypeValue),
+      );
+    }
   };
 
   const unusual =
@@ -97,66 +93,14 @@ function AddConnectionForm({
   return (
     <form action={onSubmit} className="mt-3 flex flex-col gap-2">
       {/* Step 1 — pick the target entity */}
-      {target ? (
-        <div className="flex items-center gap-[7px] border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[7px]">
-          <TypeDot type={target.type} size={7} />
-          <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-[var(--ink)]">
-            {target.name}
-          </span>
-          <span className="font-mono text-[9px] uppercase tracking-[.06em] text-[var(--ink-faint)]">
-            {formatEntityType(target.type)}
-          </span>
-          <button
-            type="button"
-            title="Choose a different entity"
-            onClick={() => {
-              setTarget(null);
-              setQuery("");
-            }}
-            className="inline-flex items-center p-[2px] text-[var(--ink-faint)] hover:text-[var(--ink)]"
-          >
-            <X aria-hidden size={12} />
-          </button>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-[6px] border border-[var(--line-strong)] bg-[var(--bg)] px-2">
-            <Search aria-hidden size={12} className="text-[var(--ink-faint)]" />
-            <input
-              type="text"
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search entity to connect…"
-              className="w-full bg-transparent py-[6px] text-[11.5px] text-[var(--ink)] outline-none placeholder:text-[var(--ink-faint)]"
-            />
-          </div>
-          <div className="flex max-h-[180px] flex-col overflow-y-auto border border-[var(--line)]">
-            {matches.length === 0 ? (
-              <p className="px-2 py-[7px] font-mono text-[10px] text-[var(--ink-faint)]">
-                No matching entities.
-              </p>
-            ) : (
-              matches.map((candidate) => (
-                <button
-                  key={candidate.id}
-                  type="button"
-                  onClick={() => selectTarget(candidate)}
-                  className="flex items-center gap-[7px] px-2 py-[6px] text-left transition-colors hover:bg-[var(--bg-3)]"
-                >
-                  <TypeDot type={candidate.type} size={7} />
-                  <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--ink)]">
-                    {candidate.name}
-                  </span>
-                  <span className="font-mono text-[9px] uppercase tracking-[.06em] text-[var(--ink-faint)]">
-                    {formatEntityType(candidate.type)}
-                  </span>
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      )}
+      <EntityTypeahead
+        name="targetId"
+        candidates={candidates}
+        value={target}
+        onChange={selectTarget}
+        placeholder="Search entity to connect…"
+        autoFocus
+      />
 
       {/* Step 2 — pick the relationship type, ranked by the chosen pairing.
           Collapsed to suggested-only until the DM picks "Show all…". */}
@@ -215,8 +159,6 @@ function AddConnectionForm({
           )}
         </>
       )}
-
-      <input type="hidden" name="targetId" value={target?.id ?? ""} />
 
       <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
         <input type="checkbox" name="secret" value="true" />

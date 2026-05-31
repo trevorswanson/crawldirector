@@ -45,10 +45,12 @@ export default async function EntityPage({
   searchParams,
 }: {
   params: Promise<{ id: string; entityId: string }>;
-  searchParams?: Promise<{ edit?: string }>;
+  searchParams?: Promise<{ edit?: string; event?: string }>;
 }) {
   const { id, entityId } = await params;
-  const editing = Boolean((await searchParams)?.edit);
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const editing = Boolean(resolvedSearchParams.edit);
+  const openEventId = resolvedSearchParams.event;
   const user = await requireUser();
   const [campaign, entity] = await Promise.all([
     getCampaignForUser(user.id, id),
@@ -286,6 +288,7 @@ export default async function EntityPage({
                   entityId={entityId}
                   events={events}
                   candidates={timelineCandidates}
+                  initialEventId={openEventId}
                 />
               </div>
             </>

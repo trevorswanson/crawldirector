@@ -71,12 +71,12 @@ describe("TimelinePanel", () => {
     );
 
     expect(screen.getByText("No events logged for this entity yet.")).toBeDefined();
-    expect(screen.getByText("Timeline · 0")).toBeDefined();
+    expect(screen.getByText("Timeline · 0 events")).toBeDefined();
     // form not shown until opened
     expect(screen.queryByText("DM-only (secret)")).toBeNull();
   });
 
-  it("lists events with role, time label, summary, and co-participants", () => {
+  it("lists events with time label, role, and provenance, hiding details until opened", () => {
     render(
       <TimelinePanel
         campaignId="c1"
@@ -96,19 +96,26 @@ describe("TimelinePanel", () => {
       />,
     );
 
-    expect(screen.getByText("Timeline · 2")).toBeDefined();
-    expect(screen.getAllByText("Floor 9 boss fight")[0]).toBeDefined();
+    expect(screen.getByText("Timeline · 2 events")).toBeDefined();
+    expect(screen.getByText("Floor 9 boss fight")).toBeDefined();
     expect(screen.getByText("Day 3")).toBeDefined();
-    expect(screen.getByText("They beat the boss.")).toBeDefined();
+    // provenance is shown at a glance, like the mockup
+    expect(screen.getAllByText("DM").length).toBeGreaterThan(0);
     // secret events are flagged
     expect(screen.getByText("secret")).toBeDefined();
-    // co-participant links to the other entity
+    // summary and co-participants are collapsed until the event is opened
+    expect(screen.queryByText("They beat the boss.")).toBeNull();
+    expect(screen.queryByText("Donut")).toBeNull();
+
+    // clicking the event name reveals summary + participants
+    fireEvent.click(screen.getByRole("button", { name: /Floor 9 boss fight/ }));
+    expect(screen.getByText("They beat the boss.")).toBeDefined();
     expect(screen.getByText("Donut").closest("a")?.getAttribute("href")).toBe(
       "/campaigns/c1/entities/e2",
     );
   });
 
-  it("renders cause/effect chains and a cause selector for other timeline events", () => {
+  it("reveals cause/effect chains and a cause selector when an event is opened", () => {
     render(
       <TimelinePanel
         campaignId="c1"
@@ -129,13 +136,32 @@ describe("TimelinePanel", () => {
       />,
     );
 
+    // causality is collapsed until the event is opened
+    expect(screen.queryByText("Caused by")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Sponsor stock drops/ }));
+
     expect(screen.getByText("Caused by")).toBeDefined();
-    expect(screen.getByText("Causes")).toBeDefined();
-    expect(screen.getAllByRole("link", { name: "Arena stunt" })[0].getAttribute("href")).toBe(
-      "/campaigns/c1/entities/e1?event=ev2",
-    );
-    expect(screen.queryByRole("button", { name: "Add cause" })).toBeNull();
+    expect(
+      screen.getByRole("link", { name: "Arena stunt" }).getAttribute("href"),
+    ).toBe("/campaigns/c1/entities/e1?event=ev2");
     expect(screen.queryByRole("option", { name: "Arena stunt" })).toBeNull();
+  });
+
+  it("opens an event's details on load when initialEventId is set", () => {
+    render(
+      <TimelinePanel
+        campaignId="c1"
+        entityId="e1"
+        events={[event()]}
+        candidates={candidates}
+        initialEventId="ev1"
+      />,
+    );
+
+    // details are visible without a click because the deep link targets this event
+    expect(screen.getByText("They beat the boss.")).toBeDefined();
+    expect(screen.getByRole("button", { name: /Remove event/ })).toBeDefined();
   });
 
   it("opens the log form with role selects and a participant picker", () => {
@@ -151,8 +177,9 @@ describe("TimelinePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /Log event/ }));
     expect(screen.getByPlaceholderText("What happened?")).toBeDefined();
     expect(screen.getByText("DM-only (secret)")).toBeDefined();
-    // candidate participant is offered
-    expect(screen.getByRole("option", { name: "Donut" })).toBeDefined();
+    // participant picker is a typeahead; candidates surface as selectable rows
+    expect(screen.getByPlaceholderText("Search entity to add…")).toBeDefined();
+    expect(screen.getByRole("button", { name: /Donut/ })).toBeDefined();
 
     // cancel hides it again
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -180,6 +207,7 @@ describe("TimelinePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /Log event/ }));
     expect(screen.getByPlaceholderText("What happened?")).toBeDefined();
     // no participant picker without candidates
-    expect(screen.queryByText("Add participant… (optional)")).toBeNull();
+    expect(screen.queryByText("Add participant (optional)")).toBeNull();
+    expect(screen.queryByPlaceholderText("Search entity to add…")).toBeNull();
   });
 });
