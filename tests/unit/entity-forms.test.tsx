@@ -42,6 +42,7 @@ import {
   EditEntityForm,
   EditFormProvider,
   QuickCreateStub,
+  EditRailControls,
 } from "@/components/entities/entity-forms";
 import type { EntityDetail } from "@/server/services/entities";
 
@@ -270,5 +271,98 @@ describe("entity forms", () => {
     expect(screen.getByDisplayValue("99")).toBeDefined();
     expect(screen.getByDisplayValue("5")).toBeDefined();
     expect(screen.getByDisplayValue("Dead")).toBeDefined();
+  });
+
+  const itemEntity: EntityDetail = {
+    id: "e3",
+    campaignId: "c1",
+    type: "ITEM",
+    name: "Gourd of Doom",
+    summary: "A heavy gourd",
+    description: "It is scary",
+    status: "CANON",
+    visibility: "PLAYER_FACING",
+    source: "DM",
+    tags: ["floor 2"],
+    version: 1,
+    locked: false,
+    lockedFields: [],
+    isStub: false,
+    agentEnabled: false,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    crawler: null,
+    data: {
+      itemTypeId: "it1",
+      divine: true,
+      unique: false,
+      fleeting: true,
+      aiDescription: "Official flavor text",
+    },
+  };
+
+  it("renders ITEM fields and attributes properly", () => {
+    const itemTypes = [
+      { id: "it1", name: "Gourd Type" },
+      { id: "it2", name: "Sword Type" },
+    ];
+    render(
+      <EditFormProvider>
+        <EditEntityForm campaignId="c1" entity={itemEntity} itemTypes={itemTypes} />
+      </EditFormProvider>,
+    );
+
+    expect(screen.getByLabelText("AI Description")).toBeDefined();
+    expect(screen.getByDisplayValue("Official flavor text")).toBeDefined();
+    expect(screen.getByLabelText("Item Type")).toBeDefined();
+    expect(screen.getByDisplayValue("Gourd Type")).toBeDefined();
+
+    const divineCheckbox = screen.getByLabelText("Divine") as HTMLInputElement;
+    expect(divineCheckbox.checked).toBe(true);
+
+    const uniqueCheckbox = screen.getByLabelText("Unique") as HTMLInputElement;
+    expect(uniqueCheckbox.checked).toBe(false);
+
+    const fleetingCheckbox = screen.getByLabelText("Fleeting") as HTMLInputElement;
+    expect(fleetingCheckbox.checked).toBe(true);
+  });
+
+  it("disables ITEM fields when locked or fields are locked", () => {
+    const itemTypes = [{ id: "it1", name: "Gourd Type" }];
+    const lockedItem: EntityDetail = {
+      ...itemEntity,
+      lockedFields: [
+        "data.itemTypeId",
+        "data.divine",
+        "data.unique",
+        "data.fleeting",
+        "data.aiDescription",
+      ],
+    };
+    render(
+      <EditFormProvider>
+        <EditEntityForm campaignId="c1" entity={lockedItem} itemTypes={itemTypes} />
+      </EditFormProvider>,
+    );
+
+    expect(screen.getByLabelText("Item Type").getAttribute("disabled")).not.toBeNull();
+    expect(screen.getByLabelText("Divine").getAttribute("disabled")).not.toBeNull();
+    expect(screen.getByLabelText("Unique").getAttribute("disabled")).not.toBeNull();
+    expect(screen.getByLabelText("Fleeting").getAttribute("disabled")).not.toBeNull();
+    expect(screen.getByLabelText("AI Description").getAttribute("readonly")).not.toBeNull();
+  });
+
+  it("renders EditRailControls properly inside provider", () => {
+    render(
+      <EditFormProvider>
+        <EditRailControls detailHref="/campaigns/c1/entities/e1" />
+      </EditFormProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: /Save/ })).toBeDefined();
+    expect(screen.getByRole("link", { name: /Discard/ })).toBeDefined();
+    expect(screen.getByRole("link", { name: /Discard/ }).getAttribute("href")).toBe(
+      "/campaigns/c1/entities/e1",
+    );
   });
 });

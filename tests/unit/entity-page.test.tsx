@@ -204,6 +204,10 @@ describe("EntityPage", () => {
 
   it("shows the edit form when ?edit is present", async () => {
     getEntityForUser.mockResolvedValue(crawler());
+    listEntitiesForUser.mockResolvedValue({
+      entities: [{ id: "it1", name: "Gourd Type", type: "ITEM_TYPE" }],
+      role: "OWNER",
+    });
 
     await renderPage("e1", "1");
 
@@ -361,6 +365,7 @@ describe("EntityPage", () => {
       crawler({
         type: "ITEM",
         data: {
+          itemTypeId: "it1",
           aiDescription: "AI generated item details",
           divine: true,
           unique: true,
@@ -368,6 +373,13 @@ describe("EntityPage", () => {
         },
       }),
     );
+    listEntitiesForUser.mockResolvedValue({
+      entities: [
+        { id: "e1", name: "Carl", type: "CRAWLER" },
+        { id: "it1", name: "Gourd Type", type: "ITEM_TYPE" },
+      ],
+      role: "OWNER",
+    });
 
     await renderPage();
 
@@ -376,6 +388,7 @@ describe("EntityPage", () => {
     expect(screen.getByText(/This is a unique item\./)).toBeDefined();
     expect(screen.getByText(/This is a fleeting item\./)).toBeDefined();
     expect(screen.getByText(/AI generated item details/)).toBeDefined();
+    expect(screen.getByText("Gourd Type")).toBeDefined();
 
     // The enclosing blockquote should not be italic
     const blockquote = screen.getByText(/AI generated item details/).closest("blockquote");
