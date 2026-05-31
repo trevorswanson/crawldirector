@@ -3,11 +3,12 @@
 import { useMemo, useState } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
-import { ArrowRight, Plus, X } from "lucide-react";
+import { ArrowRight, Lock, Plus, Unlock, X } from "lucide-react";
 
 import {
   archiveRelationshipAction,
   createRelationshipAction,
+  toggleRelationshipLockAction,
 } from "@/app/(dm)/actions";
 import {
   EntityTypeahead,
@@ -252,6 +253,33 @@ export function ConnectionsPanel({
               </div>
             </Link>
             <form
+              action={toggleRelationshipLockAction.bind(
+                null,
+                campaignId,
+                entityId,
+                c.id,
+                c.locked,
+              )}
+            >
+              <button
+                type="submit"
+                aria-label={c.locked ? "Unlock connection" : "Lock connection"}
+                title={c.locked ? "Unlock connection" : "Lock connection"}
+                className="inline-flex items-center border px-[5px] py-[3px] transition-colors hover:text-[var(--sys)]"
+                style={{
+                  borderColor: c.locked ? "var(--sys)" : "var(--line)",
+                  color: c.locked ? "var(--sys)" : "var(--ink-faint)",
+                }}
+              >
+                {c.locked ? (
+                  <Lock aria-hidden size={12} />
+                ) : (
+                  <Unlock aria-hidden size={12} />
+                )}
+              </button>
+            </form>
+            {!c.locked && (
+            <form
               action={archiveRelationshipAction.bind(
                 null,
                 campaignId,
@@ -261,12 +289,14 @@ export function ConnectionsPanel({
             >
               <button
                 type="submit"
+                aria-label="Remove connection"
                 title="Remove connection"
                 className="inline-flex items-center p-[3px] text-[var(--ink-faint)] opacity-60 transition-opacity hover:text-[var(--no)] hover:opacity-100"
               >
                 <X aria-hidden size={12} />
               </button>
             </form>
+            )}
           </div>
         ))}
       </div>

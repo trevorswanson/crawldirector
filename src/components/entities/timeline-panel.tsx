@@ -3,13 +3,14 @@
 import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
-import { ChevronRight, Plus, Trash2, X } from "lucide-react";
+import { ChevronRight, Lock, Plus, Trash2, Unlock, X } from "lucide-react";
 
 import {
   archiveEventCausalityAction,
   archiveEventAction,
   createEventAction,
   linkEventCauseAction,
+  toggleEventLockAction,
   type EventCausalityActionState,
 } from "@/app/(dm)/actions";
 import {
@@ -17,6 +18,7 @@ import {
   type EntityCandidate,
 } from "@/components/entities/entity-typeahead";
 import { Kicker } from "@/components/ui/kicker";
+import { LockChip } from "@/components/ui/lock-chip";
 import { SourceBadge } from "@/components/ui/source-badge";
 import { TypeDot } from "@/components/ui/type-dot";
 import { provenanceMeta } from "@/lib/entities";
@@ -218,6 +220,7 @@ export function TimelinePanel({
                         secret
                       </span>
                     )}
+                    {e.locked && <LockChip locked />}
                   </div>
                   <button
                     type="button"
@@ -347,22 +350,50 @@ export function TimelinePanel({
                           candidates={causeCandidates}
                         />
                       )}
-                      <form
-                        action={archiveEventAction.bind(
-                          null,
-                          campaignId,
-                          entityId,
-                          e.id,
-                        )}
-                      >
+                      <div className="flex flex-wrap gap-[6px]">
+                        <form
+                          action={toggleEventLockAction.bind(
+                            null,
+                            campaignId,
+                            entityId,
+                            e.id,
+                            e.locked,
+                          )}
+                        >
+                          <button
+                            type="submit"
+                            aria-label={e.locked ? "Unlock event" : "Lock event"}
+                            title={e.locked ? "Unlock event" : "Lock event"}
+                            className="inline-flex items-center gap-[6px] border border-[var(--line)] px-[8px] py-[5px] font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:border-[var(--sys)] hover:text-[var(--sys)]"
+                          >
+                            {e.locked ? (
+                              <Unlock aria-hidden size={11} />
+                            ) : (
+                              <Lock aria-hidden size={11} />
+                            )}
+                            {e.locked ? "Unlock event" : "Lock event"}
+                          </button>
+                        </form>
+                        {!e.locked && (
+                          <form
+                            action={archiveEventAction.bind(
+                              null,
+                              campaignId,
+                              entityId,
+                              e.id,
+                            )}
+                          >
                         <button
                           type="submit"
+                          aria-label="Remove event"
                           className="inline-flex items-center gap-[6px] border border-[var(--line)] px-[8px] py-[5px] font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:border-[var(--no)] hover:text-[var(--no)]"
                         >
                           <Trash2 aria-hidden size={11} />
                           Remove event
                         </button>
-                      </form>
+                          </form>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>

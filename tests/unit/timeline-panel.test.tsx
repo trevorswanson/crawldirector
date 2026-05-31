@@ -11,11 +11,13 @@ import {
 const {
   createEventAction,
   archiveEventAction,
+  toggleEventLockAction,
   linkEventCauseAction,
   archiveEventCausalityAction,
 } = vi.hoisted(() => ({
   createEventAction: vi.fn(),
   archiveEventAction: vi.fn(),
+  toggleEventLockAction: vi.fn(),
   linkEventCauseAction: vi.fn(),
   archiveEventCausalityAction: vi.fn(),
 }));
@@ -23,6 +25,7 @@ const {
 vi.mock("@/app/(dm)/actions", () => ({
   createEventAction,
   archiveEventAction,
+  toggleEventLockAction,
   linkEventCauseAction,
   archiveEventCausalityAction,
 }));
@@ -50,6 +53,7 @@ function event(overrides: Partial<EntityEvent> = {}): EntityEvent {
     time: { floor: 9, label: "Day 3" },
     orderKey: 9,
     secret: false,
+    locked: false,
     source: "DM",
     role: "ACTOR",
     others: [{ id: "e2", name: "Donut", type: "CRAWLER", role: "ACTOR" }],
@@ -177,6 +181,22 @@ describe("TimelinePanel", () => {
     // details are visible without a click because the deep link targets this event
     expect(screen.getByText("They beat the boss.")).toBeDefined();
     expect(screen.getByRole("button", { name: /Remove event/ })).toBeDefined();
+  });
+
+  it("surfaces locked events and hides the destructive remove control", () => {
+    render(
+      <TimelinePanel
+        campaignId="c1"
+        entityId="e1"
+        events={[event({ locked: true })]}
+        candidates={candidates}
+        initialEventId="ev1"
+      />,
+    );
+
+    expect(screen.getByText("Locked")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Unlock event" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: /Remove event/ })).toBeNull();
   });
 
   it("re-opens the targeted event when the deep link changes", () => {
