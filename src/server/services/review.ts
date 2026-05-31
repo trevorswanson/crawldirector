@@ -1880,6 +1880,12 @@ async function applyCreateEventCausality(
     throw new ServiceError("An event cannot cause itself.");
   }
 
+  // Lock the campaign row to serialize causality additions and prevent concurrent cycle-check bypass.
+  await tx.campaign.update({
+    where: { id: changeSet.campaignId },
+    data: { updatedAt: new Date() },
+  });
+
   await assertCanonEvent(tx, changeSet.campaignId, causeId);
   await assertCanonEvent(tx, changeSet.campaignId, effectId);
   const createsCycle = await wouldCreateEventCausalityCycle(

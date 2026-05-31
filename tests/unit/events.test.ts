@@ -461,4 +461,32 @@ describe("event service", () => {
       }),
     ).rejects.toThrow(/already exists/i);
   });
+
+  it("serializes concurrent causality links and prevents cycles under race conditions", async () => {
+    const owner = await makeUser("owner-concurrent@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const a = await createEvent(owner.id, campaign.id, {
+      title: "A",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const b = await createEvent(owner.id, campaign.id, {
+      title: "B",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    const results = await Promise.allSettled([
+      linkEventCause(owner.id, campaign.id, { causeId: a.id, effectId: b.id }),
+      linkEventCause(owner.id, campaign.id, { causeId: b.id, effectId: a.id }),
+    ]);
+
+    const succeeded = results.filter((r) => r.status === "fulfilled");
+    const failed = results.filter((r) => r.status === "rejected");
+
+    expect(succeeded.length).toBe(1);
+    expect(failed.length).toBe(1);
+    expect((failed[0] as PromiseRejectedResult).reason.message).toMatch(/cycle/i);
+  });
 });
