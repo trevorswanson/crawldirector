@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { ArrowRight, Plus, X } from "lucide-react";
@@ -8,7 +8,6 @@ import { ArrowRight, Plus, X } from "lucide-react";
 import {
   archiveRelationshipAction,
   createRelationshipAction,
-  type RelationshipActionState,
 } from "@/app/(dm)/actions";
 import { Kicker } from "@/components/ui/kicker";
 import { TypeDot } from "@/components/ui/type-dot";
@@ -43,10 +42,17 @@ export function ConnectionsPanel({
   candidates: ConnectionCandidate[];
 }) {
   const [open, setOpen] = useState(false);
-  const [state, formAction] = useActionState<RelationshipActionState, FormData>(
-    createRelationshipAction.bind(null, campaignId, entityId),
-    undefined,
-  );
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (formData: FormData) => {
+    setError(null);
+    const res = await createRelationshipAction(campaignId, entityId, undefined, formData);
+    if (res?.error) {
+      setError(res.error);
+    } else {
+      setOpen(false);
+    }
+  };
 
   return (
     <div>
@@ -115,7 +121,7 @@ export function ConnectionsPanel({
           Create another entity to connect this one to it.
         </p>
       ) : open ? (
-        <form action={formAction} className="mt-3 flex flex-col gap-2">
+        <form action={handleSubmit} className="mt-3 flex flex-col gap-2">
           <select
             name="type"
             defaultValue="ALLY_OF"
@@ -146,16 +152,19 @@ export function ConnectionsPanel({
             <input type="checkbox" name="secret" value="true" />
             DM-only (secret)
           </label>
-          {state?.error && (
+          {error && (
             <p role="alert" className="text-[11px] text-[var(--no)]">
-              {state.error}
+              {error}
             </p>
           )}
           <div className="flex gap-2">
             <AddButton />
             <button
               type="button"
-              onClick={() => setOpen(false)}
+              onClick={() => {
+                setError(null);
+                setOpen(false);
+              }}
               className="border border-[var(--line)] px-[10px] py-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:text-[var(--ink-dim)]"
             >
               Cancel
@@ -165,7 +174,10 @@ export function ConnectionsPanel({
       ) : (
         <button
           type="button"
-          onClick={() => setOpen(true)}
+          onClick={() => {
+            setError(null);
+            setOpen(true);
+          }}
           className="mt-3 inline-flex items-center gap-[6px] border border-[var(--line-strong)] bg-[var(--bg-3)] px-[10px] py-[5px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-dim)] transition-[filter,color] hover:text-[var(--ink)] hover:brightness-110"
         >
           <Plus aria-hidden size={12} />

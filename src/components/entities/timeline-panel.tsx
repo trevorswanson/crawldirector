@@ -11,7 +11,6 @@ import {
   createEventAction,
   linkEventCauseAction,
   type EventCausalityActionState,
-  type EventActionState,
 } from "@/app/(dm)/actions";
 import { Kicker } from "@/components/ui/kicker";
 import { TypeDot } from "@/components/ui/type-dot";
@@ -122,10 +121,17 @@ export function TimelinePanel({
   candidates: TimelineCandidate[];
 }) {
   const [open, setOpen] = useState(false);
-  const [state, formAction] = useActionState<EventActionState, FormData>(
-    createEventAction.bind(null, campaignId, entityId),
-    undefined,
-  );
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (formData: FormData) => {
+    setError(null);
+    const res = await createEventAction(campaignId, entityId, undefined, formData);
+    if (res?.error) {
+      setError(res.error);
+    } else {
+      setOpen(false);
+    }
+  };
 
   return (
     <div>
@@ -303,7 +309,7 @@ export function TimelinePanel({
       </div>
 
       {open ? (
-        <form action={formAction} className="mt-3 flex flex-col gap-2">
+        <form action={handleSubmit} className="mt-3 flex flex-col gap-2">
           <input
             name="title"
             required
@@ -379,16 +385,19 @@ export function TimelinePanel({
             <input type="checkbox" name="secret" value="true" />
             DM-only (secret)
           </label>
-          {state?.error && (
+          {error && (
             <p role="alert" className="text-[11px] text-[var(--no)]">
-              {state.error}
+              {error}
             </p>
           )}
           <div className="flex gap-2">
             <LogButton />
             <button
               type="button"
-              onClick={() => setOpen(false)}
+              onClick={() => {
+                setError(null);
+                setOpen(false);
+              }}
               className="border border-[var(--line)] px-[10px] py-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:text-[var(--ink-dim)]"
             >
               Cancel
@@ -398,7 +407,10 @@ export function TimelinePanel({
       ) : (
         <button
           type="button"
-          onClick={() => setOpen(true)}
+          onClick={() => {
+            setError(null);
+            setOpen(true);
+          }}
           className="mt-3 inline-flex items-center gap-[6px] border border-[var(--line-strong)] bg-[var(--bg-3)] px-[10px] py-[5px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-dim)] transition-[filter,color] hover:text-[var(--ink)] hover:brightness-110"
         >
           <Plus aria-hidden size={12} />

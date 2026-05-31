@@ -82,6 +82,11 @@ vi.mock("@/components/entities/entity-forms", () => ({
   EditRailControls: ({ detailHref }: { detailHref: string }) => (
     <div>Edit controls {detailHref}</div>
   ),
+  VisibilitySidebarControl: ({
+    initialVisibility,
+  }: {
+    initialVisibility: string;
+  }) => <div>Visibility control {initialVisibility}</div>,
 }));
 
 import EntityPage from "@/app/(dm)/campaigns/[id]/entities/[entityId]/page";

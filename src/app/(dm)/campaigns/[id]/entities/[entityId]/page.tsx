@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, Eye, EyeOff, Lock, Pencil, Unlock } from "lucide-react";
+import { ChevronLeft, Lock, Pencil, Unlock } from "lucide-react";
 
 import {
   toggleEntityFieldLockAction,
@@ -19,6 +19,7 @@ import {
   EditEntityForm,
   EditFormProvider,
   EditRailControls,
+  VisibilitySidebarControl,
 } from "@/components/entities/entity-forms";
 import { HudTag } from "@/components/ui/hud-tag";
 import { Kicker } from "@/components/ui/kicker";
@@ -26,9 +27,8 @@ import { Markdown } from "@/components/ui/markdown";
 import { SourceBadge } from "@/components/ui/source-badge";
 import { StatusPill } from "@/components/ui/status-pill";
 import { TypeDot } from "@/components/ui/type-dot";
-import { formatEntityType, formatVisibility } from "@/lib/entities";
+import { formatEntityType } from "@/lib/entities";
 import { cn } from "@/lib/utils";
-import { visibilityValues } from "@/lib/validation";
 import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
 import {
@@ -94,7 +94,7 @@ export default async function EntityPage({
   }
 
   return (
-    <EditFormProvider>
+    <EditFormProvider initialVisibility={entity.visibility}>
       <div className="grid h-full grid-cols-1 lg:grid-cols-[minmax(0,1fr)_304px]">
       {/* MAIN COLUMN */}
       <div className="order-2 min-w-0 overflow-y-auto lg:order-1">
@@ -358,32 +358,51 @@ export default async function EntityPage({
             </p>
           )}
 
-          <div className="mt-3 mb-[6px] font-mono text-[10px] uppercase tracking-[.06em] text-[var(--ink-faint)]">
-            Visibility
+          <div className="mt-3 mb-[6px] flex items-center justify-between">
+            <span className="font-mono text-[10px] uppercase tracking-[.06em] text-[var(--ink-faint)]">
+              Visibility
+            </span>
+            <form
+              action={toggleEntityFieldLockAction.bind(
+                null,
+                id,
+                entityId,
+              )}
+            >
+              <input type="hidden" name="field" value="visibility" />
+              <button
+                type="submit"
+                disabled={entity.locked}
+                title={
+                  entity.locked
+                    ? "Whole entity is locked"
+                    : entity.lockedFields.includes("visibility")
+                      ? "Visibility is locked — click to unlock"
+                      : "Click to lock visibility"
+                }
+                className="inline-flex items-center border px-[5px] py-[3px] transition-colors disabled:opacity-50 cursor-pointer"
+                style={{
+                  borderColor: (entity.locked || entity.lockedFields.includes("visibility"))
+                    ? "var(--sys)"
+                    : "var(--line)",
+                  color: (entity.locked || entity.lockedFields.includes("visibility"))
+                    ? "var(--sys)"
+                    : "var(--ink-faint)",
+                }}
+              >
+                {(entity.locked || entity.lockedFields.includes("visibility")) ? (
+                  <Lock aria-hidden size={11} />
+                ) : (
+                  <Unlock aria-hidden size={11} />
+                )}
+              </button>
+            </form>
           </div>
-          <div className="flex flex-col gap-1">
-            {visibilityValues.map((v) => {
-              const active = entity.visibility === v;
-              return (
-                <div
-                  key={v}
-                  className="flex items-center gap-2 text-[11.5px]"
-                  style={{ color: active ? "var(--ink)" : "var(--ink-faint)" }}
-                >
-                  {active ? (
-                    <Eye
-                      aria-hidden
-                      size={13}
-                      style={{ color: "var(--ok)" }}
-                    />
-                  ) : (
-                    <EyeOff aria-hidden size={13} />
-                  )}
-                  {formatVisibility(v).toLowerCase()}
-                </div>
-              );
-            })}
-          </div>
+          <VisibilitySidebarControl
+            initialVisibility={entity.visibility}
+            isEditing={editing}
+            isLocked={entity.locked || entity.lockedFields.includes("visibility")}
+          />
         </div>
 
         {/* connections — typed, any-to-any relationship edges */}
@@ -509,11 +528,6 @@ function entityFields(
     );
   }
   rows.push(
-    {
-      key: "visibility",
-      label: "Visibility",
-      value: formatVisibility(entity.visibility),
-    },
     {
       key: "tags",
       label: "Tags",

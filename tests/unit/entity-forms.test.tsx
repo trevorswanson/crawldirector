@@ -154,9 +154,15 @@ describe("entity forms", () => {
     const realNameInput = screen.getByLabelText("Real name");
     expect(realNameInput.getAttribute("readonly")).not.toBeNull();
 
-    // visibility is locked
-    const visibilitySelect = screen.getByLabelText("Visibility");
-    expect(visibilitySelect.getAttribute("disabled")).not.toBeNull();
+    // visibility is no longer an in-form select; it is carried as a hidden
+    // input and edited via the sidebar control. The hidden input preserves the
+    // entity's current visibility value.
+    const visibilityInput = document.querySelector(
+      'input[name="visibility"]',
+    ) as HTMLInputElement | null;
+    expect(visibilityInput).not.toBeNull();
+    expect(visibilityInput?.getAttribute("type")).toBe("hidden");
+    expect(visibilityInput?.getAttribute("value")).toBe("PLAYER_FACING");
 
     // name is not locked
     const nameInput = screen.getByLabelText("Name");
