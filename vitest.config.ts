@@ -45,10 +45,10 @@ export default defineConfig({
       // interaction tests for those two and ratchet back to >=95/90/95/95 next
       // session. Do not treat these lowered values as the new normal.
       thresholds: {
-        statements: 90,
+        statements: 95,
         branches: 85,
-        functions: 90,
-        lines: 90,
+        functions: 95,
+        lines: 95,
       },
     },
   },

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const {
   requireUser,
   createCampaign,
+  getCampaignCanonIntegrity,
   createCrawler,
   createGenericEntity,
   getEntityForUser,
@@ -25,6 +26,7 @@ const {
 } = vi.hoisted(() => ({
   requireUser: vi.fn(),
   createCampaign: vi.fn(),
+  getCampaignCanonIntegrity: vi.fn(),
   createCrawler: vi.fn(),
   createGenericEntity: vi.fn(),
   getEntityForUser: vi.fn(),
@@ -49,7 +51,10 @@ const {
 }));
 
 vi.mock("@/server/auth/session", () => ({ requireUser }));
-vi.mock("@/server/services/campaigns", () => ({ createCampaign }));
+vi.mock("@/server/services/campaigns", () => ({
+  createCampaign,
+  getCampaignCanonIntegrity,
+}));
 vi.mock("@/server/services/entities", () => ({
   archiveEntity,
   createCrawler,
@@ -85,6 +90,8 @@ import {
   createCampaignAction,
   createCrawlerAction,
   createGenericEntityAction,
+  quickCreateEntityAction,
+  getCampaignCanonIntegrityAction,
   editChangeOperationPatchAction,
   rejectChangeSetAction,
   rejectChangeSetRunAction,
@@ -201,6 +208,90 @@ describe("createGenericEntityAction", () => {
     );
 
     expect(result?.error).toBe("Could not create the entity. Please try again.");
+  });
+});
+
+describe("quickCreateEntityAction", () => {
+  it("quick-creates a stub crawler and redirects to detail", async () => {
+    createCrawler.mockResolvedValue({ id: "e9" });
+
+    await expect(
+      quickCreateEntityAction("c1", undefined, form({ type: "CRAWLER", name: "Carl" })),
+    ).rejects.toThrow("NEXT_REDIRECT");
+
+    expect(createCrawler).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      expect.objectContaining({ name: "Carl", isStub: true }),
+    );
+    expect(redirect).toHaveBeenCalledWith("/campaigns/c1/entities/e9");
+  });
+
+  it("quick-creates a stub generic entity and redirects to detail", async () => {
+    createGenericEntity.mockResolvedValue({ id: "e10" });
+
+    await expect(
+      quickCreateEntityAction("c1", undefined, form({ type: "NPC", name: "Zev" })),
+    ).rejects.toThrow("NEXT_REDIRECT");
+
+    expect(createGenericEntity).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      expect.objectContaining({ type: "NPC", name: "Zev", isStub: true }),
+    );
+    expect(redirect).toHaveBeenCalledWith("/campaigns/c1/entities/e10");
+  });
+
+  it("returns a validation error for a blank crawler name", async () => {
+    const result = await quickCreateEntityAction(
+      "c1",
+      undefined,
+      form({ type: "CRAWLER", name: "" }),
+    );
+    expect(result?.error).toBeTruthy();
+    expect(createCrawler).not.toHaveBeenCalled();
+  });
+
+  it("returns a validation error for a blank generic-entity name", async () => {
+    const result = await quickCreateEntityAction(
+      "c1",
+      undefined,
+      form({ type: "NPC", name: "" }),
+    );
+    expect(result?.error).toBeTruthy();
+    expect(createGenericEntity).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a ServiceError message", async () => {
+    createGenericEntity.mockRejectedValue(new ServiceError("Campaign not found."));
+    const result = await quickCreateEntityAction(
+      "c1",
+      undefined,
+      form({ type: "NPC", name: "Zev" }),
+    );
+    expect(result?.error).toBe("Campaign not found.");
+  });
+
+  it("hides unexpected errors behind a generic message", async () => {
+    createCrawler.mockRejectedValue(new Error("db down"));
+    const result = await quickCreateEntityAction(
+      "c1",
+      undefined,
+      form({ type: "CRAWLER", name: "Carl" }),
+    );
+    expect(result?.error).toBe("Could not create the entity. Please try again.");
+  });
+});
+
+describe("getCampaignCanonIntegrityAction", () => {
+  it("delegates to the campaigns service for the current user", async () => {
+    const integrity = { dmPercent: 100, aiPercent: 0, playerPercent: 0, lockedPercent: 0 };
+    getCampaignCanonIntegrity.mockResolvedValue(integrity);
+
+    const result = await getCampaignCanonIntegrityAction("c1");
+
+    expect(getCampaignCanonIntegrity).toHaveBeenCalledWith("u1", "c1");
+    expect(result).toBe(integrity);
   });
 });
 
@@ -489,10 +580,17 @@ describe("review queue actions", () => {
     badJson.set("kind:customFields", "json");
     badJson.set("value:customFields", "{not json}");
 
+    const badKind = new FormData();
+    badKind.append("field", "summary");
+    badKind.set("apply:summary", "on");
+    badKind.set("kind:summary", "not-a-kind");
+    badKind.set("value:summary", "whatever");
+
     await editChangeOperationPatchAction("c1", "cs1", "op1", noneSelected);
     await editChangeOperationPatchAction("c1", "cs1", "op1", badNumber);
     await editChangeOperationPatchAction("c1", "cs1", "op1", emptyNumber);
     await editChangeOperationPatchAction("c1", "cs1", "op1", badJson);
+    await editChangeOperationPatchAction("c1", "cs1", "op1", badKind);
 
     expect(setChangeOperationDecision).not.toHaveBeenCalled();
   });
