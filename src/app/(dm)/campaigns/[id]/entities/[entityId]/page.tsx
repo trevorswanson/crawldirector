@@ -131,14 +131,59 @@ export default async function EntityPage({
             </p>
           )}
 
-          {!editing && entity.type === "ITEM" && renderedAiDescription && (
-            <blockquote
-              className="mt-4 border-l-2 pl-4 text-[var(--ink-dim)] font-mono"
-              style={{ borderLeftColor: "var(--accent)" }}
-            >
-              <Markdown content={renderedAiDescription} />
-            </blockquote>
-          )}
+          {!editing && entity.type === "ITEM" && (renderedAiDescription || entity.lockedFields.includes("data.aiDescription")) && (() => {
+            const fieldLocked = entity.locked || entity.lockedFields.includes("data.aiDescription");
+            return (
+              <div className="mt-4 flex items-start justify-between gap-4">
+                <blockquote
+                  className="border-l-2 pl-4 text-[var(--ink-dim)] font-mono flex-1 min-h-[24px]"
+                  style={{ borderLeftColor: "var(--accent)" }}
+                >
+                  {renderedAiDescription ? (
+                    <Markdown content={renderedAiDescription} />
+                  ) : (
+                    <span className="text-[var(--ink-faint)] italic">Empty AI description (locked)</span>
+                  )}
+                </blockquote>
+                <form
+                  action={toggleEntityFieldLockAction.bind(
+                    null,
+                    id,
+                    entityId,
+                  )}
+                  className="shrink-0 self-center"
+                >
+                  <input type="hidden" name="field" value="data.aiDescription" />
+                  <button
+                    type="submit"
+                    disabled={entity.locked}
+                    title={
+                      entity.locked
+                        ? "Whole entity is locked"
+                        : fieldLocked
+                          ? "Locked field — click to unlock"
+                          : "Click to lock this field"
+                    }
+                    className="inline-flex items-center border px-[5px] py-[3px] transition-colors disabled:opacity-50 cursor-pointer"
+                    style={{
+                      borderColor: fieldLocked
+                        ? "var(--sys)"
+                        : "var(--line)",
+                      color: fieldLocked
+                        ? "var(--sys)"
+                        : "var(--ink-faint)",
+                    }}
+                  >
+                    {fieldLocked ? (
+                      <Lock aria-hidden size={11} />
+                    ) : (
+                      <Unlock aria-hidden size={11} />
+                    )}
+                  </button>
+                </form>
+              </div>
+            );
+          })()}
 
           {editing ? (
             <section className="mt-7">

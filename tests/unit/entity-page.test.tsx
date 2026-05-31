@@ -395,4 +395,51 @@ describe("EntityPage", () => {
     expect(blockquote).not.toBeNull();
     expect(blockquote?.className).not.toContain("italic");
   });
+
+  it("renders a lock button next to the AI description, reflecting its lock status", async () => {
+    getEntityForUser.mockResolvedValue(
+      crawler({
+        type: "ITEM",
+        lockedFields: ["data.aiDescription"],
+        data: {
+          itemTypeId: "it1",
+          aiDescription: "AI generated item details",
+        },
+      }),
+    );
+    listEntitiesForUser.mockResolvedValue({
+      entities: [{ id: "it1", name: "Gourd Type", type: "ITEM_TYPE" }],
+      role: "OWNER",
+    });
+
+    await renderPage();
+
+    // Verify the lock button is rendered with the locked field title
+    const lockBtn = screen.getByTitle("Locked field — click to unlock");
+    expect(lockBtn).toBeDefined();
+  });
+
+  it("renders the AI description section even if empty, when it is locked, so it can be unlocked", async () => {
+    getEntityForUser.mockResolvedValue(
+      crawler({
+        type: "ITEM",
+        lockedFields: ["data.aiDescription"],
+        data: {
+          itemTypeId: "it1",
+          aiDescription: null,
+        },
+      }),
+    );
+    listEntitiesForUser.mockResolvedValue({
+      entities: [{ id: "it1", name: "Gourd Type", type: "ITEM_TYPE" }],
+      role: "OWNER",
+    });
+
+    await renderPage();
+
+    // Verify placeholder text is shown
+    expect(screen.getByText("Empty AI description (locked)")).toBeDefined();
+    // Verify lock button is present
+    expect(screen.getByTitle("Locked field — click to unlock")).toBeDefined();
+  });
 });
