@@ -522,6 +522,58 @@ describe("event service", () => {
     );
   });
 
+  it("hides causality links to events with only invisible participants from players", async () => {
+    const owner = await makeUser("owner-cause-invisible-part@test.com");
+    const player = await makeUser("player-cause-invisible-part@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const publicEntity = await makeEntity(
+      owner.id,
+      campaign.id,
+      "Public crawler",
+      "SHARED_WITH_PLAYERS",
+    );
+    const secretEntity = await makeEntity(
+      owner.id,
+      campaign.id,
+      "Secret NPC",
+      "DM_ONLY",
+    );
+
+    const publicEvent = await createEvent(owner.id, campaign.id, {
+      title: "Public consequence",
+      secret: false,
+      participants: [{ entityId: publicEntity.id, role: "AFFECTED" }],
+    });
+    const invisiblePartEvent = await createEvent(owner.id, campaign.id, {
+      title: "Invisible-participant cause",
+      secret: false,
+      participants: [{ entityId: secretEntity.id, role: "ACTOR" }],
+    });
+
+    await linkEventCause(owner.id, campaign.id, {
+      causeId: invisiblePartEvent.id,
+      effectId: publicEvent.id,
+    });
+
+    const asDm = await listEventsForEntity(owner.id, campaign.id, publicEntity.id);
+    expect(asDm.find((event) => event.id === publicEvent.id)?.causedBy[0]).toMatchObject(
+      { id: invisiblePartEvent.id, title: "Invisible-participant cause" },
+    );
+
+    const asPlayer = await listEventsForEntity(player.id, campaign.id, publicEntity.id);
+    expect(asPlayer.find((event) => event.id === publicEvent.id)?.causedBy).toEqual(
+      [],
+    );
+
+    const campaignTimelineAsPlayer = await listCampaignTimeline(player.id, campaign.id);
+    expect(campaignTimelineAsPlayer.find((event) => event.id === publicEvent.id)?.causedBy).toEqual(
+      [],
+    );
+  });
+
   it("soft-archives a causality link and drops it from timelines", async () => {
     const owner = await makeUser("owner-cause-archive@test.com");
     const campaign = await createCampaign(owner.id, { name: "Dungeon" });

@@ -116,8 +116,20 @@ function readTimeInfo(value: unknown): EventTimeInfo {
   };
 }
 
-function isPlayerVisibleEvent(event: { status: CanonStatus; secret: boolean }) {
-  return event.status !== CanonStatus.ARCHIVED && !event.secret;
+function isPlayerVisibleEvent(
+  event: {
+    status: CanonStatus;
+    secret: boolean;
+    participants: { entity: { status: CanonStatus; visibility: Visibility } }[];
+  },
+  isPlayer: boolean,
+) {
+  if (event.status === CanonStatus.ARCHIVED) return false;
+  if (isPlayer) {
+    if (event.secret) return false;
+    return event.participants.some((p) => isPlayerVisible(p.entity));
+  }
+  return true;
 }
 
 /**
@@ -209,14 +221,38 @@ export async function listEventsForEntity(
         where: { status: { not: CanonStatus.ARCHIVED } },
         select: {
           id: true,
-          cause: { select: { id: true, title: true, status: true, secret: true } },
+          cause: {
+            select: {
+              id: true,
+              title: true,
+              status: true,
+              secret: true,
+              participants: {
+                select: {
+                  entity: { select: otherEntitySelect },
+                },
+              },
+            },
+          },
         },
       },
       causes: {
         where: { status: { not: CanonStatus.ARCHIVED } },
         select: {
           id: true,
-          effect: { select: { id: true, title: true, status: true, secret: true } },
+          effect: {
+            select: {
+              id: true,
+              title: true,
+              status: true,
+              secret: true,
+              participants: {
+                select: {
+                  entity: { select: otherEntitySelect },
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -248,14 +284,14 @@ export async function listEventsForEntity(
       role: self.role,
       others,
       causedBy: event.causedBy
-        .filter((edge) => !isPlayer || isPlayerVisibleEvent(edge.cause))
+        .filter((edge) => isPlayerVisibleEvent(edge.cause, isPlayer))
         .map((edge) => ({
           id: edge.cause.id,
           title: edge.cause.title,
           linkId: edge.id,
         })),
       causes: event.causes
-        .filter((edge) => !isPlayer || isPlayerVisibleEvent(edge.effect))
+        .filter((edge) => isPlayerVisibleEvent(edge.effect, isPlayer))
         .map((edge) => ({
           id: edge.effect.id,
           title: edge.effect.title,
@@ -307,14 +343,38 @@ export async function listCampaignTimeline(
         where: { status: { not: CanonStatus.ARCHIVED } },
         select: {
           id: true,
-          cause: { select: { id: true, title: true, status: true, secret: true } },
+          cause: {
+            select: {
+              id: true,
+              title: true,
+              status: true,
+              secret: true,
+              participants: {
+                select: {
+                  entity: { select: otherEntitySelect },
+                },
+              },
+            },
+          },
         },
       },
       causes: {
         where: { status: { not: CanonStatus.ARCHIVED } },
         select: {
           id: true,
-          effect: { select: { id: true, title: true, status: true, secret: true } },
+          effect: {
+            select: {
+              id: true,
+              title: true,
+              status: true,
+              secret: true,
+              participants: {
+                select: {
+                  entity: { select: otherEntitySelect },
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -343,14 +403,14 @@ export async function listCampaignTimeline(
       source: event.source,
       participants,
       causedBy: event.causedBy
-        .filter((edge) => !isPlayer || isPlayerVisibleEvent(edge.cause))
+        .filter((edge) => isPlayerVisibleEvent(edge.cause, isPlayer))
         .map((edge) => ({
           id: edge.cause.id,
           title: edge.cause.title,
           linkId: edge.id,
         })),
       causes: event.causes
-        .filter((edge) => !isPlayer || isPlayerVisibleEvent(edge.effect))
+        .filter((edge) => isPlayerVisibleEvent(edge.effect, isPlayer))
         .map((edge) => ({
           id: edge.effect.id,
           title: edge.effect.title,
