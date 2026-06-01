@@ -95,7 +95,7 @@ export function TagInput({
     <div className="relative">
       <input type="hidden" name={name} value={tags.join(",")} />
       <div
-        className="flex min-h-10 flex-wrap items-center gap-[6px] rounded-md border border-[var(--input)] bg-transparent px-2 py-[6px] focus-within:border-[var(--accent)] focus-within:ring-1 focus-within:ring-[var(--ring)]"
+        className="field-shell flex min-h-10 flex-wrap items-center gap-[6px] rounded-md border border-[var(--input)] bg-transparent px-2 py-[6px] focus-within:border-[var(--accent)] focus-within:ring-1 focus-within:ring-[var(--ring)]"
         onClick={() => inputRef.current?.focus()}
       >
         {tags.map((tag) => (
