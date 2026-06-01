@@ -42,7 +42,7 @@ export default async function RootLayout({
       lang="en"
       className={`${chakraPetch.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} h-full antialiased${fxEnabled ? " fx" : ""}`}
     >
-      <body className="min-h-full flex flex-col">
+      <body className="h-full flex flex-col overflow-hidden">
         {children}
         <div className="fx-layer fx-grain" aria-hidden />
         <div className="fx-layer fx-scanlines" aria-hidden />

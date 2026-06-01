@@ -217,110 +217,112 @@ export function CampaignTimeline({
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="mx-auto flex max-w-[980px] flex-col gap-5 px-6 py-6">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--line)] pb-4">
-        <div>
-          <Kicker dim noLead className="mb-2">
-            Timeline
-          </Kicker>
-          <h1 className="font-display text-[30px] font-bold leading-tight">
-            Crawl Timeline
-          </h1>
+    <div className="h-full overflow-y-auto">
+      <div className="mx-auto flex max-w-[980px] flex-col gap-5 px-6 py-6">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--line)] pb-4">
+          <div>
+            <Kicker dim noLead className="mb-2">
+              Timeline
+            </Kicker>
+            <h1 className="font-display text-[30px] font-bold leading-tight">
+              Crawl Timeline
+            </h1>
+          </div>
+          {!open && (
+            <button
+              type="button"
+              onClick={() => setOpen(true)}
+              className="inline-flex items-center gap-[6px] border border-[var(--line-strong)] bg-[var(--bg-3)] px-[10px] py-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-dim)] hover:text-[var(--ink)]"
+            >
+              <Plus aria-hidden size={12} />
+              Log event
+            </button>
+          )}
         </div>
-        {!open && (
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            className="inline-flex items-center gap-[6px] border border-[var(--line-strong)] bg-[var(--bg-3)] px-[10px] py-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-dim)] hover:text-[var(--ink)]"
-          >
-            <Plus aria-hidden size={12} />
-            Log event
-          </button>
+
+        {open && (
+          <NewEventForm
+            campaignId={campaignId}
+            candidates={candidates}
+            onClose={() => setOpen(false)}
+          />
+        )}
+
+        {events.length === 0 ? (
+          <div className="grid min-h-[280px] place-items-center border border-dashed border-[var(--line)] text-center text-[var(--ink-faint)]">
+            <p className="text-sm">
+              No events logged yet. Use Log event to start the campaign timeline.
+            </p>
+          </div>
+        ) : (
+          <div className="relative pl-[28px]">
+            <div className="absolute bottom-2 left-[7px] top-2 w-px bg-[var(--line-strong)]" />
+            <div className="flex flex-col gap-5">
+              {events.map((event) => (
+                <article key={event.id} className="relative">
+                  <span
+                    aria-hidden
+                    className="absolute left-[-27px] top-[5px] h-[13px] w-[13px] rounded-full border-2 border-[var(--accent)] bg-[var(--bg)]"
+                  />
+                  <div className="flex flex-wrap items-center gap-[8px]">
+                    <span className="font-mono text-[10px] tracking-[.04em] text-[var(--ink-faint)]">
+                      {formatTime(event.time)}
+                    </span>
+                    <SourceBadge source={event.source} small />
+                    {event.secret && (
+                      <span
+                        className="font-mono text-[8.5px] uppercase tracking-[.08em]"
+                        style={{ color: "var(--hot)" }}
+                      >
+                        secret
+                      </span>
+                    )}
+                    {event.locked && <LockChip locked />}
+                    <span className="font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)]">
+                      {event.participants.length} participants
+                    </span>
+                  </div>
+                  <h2 className="mt-[5px] text-[17px] font-semibold text-[var(--ink)]">
+                    {event.title}
+                  </h2>
+                  {event.summary && (
+                    <p className="mt-[5px] max-w-[720px] text-[12.5px] leading-[1.5] text-[var(--ink-dim)]">
+                      {event.summary}
+                    </p>
+                  )}
+                  {event.participants.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-x-[14px] gap-y-[7px]">
+                      {event.participants.map((participant) => (
+                        <Link
+                          key={`${event.id}-${participant.id}-${participant.role}`}
+                          href={`/campaigns/${campaignId}/entities/${participant.id}?event=${event.id}`}
+                          className="inline-flex items-center gap-[6px] text-[11px] text-[var(--ink-dim)] hover:text-[var(--ink)]"
+                        >
+                          <TypeDot type={participant.type} size={6} />
+                          <span>{participant.name}</span>
+                          <span className="font-mono text-[8.5px] uppercase tracking-[.06em] text-[var(--ink-faint)]">
+                            {participant.role}
+                          </span>
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                  {(event.causedBy.length > 0 || event.causes.length > 0) && (
+                    <div className="mt-3 flex flex-col gap-[4px] text-[11px] text-[var(--ink-faint)]">
+                      {event.causedBy.length > 0 && (
+                        <p>Caused by {event.causedBy.map((cause) => cause.title).join(", ")}</p>
+                      )}
+                      {event.causes.length > 0 && (
+                        <p>Causes {event.causes.map((effect) => effect.title).join(", ")}</p>
+                      )}
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          </div>
         )}
       </div>
-
-      {open && (
-        <NewEventForm
-          campaignId={campaignId}
-          candidates={candidates}
-          onClose={() => setOpen(false)}
-        />
-      )}
-
-      {events.length === 0 ? (
-        <div className="grid min-h-[280px] place-items-center border border-dashed border-[var(--line)] text-center text-[var(--ink-faint)]">
-          <p className="text-sm">
-            No events logged yet. Use Log event to start the campaign timeline.
-          </p>
-        </div>
-      ) : (
-        <div className="relative pl-[28px]">
-          <div className="absolute bottom-2 left-[7px] top-2 w-px bg-[var(--line-strong)]" />
-          <div className="flex flex-col gap-5">
-            {events.map((event) => (
-              <article key={event.id} className="relative">
-                <span
-                  aria-hidden
-                  className="absolute left-[-27px] top-[5px] h-[13px] w-[13px] rounded-full border-2 border-[var(--accent)] bg-[var(--bg)]"
-                />
-                <div className="flex flex-wrap items-center gap-[8px]">
-                  <span className="font-mono text-[10px] tracking-[.04em] text-[var(--ink-faint)]">
-                    {formatTime(event.time)}
-                  </span>
-                  <SourceBadge source={event.source} small />
-                  {event.secret && (
-                    <span
-                      className="font-mono text-[8.5px] uppercase tracking-[.08em]"
-                      style={{ color: "var(--hot)" }}
-                    >
-                      secret
-                    </span>
-                  )}
-                  {event.locked && <LockChip locked />}
-                  <span className="font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)]">
-                    {event.participants.length} participants
-                  </span>
-                </div>
-                <h2 className="mt-[5px] text-[17px] font-semibold text-[var(--ink)]">
-                  {event.title}
-                </h2>
-                {event.summary && (
-                  <p className="mt-[5px] max-w-[720px] text-[12.5px] leading-[1.5] text-[var(--ink-dim)]">
-                    {event.summary}
-                  </p>
-                )}
-                {event.participants.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-x-[14px] gap-y-[7px]">
-                    {event.participants.map((participant) => (
-                      <Link
-                        key={`${event.id}-${participant.id}-${participant.role}`}
-                        href={`/campaigns/${campaignId}/entities/${participant.id}?event=${event.id}`}
-                        className="inline-flex items-center gap-[6px] text-[11px] text-[var(--ink-dim)] hover:text-[var(--ink)]"
-                      >
-                        <TypeDot type={participant.type} size={6} />
-                        <span>{participant.name}</span>
-                        <span className="font-mono text-[8.5px] uppercase tracking-[.06em] text-[var(--ink-faint)]">
-                          {participant.role}
-                        </span>
-                      </Link>
-                    ))}
-                  </div>
-                )}
-                {(event.causedBy.length > 0 || event.causes.length > 0) && (
-                  <div className="mt-3 flex flex-col gap-[4px] text-[11px] text-[var(--ink-faint)]">
-                    {event.causedBy.length > 0 && (
-                      <p>Caused by {event.causedBy.map((cause) => cause.title).join(", ")}</p>
-                    )}
-                    {event.causes.length > 0 && (
-                      <p>Causes {event.causes.map((effect) => effect.title).join(", ")}</p>
-                    )}
-                  </div>
-                )}
-              </article>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
