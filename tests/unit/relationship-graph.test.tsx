@@ -11,6 +11,20 @@ vi.mock("next/link", () => ({
 
 let rafCallbacks: FrameRequestCallback[];
 
+function rect(width: number, height: number): DOMRect {
+  return {
+    left: 0,
+    top: 0,
+    width,
+    height,
+    right: width,
+    bottom: height,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   rafCallbacks = [];
@@ -19,17 +33,9 @@ beforeEach(() => {
     return rafCallbacks.length;
   });
   vi.stubGlobal("cancelAnimationFrame", () => {});
-  vi.spyOn(SVGElement.prototype, "getBoundingClientRect").mockReturnValue({
-    left: 0,
-    top: 0,
-    width: 1200,
-    height: 820,
-    right: 1200,
-    bottom: 820,
-    x: 0,
-    y: 0,
-    toJSON: () => ({}),
-  } as DOMRect);
+  vi.spyOn(SVGElement.prototype, "getBoundingClientRect").mockReturnValue(
+    rect(1200, 820),
+  );
 });
 afterEach(() => {
   cleanup();
@@ -119,6 +125,27 @@ describe("RelationshipGraph", () => {
     expect(screen.getByText(/Carl .* Donut/)).toBeDefined();
   });
 
+  it("stops scheduling simulation frames once the layout settles", () => {
+    render(<RelationshipGraph campaignId="c1" nodes={nodes} edges={edges} />);
+
+    for (let i = 0; i < 700; i++) {
+      const callback = rafCallbacks.shift();
+      if (!callback) break;
+      act(() => {
+        callback(i);
+      });
+    }
+
+    expect(rafCallbacks).toHaveLength(0);
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Carl" }), {
+      clientX: 600,
+      clientY: 90,
+    });
+    fireEvent.pointerUp(screen.getByRole("img", { name: "Relationship graph" }));
+    expect(rafCallbacks.length).toBeGreaterThan(0);
+  });
+
   it("supports pan, zoom, reset, and drag interactions", () => {
     render(<RelationshipGraph campaignId="c1" nodes={nodes} edges={edges} />);
 
@@ -149,6 +176,24 @@ describe("RelationshipGraph", () => {
     fireEvent.click(screen.getByText("Reset layout"));
     expect(document.querySelector("rect")?.getAttribute("transform")).toBe(
       "translate(0,0) scale(1)",
+    );
+  });
+
+  it("maps dragged nodes through preserveAspectRatio slice scaling", () => {
+    vi.mocked(SVGElement.prototype.getBoundingClientRect).mockReturnValue(
+      rect(600, 820),
+    );
+    render(<RelationshipGraph campaignId="c1" nodes={nodes} edges={edges} />);
+
+    const svg = screen.getByRole("img", { name: "Relationship graph" });
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Carl" }), {
+      clientX: 600,
+      clientY: 90,
+    });
+    fireEvent.pointerMove(svg, { clientX: 0, clientY: 90 });
+
+    expect(screen.getByRole("button", { name: "Carl" }).getAttribute("transform")).toBe(
+      "translate(300,90)",
     );
   });
 

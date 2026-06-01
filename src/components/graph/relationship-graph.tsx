@@ -14,6 +14,7 @@ import type { GraphEdge, GraphNode } from "@/server/services/relationships";
 // World-space canvas the force simulation runs in; the SVG scales to fit.
 const W = 1200;
 const H = 820;
+const MIN_SIMULATION_ALPHA = 0.02;
 
 // Disposition → edge color: warm allies, hot rivals, faint neutral/unknown.
 function edgeColor(disp: number | null): string {
@@ -91,6 +92,7 @@ function RelationshipGraphInner({ campaignId, nodes, edges }: RelationshipGraphP
     () => new Set(nodes.map((n) => n.type)),
   );
   const [showSecret, setShowSecret] = useState(true);
+  const [simulationRun, setSimulationRun] = useState(0);
 
   const drag = useRef<string | null>(null);
   const pan = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
@@ -99,6 +101,8 @@ function RelationshipGraphInner({ campaignId, nodes, edges }: RelationshipGraphP
 
   // Force simulation: repulsion + edge springs + centering, with damping.
   useEffect(() => {
+    if (nodes.length === 0) return;
+
     let raf = 0;
     let alpha = 1;
     const step = () => {
@@ -159,18 +163,34 @@ function RelationshipGraphInner({ campaignId, nodes, edges }: RelationshipGraphP
       });
 
       alpha *= 0.992;
-      if (alpha < 0.02) alpha = 0.02;
-      raf = requestAnimationFrame(step);
+      if (alpha > MIN_SIMULATION_ALPHA) {
+        raf = requestAnimationFrame(step);
+      }
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [edges]);
+  }, [edges, nodes.length, simulationRun]);
 
   // Screen → world coordinate transform for pointer interactions.
   const toWorld = (clientX: number, clientY: number) => {
-    const rect = svgRef.current!.getBoundingClientRect();
-    const sx = ((clientX - rect.left) / rect.width) * W;
-    const sy = ((clientY - rect.top) / rect.height) * H;
+    const svg = svgRef.current!;
+    const ctm = typeof svg.getScreenCTM === "function" ? svg.getScreenCTM() : null;
+    if (ctm && typeof svg.createSVGPoint === "function") {
+      const point = svg.createSVGPoint();
+      point.x = clientX;
+      point.y = clientY;
+      const local = point.matrixTransform(ctm.inverse());
+      return { x: (local.x - view.x) / view.k, y: (local.y - view.y) / view.k };
+    }
+
+    const rect = svg.getBoundingClientRect();
+    const scale = Math.max(rect.width / W, rect.height / H);
+    const renderedWidth = W * scale;
+    const renderedHeight = H * scale;
+    const offsetX = (rect.width - renderedWidth) / 2;
+    const offsetY = (rect.height - renderedHeight) / 2;
+    const sx = (clientX - rect.left - offsetX) / scale;
+    const sy = (clientY - rect.top - offsetY) / scale;
     return { x: (sx - view.x) / view.k, y: (sy - view.y) / view.k };
   };
 
@@ -201,9 +221,13 @@ function RelationshipGraphInner({ campaignId, nodes, edges }: RelationshipGraphP
     }
   };
   const onPointerUp = () => {
+    const wasDragging = drag.current !== null;
     drag.current = null;
     pan.current = null;
     setIsPanning(false);
+    if (wasDragging) {
+      setSimulationRun((current) => current + 1);
+    }
   };
   const zoom = (f: number) =>
     setView((v) => ({ ...v, k: Math.min(2.4, Math.max(0.4, v.k * f)) }));
@@ -511,6 +535,7 @@ function RelationshipGraphInner({ campaignId, nodes, edges }: RelationshipGraphP
                 current.map((node) => ({ ...node, pinned: false })),
               );
               setView({ x: 0, y: 0, k: 1 });
+              setSimulationRun((current) => current + 1);
             }}
             className="hud-tag cursor-pointer bg-[var(--bg-1)]"
           >
