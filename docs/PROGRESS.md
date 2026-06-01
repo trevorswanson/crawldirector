@@ -57,6 +57,36 @@ in the general search bar.
 membership, log events with participants, and traverse cause→effect chains;
 relationships/events are reviewable + lockable.
 
+### Done — slice 9: event participant editing + timeline-page event editing (2026-06-01)
+
+- [x] Taught `UPDATE_EVENT` to reconcile participants: when the patch carries a
+      `participants` list, `applyUpdateEvent` diffs it against the live rows —
+      adds new `(entity, role)` pairs, drops removed ones, leaves unchanged rows
+      in place — after validating every desired participant is live canon and that
+      the event keeps ≥1 participant. Locked events still block; absent
+      `participants` leaves the set untouched (scalar-only edit). `updateEventSchema`
+      gained an optional `participants` array; `updateEvent` now returns the
+      **union** of pre- and post-edit participant ids so timelines that *lost* the
+      event get revalidated too.
+- [x] Added `updateCampaignEventAction` (campaign-timeline edits, no single viewed
+      entity) and taught `updateEventAction` to parse participant rows. Factored the
+      shared `parseParticipantRows` form helper.
+- [x] Extracted a shared `ParticipantRows` editor
+      (`src/components/entities/participant-rows.tsx`) and used it in **both** edit
+      surfaces: the entity-detail Timeline panel's event edit form (prefilled with
+      the viewed entity + co-participants — the panel now takes the entity's
+      name/type) and a new **campaign timeline page** event edit form (scalar fields
+      + participants). Edit is hidden when the event is locked.
+- [x] Added DB-backed service coverage (add/remove/re-role reconciliation, affected
+      revalidation set, untouched-when-omitted, ≥1-participant + non-canon
+      rejection), action coverage (participant-row parsing, campaign edit action +
+      revalidation/ServiceError), and component coverage (participant prefill +
+      submit on both surfaces, add/re-role/remove rows, hidden-when-locked).
+      lint/typecheck/build/coverage gate green (statements over the 95% floor).
+- [x] **Follow-up still open:** the campaign timeline page and entity panel edit the
+      same event fields + participants now; remaining M3 event work is structured
+      effects and pending (AI/import) proposals.
+
 ### Done — slice 8: relationship + event field editing through the pipeline (2026-06-01)
 
 - [x] Wired `UPDATE_RELATIONSHIP` into the review service (`applyUpdateRelationship`):
@@ -301,8 +331,9 @@ relationships/events are reviewable + lockable.
 - The entity Timeline panel still logs events with the viewed entity plus one
       optional co-participant. Use the campaign timeline page for arbitrary
       multi-participant event logging. Event/relationship field editing landed in
-      slice 8; editing an event's *participants* (adding/removing/re-roling them
-      after the fact) is still a later M3 slice.
+      slice 8; editing an event's *participants* (add/remove/re-role after the
+      fact) landed in slice 9, on both the entity Timeline panel and the campaign
+      timeline page.
 
 ## M2 — Review pipeline ✅ (complete)
 

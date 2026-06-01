@@ -18,6 +18,10 @@ import {
   EntityTypeahead,
   type EntityCandidate,
 } from "@/components/entities/entity-typeahead";
+import {
+  ParticipantRows,
+  type ParticipantRowValue,
+} from "@/components/entities/participant-rows";
 import { Kicker } from "@/components/ui/kicker";
 import { LockChip } from "@/components/ui/lock-chip";
 import { SourceBadge } from "@/components/ui/source-badge";
@@ -120,15 +124,28 @@ function CauseLinkForm({
 
 function EditEventForm({
   event,
+  self,
+  candidates,
   onSubmit,
   onCancel,
   error,
 }: {
   event: EntityEvent;
+  self: EntityCandidate;
+  candidates: EntityCandidate[];
   onSubmit: (formData: FormData) => Promise<void>;
   onCancel: () => void;
   error: string | null;
 }) {
+  // Prefill the participant editor with the full current set: the viewed entity
+  // (its role on this event) followed by the co-participants.
+  const initialParticipants: ParticipantRowValue[] = [
+    { entity: self, role: event.role },
+    ...event.others.map((other) => ({
+      entity: { id: other.id, name: other.name, type: other.type },
+      role: other.role,
+    })),
+  ];
   return (
     <form action={onSubmit} className="flex flex-col gap-2 border border-[var(--line)] bg-[var(--bg-3)] px-[10px] py-[9px]">
       <input
@@ -169,6 +186,7 @@ function EditEventForm({
           className="min-w-0 flex-1 border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
         />
       </div>
+      <ParticipantRows candidates={candidates} initial={initialParticipants} />
       <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
         <input type="checkbox" name="secret" value="true" defaultChecked={event.secret} />
         DM-only (secret)
@@ -208,17 +226,22 @@ function SaveEventButton() {
 export function TimelinePanel({
   campaignId,
   entityId,
+  entityName,
+  entityType,
   events,
   candidates,
   initialEventId,
 }: {
   campaignId: string;
   entityId: string;
+  entityName: string;
+  entityType: string;
   events: EntityEvent[];
   candidates: TimelineCandidate[];
   // When set (e.g. via a ?event= deep link), that event starts expanded.
   initialEventId?: string;
 }) {
+  const self: EntityCandidate = { id: entityId, name: entityName, type: entityType };
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [participant, setParticipant] = useState<TimelineCandidate | null>(null);
@@ -460,6 +483,8 @@ export function TimelinePanel({
                       {editingId === e.id ? (
                         <EditEventForm
                           event={e}
+                          self={self}
+                          candidates={candidates}
                           onSubmit={handleEdit(e.id)}
                           onCancel={() => {
                             setEditError(null);

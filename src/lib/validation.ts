@@ -350,8 +350,9 @@ export const createEventSchema = z.object({
 });
 export type CreateEventInput = z.infer<typeof createEventSchema>;
 
-// Editing an event changes its scalar fields only; participant editing lands
-// with its own slice (docs/PROGRESS.md M3 follow-ups).
+// Editing an event changes its scalar fields plus (optionally) its participant
+// set. When `participants` is present the event's participants are reconciled to
+// match it; when absent, participants are left untouched.
 export const updateEventSchema = z.object({
   title: z.string().trim().min(1, "Event title is required.").max(200),
   summary: optionalText(2000),
@@ -360,6 +361,11 @@ export const updateEventSchema = z.object({
   secret: z
     .preprocess((value) => value === true || value === "true" || value === "on", z.boolean())
     .default(false),
+  participants: z
+    .array(eventParticipantSchema)
+    .min(1, "An event needs at least one participant.")
+    .max(20, "Too many participants.")
+    .optional(),
 });
 export type UpdateEventInput = z.infer<typeof updateEventSchema>;
 

@@ -1926,6 +1926,39 @@ async function applyUpdateEvent(
   if ("secret" in patch) data.secret = booleanWithDefault(readTo(patch, "secret"), false);
 
   await tx.event.update({ where: { id: eventId }, data, select: { id: true } });
+
+  // Participant editing: when the patch carries a participant list, reconcile it
+  // against the live rows — add new (entity, role) pairs, drop removed ones, and
+  // leave unchanged rows in place (preserving their order). Every desired
+  // participant must be live canon, and an event always keeps ≥1 participant.
+  if ("participants" in patch) {
+    const desired = parseEventParticipants(readTo(patch, "participants"));
+    if (desired.length === 0) {
+      throw new ServiceError("An event needs at least one participant.");
+    }
+    for (const participant of desired) {
+      await assertCanonEntity(tx, changeSet.campaignId, participant.entityId);
+    }
+    const existing = await tx.eventParticipant.findMany({
+      where: { eventId },
+      select: { id: true, entityId: true, role: true },
+    });
+    const key = (entityId: string, role: EventParticipantRole) => `${entityId}:${role}`;
+    const desiredKeys = new Set(desired.map((p) => key(p.entityId, p.role)));
+    const existingKeys = new Set(existing.map((p) => key(p.entityId, p.role)));
+    const toDelete = existing.filter((p) => !desiredKeys.has(key(p.entityId, p.role)));
+    const toCreate = desired.filter((p) => !existingKeys.has(key(p.entityId, p.role)));
+    if (toDelete.length > 0) {
+      await tx.eventParticipant.deleteMany({
+        where: { id: { in: toDelete.map((p) => p.id) } },
+      });
+    }
+    if (toCreate.length > 0) {
+      await tx.eventParticipant.createMany({
+        data: toCreate.map((p) => ({ eventId, entityId: p.entityId, role: p.role })),
+      });
+    }
+  }
   await writeEventProvenance(tx, changeSet, eventId, patch);
   await tx.auditLog.create({
     data: {

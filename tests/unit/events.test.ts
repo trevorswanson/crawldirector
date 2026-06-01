@@ -780,6 +780,102 @@ describe("updateEvent", () => {
     expect(row?.inGameTime).toMatchObject({});
   });
 
+  it("reconciles participants on edit: adds, removes, and re-roles", async () => {
+    const owner = await makeUser("owner-edit-parts@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const donut = await makeEntity(owner.id, campaign.id, "Donut");
+    const mordecai = await makeEntity(owner.id, campaign.id, "Mordecai");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Boss fight",
+      secret: false,
+      participants: [
+        { entityId: carl.id, role: "ACTOR" },
+        { entityId: donut.id, role: "ACTOR" },
+      ],
+    });
+
+    // Keep Carl as ACTOR, re-role Donut WITNESS→ drop, add Mordecai as TARGET.
+    const result = await updateEvent(owner.id, campaign.id, event.id, {
+      title: "Boss fight",
+      secret: false,
+      participants: [
+        { entityId: carl.id, role: "WITNESS" },
+        { entityId: mordecai.id, role: "TARGET" },
+      ],
+    });
+
+    // Affected pages include both the dropped (Donut) and added (Mordecai) ends.
+    expect(result.participantIds.sort()).toEqual(
+      [carl.id, donut.id, mordecai.id].sort(),
+    );
+
+    const rows = await prisma.eventParticipant.findMany({
+      where: { eventId: event.id },
+      select: { entityId: true, role: true },
+    });
+    const set = rows.map((r) => `${r.entityId}:${r.role}`).sort();
+    expect(set).toEqual([`${carl.id}:WITNESS`, `${mordecai.id}:TARGET`].sort());
+
+    // Donut's timeline no longer shows the event; Mordecai's does.
+    const donutTl = await listEventsForEntity(owner.id, campaign.id, donut.id);
+    expect(donutTl).toHaveLength(0);
+    const mordTl = await listEventsForEntity(owner.id, campaign.id, mordecai.id);
+    expect(mordTl).toHaveLength(1);
+    expect(mordTl[0].role).toBe("TARGET");
+  });
+
+  it("leaves participants untouched when the edit omits them", async () => {
+    const owner = await makeUser("owner-edit-noparts@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const donut = await makeEntity(owner.id, campaign.id, "Donut");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Boss fight",
+      secret: false,
+      participants: [
+        { entityId: carl.id, role: "ACTOR" },
+        { entityId: donut.id, role: "ACTOR" },
+      ],
+    });
+
+    await updateEvent(owner.id, campaign.id, event.id, {
+      title: "Renamed",
+      secret: false,
+    });
+
+    const rows = await prisma.eventParticipant.findMany({ where: { eventId: event.id } });
+    expect(rows).toHaveLength(2);
+  });
+
+  it("rejects an edit that drops all participants or names a non-canon one", async () => {
+    const owner = await makeUser("owner-edit-badparts@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Boss fight",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    await expect(
+      updateEvent(owner.id, campaign.id, event.id, {
+        title: "Boss fight",
+        secret: false,
+        // Zod rejects an empty participant list before the service runs.
+        participants: [],
+      }),
+    ).rejects.toThrow(/at least one participant/i);
+
+    await expect(
+      updateEvent(owner.id, campaign.id, event.id, {
+        title: "Boss fight",
+        secret: false,
+        participants: [{ entityId: "ghost", role: "ACTOR" }],
+      }),
+    ).rejects.toThrow(/not found/i);
+  });
+
   it("blocks editing a locked event", async () => {
     const owner = await makeUser("owner-edit-lock@test.com");
     const campaign = await createCampaign(owner.id, { name: "Dungeon" });

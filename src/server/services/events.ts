@@ -203,6 +203,20 @@ export async function updateEvent(
   });
   if (!existing) throw new ServiceError("Event not found.");
 
+  // Every desired participant must be live canon before we route the change set.
+  if (parsed.participants) {
+    const participantIds = Array.from(
+      new Set(parsed.participants.map((participant) => participant.entityId)),
+    );
+    const found = await prisma.entity.findMany({
+      where: { campaignId, id: { in: participantIds }, status: CanonStatus.CANON },
+      select: { id: true },
+    });
+    if (found.length !== participantIds.length) {
+      throw new ServiceError("Participant entity not found.");
+    }
+  }
+
   const inGameTime = buildInGameTime(parsed);
   const patch: ReviewPatch = {
     _baseVersion: { to: existing.version },
@@ -212,14 +226,29 @@ export async function updateEvent(
     orderKey: { to: typeof parsed.floor === "number" ? parsed.floor : 0 },
     secret: { to: parsed.secret },
   };
+  if (parsed.participants) {
+    patch.participants = {
+      to: parsed.participants.map((participant) => ({
+        entityId: participant.entityId,
+        role: participant.role,
+      })),
+    };
+  }
 
   await applyAutoApprovedEventChangeSet(userId, campaignId, {
     title: "Edit event",
     operations: [{ op: OpKind.UPDATE_EVENT, targetId: eventId, patch }],
   });
+
+  // Affected pages = entities that were participants before OR after the edit,
+  // so timelines that lost the event get revalidated too.
+  const oldIds = existing.participants.map((participant) => participant.entityId);
+  const newIds = parsed.participants
+    ? parsed.participants.map((participant) => participant.entityId)
+    : oldIds;
   return {
     id: eventId,
-    participantIds: existing.participants.map((participant) => participant.entityId),
+    participantIds: Array.from(new Set([...oldIds, ...newIds])),
   };
 }
 

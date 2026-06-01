@@ -123,6 +123,7 @@ import {
   toggleRelationshipLockAction,
   createEventAction,
   updateEventAction,
+  updateCampaignEventAction,
   createCampaignEventAction,
   archiveEventAction,
   toggleEventLockAction,
@@ -1041,6 +1042,38 @@ describe("updateEventAction", () => {
     expect(updateEvent).not.toHaveBeenCalled();
   });
 
+  it("parses participant rows when present", async () => {
+    updateEvent.mockResolvedValue({ id: "ev1", participantIds: ["e1", "e2"] });
+
+    await updateEventAction(
+      "c1",
+      "e1",
+      "ev1",
+      undefined,
+      form({
+        title: "Boss fight",
+        participantCount: "2",
+        participantId_0: "e1",
+        participantRole_0: "WITNESS",
+        participantId_1: "e2",
+        participantRole_1: "TARGET",
+      }),
+    );
+
+    expect(updateEvent).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      "ev1",
+      expect.objectContaining({
+        title: "Boss fight",
+        participants: [
+          { entityId: "e1", role: "WITNESS" },
+          { entityId: "e2", role: "TARGET" },
+        ],
+      }),
+    );
+  });
+
   it("surfaces a ServiceError and hides unexpected errors", async () => {
     updateEvent.mockRejectedValueOnce(new ServiceError("This event is locked."));
     const locked = await updateEventAction(
@@ -1061,6 +1094,53 @@ describe("updateEventAction", () => {
       form({ title: "X" }),
     );
     expect(generic?.error).toMatch(/Could not edit the event/);
+  });
+});
+
+describe("updateCampaignEventAction", () => {
+  it("edits from the timeline page and revalidates every affected participant + timeline", async () => {
+    updateEvent.mockResolvedValue({ id: "ev1", participantIds: ["e1", "e2", "e3"] });
+
+    const result = await updateCampaignEventAction(
+      "c1",
+      "ev1",
+      undefined,
+      form({
+        title: "Boss fight",
+        participantCount: "2",
+        participantId_0: "e1",
+        participantRole_0: "ACTOR",
+        participantId_1: "e3",
+        participantRole_1: "TARGET",
+      }),
+    );
+
+    expect(result).toBeUndefined();
+    expect(updateEvent).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      "ev1",
+      expect.objectContaining({
+        participants: [
+          { entityId: "e1", role: "ACTOR" },
+          { entityId: "e3", role: "TARGET" },
+        ],
+      }),
+    );
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e3");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+  });
+
+  it("surfaces a ServiceError from the timeline edit", async () => {
+    updateEvent.mockRejectedValueOnce(new ServiceError("This event is locked."));
+    const result = await updateCampaignEventAction(
+      "c1",
+      "ev1",
+      undefined,
+      form({ title: "X" }),
+    );
+    expect(result?.error).toBe("This event is locked.");
   });
 });
 

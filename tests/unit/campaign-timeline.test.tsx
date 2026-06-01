@@ -1,12 +1,23 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 
-const { createCampaignEventAction } = vi.hoisted(() => ({
+const { createCampaignEventAction, updateCampaignEventAction } = vi.hoisted(() => ({
   createCampaignEventAction: vi.fn(),
+  updateCampaignEventAction: vi.fn(),
 }));
 
-vi.mock("@/app/(dm)/actions", () => ({ createCampaignEventAction }));
+vi.mock("@/app/(dm)/actions", () => ({
+  createCampaignEventAction,
+  updateCampaignEventAction,
+}));
 vi.mock("next/link", () => ({
   default: ({ href, children, className }: {
     href: string;
@@ -144,6 +155,83 @@ describe("CampaignTimeline", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByPlaceholderText("What happened?")).toBeNull();
+  });
+
+  it("edits an event from the timeline: prefilled scalars + participants, submits", async () => {
+    updateCampaignEventAction.mockResolvedValue(undefined);
+    render(
+      <CampaignTimeline campaignId="c1" events={[...events]} candidates={candidates} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit event" }));
+
+    // scalar fields prefilled from the event
+    expect((screen.getByLabelText("Event title") as HTMLInputElement).value).toBe(
+      "Boss fight",
+    );
+    expect((screen.getByLabelText("Floor") as HTMLInputElement).value).toBe("9");
+    // participant rows prefilled from the event's participants
+    const form = screen.getByLabelText("Event title").closest("form")!;
+    expect(
+      (form.querySelector('input[name="participantCount"]') as HTMLInputElement).value,
+    ).toBe("2");
+    expect(
+      Array.from(form.querySelectorAll('input[name^="participantId_"]')).map(
+        (i) => (i as HTMLInputElement).value,
+      ),
+    ).toEqual(["e1", "e2"]);
+
+    fireEvent.change(screen.getByLabelText("Event title"), {
+      target: { value: "Boss fight (revised)" },
+    });
+    fireEvent.submit(form);
+
+    await waitFor(() => expect(updateCampaignEventAction).toHaveBeenCalledTimes(1));
+    const [, eventId, , submitted] = updateCampaignEventAction.mock.calls[0];
+    expect(eventId).toBe("ev1");
+    expect(submitted.get("title")).toBe("Boss fight (revised)");
+    expect(submitted.get("participantRole_0")).toBe("ACTOR");
+    expect(submitted.get("participantRole_1")).toBe("TARGET");
+  });
+
+  it("adds, re-roles, and removes participant rows in the edit form", () => {
+    render(
+      <CampaignTimeline campaignId="c1" events={[...events]} candidates={candidates} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit event" }));
+    const form = screen.getByLabelText("Event title").closest("form")!;
+    const q = within(form);
+
+    // starts with the two prefilled participant rows
+    expect(q.getAllByLabelText("Participant role")).toHaveLength(2);
+
+    // add a third row, pick an entity, and re-role it
+    fireEvent.click(q.getByRole("button", { name: "Add participant" }));
+    expect(q.getAllByLabelText("Participant role")).toHaveLength(3);
+    fireEvent.change(q.getByPlaceholderText("Search participant..."), {
+      target: { value: "Donut" },
+    });
+    fireEvent.click(q.getByRole("button", { name: /Donut/ }));
+    fireEvent.change(q.getAllByLabelText("Participant role")[2], {
+      target: { value: "WITNESS" },
+    });
+
+    // remove the third row again
+    fireEvent.click(q.getAllByTitle("Remove participant row")[2]);
+    expect(q.getAllByLabelText("Participant role")).toHaveLength(2);
+  });
+
+  it("hides the edit control for locked events", () => {
+    render(
+      <CampaignTimeline
+        campaignId="c1"
+        candidates={candidates}
+        events={[{ ...events[0], locked: true }]}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Edit event" })).toBeNull();
   });
 
   it("removes added participant rows", () => {

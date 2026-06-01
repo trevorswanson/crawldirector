@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 
 const {
@@ -78,6 +79,8 @@ describe("TimelinePanel", () => {
       <TimelinePanel
         campaignId="c1"
         entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
         events={[]}
         candidates={candidates}
       />,
@@ -94,6 +97,8 @@ describe("TimelinePanel", () => {
       <TimelinePanel
         campaignId="c1"
         entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
         events={[
           event(),
           event({
@@ -133,6 +138,8 @@ describe("TimelinePanel", () => {
       <TimelinePanel
         campaignId="c1"
         entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
         events={[
           event({
             id: "ev1",
@@ -175,6 +182,8 @@ describe("TimelinePanel", () => {
       <TimelinePanel
         campaignId="c1"
         entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
         events={[event()]}
         candidates={candidates}
         initialEventId="ev1"
@@ -191,6 +200,8 @@ describe("TimelinePanel", () => {
       <TimelinePanel
         campaignId="c1"
         entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
         events={[event({ locked: true })]}
         candidates={candidates}
         initialEventId="ev1"
@@ -208,6 +219,8 @@ describe("TimelinePanel", () => {
       <TimelinePanel
         campaignId="c1"
         entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
         events={[event()]}
         candidates={candidates}
         initialEventId="ev1"
@@ -236,12 +249,54 @@ describe("TimelinePanel", () => {
     await waitFor(() => expect(screen.queryByLabelText("Event title")).toBeNull());
   });
 
+  it("edits participants: prefills self + co-participants and submits the rows", async () => {
+    updateEventAction.mockResolvedValue(undefined);
+    render(
+      <TimelinePanel
+        campaignId="c1"
+        entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
+        events={[event()]}
+        candidates={candidates}
+        initialEventId="ev1"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit event" }));
+    const form = screen.getByLabelText("Event title").closest("form")!;
+    const formQueries = within(form);
+
+    // the participant editor is prefilled with the viewed entity + co-participant
+    expect(formQueries.getByText("Participants")).toBeDefined();
+    expect(formQueries.getByText("Carl")).toBeDefined();
+    expect(formQueries.getByText("Donut")).toBeDefined();
+    expect(
+      (form.querySelector('input[name="participantCount"]') as HTMLInputElement).value,
+    ).toBe("2");
+    expect(
+      Array.from(form.querySelectorAll('input[name^="participantId_"]')).map(
+        (i) => (i as HTMLInputElement).value,
+      ),
+    ).toEqual(["e1", "e2"]);
+
+    fireEvent.submit(form);
+    await waitFor(() => expect(updateEventAction).toHaveBeenCalledTimes(1));
+    const submitted = updateEventAction.mock.calls[0][4] as FormData;
+    expect(submitted.get("participantCount")).toBe("2");
+    expect(submitted.get("participantId_0")).toBe("e1");
+    expect(submitted.get("participantRole_0")).toBe("ACTOR");
+    expect(submitted.get("participantId_1")).toBe("e2");
+  });
+
   it("keeps the edit form open and shows the error when an event edit fails", async () => {
     updateEventAction.mockResolvedValue({ error: "This event is locked." });
     render(
       <TimelinePanel
         campaignId="c1"
         entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
         events={[event()]}
         candidates={candidates}
         initialEventId="ev1"
@@ -262,6 +317,8 @@ describe("TimelinePanel", () => {
       <TimelinePanel
         campaignId="c1"
         entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
         events={[event()]}
         candidates={candidates}
         initialEventId="ev1"
@@ -285,6 +342,8 @@ describe("TimelinePanel", () => {
       <TimelinePanel
         campaignId="c1"
         entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
         events={[event({ locked: true })]}
         candidates={candidates}
         initialEventId="ev1"
@@ -303,6 +362,8 @@ describe("TimelinePanel", () => {
       <TimelinePanel
         campaignId="c1"
         entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
         events={events}
         candidates={candidates}
         initialEventId="ev1"
@@ -316,6 +377,8 @@ describe("TimelinePanel", () => {
       <TimelinePanel
         campaignId="c1"
         entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
         events={events}
         candidates={candidates}
         initialEventId="ev2"
@@ -331,6 +394,8 @@ describe("TimelinePanel", () => {
       <TimelinePanel
         campaignId="c1"
         entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
         events={[]}
         candidates={candidates}
       />,
@@ -360,6 +425,8 @@ describe("TimelinePanel", () => {
       <TimelinePanel
         campaignId="c1"
         entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
         events={[]}
         candidates={candidates}
       />,
@@ -382,6 +449,8 @@ describe("TimelinePanel", () => {
       <TimelinePanel
         campaignId="c1"
         entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
         events={[]}
         candidates={candidates}
       />,
@@ -404,6 +473,8 @@ describe("TimelinePanel", () => {
       <TimelinePanel
         campaignId="c1"
         entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
         events={[event({ time: { floor: 4, label: null } })]}
         candidates={candidates}
       />,
@@ -414,7 +485,14 @@ describe("TimelinePanel", () => {
 
   it("still offers the log form when there are no candidate participants", () => {
     render(
-      <TimelinePanel campaignId="c1" entityId="e1" events={[]} candidates={[]} />,
+      <TimelinePanel
+        campaignId="c1"
+        entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
+        events={[]}
+        candidates={[]}
+      />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: /Log event/ }));
