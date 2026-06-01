@@ -271,6 +271,7 @@ export async function listEntitiesForUser(
   campaignId: string,
   filters: {
     query?: string;
+    tag?: string;
     type?: EntityType | "ALL";
     status?: EntityStatusFilter;
     lockedOnly?: boolean;
@@ -281,6 +282,7 @@ export async function listEntitiesForUser(
   if (!membership) return { entities: [], role: null };
 
   const query = filters.query?.trim();
+  const tag = filters.tag?.trim();
   const type = filters.type && filters.type !== "ALL" ? filters.type : undefined;
   const status = filters.status && filters.status !== "ALL" ? filters.status : undefined;
   const lockedOnly = filters.lockedOnly || status === "LOCKED";
@@ -307,12 +309,34 @@ export async function listEntitiesForUser(
       ...(source ? { source } : {}),
       ...playerVisibleWhere(membership.role),
       ...(type ? { type } : {}),
+      ...(tag
+        ? {
+            tags: {
+              hasSome: [
+                tag,
+                tag.toLowerCase(),
+                tag.toUpperCase(),
+                tag.charAt(0).toUpperCase() + tag.slice(1).toLowerCase(),
+              ],
+            },
+          }
+        : {}),
       ...(query
         ? {
             OR: [
               { name: { contains: query, mode: "insensitive" } },
               { summary: { contains: query, mode: "insensitive" } },
               { description: { contains: query, mode: "insensitive" } },
+              {
+                tags: {
+                  hasSome: [
+                    query,
+                    query.toLowerCase(),
+                    query.toUpperCase(),
+                    query.charAt(0).toUpperCase() + query.slice(1).toLowerCase(),
+                  ],
+                },
+              },
             ],
           }
         : {}),
@@ -322,6 +346,40 @@ export async function listEntitiesForUser(
   });
 
   return { entities, role: membership.role };
+}
+
+export async function listCampaignTags(
+  userId: string,
+  campaignId: string,
+): Promise<string[]> {
+  const membership = await assertCampaignMember(userId, campaignId);
+  if (!membership) return [];
+
+  const entities = await prisma.entity.findMany({
+    where: {
+      campaignId,
+      status: { not: CanonStatus.ARCHIVED },
+      ...playerVisibleWhere(membership.role),
+    },
+    select: {
+      tags: true,
+    },
+  });
+
+  const uniqueTags = new Map<string, string>();
+  for (const entity of entities) {
+    for (const tag of entity.tags) {
+      const trimmed = tag.trim();
+      if (trimmed) {
+        const lower = trimmed.toLowerCase();
+        if (!uniqueTags.has(lower)) {
+          uniqueTags.set(lower, trimmed);
+        }
+      }
+    }
+  }
+
+  return Array.from(uniqueTags.values()).sort((a, b) => a.localeCompare(b));
 }
 
 // Per-type counts for the world-browser facets. Scoped + visibility-aware, and

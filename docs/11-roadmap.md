@@ -70,6 +70,15 @@ decomposition, not a frozen spec — refine at the start of each session
   membership, log events with participants, and traverse cause→effect chains;
   relationships/events are reviewable + lockable.
 
+## M3.5 — Tagging system
+**Goal:** Replace freeform tag strings with a structured, queryable tagging system.
+- Build `listCampaignTags` service layer query to extract unique tags.
+- Update `listEntitiesForUser` to support filtering by tag and matching queries against the `tags` array.
+- Replace the raw text input on `EntityForm` with a tag selection UI featuring campaign autocomplete.
+- Add tag filter controls to the Campaign detail sidebar.
+- Style tags as clickable badges that activate tag-filtering when clicked.
+- **Done when:** Users can filter the World Browser by tag, click any tag badge to search by it, autocomplete tags during creation/edit, and search tags in the general search bar.
+
 ## M4 — AI generation (BYO-key)
 **Goal:** generate proposals via a provider-agnostic pipeline.
 - Provider abstraction + Anthropic and OpenAI adapters; encrypted `AiKey`;
@@ -190,12 +199,12 @@ and events from their values.
 ## Dependency graph
 
 ```
-M0 ▶ M1 ▶ M2 ▶ M3 ▶ M4 ▶ M5 ▶ M6 ▶ M7 ▶ M8 ▶ M9 ▶ M10 ▶ M11 ▶ M12
-          │         │    │    │              ▲              ▲
-  linchpin┘         │    │    └ M6 persona needs M2/M3/M4   │
-  M5 retrieval boosts M6 & M11 context ──────┘             │
-  M8 session mode needs M3 + M7 (+ M6 for in-voice recaps) │
-  M11 agents need M3/M4/M6, use M5 retrieval, pair with M10┘
+M0 ▶ M1 ▶ M2 ▶ M3 ▶ M3.5 ▶ M4 ▶ M5 ▶ M6 ▶ M7 ▶ M8 ▶ M9 ▶ M10 ▶ M11 ▶ M12
+          │                 │    │    │              ▲              ▲
+  linchpin┘                 │    │    └ M6 persona needs M2/M3/M4        │
+  M5 retrieval boosts M6 & M11 context ─────────────┘              │
+  M8 session mode needs M3 + M7 (+ M6 for in-voice recaps)         │
+  M11 agents need M3/M4/M6, use M5 retrieval, pair with M10        ┘
 ```
 
 M2 is the linchpin; nothing after it should introduce a canon write path that
