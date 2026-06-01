@@ -30,6 +30,21 @@ async function makeEntity(
   });
 }
 
+function link(
+  userId: string,
+  campaignId: string,
+  sourceId: string,
+  type: "MEMBER_OF" | "LEADS",
+  targetId: string,
+  secret = false,
+) {
+  return createRelationship(userId, campaignId, sourceId, {
+    type,
+    targetId,
+    secret,
+  });
+}
+
 beforeEach(async () => {
   await prisma.provenance.deleteMany();
   await prisma.changeOperation.deleteMany();
@@ -72,31 +87,13 @@ describe("getGroupRoster", () => {
     const partyLeader = await makeEntity(dm.id, campaign.id, "NPC", "Captain");
 
     // member edges (source MEMBER_OF target-group)
-    await createRelationship(dm.id, campaign.id, carl.id, {
-      type: "MEMBER_OF",
-      targetId: party.id,
-    });
-    await createRelationship(dm.id, campaign.id, donut.id, {
-      type: "MEMBER_OF",
-      targetId: party.id,
-    });
-    await createRelationship(dm.id, campaign.id, party.id, {
-      type: "MEMBER_OF",
-      targetId: guild.id,
-    });
-    await createRelationship(dm.id, campaign.id, emptyParty.id, {
-      type: "MEMBER_OF",
-      targetId: guild.id,
-    });
+    await link(dm.id, campaign.id, carl.id, "MEMBER_OF", party.id);
+    await link(dm.id, campaign.id, donut.id, "MEMBER_OF", party.id);
+    await link(dm.id, campaign.id, party.id, "MEMBER_OF", guild.id);
+    await link(dm.id, campaign.id, emptyParty.id, "MEMBER_OF", guild.id);
     // leadership edges (source LEADS target-group)
-    await createRelationship(dm.id, campaign.id, guildLeader.id, {
-      type: "LEADS",
-      targetId: guild.id,
-    });
-    await createRelationship(dm.id, campaign.id, partyLeader.id, {
-      type: "LEADS",
-      targetId: party.id,
-    });
+    await link(dm.id, campaign.id, guildLeader.id, "LEADS", guild.id);
+    await link(dm.id, campaign.id, partyLeader.id, "LEADS", party.id);
 
     const roster = await getGroupRoster(dm.id, campaign.id, guild.id);
     expect(roster).not.toBeNull();
@@ -167,21 +164,11 @@ describe("getGroupRoster", () => {
       "SHARED_WITH_PLAYERS",
     );
 
-    await createRelationship(dm.id, campaign.id, shown.id, {
-      type: "MEMBER_OF",
-      targetId: party.id,
-    });
+    await link(dm.id, campaign.id, shown.id, "MEMBER_OF", party.id);
     // member is canon-invisible to players → omitted
-    await createRelationship(dm.id, campaign.id, hiddenEntity.id, {
-      type: "MEMBER_OF",
-      targetId: party.id,
-    });
+    await link(dm.id, campaign.id, hiddenEntity.id, "MEMBER_OF", party.id);
     // edge itself is secret → omitted even though the member is visible
-    await createRelationship(dm.id, campaign.id, secretMember.id, {
-      type: "MEMBER_OF",
-      targetId: party.id,
-      secret: true,
-    });
+    await link(dm.id, campaign.id, secretMember.id, "MEMBER_OF", party.id, true);
 
     const dmRoster = await getGroupRoster(dm.id, campaign.id, party.id);
     expect(dmRoster?.members.map((m) => m.entity.name).sort()).toEqual([
@@ -201,14 +188,8 @@ describe("getGroupRoster", () => {
     const a = await makeEntity(dm.id, campaign.id, "GUILD", "Group A");
     const b = await makeEntity(dm.id, campaign.id, "GUILD", "Group B");
 
-    await createRelationship(dm.id, campaign.id, a.id, {
-      type: "MEMBER_OF",
-      targetId: b.id,
-    });
-    await createRelationship(dm.id, campaign.id, b.id, {
-      type: "MEMBER_OF",
-      targetId: a.id,
-    });
+    await link(dm.id, campaign.id, a.id, "MEMBER_OF", b.id);
+    await link(dm.id, campaign.id, b.id, "MEMBER_OF", a.id);
 
     const roster = await getGroupRoster(dm.id, campaign.id, a.id);
     expect(roster?.members.map((m) => m.entity.name)).toEqual(["Group B"]);
@@ -224,10 +205,7 @@ describe("getGroupRoster", () => {
     const party = await makeEntity(dm.id, campaign.id, "PARTY", "Party");
     const member = await makeEntity(dm.id, campaign.id, "NPC", "Member");
 
-    const edge = await createRelationship(dm.id, campaign.id, member.id, {
-      type: "MEMBER_OF",
-      targetId: party.id,
-    });
+    const edge = await link(dm.id, campaign.id, member.id, "MEMBER_OF", party.id);
 
     let roster = await getGroupRoster(dm.id, campaign.id, party.id);
     expect(roster?.members).toHaveLength(1);
