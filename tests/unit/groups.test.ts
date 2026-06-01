@@ -230,6 +230,24 @@ describe("getGroupRoster", () => {
     expect(roster).toBeNull();
   });
 
+  it("excludes soft-archived members even for the DM", async () => {
+    const dm = await makeUser("dm-arch@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    const party = await makeEntity(dm.id, campaign.id, "PARTY", "Party");
+    const member = await makeEntity(dm.id, campaign.id, "NPC", "Member");
+
+    // Membership edge stays active; only the member entity is archived.
+    await link(dm.id, campaign.id, member.id, "MEMBER_OF", party.id);
+    await prisma.entity.update({
+      where: { id: member.id },
+      data: { status: "ARCHIVED" },
+    });
+
+    const roster = await getGroupRoster(dm.id, campaign.id, party.id);
+    expect(roster?.members).toHaveLength(0);
+    expect(roster?.rolledUpMemberCount).toBe(0);
+  });
+
   it("returns null for a missing group id", async () => {
     const dm = await makeUser("dm6@test.com");
     const campaign = await createCampaign(dm.id, { name: "Crawl" });

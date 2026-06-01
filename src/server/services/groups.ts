@@ -130,9 +130,13 @@ export async function getGroupRoster(
   })) as MembershipEdge[];
 
   // Index edges by the group they point at (target = the group; source = the
-  // member/leader). Hide endpoints a player can't see.
+  // member/leader). Archiving an entity soft-archives it but leaves its edges
+  // in place, so drop archived members/leaders for everyone (not just players)
+  // — otherwise a DM would see an archived crawler as a current member. Then
+  // additionally hide endpoints a player can't see.
   const byTarget = new Map<string, MembershipEdge[]>();
   for (const edge of edges) {
+    if (edge.sourceEntity.status === CanonStatus.ARCHIVED) continue;
     if (isPlayer && !isPlayerVisible(edge.sourceEntity)) continue;
     const list = byTarget.get(edge.targetEntity.id) ?? [];
     list.push(edge);
