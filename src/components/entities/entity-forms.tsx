@@ -21,7 +21,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { formatEntityType, formatTags, formatVisibility } from "@/lib/entities";
+import { TagInput } from "@/components/entities/tag-input";
+import { formatEntityType, formatVisibility } from "@/lib/entities";
 import {
   entityTypeValues,
   genericEntityTypeValues,
@@ -61,6 +62,14 @@ function SubmitButton({
       {pending ? "Working..." : children}
     </Button>
   );
+}
+
+function splitTags(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
 }
 
 function StateMessage({ state }: { state: EntityActionState }) {
@@ -104,12 +113,18 @@ function VisibilitySelect({
 function CoreFields({
   entity,
   values,
+  campaignTags = [],
 }: {
   entity?: EntityDetail;
   values?: Record<string, unknown>;
+  campaignTags?: string[];
 }) {
   const editCtx = useContext(EditFormContext);
   const visibility = editCtx?.visibility;
+
+  const tagDefaults = values
+    ? splitTags(values.tags as string | undefined)
+    : entity?.tags ?? [];
 
   const isLocked = (fieldKey: string) => {
     if (!entity) return false;
@@ -186,13 +201,12 @@ function CoreFields({
           />
         )}
         <div className="grid gap-2">
-          <Label htmlFor="tags">Tags</Label>
-          <Input
-            id="tags"
+          <Label>Tags</Label>
+          <TagInput
             name="tags"
-            defaultValue={values ? (values.tags as string) : (entity ? formatTags(entity.tags) : "")}
+            defaultTags={tagDefaults}
+            suggestions={campaignTags}
             readOnly={isLocked("tags")}
-            placeholder="floor 1, sponsor, rumor"
           />
         </div>
       </div>
@@ -470,7 +484,13 @@ function ItemFields({
   );
 }
 
-export function CreateCrawlerForm({ campaignId }: { campaignId: string }) {
+export function CreateCrawlerForm({
+  campaignId,
+  campaignTags = [],
+}: {
+  campaignId: string;
+  campaignTags?: string[];
+}) {
   const [state, action] = useActionState(
     createCrawlerAction.bind(null, campaignId),
     undefined,
@@ -478,7 +498,7 @@ export function CreateCrawlerForm({ campaignId }: { campaignId: string }) {
 
   return (
     <form action={action} className="grid gap-4">
-      <CoreFields />
+      <CoreFields campaignTags={campaignTags} />
       <CrawlerFields />
       <StateMessage state={state} />
       <div>
@@ -488,7 +508,13 @@ export function CreateCrawlerForm({ campaignId }: { campaignId: string }) {
   );
 }
 
-export function CreateGenericEntityForm({ campaignId }: { campaignId: string }) {
+export function CreateGenericEntityForm({
+  campaignId,
+  campaignTags = [],
+}: {
+  campaignId: string;
+  campaignTags?: string[];
+}) {
   const [state, action] = useActionState(
     createGenericEntityAction.bind(null, campaignId),
     undefined,
@@ -511,7 +537,7 @@ export function CreateGenericEntityForm({ campaignId }: { campaignId: string }) 
           ))}
         </select>
       </div>
-      <CoreFields />
+      <CoreFields campaignTags={campaignTags} />
       <StateMessage state={state} />
       <div>
         <SubmitButton icon={<Plus aria-hidden size={16} />}>Create entity</SubmitButton>
@@ -524,10 +550,12 @@ export function EditEntityForm({
   campaignId,
   entity,
   itemTypes = [],
+  campaignTags = [],
 }: {
   campaignId: string;
   entity: EntityDetail;
   itemTypes?: Array<{ id: string; name: string }>;
+  campaignTags?: string[];
 }) {
   const [state, action] = useActionState(
     updateEntityAction.bind(null, campaignId, entity.id),
@@ -553,7 +581,7 @@ export function EditEntityForm({
   return (
     <form id="edit-entity-form" key={state?.timestamp} action={action} className="grid gap-4">
       <input type="hidden" name="type" value={entity.type} />
-      <CoreFields entity={entity} values={state?.values} />
+      <CoreFields entity={entity} values={state?.values} campaignTags={campaignTags} />
       {entity.type === "CRAWLER" && <CrawlerFields entity={entity} values={state?.values} />}
       {entity.type === "ITEM" && <ItemFields entity={entity} itemTypes={itemTypes} values={state?.values} />}
       <StateMessage state={state} />

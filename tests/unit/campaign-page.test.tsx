@@ -7,12 +7,14 @@ const {
   getCampaignForUser,
   listEntitiesForUser,
   getEntityTypeCounts,
+  listCampaignTags,
   notFound,
 } = vi.hoisted(() => ({
   requireUser: vi.fn(),
   getCampaignForUser: vi.fn(),
   listEntitiesForUser: vi.fn(),
   getEntityTypeCounts: vi.fn(),
+  listCampaignTags: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
@@ -23,6 +25,7 @@ vi.mock("@/server/services/campaigns", () => ({ getCampaignForUser }));
 vi.mock("@/server/services/entities", () => ({
   listEntitiesForUser,
   getEntityTypeCounts,
+  listCampaignTags,
 }));
 vi.mock("next/navigation", () => ({
   notFound,
@@ -50,6 +53,7 @@ beforeEach(() => {
   requireUser.mockResolvedValue({ id: "u1" });
   listEntitiesForUser.mockResolvedValue({ entities: [], role: "OWNER" });
   getEntityTypeCounts.mockResolvedValue({});
+  listCampaignTags.mockResolvedValue([]);
 });
 
 afterEach(cleanup);
@@ -187,6 +191,60 @@ describe("CampaignPage", () => {
     expect(
       screen.getByText(/No entities match/),
     ).toBeDefined();
+  });
+
+  it("renders a Tags facet with clickable campaign tags", async () => {
+    getCampaignForUser.mockResolvedValue({
+      id: "c5",
+      name: "World Five",
+      summary: null,
+      createdAt: new Date(),
+      members: [{ role: "OWNER" }],
+      _count: { members: 1, entities: 0 },
+    });
+    listCampaignTags.mockResolvedValue(["floor 1", "sponsor"]);
+
+    render(
+      await CampaignPage({
+        params: Promise.resolve({ id: "c5" }),
+        searchParams: Promise.resolve({ tag: "floor 1" }),
+      }),
+    );
+
+    expect(screen.getByText("Tags")).toBeDefined();
+    // The active tag clears the filter; an inactive tag applies it.
+    const active = screen.getByRole("link", { name: "floor 1" });
+    expect(active.getAttribute("href")).toBe("/campaigns/c5");
+    const inactive = screen.getByRole("link", { name: "sponsor" });
+    expect(inactive.getAttribute("href")).toBe("/campaigns/c5?tag=sponsor");
+
+    expect(listCampaignTags).toHaveBeenCalledWith("u1", "c5");
+    expect(listEntitiesForUser).toHaveBeenCalledWith(
+      "u1",
+      "c5",
+      expect.objectContaining({ tag: "floor 1" }),
+    );
+  });
+
+  it("hides the Tags facet when the campaign has no tags", async () => {
+    getCampaignForUser.mockResolvedValue({
+      id: "c6",
+      name: "World Six",
+      summary: null,
+      createdAt: new Date(),
+      members: [{ role: "OWNER" }],
+      _count: { members: 1, entities: 0 },
+    });
+    listCampaignTags.mockResolvedValue([]);
+
+    render(
+      await CampaignPage({
+        params: Promise.resolve({ id: "c6" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+
+    expect(screen.queryByText("Tags")).toBeNull();
   });
 
   it("calls notFound when the user is not a member", async () => {

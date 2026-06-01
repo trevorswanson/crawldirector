@@ -310,7 +310,13 @@ describe("entity forms", () => {
     expect(screen.getByDisplayValue("Carl Changed Name")).toBeDefined();
     expect(screen.getByDisplayValue("New summary content")).toBeDefined();
     expect(screen.getByDisplayValue("New description text")).toBeDefined();
-    expect(screen.getByDisplayValue("tag1, tag2")).toBeDefined();
+    // Tags render as chips and submit as a comma-joined hidden field.
+    expect(screen.getByText("tag1")).toBeDefined();
+    expect(screen.getByText("tag2")).toBeDefined();
+    const tagsHidden = document.querySelector(
+      'input[name="tags"]',
+    ) as HTMLInputElement | null;
+    expect(tagsHidden?.value).toBe("tag1,tag2");
     expect(screen.getByDisplayValue("Carl Real Name")).toBeDefined();
     expect(screen.getByDisplayValue("999")).toBeDefined();
     expect(screen.getByDisplayValue("10")).toBeDefined();

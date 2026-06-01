@@ -7,6 +7,7 @@ const {
   getCampaignForUser,
   getEntityForUser,
   listEntitiesForUser,
+  listCampaignTags,
   listConnectionsForEntity,
   listEventsForEntity,
   getEntityProvenance,
@@ -16,6 +17,7 @@ const {
   getCampaignForUser: vi.fn(),
   getEntityForUser: vi.fn(),
   listEntitiesForUser: vi.fn(),
+  listCampaignTags: vi.fn(),
   listConnectionsForEntity: vi.fn(),
   listEventsForEntity: vi.fn(),
   getEntityProvenance: vi.fn(),
@@ -29,6 +31,7 @@ vi.mock("@/server/services/campaigns", () => ({ getCampaignForUser }));
 vi.mock("@/server/services/entities", () => ({
   getEntityForUser,
   listEntitiesForUser,
+  listCampaignTags,
 }));
 vi.mock("@/server/services/relationships", () => ({ listConnectionsForEntity }));
 vi.mock("@/server/services/events", () => ({ listEventsForEntity }));
@@ -116,6 +119,7 @@ beforeEach(() => {
   });
   getEntityProvenance.mockResolvedValue(crawlerProvenance);
   listEntitiesForUser.mockResolvedValue({ entities: [], role: "OWNER" });
+  listCampaignTags.mockResolvedValue([]);
   listConnectionsForEntity.mockResolvedValue([]);
   listEventsForEntity.mockResolvedValue([]);
 });
@@ -205,6 +209,22 @@ describe("EntityPage", () => {
     expect(screen.getByText("Connections panel (0/1)")).toBeDefined();
     expect(screen.getByText("Timeline panel (0/1)")).toBeDefined();
     expect(screen.queryAllByText(/Planned · M3/).length).toBe(0);
+  });
+
+  it("renders entity tags as links that filter the World Browser", async () => {
+    getEntityForUser.mockResolvedValue(
+      crawler({ tags: ["floor 1", "sponsor"] }),
+    );
+
+    await renderPage();
+
+    const tagLink = screen.getByRole("link", { name: "floor 1" });
+    expect(tagLink.getAttribute("href")).toBe("/campaigns/c1?tag=floor%201");
+    expect(
+      screen.getByRole("link", { name: "sponsor" }).getAttribute("href"),
+    ).toBe("/campaigns/c1?tag=sponsor");
+    // The campaign tag list is fetched for the edit form's autocomplete.
+    expect(listCampaignTags).toHaveBeenCalledWith("u1", "c1");
   });
 
   it("shows the edit form when ?edit is present", async () => {
