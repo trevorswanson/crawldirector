@@ -54,6 +54,27 @@ export type EntityEvent = {
   causes: EventCausalitySummary[];
 };
 
+export type CampaignTimelineParticipant = {
+  id: string;
+  name: string;
+  type: string;
+  role: EventParticipantRole;
+};
+
+export type CampaignTimelineEvent = {
+  id: string;
+  title: string;
+  summary: string | null;
+  time: EventTimeInfo;
+  orderKey: number;
+  secret: boolean;
+  locked: boolean;
+  source: ChangeSource;
+  participants: CampaignTimelineParticipant[];
+  causedBy: EventCausalitySummary[];
+  causes: EventCausalitySummary[];
+};
+
 const otherEntitySelect = {
   id: true,
   name: true,
@@ -242,6 +263,102 @@ export async function listEventsForEntity(
         })),
     });
   }
+  return timeline;
+}
+
+/**
+ * Campaign-wide event timeline for the dedicated M3 timeline page. Players get
+ * the same visibility projection as entity timelines: secret events are hidden,
+ * invisible co-participants are dropped, and a public event with no visible
+ * participants is omitted rather than leaking orphaned canon.
+ */
+export async function listCampaignTimeline(
+  userId: string,
+  campaignId: string,
+): Promise<CampaignTimelineEvent[]> {
+  const membership = await getMembership(userId, campaignId);
+  if (!membership) return [];
+  const isPlayer = membership.role === Role.PLAYER;
+
+  const events = await prisma.event.findMany({
+    where: {
+      campaignId,
+      status: { not: CanonStatus.ARCHIVED },
+      ...(isPlayer ? { secret: false } : {}),
+    },
+    orderBy: [{ orderKey: "desc" }, { createdAt: "desc" }],
+    select: {
+      id: true,
+      title: true,
+      summary: true,
+      inGameTime: true,
+      orderKey: true,
+      secret: true,
+      locked: true,
+      source: true,
+      participants: {
+        orderBy: { createdAt: "asc" },
+        select: {
+          role: true,
+          entity: { select: otherEntitySelect },
+        },
+      },
+      causedBy: {
+        where: { status: { not: CanonStatus.ARCHIVED } },
+        select: {
+          id: true,
+          cause: { select: { id: true, title: true, status: true, secret: true } },
+        },
+      },
+      causes: {
+        where: { status: { not: CanonStatus.ARCHIVED } },
+        select: {
+          id: true,
+          effect: { select: { id: true, title: true, status: true, secret: true } },
+        },
+      },
+    },
+  });
+
+  const timeline: CampaignTimelineEvent[] = [];
+  for (const event of events) {
+    const participants = event.participants
+      .filter((participant) => !isPlayer || isPlayerVisible(participant.entity))
+      .map((participant) => ({
+        id: participant.entity.id,
+        name: participant.entity.name,
+        type: participant.entity.type,
+        role: participant.role,
+      }));
+    if (isPlayer && participants.length === 0) continue;
+
+    timeline.push({
+      id: event.id,
+      title: event.title,
+      summary: event.summary,
+      time: readTimeInfo(event.inGameTime),
+      orderKey: event.orderKey,
+      secret: event.secret,
+      locked: event.locked,
+      source: event.source,
+      participants,
+      causedBy: event.causedBy
+        .filter((edge) => !isPlayer || isPlayerVisibleEvent(edge.cause))
+        .map((edge) => ({
+          id: edge.cause.id,
+          title: edge.cause.title,
+          linkId: edge.id,
+        })),
+      causes: event.causes
+        .filter((edge) => !isPlayer || isPlayerVisibleEvent(edge.effect))
+        .map((edge) => ({
+          id: edge.effect.id,
+          title: edge.effect.title,
+          linkId: edge.id,
+        })),
+    });
+  }
+
   return timeline;
 }
 

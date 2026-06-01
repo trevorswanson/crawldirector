@@ -10,6 +10,7 @@ import {
   archiveEventCausality,
   createEvent,
   linkEventCause,
+  listCampaignTimeline,
   listEventsForEntity,
   setEventLock,
 } from "@/server/services/events";
@@ -121,6 +122,82 @@ describe("event service", () => {
 
     const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
     expect(timeline.map((e) => e.title)).toEqual(["Later", "Early"]);
+  });
+
+  it("lists the campaign-wide timeline with visible participants", async () => {
+    const owner = await makeUser("campaign-timeline-owner@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const donut = await makeEntity(owner.id, campaign.id, "Donut");
+
+    await createEvent(owner.id, campaign.id, {
+      title: "Early stunt",
+      floor: 2,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await createEvent(owner.id, campaign.id, {
+      title: "Later boss fight",
+      floor: 9,
+      timeLabel: "Day 3",
+      secret: false,
+      participants: [
+        { entityId: carl.id, role: "ACTOR" },
+        { entityId: donut.id, role: "TARGET" },
+      ],
+    });
+
+    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+
+    expect(timeline.map((event) => event.title)).toEqual([
+      "Later boss fight",
+      "Early stunt",
+    ]);
+    expect(timeline[0].time).toEqual({ floor: 9, label: "Day 3" });
+    expect(timeline[0].participants.map((p) => `${p.name}:${p.role}`)).toEqual([
+      "Carl:ACTOR",
+      "Donut:TARGET",
+    ]);
+  });
+
+  it("scopes the campaign timeline for players", async () => {
+    const owner = await makeUser("campaign-timeline-owner2@test.com");
+    const player = await makeUser("campaign-timeline-player@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const publicEntity = await makeEntity(
+      owner.id,
+      campaign.id,
+      "Public crawler",
+      "SHARED_WITH_PLAYERS",
+    );
+    const secretEntity = await makeEntity(owner.id, campaign.id, "Secret NPC");
+
+    await createEvent(owner.id, campaign.id, {
+      title: "Public scene",
+      floor: 3,
+      secret: false,
+      participants: [
+        { entityId: publicEntity.id, role: "ACTOR" },
+        { entityId: secretEntity.id, role: "WITNESS" },
+      ],
+    });
+    await createEvent(owner.id, campaign.id, {
+      title: "Hidden scene",
+      floor: 4,
+      secret: true,
+      participants: [{ entityId: publicEntity.id, role: "ACTOR" }],
+    });
+
+    const timeline = await listCampaignTimeline(player.id, campaign.id);
+
+    expect(timeline).toHaveLength(1);
+    expect(timeline[0].title).toBe("Public scene");
+    expect(timeline[0].participants.map((p) => p.name)).toEqual([
+      "Public crawler",
+    ]);
   });
 
   it("dedupes repeated (entity, role) participants", async () => {

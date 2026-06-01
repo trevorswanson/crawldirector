@@ -11,6 +11,29 @@ Running checklist of milestones/tasks, newest first. See
 membership, log events with participants, and traverse cause→effect chains;
 relationships/events are reviewable + lockable.
 
+### Done — slice 7: campaign timeline page + multi-participant logging (2026-06-01)
+
+- [x] Added `listCampaignTimeline` to the `events` service: a campaign-wide,
+      visibility-scoped projection of live events ordered by in-game floor/time.
+      It includes all visible participants for each event, cause/effect
+      summaries, source/secret/lock state, and returns an empty list for
+      non-members. Player reads hide secret events, invisible participants, and
+      public events that would otherwise have no visible participant.
+- [x] Added the `/campaigns/[id]/timeline` route and linked it from the console
+      nav. The page renders the real campaign event stream, an honest empty
+      state, participant links back to entity timelines, and no fake/filler
+      events.
+- [x] Added `CampaignTimeline`, a timeline-oriented client surface with a
+      multi-participant event form. DMs can log an event with up to 20 selected
+      participants and per-participant roles; the action routes through the
+      existing review-backed `createEvent` service and revalidates the campaign
+      timeline plus every participant entity timeline.
+- [x] Added DB-backed service coverage for ordering and player visibility,
+      server-action coverage for multi-participant parsing/revalidation, page
+      coverage for render/empty/404, component coverage for timeline rendering
+      and multi-participant submit, and nav coverage for the active timeline
+      link.
+
 ### Done — slice 6: campaign relationship graph view (2026-06-01)
 
 - [x] Added `getCampaignRelationshipGraph` to the `relationships` service: a
@@ -182,10 +205,10 @@ relationships/events are reviewable + lockable.
 
 - Next slices: event effects (structured deltas applied on approval);
       relationship/event editing and pending (AI/import) relationship/event
-      proposals in the Review Queue; a campaign timeline page (with full
-      multi-participant editing); knowledge/reveal grants for fog of war. (Group
-      hierarchy crawler→party→guild rollup view shipped in slice 5; the
-      campaign-wide relationship graph view shipped in slice 6.)
+      proposals in the Review Queue; knowledge/reveal grants for fog of war.
+      (Group hierarchy crawler→party→guild rollup view shipped in slice 5; the
+      campaign-wide relationship graph view shipped in slice 6; the campaign
+      timeline page with multi-participant logging shipped in slice 7.)
 - The relationship graph now follows the M3 graph mockup's force-directed
       pan/zoom + connections-panel shape and shows only connected entities. At
       scale, node labels will crowd — the same typeahead/search note as the
@@ -197,9 +220,10 @@ relationships/events are reviewable + lockable.
       when events can scope membership intervals.
 - The connections/timeline add forms list current campaign entities as targets;
       at scale this should become a typeahead/search (revisit with M5 search).
-- The Timeline panel currently logs events with the viewed entity plus one
-      optional co-participant. The campaign timeline page (a later slice) is the
-      natural home for arbitrary multi-participant editing.
+- The entity Timeline panel still logs events with the viewed entity plus one
+      optional co-participant. Use the campaign timeline page for arbitrary
+      multi-participant event logging; existing event field/participant editing
+      is still a later M3 slice.
 
 ## M2 — Review pipeline ✅ (complete)
 

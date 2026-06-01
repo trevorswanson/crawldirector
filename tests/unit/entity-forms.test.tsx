@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, act } from "@testing-library/react";
 
 const { useActionState, useFormStatus } = vi.hoisted(() => ({
   useActionState: vi.fn(),
@@ -227,6 +227,26 @@ describe("entity forms", () => {
 
     expect(screen.getByPlaceholderText(/New entity name/)).toBeDefined();
     expect(screen.getByRole("button", { name: /Create stub/ })).toBeDefined();
+  });
+
+  it("resets and refocusses the name input on success state", () => {
+    vi.useFakeTimers();
+    const { rerender } = render(<QuickCreateStub campaignId="c1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Quick-create stub/ }));
+    expect(screen.getByPlaceholderText(/New entity name/)).toBeDefined();
+
+    useActionState.mockReturnValueOnce([{ success: "Stub created." }, noopAction]);
+    rerender(<QuickCreateStub campaignId="c1" />);
+
+    expect(screen.getByText("Stub created.")).toBeDefined();
+
+    act(() => {
+      vi.runAllTimers();
+    });
+    expect(screen.queryByText("Stub created.")).toBeNull();
+
+    vi.useRealTimers();
   });
 
   it("redirects to read-only view if the entity is locked and no error state is present", () => {

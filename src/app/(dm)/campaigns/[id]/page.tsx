@@ -10,12 +10,12 @@ import {
   listEntitiesForUser,
   type EntityStatusFilter,
 } from "@/server/services/entities";
-import { Input } from "@/components/ui/input";
 import { Kicker } from "@/components/ui/kicker";
 import { TypeDot } from "@/components/ui/type-dot";
 import { SourceBadge } from "@/components/ui/source-badge";
 import { StatusPill } from "@/components/ui/status-pill";
 import { QuickCreateStub } from "@/components/entities/entity-forms";
+import { CampaignSearch } from "@/components/entities/campaign-search";
 import { formatEntityType } from "@/lib/entities";
 import { cn } from "@/lib/utils";
 import { entityTypeValues } from "@/lib/validation";
@@ -41,6 +41,7 @@ export default async function CampaignPage({
   params: Promise<{ id: string }>;
   searchParams?: Promise<{
     q?: string;
+    tag?: string;
     type?: string;
     status?: string;
     source?: string;
@@ -55,6 +56,7 @@ export default async function CampaignPage({
   // Not a member (or doesn't exist) -> 404, never leak existence.
   if (!campaign) notFound();
 
+  const activeTag = filters.tag?.trim();
   const activeType =
     filters.type && (entityTypeValues as readonly string[]).includes(filters.type)
       ? (filters.type as EntityType)
@@ -79,6 +81,7 @@ export default async function CampaignPage({
   const [{ entities }, counts] = await Promise.all([
     listEntitiesForUser(user.id, id, {
       query: filters.q,
+      tag: activeTag,
       type: activeType ?? "ALL",
       status: activeStatus,
       source: sourceFilter === "ALL" ? undefined : sourceFilter,
@@ -93,6 +96,7 @@ export default async function CampaignPage({
     const next = new URLSearchParams();
     const merged = {
       q: filters.q,
+      tag: activeTag,
       type: activeType,
       status: activeStatus === "ALL" ? undefined : activeStatus,
       source: activeSource === "ALL" ? undefined : activeSource,
@@ -136,8 +140,8 @@ export default async function CampaignPage({
                 key={type}
                 href={hrefWith({ type: active ? undefined : type })}
                 className={cn(
-                  "border border-transparent transition-colors hover:bg-[var(--bg-3)]",
-                  active && "border-[var(--line-strong)] bg-[var(--bg-3)]",
+                  "transition-colors hover:bg-[var(--bg-3)]",
+                  active && "bg-[var(--bg-3)]",
                 )}
               >
                 {row}
@@ -224,47 +228,22 @@ export default async function CampaignPage({
 
       {/* RESULTS */}
       <div className="order-1 flex min-h-0 min-w-0 flex-col lg:order-2">
-        <div className="flex flex-wrap items-center gap-3 border-b border-[var(--line)] bg-[var(--bg-1)] px-5 py-3">
-          <form className="flex min-w-[240px] flex-1 items-center">
-            <div className="relative w-full max-w-[440px]">
-              <Search
-                aria-hidden
-                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--ink-faint)]"
-              />
-              {activeType && <input type="hidden" name="type" value={activeType} />}
-              {activeStatus !== "ALL" && (
-                <input type="hidden" name="status" value={activeStatus} />
-              )}
-              {activeSource !== "ALL" && (
-                <input type="hidden" name="source" value={activeSource} />
-              )}
-              {lockedOnly && <input type="hidden" name="locked" value="1" />}
-              <Input
-                name="q"
-                defaultValue={filters.q ?? ""}
-                placeholder="Search entities, tags, summaries…"
-                className="pl-9"
-              />
-            </div>
-          </form>
+        <div className="flex flex-wrap items-center gap-3 border-b border-[var(--line)] bg-[var(--bg-1)] px-[22px] py-[14px]">
+          <CampaignSearch
+            initialQuery={filters.q ?? ""}
+            activeTag={activeTag}
+            activeType={activeType}
+            activeStatus={activeStatus}
+            activeSource={activeSource}
+            lockedOnly={lockedOnly}
+          />
           <span className="font-mono text-[11px] text-[var(--ink-faint)]">
             {entities.length} / {total}
           </span>
           <QuickCreateStub campaignId={id} />
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-          <div className="mb-4">
-            <h1 className="font-display text-2xl font-semibold tracking-tight">
-              {campaign.name}
-            </h1>
-            {campaign.summary && (
-              <p className="text-sm text-[var(--muted-foreground)]">
-                {campaign.summary}
-              </p>
-            )}
-          </div>
-
+        <div className="min-h-0 flex-1 overflow-y-auto px-[22px] py-[18px]">
           {entities.length === 0 ? (
             <div className="grid h-60 place-items-center text-center text-[var(--ink-faint)]">
               <div>

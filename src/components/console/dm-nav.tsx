@@ -9,6 +9,7 @@ import {
   SlidersHorizontal,
   Workflow,
   Network,
+  CalendarClock,
   MonitorSmartphone,
   type LucideIcon,
 } from "lucide-react";
@@ -60,6 +61,14 @@ const NAV: NavItem[] = [
     href: (campaignId) =>
       campaignId ? `/campaigns/${campaignId}/graph` : "/dashboard",
     match: (p) => /^\/campaigns\/[^/]+\/graph/.test(p),
+  },
+  {
+    label: "Timeline",
+    icon: CalendarClock,
+    group: "dm",
+    href: (campaignId) =>
+      campaignId ? `/campaigns/${campaignId}/timeline` : "/dashboard",
+    match: (p) => /^\/campaigns\/[^/]+\/timeline/.test(p),
   },
   { label: "AI · Persona Studio", icon: SlidersHorizontal, group: "dm", planned: "M6 — System AI persona engine" },
   { label: "Simulation", icon: Workflow, group: "dm", planned: "M11 — Entity agents & simulation" },

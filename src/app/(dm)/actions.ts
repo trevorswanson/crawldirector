@@ -168,6 +168,7 @@ export async function quickCreateEntityAction(
   const user = await requireUser();
   const type = String(formData.get("type") ?? "");
   const name = formData.get("name");
+  const actionType = String(formData.get("actionType") ?? "edit");
 
   // A thin reference the DM fleshes out on the detail page (or with AI later).
   let entityId: string;
@@ -204,6 +205,11 @@ export async function quickCreateEntityAction(
     console.error("Quick-create entity failed:", error);
     if (error instanceof ServiceError) return { error: error.message };
     return { error: "Could not create the entity. Please try again." };
+  }
+
+  if (actionType === "stay") {
+    revalidatePath(`/campaigns/${campaignId}`);
+    return { success: `Created stub "${name}".` };
   }
 
   redirect(`/campaigns/${campaignId}/entities/${entityId}`);
@@ -548,8 +554,8 @@ export async function createEventAction(
   const user = await requireUser();
 
   // The viewed entity is always a participant; one optional co-participant may
-  // be added from the same form. Richer multi-participant editing arrives with
-  // the campaign timeline view (later M3 slice).
+  // be added from the same form. The campaign timeline action below handles
+  // arbitrary multi-participant logging.
   const participants = [
     { entityId: sourceId, role: parseParticipantRole(formData.get("sourceRole")) },
   ];
@@ -581,8 +587,59 @@ export async function createEventAction(
   }
 
   revalidatePath(`/campaigns/${campaignId}/entities/${sourceId}`);
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
   if (otherId) {
     revalidatePath(`/campaigns/${campaignId}/entities/${otherId}`);
+  }
+  return undefined;
+}
+
+export async function createCampaignEventAction(
+  campaignId: string,
+  _prev: EventActionState,
+  formData: FormData,
+): Promise<EventActionState> {
+  const user = await requireUser();
+  const participantCount = Number(formData.get("participantCount") ?? 0);
+  const participants: { entityId: string; role: ReturnType<typeof parseParticipantRole> }[] = [];
+  const seen = new Set<string>();
+
+  for (let index = 0; index < Math.min(participantCount, 20); index += 1) {
+    const entityId = formData.get(`participantId_${index}`)?.toString().trim();
+    if (!entityId) continue;
+    const role = parseParticipantRole(formData.get(`participantRole_${index}`));
+    const key = `${entityId}:${role}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    participants.push({ entityId, role });
+  }
+
+  if (participants.length === 0) {
+    return { error: "Choose at least one participant." };
+  }
+
+  const parsed = createEventSchema.safeParse({
+    title: formData.get("title"),
+    summary: formData.get("summary"),
+    floor: formData.get("floor"),
+    timeLabel: formData.get("timeLabel"),
+    secret: formData.get("secret"),
+    participants,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  try {
+    await createEvent(user.id, campaignId, parsed.data);
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    return { error: "Could not log the event. Please try again." };
+  }
+
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
+  for (const participant of parsed.data.participants) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${participant.entityId}`);
   }
   return undefined;
 }
@@ -598,6 +655,7 @@ export async function archiveEventAction(
   for (const participantId of participantIds) {
     revalidatePath(`/campaigns/${campaignId}/entities/${participantId}`);
   }
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
 }
 
 export async function toggleEventLockAction(
@@ -612,6 +670,7 @@ export async function toggleEventLockAction(
   for (const participantId of participantIds) {
     revalidatePath(`/campaigns/${campaignId}/entities/${participantId}`);
   }
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
 }
 
 export async function linkEventCauseAction(
@@ -644,6 +703,7 @@ export async function linkEventCauseAction(
   }
 
   revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
   return undefined;
 }
 
@@ -655,6 +715,7 @@ export async function archiveEventCausalityAction(
   const user = await requireUser();
   await archiveEventCausality(user.id, campaignId, eventCausalityId);
   revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
 }
 
 export async function getCampaignCanonIntegrityAction(campaignId: string) {

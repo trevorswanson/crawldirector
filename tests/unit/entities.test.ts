@@ -11,6 +11,7 @@ import {
   createGenericEntity,
   getEntityForUser,
   getEntityTypeCounts,
+  listCampaignTags,
   listEntitiesForUser,
   updateEntity,
 } from "@/server/services/entities";
@@ -1313,5 +1314,160 @@ describe("entity provenance", () => {
     await expect(
       getEntityProvenance(stranger.id, campaign.id, entity.id),
     ).resolves.toBeNull();
+  });
+});
+
+describe("tagging system", () => {
+  it("aggregates unique tags in a campaign and ignores archived ones", async () => {
+    const owner = await makeUser("tagowner@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Tags Campaign" });
+
+    // Entity 1: lowercase & mixed tags
+    await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Mordecai",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: ["Guide", "lore"],
+    });
+
+    // Entity 2: duplicates and different casing
+    await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Carl",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: ["guide", "crawler"],
+    });
+
+    // Entity 3: archived entity (should be ignored)
+    const archived = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Dead NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: ["ignored"],
+    });
+    await archiveEntity(owner.id, campaign.id, archived.id);
+
+    const tags = await listCampaignTags(owner.id, campaign.id);
+    expect(tags.map(t => t.toLowerCase())).toContain("guide");
+    expect(tags).toContain("crawler");
+    expect(tags).toContain("lore");
+    expect(tags).not.toContain("ignored");
+    expect(tags).toHaveLength(3);
+  });
+
+  it("restricts listCampaignTags to visible entities for players", async () => {
+    const owner = await makeUser("tagowner2@test.com");
+    const playerUser = await makeUser("tagplayer2@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Tags Campaign 2" });
+
+    // Join campaign as player
+    await prisma.membership.create({
+      data: {
+        userId: playerUser.id,
+        campaignId: campaign.id,
+        role: "PLAYER",
+      },
+    });
+
+    // DM only entity with secret tag
+    await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Secret NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: ["secret-tag"],
+    });
+
+    // Player visible entity with public tag
+    await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Public NPC",
+      summary: "",
+      description: "",
+      visibility: "SHARED_WITH_PLAYERS",
+      tags: ["public-tag"],
+    });
+
+    const dmTags = await listCampaignTags(owner.id, campaign.id);
+    expect(dmTags).toContain("secret-tag");
+    expect(dmTags).toContain("public-tag");
+
+    const playerTags = await listCampaignTags(playerUser.id, campaign.id);
+    expect(playerTags).not.toContain("secret-tag");
+    expect(playerTags).toContain("public-tag");
+  });
+
+  it("filters entities by tag with listEntitiesForUser", async () => {
+    const owner = await makeUser("tagfilter@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Filter Campaign" });
+
+    await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Guide NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: ["Guide"],
+    });
+
+    await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Crawler Carl",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: ["crawler"],
+    });
+
+    // Specific tag filter
+    const crawlerList = await listEntitiesForUser(owner.id, campaign.id, {
+      tag: "crawler",
+    });
+    expect(crawlerList.entities).toHaveLength(1);
+    expect(crawlerList.entities[0].name).toBe("Crawler Carl");
+
+    // Case-insensitive filtering
+    const guideList = await listEntitiesForUser(owner.id, campaign.id, {
+      tag: "guide",
+    });
+    expect(guideList.entities).toHaveLength(1);
+    expect(guideList.entities[0].name).toBe("Guide NPC");
+  });
+
+  it("searches tags inside the query filter in listEntitiesForUser", async () => {
+    const owner = await makeUser("tagsearch@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Search Campaign" });
+
+    await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "NPC 1",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: ["lore"],
+    });
+
+    await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "NPC 2",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: ["combat"],
+    });
+
+    // Search query matches tags
+    const loreList = await listEntitiesForUser(owner.id, campaign.id, {
+      query: "lore",
+    });
+    expect(loreList.entities).toHaveLength(1);
+    expect(loreList.entities[0].name).toBe("NPC 1");
   });
 });

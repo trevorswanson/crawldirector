@@ -45,7 +45,7 @@ describe("SignInPage", () => {
   it("renders the sign-in form without an SSO button when oidc is off", () => {
     disableOidc();
     render(<SignInPage />);
-    expect(screen.getByText("Sign in")).toBeDefined();
+    expect(screen.getByText("Welcome back.")).toBeDefined();
     expect(screen.getByTestId("credentials-form").textContent).toBe("sign-in");
     expect(screen.queryByRole("button", { name: /Continue with/ })).toBeNull();
   });

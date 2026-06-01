@@ -22,7 +22,7 @@ test("sign up, create a crawl, see the entity browser", async ({
   await page.getByRole("button", { name: "Create crawl" }).click();
 
   await expect(page).toHaveURL(/\/campaigns\//);
-  await expect(page.getByRole("heading", { name: "Floor One" })).toBeVisible();
+  await expect(page.getByLabel("Switch campaign").getByText("Floor One")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Quick-create stub" }),
   ).toBeVisible();

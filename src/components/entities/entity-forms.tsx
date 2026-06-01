@@ -1,11 +1,11 @@
 "use client";
 
-import { useActionState, useState, createContext, useContext, useEffect } from "react";
+import { useActionState, useState, createContext, useContext, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Archive, Plus, Save, X, Eye, EyeOff } from "lucide-react";
+import { Archive, Plus, Save, X, Eye, EyeOff, Check } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -34,15 +34,29 @@ function SubmitButton({
   icon,
   size,
   variant,
+  className,
+  name,
+  value,
 }: {
   children: ReactNode;
   icon: ReactNode;
   size?: "default" | "sm" | "lg";
   variant?: "default" | "primary" | "outline" | "ghost" | "ok" | "destructive" | "bare";
+  className?: string;
+  name?: string;
+  value?: string;
 }) {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" size={size} variant={variant} disabled={pending}>
+    <Button
+      type="submit"
+      size={size}
+      variant={variant}
+      disabled={pending}
+      className={className}
+      name={name}
+      value={value}
+    >
       {icon}
       {pending ? "Working..." : children}
     </Button>
@@ -547,32 +561,70 @@ export function EditEntityForm({
   );
 }
 
+function SuccessToast({ message }: { message: string }) {
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setVisible(false);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [message]);
+
+  if (!visible) return null;
+
+  return (
+    <div className="fixed bottom-5 right-5 z-50 fade-in flex items-center gap-2 border border-[var(--ok)] bg-[var(--bg-2)] px-4 py-3 font-mono text-[11px] uppercase tracking-wider text-[var(--ok)] shadow-[0_8px_24px_rgba(0,0,0,.45)]">
+      <Check aria-hidden size={14} className="shrink-0" />
+      <span>{message}</span>
+    </div>
+  );
+}
+
 export function QuickCreateStub({ campaignId }: { campaignId: string }) {
   const [open, setOpen] = useState(false);
   const [state, action] = useActionState(
     quickCreateEntityAction.bind(null, campaignId),
     undefined,
   );
+  const formRef = useRef<HTMLFormElement>(null);
+
+  useEffect(() => {
+    if (state?.success && formRef.current) {
+      formRef.current.reset();
+      const nameInput = formRef.current.elements.namedItem("name") as HTMLInputElement;
+      nameInput?.focus();
+    }
+  }, [state]);
 
   return (
-    <div className="relative">
-      <Button
-        type="button"
-        variant="primary"
-        size="sm"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <Plus aria-hidden size={13} />
-        Quick-create stub
-      </Button>
+    <>
+      <div className="ml-auto">
+        <Button
+          type="button"
+          variant="primary"
+          size="sm"
+          onClick={() => setOpen((o) => !o)}
+          className="h-7 px-2.5 py-1 text-[11px]"
+        >
+          <Plus aria-hidden size={13} />
+          Quick-create stub
+        </Button>
+      </div>
       {open && (
-        <div className="absolute right-0 top-full z-20 mt-2 w-[340px] border border-[var(--line-strong)] bg-[var(--bg-2)] p-3 shadow-[0_12px_32px_rgba(0,0,0,.45)]">
-          <form action={action} className="grid gap-2">
-            <Input name="name" autoFocus placeholder="New entity name…" required />
+        <div className="fade-in w-[calc(100%+44px)] order-last mt-0 -mb-[14px] -mx-[22px] border-t border-[var(--line)] bg-[var(--bg-2)] px-[22px] py-[10px]">
+          <form ref={formRef} action={action} className="flex flex-wrap items-center gap-[10px]">
+            <input
+              name="name"
+              autoFocus
+              placeholder="New entity name…"
+              required
+              className="flex-1 max-w-[320px] bg-[var(--bg)] border border-[var(--line-strong)] text-[var(--ink)] px-2.5 py-1 h-7 text-[12.5px] outline-none rounded-[2px] focus:border-[var(--accent)]"
+            />
             <select
               name="type"
               defaultValue="NPC"
-              className="h-9 border border-[var(--line-strong)] bg-[var(--bg)] px-2 text-sm"
+              className="h-7 border border-[var(--line-strong)] bg-[var(--bg)] px-2.5 py-1 text-[12.5px] text-[var(--ink)] rounded-[2px] outline-none focus:border-[var(--accent)]"
             >
               {entityTypeValues.map((type) => (
                 <option key={type} value={type}>
@@ -580,19 +632,40 @@ export function QuickCreateStub({ campaignId }: { campaignId: string }) {
                 </option>
               ))}
             </select>
-            <div className="flex items-center justify-between gap-2">
-              <SubmitButton icon={<Plus aria-hidden size={13} />} size="sm">
-                Create stub
-              </SubmitButton>
-              <span className="font-mono text-[10px] text-[var(--ink-faint)]">
-                thin reference · flesh out later
-              </span>
-            </div>
-            <StateMessage state={state} />
+            <SubmitButton
+              name="actionType"
+              value="stay"
+              icon={<Check aria-hidden size={13} />}
+              size="sm"
+              variant="ok"
+              className="h-7 px-2.5 py-1 text-[11px]"
+            >
+              Create stub
+            </SubmitButton>
+            <SubmitButton
+              name="actionType"
+              value="edit"
+              icon={<Plus aria-hidden size={13} />}
+              size="sm"
+              variant="primary"
+              className="h-7 px-2.5 py-1 text-[11px]"
+            >
+              Create and Edit
+            </SubmitButton>
           </form>
+          {state?.error && (
+            <div className="mt-2">
+              <p role="alert" className="text-sm text-[var(--destructive)]">
+                {state.error}
+              </p>
+            </div>
+          )}
         </div>
       )}
-    </div>
+      {state?.success && (
+        <SuccessToast key={state.success} message={state.success} />
+      )}
+    </>
   );
 }
 

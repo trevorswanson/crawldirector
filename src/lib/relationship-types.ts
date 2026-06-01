@@ -75,7 +75,7 @@ export const relationshipTypeMeta: Record<
     group: "AFFILIATION",
     forward: "leads",
     inverse: "led by",
-    sourceTypes: ["CRAWLER", "NPC"],
+    sourceTypes: ["CRAWLER", "NPC", "PARTY"],
     targetTypes: ["PARTY", "GUILD", "FACTION", "ORGANIZATION", "SHOW"],
   },
   SPONSORS: {
@@ -173,7 +173,7 @@ export const relationshipTypeMeta: Record<
   },
   MENTOR_OF: {
     group: "SOCIAL",
-    forward: "mentor of",
+    forward: "mentors",
     inverse: "mentored by",
     sourceTypes: ["CRAWLER", "NPC"],
     targetTypes: ["CRAWLER", "NPC"],

@@ -47,7 +47,7 @@ export default async function DmLayout({
             className="hidden cursor-not-allowed items-center gap-[9px] border border-[var(--line)] bg-[var(--bg)] px-[11px] py-[6px] text-[var(--ink-faint)] lg:flex"
           >
             <Search aria-hidden size={14} />
-            <span className="text-[12.5px]">Search · Ask the Campaign…</span>
+            <span className="text-[12.5px]">Search · Query the System…</span>
             <span className="font-mono text-[9px] uppercase tracking-[.08em]">
               M5
             </span>
