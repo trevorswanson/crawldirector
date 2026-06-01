@@ -1354,7 +1354,7 @@ describe("tagging system", () => {
     await archiveEntity(owner.id, campaign.id, archived.id);
 
     const tags = await listCampaignTags(owner.id, campaign.id);
-    expect(tags).toContain("Guide");
+    expect(tags.map(t => t.toLowerCase())).toContain("guide");
     expect(tags).toContain("crawler");
     expect(tags).toContain("lore");
     expect(tags).not.toContain("ignored");

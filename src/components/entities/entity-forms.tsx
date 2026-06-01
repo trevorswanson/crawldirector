@@ -561,6 +561,26 @@ export function EditEntityForm({
   );
 }
 
+function SuccessToast({ message }: { message: string }) {
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setVisible(false);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [message]);
+
+  if (!visible) return null;
+
+  return (
+    <div className="fixed bottom-5 right-5 z-50 fade-in flex items-center gap-2 border border-[var(--ok)] bg-[var(--bg-2)] px-4 py-3 font-mono text-[11px] uppercase tracking-wider text-[var(--ok)] shadow-[0_8px_24px_rgba(0,0,0,.45)]">
+      <Check aria-hidden size={14} className="shrink-0" />
+      <span>{message}</span>
+    </div>
+  );
+}
+
 export function QuickCreateStub({ campaignId }: { campaignId: string }) {
   const [open, setOpen] = useState(false);
   const [state, action] = useActionState(
@@ -632,16 +652,18 @@ export function QuickCreateStub({ campaignId }: { campaignId: string }) {
             >
               Create and Edit
             </SubmitButton>
-            <span className="font-mono text-[10.5px] text-[var(--ink-faint)]">
-              flesh out with AI later
-            </span>
           </form>
-          {state && (
+          {state?.error && (
             <div className="mt-2">
-              <StateMessage state={state} />
+              <p role="alert" className="text-sm text-[var(--destructive)]">
+                {state.error}
+              </p>
             </div>
           )}
         </div>
+      )}
+      {state?.success && (
+        <SuccessToast key={state.success} message={state.success} />
       )}
     </>
   );
