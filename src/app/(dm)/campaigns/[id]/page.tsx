@@ -7,6 +7,7 @@ import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
 import {
   getEntityTypeCounts,
+  listCampaignTags,
   listEntitiesForUser,
   type EntityStatusFilter,
 } from "@/server/services/entities";
@@ -78,7 +79,7 @@ export default async function CampaignPage({
         ? "ALL"
         : (activeSource as ChangeSource);
 
-  const [{ entities }, counts] = await Promise.all([
+  const [{ entities }, counts, campaignTags] = await Promise.all([
     listEntitiesForUser(user.id, id, {
       query: filters.q,
       tag: activeTag,
@@ -88,6 +89,7 @@ export default async function CampaignPage({
       lockedOnly,
     }),
     getEntityTypeCounts(user.id, id),
+    listCampaignTags(user.id, id),
   ]);
   const total = Object.values(counts).reduce((sum, n) => sum + (n ?? 0), 0);
 
@@ -224,6 +226,45 @@ export default async function CampaignPage({
             M4
           </span>
         </div>
+
+        {(campaignTags.length > 0 || activeTag) && (
+          <>
+            <Kicker dim noLead className="mb-[9px] mt-5">
+              Tags
+            </Kicker>
+            <div className="flex flex-wrap gap-[5px]">
+              {activeTag &&
+                !campaignTags.some(
+                  (t) => t.toLowerCase() === activeTag.toLowerCase(),
+                ) && (
+                  <Link
+                    href={hrefWith({ tag: undefined })}
+                    className="border border-[var(--accent)] bg-[var(--accent)] px-[9px] py-1 font-mono text-[10px] tracking-[.04em] text-[var(--accent-ink)]"
+                  >
+                    {activeTag}
+                  </Link>
+                )}
+              {campaignTags.map((tag) => {
+                const active =
+                  !!activeTag && activeTag.toLowerCase() === tag.toLowerCase();
+                return (
+                  <Link
+                    key={tag}
+                    href={hrefWith({ tag: active ? undefined : tag })}
+                    className={cn(
+                      "border px-[9px] py-1 font-mono text-[10px] tracking-[.04em]",
+                      active
+                        ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-ink)]"
+                        : "border-[var(--line-strong)] text-[var(--ink-dim)] hover:text-[var(--ink)]",
+                    )}
+                  >
+                    {tag}
+                  </Link>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
 
       {/* RESULTS */}

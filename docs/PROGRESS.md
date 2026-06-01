@@ -4,6 +4,52 @@ Running checklist of milestones/tasks, newest first. See
 [`11-roadmap.md`](./11-roadmap.md) for the full plan and
 [`12-working-sessions.md`](./12-working-sessions.md) for how to pick up work.
 
+## M3.5 — Tagging system 🚧 (in progress)
+
+**Goal:** replace freeform tag strings with a structured, queryable tagging
+system. **Done when:** users can filter the World Browser by tag, click any tag
+badge to search by it, autocomplete tags during creation/edit, and search tags
+in the general search bar.
+
+### Done — tag selection UI + campaign tag facet/badges (2026-06-01)
+
+- [x] Added the `TagInput` client component
+      (`src/components/entities/tag-input.tsx`): tags render as removable chips,
+      a campaign-autocomplete dropdown suggests existing tags (with a "New" option
+      for novel ones), Enter/comma commit a tag, Backspace removes the last, and
+      the selection submits as a single comma-joined hidden `tags` field — so it
+      slots straight into the existing entity-form action + Zod `tagsSchema`
+      (which already accepted a comma-separated string). Case-insensitive dedupe
+      and the schema's 20-tag cap are enforced in the UI. Honors locked fields
+      (read-only chip view).
+- [x] Replaced the raw `tags` text input in the entity create/edit forms
+      (`CoreFields`) with `TagInput`, threading the campaign's existing tags
+      (`listCampaignTags`) through `EditEntityForm` /
+      `CreateGenericEntityForm` / `CreateCrawlerForm` from the entity detail page.
+- [x] Added a **Tags** facet to the World Browser sidebar: clickable
+      campaign-tag chips that toggle the `?tag=` filter (active chip clears it),
+      shown only when the campaign has tags (or one is active). Made the entity
+      detail **Tags** field render its tags as clickable badges that link to the
+      filtered World Browser.
+- [x] Added `TagInput` component coverage (chip render, dedupe, add via
+      Enter/comma, Backspace/remove, suggestion select, "New" option, read-only,
+      20-tag cap), updated entity-forms coverage for the chip UI + hidden field,
+      and added page coverage for the sidebar Tags facet (active/inactive hrefs,
+      hidden-when-empty) and the entity detail tag-badge links. lint, typecheck,
+      build, and full coverage gate green.
+
+### Notes / follow-ups (M3.5)
+
+- The service layer landed earlier (`listCampaignTags`; tag filtering in
+      `listEntitiesForUser`; general search already matches tags). This slice
+      completes the **done-when** UI bar. Tags remain a `String[]` on `Entity`
+      (no separate `Tag` table) — promote to a structured/normalized model only if
+      cross-campaign tag management or rename-cascades are needed later.
+- In-browser verification of the authenticated flow was not run this session: a
+      separate `next dev` server was already holding port 3000, and the preview
+      harness can't attach to a server it didn't start. Covered by the component/
+      page tests + build instead.
+
 ## M3 — Relationships & events graph 🚧 (in progress)
 
 **Goal:** model the connective tissue and causality.

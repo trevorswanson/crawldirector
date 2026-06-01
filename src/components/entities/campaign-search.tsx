@@ -53,7 +53,7 @@ export function CampaignSearch({
   }, [value, initialQuery, activeTag, activeType, activeStatus, activeSource, lockedOnly, pathname, router]);
 
   return (
-    <div className="relative flex items-center gap-[9px] bg-[var(--bg)] border border-[var(--line-strong)] px-3 py-[8px] flex-1 max-w-[420px] rounded-[2px] focus-within:border-[var(--accent)] focus-within:ring-1 focus-within:ring-[var(--ring)]">
+    <div className="field-shell relative flex items-center gap-[9px] bg-[var(--bg)] border border-[var(--line-strong)] px-3 py-[8px] flex-1 max-w-[420px] rounded-[2px] focus-within:border-[var(--accent)] focus-within:ring-1 focus-within:ring-[var(--ring)]">
       <Search
         aria-hidden
         size={15}

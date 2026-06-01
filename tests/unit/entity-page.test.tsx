@@ -7,6 +7,7 @@ const {
   getCampaignForUser,
   getEntityForUser,
   listEntitiesForUser,
+  listCampaignTags,
   listConnectionsForEntity,
   listEventsForEntity,
   getEntityProvenance,
@@ -16,6 +17,7 @@ const {
   getCampaignForUser: vi.fn(),
   getEntityForUser: vi.fn(),
   listEntitiesForUser: vi.fn(),
+  listCampaignTags: vi.fn(),
   listConnectionsForEntity: vi.fn(),
   listEventsForEntity: vi.fn(),
   getEntityProvenance: vi.fn(),
@@ -29,6 +31,7 @@ vi.mock("@/server/services/campaigns", () => ({ getCampaignForUser }));
 vi.mock("@/server/services/entities", () => ({
   getEntityForUser,
   listEntitiesForUser,
+  listCampaignTags,
 }));
 vi.mock("@/server/services/relationships", () => ({ listConnectionsForEntity }));
 vi.mock("@/server/services/events", () => ({ listEventsForEntity }));
@@ -116,6 +119,7 @@ beforeEach(() => {
   });
   getEntityProvenance.mockResolvedValue(crawlerProvenance);
   listEntitiesForUser.mockResolvedValue({ entities: [], role: "OWNER" });
+  listCampaignTags.mockResolvedValue([]);
   listConnectionsForEntity.mockResolvedValue([]);
   listEventsForEntity.mockResolvedValue([]);
 });
@@ -207,6 +211,22 @@ describe("EntityPage", () => {
     expect(screen.queryAllByText(/Planned · M3/).length).toBe(0);
   });
 
+  it("renders entity tags as links that filter the World Browser", async () => {
+    getEntityForUser.mockResolvedValue(
+      crawler({ tags: ["floor 1", "sponsor"] }),
+    );
+
+    await renderPage();
+
+    const tagLink = screen.getByRole("link", { name: "floor 1" });
+    expect(tagLink.getAttribute("href")).toBe("/campaigns/c1?tag=floor%201");
+    expect(
+      screen.getByRole("link", { name: "sponsor" }).getAttribute("href"),
+    ).toBe("/campaigns/c1?tag=sponsor");
+    // Read view uses entity.tags; the campaign tag scan is skipped here.
+    expect(listCampaignTags).not.toHaveBeenCalled();
+  });
+
   it("shows the edit form when ?edit is present", async () => {
     getEntityForUser.mockResolvedValue(crawler());
     listEntitiesForUser.mockResolvedValue({
@@ -222,6 +242,8 @@ describe("EntityPage", () => {
     // lock button should be hidden in edit mode
     expect(screen.queryByRole("button", { name: "Lock" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Locked" })).toBeNull();
+    // The campaign tag list is fetched only in edit mode (autocomplete source).
+    expect(listCampaignTags).toHaveBeenCalledWith("u1", "c1");
   });
 
   it("disables the visibility lock toggle while editing", async () => {

@@ -34,6 +34,7 @@ import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
 import {
   getEntityForUser,
+  listCampaignTags,
   listEntitiesForUser,
   type EntityDetail,
 } from "@/server/services/entities";
@@ -62,13 +63,16 @@ export default async function EntityPage({
   if (!campaign || !entity) notFound();
 
   const isGroup = isGroupEntityType(entity.type);
-  const [provenance, connections, events, candidateList, roster] =
+  const [provenance, connections, events, candidateList, roster, campaignTags] =
     await Promise.all([
       getEntityProvenance(user.id, id, entityId),
       listConnectionsForEntity(user.id, id, entityId),
       listEventsForEntity(user.id, id, entityId),
       listEntitiesForUser(user.id, id),
       isGroup ? getGroupRoster(user.id, id, entityId) : Promise.resolve(null),
+      // Only the edit form consumes the campaign tag list (autocomplete); the
+      // read view's tag badges use entity.tags. Skip the scan in read mode.
+      editing ? listCampaignTags(user.id, id) : Promise.resolve<string[]>([]),
     ]);
   const candidates: ConnectionCandidate[] = candidateList.entities
     .filter((candidate) => candidate.id !== entityId)
@@ -207,6 +211,7 @@ export default async function EntityPage({
                 campaignId={id}
                 entity={entity}
                 itemTypes={candidateList.entities.filter((e) => e.type === "ITEM_TYPE")}
+                campaignTags={campaignTags}
               />
             </section>
           ) : (
@@ -241,9 +246,24 @@ export default async function EntityPage({
                           <span className="font-mono text-[10.5px] uppercase tracking-[.06em] text-[var(--ink-faint)]">
                             {f.label}
                           </span>
-                          <span className="min-w-0 truncate text-[13.5px] text-[var(--ink)]">
-                            {f.value}
-                          </span>
+                          {f.key === "tags" && entity.tags.length ? (
+                            <span className="flex min-w-0 flex-wrap items-center gap-[5px]">
+                              {entity.tags.map((tag) => (
+                                <Link
+                                  key={tag}
+                                  href={`/campaigns/${id}?tag=${encodeURIComponent(tag)}`}
+                                  className="hud-tag px-[6px] py-px text-[10px] text-[var(--ink-dim)] transition-colors hover:text-[var(--ink)] hover:border-[var(--accent)]"
+                                  title={`Filter the World Browser by “${tag}”`}
+                                >
+                                  {tag}
+                                </Link>
+                              ))}
+                            </span>
+                          ) : (
+                            <span className="min-w-0 truncate text-[13.5px] text-[var(--ink)]">
+                              {f.value}
+                            </span>
+                          )}
                           <form
                             action={toggleEntityFieldLockAction.bind(
                               null,

@@ -24,7 +24,7 @@ test("sign up, create a crawl, see the entity browser", async ({
   await expect(page).toHaveURL(/\/campaigns\//);
   await expect(page.getByLabel("Switch campaign").getByText("Floor One")).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Quick-create stub" }),
+    page.getByRole("button", { name: "Create Entity" }),
   ).toBeVisible();
   await expect(
     page.getByText("No entities match.", { exact: false }),
