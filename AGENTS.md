@@ -29,10 +29,12 @@ review. **M3 is underway**: typed any-to-any `Relationship` edges, `Event`s
 (with participants), and `EventCausality` cause→effect links route through the
 pipeline (auto-approved DM path with provenance); the entity detail page's
 Connections panel shows real edges, and its Timeline panel shows real events
-plus simple cause/effect traversal and add/remove. Still to come in M3:
-structured event effects, the relationship graph view + campaign timeline page,
-edge/event editing and pending relationship/event proposals, group hierarchies,
-and knowledge/reveal grants.
+plus simple cause/effect traversal and add/remove. Group-type entities
+(PARTY/GUILD/FACTION/ORGANIZATION) show a read-only roster that rolls up
+`MEMBER_OF`/`LEADS` edges into a crawler→party→guild membership hierarchy. Still
+to come in M3: structured event effects, the relationship graph view + campaign
+timeline page, edge/event editing and pending relationship/event proposals,
+time-bounded membership, and knowledge/reveal grants.
 See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
 ## Start here, every session
