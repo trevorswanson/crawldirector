@@ -22,20 +22,22 @@ relationships/events are reviewable + lockable.
       archived endpoint (archiving leaves edges in place, so those drop for
       everyone). Returns null for non-members.
 - [x] Added the `RelationshipGraph` client component: a dependency-free SVG
-      node-link diagram (circular layout) with type-colored nodes, directional
-      edges, dashed/hot secret edges, a lock ring on locked nodes, hover
-      highlighting of a node's edges, a type legend, and click/Enter/Space
-      navigation to the entity. "Start simple" per the M3 roadmap.
-- [x] Added the `/campaigns/[id]/graph` route (header with node/connection
-      counts, honest empty state when there are no edges) and turned the nav's
+      force-directed node-link diagram matched to
+      `docs/design/mockup/screen-graph.jsx`, with type/secret filters, pan/zoom,
+      reset, type-colored nodes, directional disposition-weighted edges,
+      dashed/hot secret edges, locked-node rings, neighbor highlighting, and a
+      selected-node connections panel with entity navigation. The graph still
+      shows only real visibility-scoped data — no mock/filler nodes.
+- [x] Added the `/campaigns/[id]/graph` route (full-bleed graph canvas with an
+      honest empty state when there are no edges) and turned the nav's
       "Relationship Graph · Planned M3" stub into a real, active link.
 - [x] Added DB-backed service coverage (connectivity nodes, isolated-entity
       omission, locked node flag, player secret/invisible/archived scoping,
-      non-member null), component coverage (render, legend, click/keyboard nav,
-      hover highlight, secret edge label), and page coverage (counts, empty
-      state, 404). Verified in-browser against a seeded 5-node/4-edge graph
-      (secret edges dashed, Donut's lock ring, node→entity navigation). lint,
-      typecheck, build, and coverage green.
+      non-member null), component coverage (render, filters, selected-node
+      connections panel, side-panel entity navigation, secret edge label), and
+      page coverage (graph shell, empty state, 404). Verified in-browser against
+      a seeded 5-node/4-edge graph (secret edges dashed, Donut's lock ring,
+      node→entity navigation). lint, typecheck, build, and coverage green.
 
 ### Done — slice 5: group hierarchy roster rollup (2026-06-01)
 
@@ -184,11 +186,11 @@ relationships/events are reviewable + lockable.
       multi-participant editing); knowledge/reveal grants for fog of war. (Group
       hierarchy crawler→party→guild rollup view shipped in slice 5; the
       campaign-wide relationship graph view shipped in slice 6.)
-- The relationship graph is a basic circular node-link diagram and shows only
-      connected entities. A force-directed/clustered layout, edge-type filtering,
-      and zoom/pan are natural future polish (revisit with M12 graph analytics);
-      at scale, node labels will crowd — the same typeahead/search note as the
-      connections panel applies.
+- The relationship graph now follows the M3 graph mockup's force-directed
+      pan/zoom + connections-panel shape and shows only connected entities. At
+      scale, node labels will crowd — the same typeahead/search note as the
+      connections panel applies, and deeper clustering/analytics can be revisited
+      with M12 graph analytics.
 - The roster rollup is read-only and surfaces only on group-type entities
       (PARTY/GUILD/FACTION/ORGANIZATION). Time-bounded membership ("who was where,
       when") isn't modeled yet — current rollup reflects live edges only; revisit

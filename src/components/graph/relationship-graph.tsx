@@ -31,21 +31,44 @@ type SimNode = GraphNode & {
   pinned: boolean;
 };
 
+type RelationshipGraphProps = {
+  campaignId: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+};
+
+function seedLayout(nodes: GraphNode[], degree: Map<string, number>): SimNode[] {
+  const n = nodes.length;
+  return nodes.map((node, i) => {
+    const angle = -Math.PI / 2 + (2 * Math.PI * i) / Math.max(n, 1);
+    return {
+      ...node,
+      px: W / 2 + 320 * Math.cos(angle),
+      py: H / 2 + 320 * Math.sin(angle),
+      vx: 0,
+      vy: 0,
+      r: 13 + Math.min(10, (degree.get(node.id) ?? 0) * 2),
+      pinned: false,
+    };
+  });
+}
+
 /**
  * Force-directed relationship graph (docs/design/mockup/screen-graph.jsx): a
  * draggable, pan/zoomable node-link diagram with a connections side panel. Type
  * and secret-edge filters live in the toolbar. All data arrives already
  * visibility-scoped from the service; nothing is faked.
  */
-export function RelationshipGraph({
-  campaignId,
-  nodes,
-  edges,
-}: {
-  campaignId: string;
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-}) {
+export function RelationshipGraph(props: RelationshipGraphProps) {
+  const graphKey =
+    props.nodes.map((n) => n.id).join(",") +
+    "|" +
+    props.edges.map((e) => e.id).join(",");
+
+  return <RelationshipGraphInner key={graphKey} {...props} />;
+}
+
+function RelationshipGraphInner({ campaignId, nodes, edges }: RelationshipGraphProps) {
   // Degree per node sizes the circles and seeds a stable starting layout.
   const degree = useMemo(() => {
     const d = new Map<string, number>();
@@ -56,34 +79,11 @@ export function RelationshipGraph({
     return d;
   }, [edges]);
 
-  // Seed positions on a circle, then let the simulation settle. Kept in a ref so
-  // the rAF loop can mutate without re-seeding on every React render.
-  const nodesRef = useRef<SimNode[]>([]);
-  const seedKey = useRef<string>("");
-  const key = useMemo(
-    () => nodes.map((n) => n.id).join(",") + "|" + edges.map((e) => e.id).join(","),
-    [nodes, edges],
+  // Seed positions on a circle, then let the simulation settle through state
+  // updates so React renders from immutable snapshots.
+  const [simNodes, setSimNodes] = useState<SimNode[]>(() =>
+    seedLayout(nodes, degree),
   );
-  if (seedKey.current !== key) {
-    seedKey.current = key;
-    const n = nodes.length;
-    nodesRef.current = nodes.map((node, i) => {
-      const angle = -Math.PI / 2 + (2 * Math.PI * i) / Math.max(n, 1);
-      return {
-        ...node,
-        px: W / 2 + 320 * Math.cos(angle),
-        py: H / 2 + 320 * Math.sin(angle),
-        vx: 0,
-        vy: 0,
-        r: 13 + Math.min(10, (degree.get(node.id) ?? 0) * 2),
-        pinned: false,
-      };
-    });
-  }
-
-  const byId = (id: string) => nodesRef.current.find((n) => n.id === id);
-
-  const [, force] = useState(0);
   const [view, setView] = useState({ x: 0, y: 0, k: 1 });
   const [hover, setHover] = useState<string | null>(null);
   const [sel, setSel] = useState<string>(() => nodes[0]?.id ?? "");
@@ -95,66 +95,75 @@ export function RelationshipGraph({
   const drag = useRef<string | null>(null);
   const pan = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
 
   // Force simulation: repulsion + edge springs + centering, with damping.
   useEffect(() => {
     let raf = 0;
     let alpha = 1;
     const step = () => {
-      const ns = nodesRef.current;
-      for (let i = 0; i < ns.length; i++) {
-        for (let j = i + 1; j < ns.length; j++) {
-          const a = ns[i];
-          const b = ns[j];
-          const dx = a.px - b.px;
-          const dy = a.py - b.py;
-          const d2 = dx * dx + dy * dy || 1;
-          const d = Math.sqrt(d2);
-          const rep = 9000 / d2;
-          const fx = (dx / d) * rep;
-          const fy = (dy / d) * rep;
+      setSimNodes((current) => {
+        if (current.length === 0) return current;
+
+        const ns = current.map((node) => ({ ...node }));
+        const byId = new Map(ns.map((node) => [node.id, node]));
+
+        for (let i = 0; i < ns.length; i++) {
+          for (let j = i + 1; j < ns.length; j++) {
+            const a = ns[i];
+            const b = ns[j];
+            const dx = a.px - b.px;
+            const dy = a.py - b.py;
+            const d2 = dx * dx + dy * dy || 1;
+            const d = Math.sqrt(d2);
+            const rep = 9000 / d2;
+            const fx = (dx / d) * rep;
+            const fy = (dy / d) * rep;
+            a.vx += fx;
+            a.vy += fy;
+            b.vx -= fx;
+            b.vy -= fy;
+          }
+        }
+
+        for (const e of edges) {
+          const a = byId.get(e.sourceId);
+          const b = byId.get(e.targetId);
+          if (!a || !b) continue;
+          const dx = b.px - a.px;
+          const dy = b.py - a.py;
+          const d = Math.sqrt(dx * dx + dy * dy) || 1;
+          const k = 0.012 * (d - 190);
+          const fx = (dx / d) * k;
+          const fy = (dy / d) * k;
           a.vx += fx;
           a.vy += fy;
           b.vx -= fx;
           b.vy -= fy;
         }
-      }
-      for (const e of edges) {
-        const a = byId(e.sourceId);
-        const b = byId(e.targetId);
-        if (!a || !b) continue;
-        const dx = b.px - a.px;
-        const dy = b.py - a.py;
-        const d = Math.sqrt(dx * dx + dy * dy) || 1;
-        const k = 0.012 * (d - 190);
-        const fx = (dx / d) * k;
-        const fy = (dy / d) * k;
-        a.vx += fx;
-        a.vy += fy;
-        b.vx -= fx;
-        b.vy -= fy;
-      }
-      for (const n of ns) {
-        n.vx += (W / 2 - n.px) * 0.0016;
-        n.vy += (H / 2 - n.py) * 0.0016;
-        if (!n.pinned && drag.current !== n.id) {
-          n.vx *= 0.86;
-          n.vy *= 0.86;
-          n.px += n.vx * alpha;
-          n.py += n.vy * alpha;
-        } else {
-          n.vx = 0;
-          n.vy = 0;
+
+        for (const n of ns) {
+          n.vx += (W / 2 - n.px) * 0.0016;
+          n.vy += (H / 2 - n.py) * 0.0016;
+          if (!n.pinned && drag.current !== n.id) {
+            n.vx *= 0.86;
+            n.vy *= 0.86;
+            n.px += n.vx * alpha;
+            n.py += n.vy * alpha;
+          } else {
+            n.vx = 0;
+            n.vy = 0;
+          }
         }
-      }
+        return ns;
+      });
+
       alpha *= 0.992;
       if (alpha < 0.02) alpha = 0.02;
-      force((x) => x + 1);
       raf = requestAnimationFrame(step);
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-    // The loop reads `edges` and mutates `nodesRef`; re-arm only when they change.
   }, [edges]);
 
   // Screen → world coordinate transform for pointer interactions.
@@ -168,23 +177,24 @@ export function RelationshipGraph({
   const onPointerDownNode = (e: React.PointerEvent, id: string) => {
     e.stopPropagation();
     drag.current = id;
-    const n = byId(id);
-    if (n) n.pinned = true;
+    setSimNodes((current) =>
+      current.map((node) => (node.id === id ? { ...node, pinned: true } : node)),
+    );
     setSel(id);
   };
   const onPointerDownBg = (e: React.PointerEvent) => {
     pan.current = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
+    setIsPanning(true);
   };
   const onPointerMove = (e: React.PointerEvent) => {
     if (drag.current) {
       const w = toWorld(e.clientX, e.clientY);
-      const n = byId(drag.current);
-      if (n) {
-        n.px = w.x;
-        n.py = w.y;
-        n.vx = 0;
-        n.vy = 0;
-      }
+      const id = drag.current;
+      setSimNodes((current) =>
+        current.map((node) =>
+          node.id === id ? { ...node, px: w.x, py: w.y, vx: 0, vy: 0 } : node,
+        ),
+      );
     } else if (pan.current) {
       const p = pan.current;
       setView((v) => ({ ...v, x: p.vx + (e.clientX - p.x), y: p.vy + (e.clientY - p.y) }));
@@ -193,14 +203,20 @@ export function RelationshipGraph({
   const onPointerUp = () => {
     drag.current = null;
     pan.current = null;
+    setIsPanning(false);
   };
   const zoom = (f: number) =>
     setView((v) => ({ ...v, k: Math.min(2.4, Math.max(0.4, v.k * f)) }));
 
+  const nodeById = useMemo(
+    () => new Map(simNodes.map((node) => [node.id, node])),
+    [simNodes],
+  );
+
   const visibleNode = (n: { type: string }) => activeTypes.has(n.type);
   const visibleEdge = (e: GraphEdge) => {
-    const a = byId(e.sourceId);
-    const b = byId(e.targetId);
+    const a = nodeById.get(e.sourceId);
+    const b = nodeById.get(e.targetId);
     return (
       (showSecret || !e.secret) &&
       !!a &&
@@ -236,7 +252,7 @@ export function RelationshipGraph({
   }, [nodes]);
   const hasSecret = useMemo(() => edges.some((e) => e.secret), [edges]);
 
-  const selNode = byId(sel) ?? nodesRef.current[0];
+  const selNode = nodeById.get(sel) ?? simNodes[0];
   const selEdges = edges.filter(
     (e) => selNode && (e.sourceId === selNode.id || e.targetId === selNode.id),
   );
@@ -308,7 +324,7 @@ export function RelationshipGraph({
           preserveAspectRatio="xMidYMid slice"
           className="block h-full w-full"
           style={{
-            cursor: pan.current ? "grabbing" : "grab",
+            cursor: isPanning ? "grabbing" : "grab",
             background:
               "radial-gradient(120% 100% at 50% 0%, var(--bg-1), var(--bg))",
           }}
@@ -329,14 +345,31 @@ export function RelationshipGraph({
             >
               <path d="M0,0 L8,3 L0,6" fill="var(--ink-faint)" />
             </marker>
+            <pattern id="rg-grid" width="44" height="44" patternUnits="userSpaceOnUse">
+              <path
+                d="M44 0H0V44"
+                fill="none"
+                stroke="var(--ink)"
+                strokeOpacity={0.035}
+                strokeWidth="1"
+              />
+            </pattern>
           </defs>
 
+          <rect
+            x="-2000"
+            y="-2000"
+            width="6000"
+            height="6000"
+            fill="url(#rg-grid)"
+            transform={`translate(${view.x},${view.y}) scale(${view.k})`}
+          />
           <g transform={`translate(${view.x},${view.y}) scale(${view.k})`}>
             {/* Edges */}
             {edges.map((edge) => {
               if (!visibleEdge(edge)) return null;
-              const a = byId(edge.sourceId);
-              const b = byId(edge.targetId);
+              const a = nodeById.get(edge.sourceId);
+              const b = nodeById.get(edge.targetId);
               if (!a || !b) return null;
               const dim =
                 active !== null && active !== edge.sourceId && active !== edge.targetId;
@@ -386,7 +419,7 @@ export function RelationshipGraph({
             })}
 
             {/* Nodes */}
-            {nodesRef.current.map((node) => {
+            {simNodes.map((node) => {
               if (!visibleNode(node)) return null;
               const isActive = active === node.id;
               const isNbr = nbrs?.has(node.id) ?? false;
@@ -474,7 +507,9 @@ export function RelationshipGraph({
           <button
             type="button"
             onClick={() => {
-              for (const n of nodesRef.current) n.pinned = false;
+              setSimNodes((current) =>
+                current.map((node) => ({ ...node, pinned: false })),
+              );
               setView({ x: 0, y: 0, k: 1 });
             }}
             className="hud-tag cursor-pointer bg-[var(--bg-1)]"
@@ -525,13 +560,14 @@ export function RelationshipGraph({
               )}
               {selEdges.map((e) => {
                 const out = e.sourceId === selNode.id;
-                const other = byId(out ? e.targetId : e.sourceId);
+                const other = nodeById.get(out ? e.targetId : e.sourceId);
                 if (!other) return null;
                 const disp = e.disposition ?? 0;
                 return (
                   <button
                     key={e.id}
                     type="button"
+                    aria-label={`Select ${other.name} connection`}
                     onClick={() => setSel(other.id)}
                     className="mb-[6px] block w-full border border-[var(--line)] px-[11px] py-[10px] text-left transition-colors hover:border-[var(--line-strong)]"
                   >

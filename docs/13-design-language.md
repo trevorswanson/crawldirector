@@ -7,8 +7,10 @@ saved mockup in [`design/mockup/`](./design/mockup/) (study
 `CrawlDirector Console.html`); when in doubt, match it.
 
 > **Rule for every milestone:** build UI from the tokens and primitives below.
-> Never hardcode a hex value in a component — use a CSS variable (or a shadcn
-> alias). New surfaces should feel like they came out of the same console.
+> Match the relevant mockup screen in `design/mockup/` as the acceptance target,
+> not as mood-board inspiration. Never hardcode a hex value in a component — use
+> a CSS variable (or a shadcn alias). New surfaces should feel like they came out
+> of the same console.
 
 ## Where it lives
 
@@ -118,6 +120,10 @@ Desktop-first console (collapses below `md`): a 232px left nav + 52px topbar.
 
 ## Principles
 
+- **Mockup-first implementation.** Before building or revising a screen, open the
+  corresponding `design/mockup/screen-*.jsx` file and preserve its layout,
+  density, primary controls, and interaction model unless there is a documented
+  product/accessibility reason to diverge.
 - **No fabricated data.** Show only real campaign data. Atmosphere comes from
   styling, not invented numbers (no fake tickers/clocks/ratings — those are
   roadmapped, see [`11-roadmap.md`](./11-roadmap.md)).

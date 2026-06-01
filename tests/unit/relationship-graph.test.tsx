@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act } from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
 vi.mock("next/link", () => ({
@@ -8,14 +9,31 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-// rAF drives the force loop; make it a no-op so tests are deterministic.
+let rafCallbacks: FrameRequestCallback[];
+
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.stubGlobal("requestAnimationFrame", () => 0);
+  rafCallbacks = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    rafCallbacks.push(callback);
+    return rafCallbacks.length;
+  });
   vi.stubGlobal("cancelAnimationFrame", () => {});
+  vi.spyOn(SVGElement.prototype, "getBoundingClientRect").mockReturnValue({
+    left: 0,
+    top: 0,
+    width: 1200,
+    height: 820,
+    right: 1200,
+    bottom: 820,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  } as DOMRect);
 });
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -59,7 +77,7 @@ describe("RelationshipGraph", () => {
     render(<RelationshipGraph campaignId="c1" nodes={nodes} edges={edges} />);
 
     // Click the connection row leading to Donut.
-    const row = screen.getByRole("button", { name: /Donut/ });
+    const row = screen.getByRole("button", { name: "Select Donut connection" });
     fireEvent.click(row);
     expect(screen.getByRole("heading", { name: "Donut" })).toBeDefined();
   });
@@ -87,5 +105,73 @@ describe("RelationshipGraph", () => {
     render(<RelationshipGraph campaignId="c1" nodes={nodes} edges={edges} />);
     expect(screen.getByText(/Mordecai .* Carl/)).toBeDefined();
     expect(screen.getAllByText(/· secret/).length).toBeGreaterThan(0);
+  });
+
+  it("runs one force-simulation frame without losing rendered nodes", () => {
+    render(<RelationshipGraph campaignId="c1" nodes={nodes} edges={edges} />);
+
+    expect(rafCallbacks.length).toBeGreaterThan(0);
+    act(() => {
+      rafCallbacks.shift()?.(0);
+    });
+
+    expect(screen.getByRole("button", { name: "Carl" })).toBeDefined();
+    expect(screen.getByText(/Carl .* Donut/)).toBeDefined();
+  });
+
+  it("supports pan, zoom, reset, and drag interactions", () => {
+    render(<RelationshipGraph campaignId="c1" nodes={nodes} edges={edges} />);
+
+    const svg = screen.getByRole("img", { name: "Relationship graph" });
+    fireEvent.pointerDown(svg, { clientX: 10, clientY: 20 });
+    fireEvent.pointerMove(svg, { clientX: 40, clientY: 55 });
+    expect(svg.getAttribute("style")).toContain("cursor: grabbing");
+    expect(document.querySelector("rect")?.getAttribute("transform")).toBe(
+      "translate(30,35) scale(1)",
+    );
+
+    fireEvent.pointerUp(svg);
+    expect(svg.getAttribute("style")).toContain("cursor: grab");
+
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(document.querySelector("rect")?.getAttribute("transform")).toBe(
+      "translate(30,35) scale(1.18)",
+    );
+
+    const carl = screen.getByRole("button", { name: "Carl" });
+    fireEvent.pointerDown(carl, { clientX: 600, clientY: 90 });
+    fireEvent.pointerMove(svg, { clientX: 700, clientY: 300 });
+    expect(
+      screen.getByRole("button", { name: "Carl" }).getAttribute("transform"),
+    ).toMatch(/^translate\(567\.796610169491[56],224\.576271186440[67]\)$/);
+    fireEvent.pointerLeave(svg);
+
+    fireEvent.click(screen.getByText("Reset layout"));
+    expect(document.querySelector("rect")?.getAttribute("transform")).toBe(
+      "translate(0,0) scale(1)",
+    );
+  });
+
+  it("hides secret edges from the canvas when the secret filter is toggled off", () => {
+    render(<RelationshipGraph campaignId="c1" nodes={nodes} edges={edges} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Secret/ }));
+
+    expect(screen.queryByText(/Mordecai .* Carl/)).toBeNull();
+    expect(screen.getByRole("button", { name: /Secret/ }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+  });
+
+  it("renders an empty graph shell without selected-node chrome", () => {
+    render(<RelationshipGraph campaignId="c1" nodes={[]} edges={[]} />);
+
+    act(() => {
+      rafCallbacks.shift()?.(0);
+    });
+
+    expect(screen.getByRole("img", { name: "Relationship graph" })).toBeDefined();
+    expect(screen.queryByRole("heading")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Secret/ })).toBeNull();
   });
 });
