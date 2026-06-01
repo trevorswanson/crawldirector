@@ -223,8 +223,8 @@ describe("EntityPage", () => {
     expect(
       screen.getByRole("link", { name: "sponsor" }).getAttribute("href"),
     ).toBe("/campaigns/c1?tag=sponsor");
-    // The campaign tag list is fetched for the edit form's autocomplete.
-    expect(listCampaignTags).toHaveBeenCalledWith("u1", "c1");
+    // Read view uses entity.tags; the campaign tag scan is skipped here.
+    expect(listCampaignTags).not.toHaveBeenCalled();
   });
 
   it("shows the edit form when ?edit is present", async () => {
@@ -242,6 +242,8 @@ describe("EntityPage", () => {
     // lock button should be hidden in edit mode
     expect(screen.queryByRole("button", { name: "Lock" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Locked" })).toBeNull();
+    // The campaign tag list is fetched only in edit mode (autocomplete source).
+    expect(listCampaignTags).toHaveBeenCalledWith("u1", "c1");
   });
 
   it("disables the visibility lock toggle while editing", async () => {

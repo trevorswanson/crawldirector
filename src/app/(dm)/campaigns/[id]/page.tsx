@@ -233,16 +233,20 @@ export default async function CampaignPage({
               Tags
             </Kicker>
             <div className="flex flex-wrap gap-[5px]">
-              {activeTag && !campaignTags.includes(activeTag) && (
-                <Link
-                  href={hrefWith({ tag: undefined })}
-                  className="border border-[var(--accent)] bg-[var(--accent)] px-[9px] py-1 font-mono text-[10px] tracking-[.04em] text-[var(--accent-ink)]"
-                >
-                  {activeTag}
-                </Link>
-              )}
+              {activeTag &&
+                !campaignTags.some(
+                  (t) => t.toLowerCase() === activeTag.toLowerCase(),
+                ) && (
+                  <Link
+                    href={hrefWith({ tag: undefined })}
+                    className="border border-[var(--accent)] bg-[var(--accent)] px-[9px] py-1 font-mono text-[10px] tracking-[.04em] text-[var(--accent-ink)]"
+                  >
+                    {activeTag}
+                  </Link>
+                )}
               {campaignTags.map((tag) => {
-                const active = activeTag === tag;
+                const active =
+                  !!activeTag && activeTag.toLowerCase() === tag.toLowerCase();
                 return (
                   <Link
                     key={tag}

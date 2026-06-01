@@ -70,7 +70,9 @@ export default async function EntityPage({
       listEventsForEntity(user.id, id, entityId),
       listEntitiesForUser(user.id, id),
       isGroup ? getGroupRoster(user.id, id, entityId) : Promise.resolve(null),
-      listCampaignTags(user.id, id),
+      // Only the edit form consumes the campaign tag list (autocomplete); the
+      // read view's tag badges use entity.tags. Skip the scan in read mode.
+      editing ? listCampaignTags(user.id, id) : Promise.resolve<string[]>([]),
     ]);
   const candidates: ConnectionCandidate[] = candidateList.entities
     .filter((candidate) => candidate.id !== entityId)

@@ -106,9 +106,10 @@ body {
 ::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--bg-4) 85%, var(--ink)); }
 :focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 /* Composite field shells (search box, tag input) show focus on the wrapper via
-   focus-within; suppress the inner control's own outline so it doesn't read as a
-   doubled border. Higher specificity than the bare :focus-visible rule above. */
-.field-shell :focus-visible { outline: none; }
+   focus-within; suppress the inner text field's own outline so it doesn't read
+   as a doubled border. Scoped to `input` so other focusable children (e.g. the
+   tag remove buttons) keep their keyboard focus ring. */
+.field-shell input:focus-visible { outline: none; }
 
 /* ---------------------------- HUD primitives ---------------------------- */
 .mono { font-family: var(--font-mono); }

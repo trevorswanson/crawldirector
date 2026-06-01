@@ -201,8 +201,9 @@ function CoreFields({
           />
         )}
         <div className="grid gap-2">
-          <Label>Tags</Label>
+          <Label htmlFor={isLocked("tags") ? undefined : "tags"}>Tags</Label>
           <TagInput
+            id="tags"
             name="tags"
             defaultTags={tagDefaults}
             suggestions={campaignTags}

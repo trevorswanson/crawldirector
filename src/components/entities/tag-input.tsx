@@ -15,11 +15,13 @@ const MAX_TAGS = 20;
  * campaign's existing tags; the DM can also type a brand-new tag.
  */
 export function TagInput({
+  id,
   name = "tags",
   defaultTags = [],
   suggestions = [],
   readOnly = false,
 }: {
+  id?: string;
   name?: string;
   defaultTags?: string[];
   suggestions?: string[];
@@ -44,14 +46,25 @@ export function TagInput({
   }, [input, suggestions, selectedLower]);
 
   const addTag = (raw: string) => {
-    const value = raw.trim();
-    if (!value) return;
-    if (selectedLower.has(value.toLowerCase())) {
-      setInput("");
-      return;
-    }
-    if (tags.length >= MAX_TAGS) return;
-    setTags((prev) => [...prev, value]);
+    // Split on comma so a pasted "a, b, c" becomes distinct chips that match
+    // what the comma-joined hidden field will submit (the schema splits on ",").
+    const parts = raw
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    if (!parts.length) return;
+    setTags((prev) => {
+      const next = [...prev];
+      const seen = new Set(next.map((t) => t.toLowerCase()));
+      for (const part of parts) {
+        if (next.length >= MAX_TAGS) break;
+        const lower = part.toLowerCase();
+        if (seen.has(lower)) continue;
+        seen.add(lower);
+        next.push(part);
+      }
+      return next;
+    });
     setInput("");
     setOpen(false);
   };
@@ -119,6 +132,7 @@ export function TagInput({
         ))}
         <input
           ref={inputRef}
+          id={id}
           type="text"
           aria-label="Add tag"
           value={input}

@@ -52,6 +52,21 @@ describe("TagInput", () => {
     expect((input as HTMLInputElement).value).toBe("");
   });
 
+  it("splits a pasted comma list into distinct chips on commit", () => {
+    render(<TagInput defaultTags={["floor 1"]} />);
+    const input = screen.getByLabelText("Add tag");
+
+    // Paste-like value containing commas, committed with Enter.
+    fireEvent.change(input, { target: { value: "a, b, FLOOR 1, c" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // Three new chips added; the case-insensitive duplicate "FLOOR 1" is dropped.
+    expect(screen.getByText("a")).toBeDefined();
+    expect(screen.getByText("b")).toBeDefined();
+    expect(screen.getByText("c")).toBeDefined();
+    expect(hiddenValue()).toBe("floor 1,a,b,c");
+  });
+
   it("removes the last tag on Backspace when the input is empty", () => {
     render(<TagInput defaultTags={["a", "b"]} />);
     const input = screen.getByLabelText("Add tag");
