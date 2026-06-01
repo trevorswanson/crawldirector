@@ -318,6 +318,8 @@ export default async function EntityPage({
                 <TimelinePanel
                   campaignId={id}
                   entityId={entityId}
+                  entityName={entity.name}
+                  entityType={entity.type}
                   events={events}
                   candidates={timelineCandidates}
                   initialEventId={openEventId}

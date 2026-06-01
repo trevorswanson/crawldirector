@@ -3,7 +3,7 @@
 import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
-import { ChevronRight, Lock, Plus, Trash2, Unlock, X } from "lucide-react";
+import { ChevronRight, Lock, Pencil, Plus, Trash2, Unlock, X } from "lucide-react";
 
 import {
   archiveEventCausalityAction,
@@ -11,12 +11,17 @@ import {
   createEventAction,
   linkEventCauseAction,
   toggleEventLockAction,
+  updateEventAction,
   type EventCausalityActionState,
 } from "@/app/(dm)/actions";
 import {
   EntityTypeahead,
   type EntityCandidate,
 } from "@/components/entities/entity-typeahead";
+import {
+  ParticipantRows,
+  type ParticipantRowValue,
+} from "@/components/entities/participant-rows";
 import { Kicker } from "@/components/ui/kicker";
 import { LockChip } from "@/components/ui/lock-chip";
 import { SourceBadge } from "@/components/ui/source-badge";
@@ -117,23 +122,133 @@ function CauseLinkForm({
   );
 }
 
+function EditEventForm({
+  event,
+  self,
+  candidates,
+  onSubmit,
+  onCancel,
+  error,
+}: {
+  event: EntityEvent;
+  self: EntityCandidate;
+  candidates: EntityCandidate[];
+  onSubmit: (formData: FormData) => Promise<void>;
+  onCancel: () => void;
+  error: string | null;
+}) {
+  // Prefill the participant editor with the full current set: a row for every
+  // role the viewed entity holds (it can have more than one) followed by the
+  // co-participants — so editing never silently drops an extra self role.
+  const initialParticipants: ParticipantRowValue[] = [
+    ...event.selfRoles.map((role) => ({ entity: self, role })),
+    ...event.others.map((other) => ({
+      entity: { id: other.id, name: other.name, type: other.type },
+      role: other.role,
+    })),
+  ];
+  return (
+    <form action={onSubmit} className="flex flex-col gap-2 border border-[var(--line)] bg-[var(--bg-3)] px-[10px] py-[9px]">
+      <input
+        name="title"
+        required
+        maxLength={200}
+        defaultValue={event.title}
+        aria-label="Event title"
+        placeholder="What happened?"
+        className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12.5px] text-[var(--ink)]"
+      />
+      <textarea
+        name="summary"
+        rows={2}
+        maxLength={2000}
+        defaultValue={event.summary ?? ""}
+        aria-label="Event summary"
+        placeholder="Summary (optional)"
+        className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
+      />
+      <div className="flex gap-2">
+        <input
+          name="floor"
+          type="number"
+          min={1}
+          max={18}
+          defaultValue={event.time.floor ?? ""}
+          aria-label="Floor"
+          placeholder="Floor"
+          className="w-[80px] border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
+        />
+        <input
+          name="timeLabel"
+          maxLength={120}
+          defaultValue={event.time.label ?? ""}
+          aria-label="Time label"
+          placeholder="Time label (e.g. Day 3)"
+          className="min-w-0 flex-1 border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
+        />
+      </div>
+      <ParticipantRows candidates={candidates} initial={initialParticipants} />
+      <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
+        <input type="checkbox" name="secret" value="true" defaultChecked={event.secret} />
+        DM-only (secret)
+      </label>
+      {error && (
+        <p role="alert" className="text-[11px] text-[var(--no)]">
+          {error}
+        </p>
+      )}
+      <div className="flex gap-2">
+        <SaveEventButton />
+        <button
+          type="button"
+          onClick={onCancel}
+          className="border border-[var(--line)] px-[10px] py-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:text-[var(--ink-dim)]"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function SaveEventButton() {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      className="inline-flex items-center justify-center gap-[6px] border border-[var(--line-strong)] bg-[var(--bg-3)] px-[10px] py-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-dim)] transition-[filter,color] hover:text-[var(--ink)] hover:brightness-110 disabled:opacity-50"
+    >
+      {pending ? "Saving..." : "Save event"}
+    </button>
+  );
+}
+
 export function TimelinePanel({
   campaignId,
   entityId,
+  entityName,
+  entityType,
   events,
   candidates,
   initialEventId,
 }: {
   campaignId: string;
   entityId: string;
+  entityName: string;
+  entityType: string;
   events: EntityEvent[];
   candidates: TimelineCandidate[];
   // When set (e.g. via a ?event= deep link), that event starts expanded.
   initialEventId?: string;
 }) {
+  const self: EntityCandidate = { id: entityId, name: entityName, type: entityType };
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [participant, setParticipant] = useState<TimelineCandidate | null>(null);
+  // Which event is being edited inline, with its own error slot.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
   // Which event's details (summary, participants, causality, controls) are
   // revealed. The compact rail mirrors the mockup; the rest opens on click.
   const [expandedId, setExpandedId] = useState<string | null>(
@@ -162,6 +277,22 @@ export function TimelinePanel({
       setError(res.error);
     } else {
       closeForm();
+    }
+  };
+
+  const handleEdit = (eventId: string) => async (formData: FormData) => {
+    setEditError(null);
+    const res = await updateEventAction(
+      campaignId,
+      entityId,
+      eventId,
+      undefined,
+      formData,
+    );
+    if (res?.error) {
+      setEditError(res.error);
+    } else {
+      setEditingId(null);
     }
   };
 
@@ -350,7 +481,35 @@ export function TimelinePanel({
                           candidates={causeCandidates}
                         />
                       )}
+                      {editingId === e.id ? (
+                        <EditEventForm
+                          event={e}
+                          self={self}
+                          candidates={candidates}
+                          onSubmit={handleEdit(e.id)}
+                          onCancel={() => {
+                            setEditError(null);
+                            setEditingId(null);
+                          }}
+                          error={editError}
+                        />
+                      ) : null}
                       <div className="flex flex-wrap gap-[6px]">
+                        {!e.locked && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditError(null);
+                              setEditingId(editingId === e.id ? null : e.id);
+                            }}
+                            aria-label="Edit event"
+                            aria-expanded={editingId === e.id}
+                            className="inline-flex items-center gap-[6px] border border-[var(--line)] px-[8px] py-[5px] font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                          >
+                            <Pencil aria-hidden size={11} />
+                            Edit event
+                          </button>
+                        )}
                         <form
                           action={toggleEventLockAction.bind(
                             null,

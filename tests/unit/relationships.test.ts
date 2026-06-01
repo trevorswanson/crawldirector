@@ -11,7 +11,10 @@ import {
   getCampaignRelationshipGraph,
   listConnectionsForEntity,
   setRelationshipLock,
+  updateRelationship,
 } from "@/server/services/relationships";
+import { applyAutoApprovedRelationshipChangeSet } from "@/server/services/review";
+import { OpKind } from "@/generated/prisma/client";
 
 function makeUser(email: string) {
   return prisma.user.create({ data: { email } });
@@ -180,6 +183,158 @@ describe("relationship service", () => {
       orderBy: { createdAt: "asc" },
     });
     expect(audit.map((entry) => entry.action)).toEqual(["LOCK", "UNLOCK"]);
+  });
+
+  it("edits an edge's fields through the pipeline, bumping version + provenance", async () => {
+    const owner = await makeUser("owner-edit@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const source = await makeEntity(owner.id, campaign.id, "Carl");
+    const target = await makeEntity(owner.id, campaign.id, "Donut");
+    const edge = await createRelationship(owner.id, campaign.id, source.id, {
+      type: "ALLY_OF",
+      targetId: target.id,
+      disposition: 40,
+      notes: "Early days",
+      secret: false,
+    });
+
+    const before = await prisma.relationship.findUnique({ where: { id: edge.id } });
+
+    const result = await updateRelationship(owner.id, campaign.id, edge.id, {
+      type: "RIVAL_OF",
+      disposition: -60,
+      notes: "Fell out after Floor 9",
+      secret: true,
+    });
+    expect(result).toMatchObject({ sourceId: source.id, targetId: target.id });
+
+    const row = await prisma.relationship.findUnique({ where: { id: edge.id } });
+    expect(row?.type).toBe("RIVAL_OF");
+    expect(row?.disposition).toBe(-60);
+    expect(row?.notes).toBe("Fell out after Floor 9");
+    expect(row?.secret).toBe(true);
+    // Endpoints are never re-pointed by an edit.
+    expect(row?.sourceId).toBe(source.id);
+    expect(row?.targetId).toBe(target.id);
+    expect(row?.version).toBe((before?.version ?? 0) + 1);
+
+    const provenance = await prisma.provenance.findMany({
+      where: { relationshipId: edge.id, changeSetId: { not: undefined } },
+    });
+    // The edit wrote its own provenance rows (one per edited field).
+    expect(provenance.some((p) => p.field === "type")).toBe(true);
+    expect(provenance.some((p) => p.field === "secret")).toBe(true);
+  });
+
+  it("clears optional edge fields when omitted on edit", async () => {
+    const owner = await makeUser("owner-edit-clear@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const source = await makeEntity(owner.id, campaign.id, "A");
+    const target = await makeEntity(owner.id, campaign.id, "B");
+    const edge = await createRelationship(owner.id, campaign.id, source.id, {
+      type: "ALLY_OF",
+      targetId: target.id,
+      disposition: 75,
+      notes: "Has notes",
+      secret: false,
+    });
+
+    await updateRelationship(owner.id, campaign.id, edge.id, {
+      type: "ALLY_OF",
+      secret: false,
+    });
+
+    const row = await prisma.relationship.findUnique({ where: { id: edge.id } });
+    expect(row?.disposition).toBeNull();
+    expect(row?.notes).toBeNull();
+  });
+
+  it("rejects a stale edge edit (base version mismatch)", async () => {
+    const owner = await makeUser("owner-stale-edge@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const source = await makeEntity(owner.id, campaign.id, "A");
+    const target = await makeEntity(owner.id, campaign.id, "B");
+    const edge = await createRelationship(owner.id, campaign.id, source.id, {
+      type: "ALLY_OF",
+      targetId: target.id,
+      secret: false,
+    });
+    const current = await prisma.relationship.findUniqueOrThrow({
+      where: { id: edge.id },
+      select: { type: true, version: true },
+    });
+
+    await expect(
+      applyAutoApprovedRelationshipChangeSet(owner.id, campaign.id, {
+        title: "Edit connection",
+        operations: [
+          {
+            op: OpKind.UPDATE_RELATIONSHIP,
+            targetId: edge.id,
+            patch: {
+              _baseVersion: { to: current.version + 5 },
+              type: { to: "RIVAL_OF" },
+            },
+          },
+        ],
+      }),
+    ).rejects.toThrow(/changed since you opened it/i);
+
+    const row = await prisma.relationship.findUnique({ where: { id: edge.id } });
+    expect(row?.type).toBe(current.type);
+  });
+
+  it("blocks editing a locked edge", async () => {
+    const owner = await makeUser("owner-edit-lock@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const source = await makeEntity(owner.id, campaign.id, "A");
+    const target = await makeEntity(owner.id, campaign.id, "B");
+    const edge = await createRelationship(owner.id, campaign.id, source.id, {
+      type: "ALLY_OF",
+      targetId: target.id,
+      secret: false,
+    });
+    await setRelationshipLock(owner.id, campaign.id, edge.id, true);
+
+    await expect(
+      updateRelationship(owner.id, campaign.id, edge.id, {
+        type: "RIVAL_OF",
+        secret: false,
+      }),
+    ).rejects.toThrow(/locked/);
+
+    const row = await prisma.relationship.findUnique({ where: { id: edge.id } });
+    expect(row?.type).toBe("ALLY_OF");
+  });
+
+  it("rejects editing a missing edge and blocks players", async () => {
+    const owner = await makeUser("owner-edit-missing@test.com");
+    const player = await makeUser("player-edit@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const source = await makeEntity(owner.id, campaign.id, "A");
+    const target = await makeEntity(owner.id, campaign.id, "B");
+    const edge = await createRelationship(owner.id, campaign.id, source.id, {
+      type: "ALLY_OF",
+      targetId: target.id,
+      secret: false,
+    });
+
+    await expect(
+      updateRelationship(owner.id, campaign.id, "missing", {
+        type: "ALLY_OF",
+        secret: false,
+      }),
+    ).rejects.toThrow(/not found/);
+
+    await expect(
+      updateRelationship(player.id, campaign.id, edge.id, {
+        type: "ALLY_OF",
+        secret: false,
+      }),
+    ).rejects.toBeInstanceOf(ServiceError);
   });
 
   it("blocks players from creating edges", async () => {

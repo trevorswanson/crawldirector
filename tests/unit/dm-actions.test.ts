@@ -18,8 +18,10 @@ const {
   setEntityLock,
   createRelationship,
   archiveRelationship,
+  updateRelationship,
   setRelationshipLock,
   createEvent,
+  updateEvent,
   archiveEvent,
   setEventLock,
   linkEventCause,
@@ -44,9 +46,11 @@ const {
   supersedeChangeSet: vi.fn(),
   setEntityLock: vi.fn(),
   createRelationship: vi.fn(),
+  updateRelationship: vi.fn(),
   archiveRelationship: vi.fn(),
   setRelationshipLock: vi.fn(),
   createEvent: vi.fn(),
+  updateEvent: vi.fn(),
   archiveEvent: vi.fn(),
   setEventLock: vi.fn(),
   linkEventCause: vi.fn(),
@@ -81,11 +85,13 @@ vi.mock("@/server/services/review", () => ({
 }));
 vi.mock("@/server/services/relationships", () => ({
   createRelationship,
+  updateRelationship,
   archiveRelationship,
   setRelationshipLock,
 }));
 vi.mock("@/server/services/events", () => ({
   createEvent,
+  updateEvent,
   archiveEvent,
   setEventLock,
   linkEventCause,
@@ -112,9 +118,12 @@ import {
   toggleEntityFieldLockAction,
   toggleEntityLockAction,
   createRelationshipAction,
+  updateRelationshipAction,
   archiveRelationshipAction,
   toggleRelationshipLockAction,
   createEventAction,
+  updateEventAction,
+  updateCampaignEventAction,
   createCampaignEventAction,
   archiveEventAction,
   toggleEventLockAction,
@@ -783,6 +792,52 @@ describe("createRelationshipAction", () => {
   });
 });
 
+describe("updateRelationshipAction", () => {
+  it("edits the edge and revalidates the viewed + both endpoint pages", async () => {
+    updateRelationship.mockResolvedValue({ id: "r1", sourceId: "e1", targetId: "e2" });
+
+    const result = await updateRelationshipAction(
+      "c1",
+      "e1",
+      "r1",
+      undefined,
+      form({ type: "RIVAL_OF", disposition: "-50", notes: "Fell out", secret: "true" }),
+    );
+
+    expect(result).toBeUndefined();
+    expect(updateRelationship).toHaveBeenCalledWith("u1", "c1", "r1", {
+      type: "RIVAL_OF",
+      disposition: -50,
+      notes: "Fell out",
+      secret: true,
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
+  });
+
+  it("surfaces a ServiceError and hides unexpected errors", async () => {
+    updateRelationship.mockRejectedValueOnce(new ServiceError("This relationship is locked."));
+    const locked = await updateRelationshipAction(
+      "c1",
+      "e1",
+      "r1",
+      undefined,
+      form({ type: "ALLY_OF" }),
+    );
+    expect(locked?.error).toBe("This relationship is locked.");
+
+    updateRelationship.mockRejectedValueOnce(new Error("boom"));
+    const generic = await updateRelationshipAction(
+      "c1",
+      "e1",
+      "r1",
+      undefined,
+      form({ type: "ALLY_OF" }),
+    );
+    expect(generic?.error).toMatch(/Could not edit the connection/);
+  });
+});
+
 describe("archiveRelationshipAction", () => {
   it("archives the edge and revalidates the source entity page", async () => {
     await archiveRelationshipAction("c1", "e1", "r1");
@@ -947,6 +1002,145 @@ describe("createCampaignEventAction", () => {
 
     expect(result?.error).toBe("Choose at least one participant.");
     expect(createEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateEventAction", () => {
+  it("edits the event and revalidates every participant timeline + campaign timeline", async () => {
+    updateEvent.mockResolvedValue({ id: "ev1", participantIds: ["e1", "e2"] });
+
+    const result = await updateEventAction(
+      "c1",
+      "e1",
+      "ev1",
+      undefined,
+      form({ title: "Revised", summary: "New", floor: "10", timeLabel: "Day 4", secret: "true" }),
+    );
+
+    expect(result).toBeUndefined();
+    expect(updateEvent).toHaveBeenCalledWith("u1", "c1", "ev1", {
+      title: "Revised",
+      summary: "New",
+      floor: 10,
+      timeLabel: "Day 4",
+      secret: true,
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+  });
+
+  it("returns a validation error for an empty title", async () => {
+    const result = await updateEventAction(
+      "c1",
+      "e1",
+      "ev1",
+      undefined,
+      form({ title: "" }),
+    );
+    expect(result?.error).toBeTruthy();
+    expect(updateEvent).not.toHaveBeenCalled();
+  });
+
+  it("parses participant rows when present", async () => {
+    updateEvent.mockResolvedValue({ id: "ev1", participantIds: ["e1", "e2"] });
+
+    await updateEventAction(
+      "c1",
+      "e1",
+      "ev1",
+      undefined,
+      form({
+        title: "Boss fight",
+        participantCount: "2",
+        participantId_0: "e1",
+        participantRole_0: "WITNESS",
+        participantId_1: "e2",
+        participantRole_1: "TARGET",
+      }),
+    );
+
+    expect(updateEvent).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      "ev1",
+      expect.objectContaining({
+        title: "Boss fight",
+        participants: [
+          { entityId: "e1", role: "WITNESS" },
+          { entityId: "e2", role: "TARGET" },
+        ],
+      }),
+    );
+  });
+
+  it("surfaces a ServiceError and hides unexpected errors", async () => {
+    updateEvent.mockRejectedValueOnce(new ServiceError("This event is locked."));
+    const locked = await updateEventAction(
+      "c1",
+      "e1",
+      "ev1",
+      undefined,
+      form({ title: "X" }),
+    );
+    expect(locked?.error).toBe("This event is locked.");
+
+    updateEvent.mockRejectedValueOnce(new Error("boom"));
+    const generic = await updateEventAction(
+      "c1",
+      "e1",
+      "ev1",
+      undefined,
+      form({ title: "X" }),
+    );
+    expect(generic?.error).toMatch(/Could not edit the event/);
+  });
+});
+
+describe("updateCampaignEventAction", () => {
+  it("edits from the timeline page and revalidates every affected participant + timeline", async () => {
+    updateEvent.mockResolvedValue({ id: "ev1", participantIds: ["e1", "e2", "e3"] });
+
+    const result = await updateCampaignEventAction(
+      "c1",
+      "ev1",
+      undefined,
+      form({
+        title: "Boss fight",
+        participantCount: "2",
+        participantId_0: "e1",
+        participantRole_0: "ACTOR",
+        participantId_1: "e3",
+        participantRole_1: "TARGET",
+      }),
+    );
+
+    expect(result).toBeUndefined();
+    expect(updateEvent).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      "ev1",
+      expect.objectContaining({
+        participants: [
+          { entityId: "e1", role: "ACTOR" },
+          { entityId: "e3", role: "TARGET" },
+        ],
+      }),
+    );
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e3");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+  });
+
+  it("surfaces a ServiceError from the timeline edit", async () => {
+    updateEvent.mockRejectedValueOnce(new ServiceError("This event is locked."));
+    const result = await updateCampaignEventAction(
+      "c1",
+      "ev1",
+      undefined,
+      form({ title: "X" }),
+    );
+    expect(result?.error).toBe("This event is locked.");
   });
 });
 

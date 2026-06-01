@@ -296,6 +296,18 @@ export const createRelationshipSchema = z.object({
 });
 export type CreateRelationshipInput = z.infer<typeof createRelationshipSchema>;
 
+// Editing an edge changes its mutable fields only; endpoints are fixed
+// (re-pointing an edge is a remove + add, so provenance stays honest).
+export const updateRelationshipSchema = z.object({
+  type: z.enum(relationshipTypeValues),
+  disposition: optionalDisposition,
+  notes: optionalText(500),
+  secret: z
+    .preprocess((value) => value === true || value === "true" || value === "on", z.boolean())
+    .default(false),
+});
+export type UpdateRelationshipInput = z.infer<typeof updateRelationshipSchema>;
+
 // Event participant roles (docs/01-domain-model.md). Any-to-any, like
 // relationship types — every role is valid for any entity.
 export const eventParticipantRoleValues = [
@@ -337,6 +349,25 @@ export const createEventSchema = z.object({
     .max(20, "Too many participants."),
 });
 export type CreateEventInput = z.infer<typeof createEventSchema>;
+
+// Editing an event changes its scalar fields plus (optionally) its participant
+// set. When `participants` is present the event's participants are reconciled to
+// match it; when absent, participants are left untouched.
+export const updateEventSchema = z.object({
+  title: z.string().trim().min(1, "Event title is required.").max(200),
+  summary: optionalText(2000),
+  floor: optionalFloor,
+  timeLabel: optionalText(120),
+  secret: z
+    .preprocess((value) => value === true || value === "true" || value === "on", z.boolean())
+    .default(false),
+  participants: z
+    .array(eventParticipantSchema)
+    .min(1, "An event needs at least one participant.")
+    .max(20, "Too many participants.")
+    .optional(),
+});
+export type UpdateEventInput = z.infer<typeof updateEventSchema>;
 
 export const changeOperationDecisionSchema = z.enum([
   "PENDING",

@@ -1,19 +1,28 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 
 const {
   createRelationshipAction,
+  updateRelationshipAction,
   archiveRelationshipAction,
   toggleRelationshipLockAction,
 } = vi.hoisted(() => ({
   createRelationshipAction: vi.fn(),
+  updateRelationshipAction: vi.fn(),
   archiveRelationshipAction: vi.fn(),
   toggleRelationshipLockAction: vi.fn(),
 }));
 
 vi.mock("@/app/(dm)/actions", () => ({
   createRelationshipAction,
+  updateRelationshipAction,
   archiveRelationshipAction,
   toggleRelationshipLockAction,
 }));
@@ -142,6 +151,104 @@ describe("ConnectionsPanel", () => {
       "lucide-lock",
     );
     expect(screen.queryByRole("button", { name: "Remove connection" })).toBeNull();
+  });
+
+  it("edits a connection: prefilled form, submits, and closes on success", async () => {
+    updateRelationshipAction.mockResolvedValue(undefined);
+    render(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="e1"
+        sourceType="CRAWLER"
+        connections={[connection({ notes: "Old notes" })]}
+        candidates={candidates}
+      />,
+    );
+
+    // open the inline edit form
+    fireEvent.click(screen.getByRole("button", { name: "Edit connection" }));
+
+    // current values are prefilled
+    const typeSelect = screen.getByLabelText("Relationship type") as HTMLSelectElement;
+    expect(typeSelect.value).toBe("ALLY_OF");
+    expect((screen.getByLabelText("Disposition") as HTMLInputElement).value).toBe("50");
+    expect((screen.getByLabelText("Notes") as HTMLTextAreaElement).value).toBe("Old notes");
+
+    // change the type and save
+    fireEvent.change(typeSelect, { target: { value: "RIVAL_OF" } });
+    fireEvent.submit(typeSelect.closest("form")!);
+
+    await waitFor(() => expect(updateRelationshipAction).toHaveBeenCalledTimes(1));
+    expect(updateRelationshipAction).toHaveBeenCalledWith(
+      "c1",
+      "e1",
+      "r1",
+      undefined,
+      expect.any(FormData),
+    );
+    // form closes once the edit resolves without error
+    await waitFor(() => expect(screen.queryByLabelText("Relationship type")).toBeNull());
+  });
+
+  it("keeps the edit form open and shows the error when an edit fails", async () => {
+    updateRelationshipAction.mockResolvedValue({ error: "This relationship is locked." });
+    render(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="e1"
+        sourceType="CRAWLER"
+        connections={[connection()]}
+        candidates={candidates}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit connection" }));
+    fireEvent.submit(screen.getByLabelText("Relationship type").closest("form")!);
+
+    await waitFor(() =>
+      expect(screen.getByText("This relationship is locked.")).toBeDefined(),
+    );
+    // stays open for correction
+    expect(screen.getByLabelText("Relationship type")).toBeDefined();
+  });
+
+  it("cancels and toggles the edit form closed without submitting", () => {
+    render(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="e1"
+        sourceType="CRAWLER"
+        connections={[connection()]}
+        candidates={candidates}
+      />,
+    );
+
+    // Cancel closes the form.
+    fireEvent.click(screen.getByRole("button", { name: "Edit connection" }));
+    expect(screen.getByLabelText("Relationship type")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByLabelText("Relationship type")).toBeNull();
+
+    // Clicking the edit toggle again opens then closes it.
+    fireEvent.click(screen.getByRole("button", { name: "Edit connection" }));
+    expect(screen.getByLabelText("Relationship type")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Edit connection" }));
+    expect(screen.queryByLabelText("Relationship type")).toBeNull();
+    expect(updateRelationshipAction).not.toHaveBeenCalled();
+  });
+
+  it("hides the edit control for locked edges", () => {
+    render(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="e1"
+        sourceType="CRAWLER"
+        connections={[connection({ locked: true })]}
+        candidates={candidates}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Edit connection" })).toBeNull();
   });
 
   it("hides destructive remove controls for locked edges", () => {

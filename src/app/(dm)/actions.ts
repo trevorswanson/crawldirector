@@ -19,11 +19,14 @@ import {
   lockFieldSchema,
   reviewEditValueKindSchema,
   updateEntitySchema,
+  updateEventSchema,
+  updateRelationshipSchema,
 } from "@/lib/validation";
 import {
   archiveRelationship,
   createRelationship,
   setRelationshipLock,
+  updateRelationship,
 } from "@/server/services/relationships";
 import {
   archiveEvent,
@@ -31,6 +34,7 @@ import {
   createEvent,
   linkEventCause,
   setEventLock,
+  updateEvent,
 } from "@/server/services/events";
 import {
   archiveEntity,
@@ -508,6 +512,38 @@ export async function createRelationshipAction(
   return undefined;
 }
 
+export async function updateRelationshipAction(
+  campaignId: string,
+  entityId: string,
+  relationshipId: string,
+  _prev: RelationshipActionState,
+  formData: FormData,
+): Promise<RelationshipActionState> {
+  const user = await requireUser();
+  const parsed = updateRelationshipSchema.safeParse({
+    type: formData.get("type"),
+    disposition: formData.get("disposition"),
+    notes: formData.get("notes"),
+    secret: formData.get("secret"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  let result: { sourceId: string; targetId: string };
+  try {
+    result = await updateRelationship(user.id, campaignId, relationshipId, parsed.data);
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    return { error: "Could not edit the connection. Please try again." };
+  }
+
+  for (const id of new Set([entityId, result.sourceId, result.targetId])) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${id}`);
+  }
+  return undefined;
+}
+
 export async function archiveRelationshipAction(
   campaignId: string,
   entityId: string,
@@ -543,6 +579,27 @@ export type EventCausalityActionState = { error?: string } | undefined;
 function parseParticipantRole(value: FormDataEntryValue | null) {
   const parsed = z.enum(eventParticipantRoleValues).safeParse(value);
   return parsed.success ? parsed.data : "ACTOR";
+}
+
+// Read the indexed participant rows (`participantId_N` / `participantRole_N`,
+// counted by `participantCount`) a multi-participant event form submits, deduped
+// on (entity, role). Returns `undefined` when no participant rows are present so
+// callers can distinguish "leave participants untouched" from "set to empty".
+function parseParticipantRows(formData: FormData) {
+  if (formData.get("participantCount") == null) return undefined;
+  const count = Number(formData.get("participantCount") ?? 0);
+  const participants: { entityId: string; role: ReturnType<typeof parseParticipantRole> }[] = [];
+  const seen = new Set<string>();
+  for (let index = 0; index < Math.min(count, 20); index += 1) {
+    const entityId = formData.get(`participantId_${index}`)?.toString().trim();
+    if (!entityId) continue;
+    const role = parseParticipantRole(formData.get(`participantRole_${index}`));
+    const key = `${entityId}:${role}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    participants.push({ entityId, role });
+  }
+  return participants;
 }
 
 export async function createEventAction(
@@ -591,6 +648,79 @@ export async function createEventAction(
   if (otherId) {
     revalidatePath(`/campaigns/${campaignId}/entities/${otherId}`);
   }
+  return undefined;
+}
+
+export async function updateEventAction(
+  campaignId: string,
+  entityId: string,
+  eventId: string,
+  _prev: EventActionState,
+  formData: FormData,
+): Promise<EventActionState> {
+  const user = await requireUser();
+  const participants = parseParticipantRows(formData);
+  const parsed = updateEventSchema.safeParse({
+    title: formData.get("title"),
+    summary: formData.get("summary"),
+    floor: formData.get("floor"),
+    timeLabel: formData.get("timeLabel"),
+    secret: formData.get("secret"),
+    ...(participants ? { participants } : {}),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  let result: { participantIds: string[] };
+  try {
+    result = await updateEvent(user.id, campaignId, eventId, parsed.data);
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    return { error: "Could not edit the event. Please try again." };
+  }
+
+  for (const id of new Set([...result.participantIds, entityId])) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${id}`);
+  }
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
+  return undefined;
+}
+
+// Edit an event from the campaign timeline page (no single "viewed entity"):
+// revalidates every affected participant timeline plus the campaign timeline.
+export async function updateCampaignEventAction(
+  campaignId: string,
+  eventId: string,
+  _prev: EventActionState,
+  formData: FormData,
+): Promise<EventActionState> {
+  const user = await requireUser();
+  const participants = parseParticipantRows(formData);
+  const parsed = updateEventSchema.safeParse({
+    title: formData.get("title"),
+    summary: formData.get("summary"),
+    floor: formData.get("floor"),
+    timeLabel: formData.get("timeLabel"),
+    secret: formData.get("secret"),
+    ...(participants ? { participants } : {}),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  let result: { participantIds: string[] };
+  try {
+    result = await updateEvent(user.id, campaignId, eventId, parsed.data);
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    return { error: "Could not edit the event. Please try again." };
+  }
+
+  for (const id of result.participantIds) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${id}`);
+  }
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
   return undefined;
 }
 

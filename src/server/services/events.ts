@@ -7,7 +7,12 @@ import {
   Visibility,
 } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
-import { createEventSchema, type CreateEventInput } from "@/lib/validation";
+import {
+  createEventSchema,
+  updateEventSchema,
+  type CreateEventInput,
+  type UpdateEventInput,
+} from "@/lib/validation";
 import { prisma } from "@/server/db";
 import {
   applyAutoApprovedEventChangeSet,
@@ -46,8 +51,12 @@ export type EntityEvent = {
   secret: boolean;
   locked: boolean;
   source: ChangeSource;
-  // The viewed entity's role in this event.
+  // The viewed entity's role in this event (its first, for the compact chip).
   role: EventParticipantRole;
+  // Every role the viewed entity holds on this event (an entity can be e.g.
+  // both ACTOR and TARGET). The edit form seeds a row per role so editing
+  // never silently drops the entity's other-role participations.
+  selfRoles: EventParticipantRole[];
   // Other participants (the viewed entity excluded), visibility-scoped.
   others: { id: string; name: string; type: string; role: EventParticipantRole }[];
   causedBy: EventCausalitySummary[];
@@ -97,7 +106,7 @@ function isPlayerVisible(entity: {
 // Build the flexible in-game time JSON ({ floor?, label? }) the Event stores,
 // plus the integer order key the timeline sorts by (DCC time is irregular, so
 // floor is the natural coarse ordering — see docs/01-domain-model.md).
-function buildInGameTime(input: CreateEventInput) {
+function buildInGameTime(input: { floor?: number; timeLabel?: string }) {
   const time: { floor?: number; label?: string } = {};
   if (typeof input.floor === "number") time.floor = input.floor;
   const label = nullIfEmpty(input.timeLabel);
@@ -175,6 +184,76 @@ export async function createEvent(
     operations: [{ op: OpKind.CREATE_EVENT, patch }],
   });
   return { id: result.targetIds[0] };
+}
+
+/**
+ * Edit an event's scalar fields (title/summary/in-game time/secret) through the
+ * review pipeline as an auto-approved DM change set, so the edit carries
+ * provenance and respects locks. Participant editing is a separate slice.
+ * DM/co-DM only.
+ */
+export async function updateEvent(
+  userId: string,
+  campaignId: string,
+  eventId: string,
+  input: UpdateEventInput,
+) {
+  const parsed = updateEventSchema.parse(input);
+  await assertCampaignDm(userId, campaignId);
+
+  const existing = await prisma.event.findFirst({
+    where: { id: eventId, campaignId, status: { not: CanonStatus.ARCHIVED } },
+    select: { id: true, version: true, participants: { select: { entityId: true } } },
+  });
+  if (!existing) throw new ServiceError("Event not found.");
+
+  // Every desired participant must be live canon before we route the change set.
+  if (parsed.participants) {
+    const participantIds = Array.from(
+      new Set(parsed.participants.map((participant) => participant.entityId)),
+    );
+    const found = await prisma.entity.findMany({
+      where: { campaignId, id: { in: participantIds }, status: CanonStatus.CANON },
+      select: { id: true },
+    });
+    if (found.length !== participantIds.length) {
+      throw new ServiceError("Participant entity not found.");
+    }
+  }
+
+  const inGameTime = buildInGameTime(parsed);
+  const patch: ReviewPatch = {
+    _baseVersion: { to: existing.version },
+    title: { to: parsed.title },
+    summary: { to: nullIfEmpty(parsed.summary) },
+    inGameTime: { to: inGameTime },
+    orderKey: { to: typeof parsed.floor === "number" ? parsed.floor : 0 },
+    secret: { to: parsed.secret },
+  };
+  if (parsed.participants) {
+    patch.participants = {
+      to: parsed.participants.map((participant) => ({
+        entityId: participant.entityId,
+        role: participant.role,
+      })),
+    };
+  }
+
+  await applyAutoApprovedEventChangeSet(userId, campaignId, {
+    title: "Edit event",
+    operations: [{ op: OpKind.UPDATE_EVENT, targetId: eventId, patch }],
+  });
+
+  // Affected pages = entities that were participants before OR after the edit,
+  // so timelines that lost the event get revalidated too.
+  const oldIds = existing.participants.map((participant) => participant.entityId);
+  const newIds = parsed.participants
+    ? parsed.participants.map((participant) => participant.entityId)
+    : oldIds;
+  return {
+    id: eventId,
+    participantIds: Array.from(new Set([...oldIds, ...newIds])),
+  };
 }
 
 /**
@@ -258,7 +337,10 @@ export async function listEventsForEntity(
 
   const timeline: EntityEvent[] = [];
   for (const event of events) {
-    const self = event.participants.find((p) => p.entityId === entityId);
+    const selfParticipations = event.participants.filter(
+      (p) => p.entityId === entityId,
+    );
+    const self = selfParticipations[0];
     if (!self) continue;
     const others = event.participants
       .filter((p) => p.entityId !== entityId)
@@ -280,6 +362,7 @@ export async function listEventsForEntity(
       locked: event.locked,
       source: event.source,
       role: self.role,
+      selfRoles: selfParticipations.map((p) => p.role),
       others,
       causedBy: event.causedBy
         .filter((edge) => isPlayerVisibleEvent(edge.cause, isPlayer))

@@ -1549,6 +1549,15 @@ async function applyRelationshipOperation(
   switch (operation.op) {
     case OpKind.CREATE_RELATIONSHIP:
       return applyCreateRelationship(tx, changeSet, operation.id, patch);
+    case OpKind.UPDATE_RELATIONSHIP:
+      if (!operation.targetId) throw new ServiceError("Missing relationship target.");
+      return applyUpdateRelationship(
+        tx,
+        changeSet,
+        operation.id,
+        operation.targetId,
+        patch,
+      );
     case OpKind.DELETE_RELATIONSHIP:
       if (!operation.targetId) throw new ServiceError("Missing relationship target.");
       return applyDeleteRelationship(tx, changeSet, operation.id, operation.targetId);
@@ -1617,6 +1626,76 @@ async function applyCreateRelationship(
     },
   });
   return relationship.id;
+}
+
+// Edit a live edge's mutable fields (type/disposition/notes/secret). Endpoints
+// are never edited — re-pointing an edge is a delete + recreate so provenance
+// stays honest. Locked edges block, like deletes.
+async function applyUpdateRelationship(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operationId: string,
+  relationshipId: string,
+  patch: ReviewPatch,
+) {
+  const relationship = await tx.relationship.findFirst({
+    where: {
+      id: relationshipId,
+      campaignId: changeSet.campaignId,
+      status: { not: CanonStatus.ARCHIVED },
+    },
+    select: { id: true, locked: true, version: true },
+  });
+  if (!relationship) throw new ServiceError("Relationship not found.");
+
+  // Reject a stale edit (the row advanced since this edit was built), the same
+  // way applyUpdateEntity does — so concurrent DM edits don't silently clobber.
+  const expectedVersion = readTo(patch, "_baseVersion");
+  if (typeof expectedVersion === "number" && expectedVersion !== relationship.version) {
+    await tx.changeOperation.update({
+      where: { id: operationId },
+      data: { isStale: true },
+    });
+    throw new ServiceError(
+      "This relationship changed since you opened it. Reload and try again.",
+    );
+  }
+
+  if (relationship.locked) {
+    await tx.changeOperation.update({
+      where: { id: operationId },
+      data: { blockedByLock: true },
+    });
+    throw new ServiceError("This relationship is locked.");
+  }
+
+  const data: Prisma.RelationshipUpdateInput = { version: { increment: 1 } };
+  if ("type" in patch) {
+    const type = readTo(patch, "type");
+    if (typeof type !== "string") throw new ServiceError("Relationship type is required.");
+    data.type = type as RelationshipType;
+  }
+  if ("disposition" in patch) data.disposition = optionalNumber(readTo(patch, "disposition"));
+  if ("notes" in patch) data.notes = nullableString(readTo(patch, "notes"));
+  if ("secret" in patch) data.secret = booleanWithDefault(readTo(patch, "secret"), false);
+
+  await tx.relationship.update({
+    where: { id: relationshipId },
+    data,
+    select: { id: true },
+  });
+  await writeRelationshipProvenance(tx, changeSet, relationshipId, patch);
+  await tx.auditLog.create({
+    data: {
+      campaignId: changeSet.campaignId,
+      actorUserId: changeSet.reviewedById ?? changeSet.actorUserId ?? "",
+      action: "APPLY_OPERATION",
+      targetType: "CHANGE_OPERATION",
+      targetId: operationId,
+      detail: { relationshipId, op: OpKind.UPDATE_RELATIONSHIP },
+    },
+  });
+  return relationshipId;
 }
 
 async function applyDeleteRelationship(
@@ -1827,9 +1906,22 @@ async function applyUpdateEvent(
       campaignId: changeSet.campaignId,
       status: { not: CanonStatus.ARCHIVED },
     },
-    select: { id: true, locked: true },
+    select: { id: true, locked: true, version: true },
   });
   if (!event) throw new ServiceError("Event not found.");
+
+  // Reject a stale edit (the row advanced since this edit was built), the same
+  // way applyUpdateEntity does — so concurrent DM edits don't silently clobber.
+  const expectedVersion = readTo(patch, "_baseVersion");
+  if (typeof expectedVersion === "number" && expectedVersion !== event.version) {
+    await tx.changeOperation.update({
+      where: { id: operationId },
+      data: { isStale: true },
+    });
+    throw new ServiceError(
+      "This event changed since you opened it. Reload and try again.",
+    );
+  }
 
   if (event.locked) {
     await tx.changeOperation.update({
@@ -1839,15 +1931,60 @@ async function applyUpdateEvent(
     throw new ServiceError("This event is locked.");
   }
 
-  // This slice's only UPDATE_EVENT use is soft-archive (a status change).
-  // Editing event fields (title/time/secret) lands with the event
-  // locking/editing slice, alongside its own coverage.
+  // UPDATE_EVENT covers both soft-archive (a status change) and field edits.
+  // Participant editing is not handled here yet — it lands with its own slice
+  // (see docs/PROGRESS.md M3 follow-ups).
   const data: Prisma.EventUpdateInput = { version: { increment: 1 } };
   if ("status" in patch) {
     data.status = (readTo(patch, "status") as CanonStatus) ?? CanonStatus.CANON;
   }
+  if ("title" in patch) {
+    const title = readTo(patch, "title");
+    if (typeof title !== "string" || title.length === 0) {
+      throw new ServiceError("Event title is required.");
+    }
+    data.title = title;
+  }
+  if ("summary" in patch) data.summary = nullableString(readTo(patch, "summary"));
+  if ("description" in patch) data.description = nullableString(readTo(patch, "description"));
+  if ("inGameTime" in patch) data.inGameTime = jsonObject(readTo(patch, "inGameTime"));
+  if ("orderKey" in patch) data.orderKey = numberWithDefault(readTo(patch, "orderKey"), 0);
+  if ("secret" in patch) data.secret = booleanWithDefault(readTo(patch, "secret"), false);
 
   await tx.event.update({ where: { id: eventId }, data, select: { id: true } });
+
+  // Participant editing: when the patch carries a participant list, reconcile it
+  // against the live rows — add new (entity, role) pairs, drop removed ones, and
+  // leave unchanged rows in place (preserving their order). Every desired
+  // participant must be live canon, and an event always keeps ≥1 participant.
+  if ("participants" in patch) {
+    const desired = parseEventParticipants(readTo(patch, "participants"));
+    if (desired.length === 0) {
+      throw new ServiceError("An event needs at least one participant.");
+    }
+    for (const participant of desired) {
+      await assertCanonEntity(tx, changeSet.campaignId, participant.entityId);
+    }
+    const existing = await tx.eventParticipant.findMany({
+      where: { eventId },
+      select: { id: true, entityId: true, role: true },
+    });
+    const key = (entityId: string, role: EventParticipantRole) => `${entityId}:${role}`;
+    const desiredKeys = new Set(desired.map((p) => key(p.entityId, p.role)));
+    const existingKeys = new Set(existing.map((p) => key(p.entityId, p.role)));
+    const toDelete = existing.filter((p) => !desiredKeys.has(key(p.entityId, p.role)));
+    const toCreate = desired.filter((p) => !existingKeys.has(key(p.entityId, p.role)));
+    if (toDelete.length > 0) {
+      await tx.eventParticipant.deleteMany({
+        where: { id: { in: toDelete.map((p) => p.id) } },
+      });
+    }
+    if (toCreate.length > 0) {
+      await tx.eventParticipant.createMany({
+        data: toCreate.map((p) => ({ eventId, entityId: p.entityId, role: p.role })),
+      });
+    }
+  }
   await writeEventProvenance(tx, changeSet, eventId, patch);
   await tx.auditLog.create({
     data: {
