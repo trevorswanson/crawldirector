@@ -71,7 +71,7 @@ function NewEventForm({
   };
 
   return (
-    <form action={handleSubmit} className="flex flex-col gap-3 border-y border-[var(--line)] py-4">
+    <form action={handleSubmit} className="flex flex-col gap-3 border-b border-[var(--line)] py-4">
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
         <input
           name="title"
@@ -221,10 +221,10 @@ export function CampaignTimeline({
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--line)] pb-4">
         <div>
           <Kicker dim noLead className="mb-2">
-            M3 timeline
+            Timeline
           </Kicker>
           <h1 className="font-display text-[30px] font-bold leading-tight">
-            Campaign Timeline
+            Crawl Timeline
           </h1>
         </div>
         {!open && (
