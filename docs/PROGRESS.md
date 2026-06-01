@@ -57,6 +57,38 @@ in the general search bar.
 membership, log events with participants, and traverse cause→effect chains;
 relationships/events are reviewable + lockable.
 
+### Done — slice 8: relationship + event field editing through the pipeline (2026-06-01)
+
+- [x] Wired `UPDATE_RELATIONSHIP` into the review service (`applyUpdateRelationship`):
+      edits an edge's mutable fields (type/disposition/notes/secret) as an
+      auto-approved DM change set, bumping `version`, writing per-field relationship
+      provenance + an `APPLY_OPERATION` audit row. Endpoints are never re-pointed
+      (that stays a remove + add so provenance is honest), and locked edges block
+      with `blockedByLock`, like deletes.
+- [x] Extended `applyUpdateEvent` so `UPDATE_EVENT` covers field edits
+      (title/summary/in-game time/orderKey/secret) in addition to soft-archive —
+      finishing the editing path explicitly deferred in slice 2. Locked events still
+      block; participant editing remains a later slice.
+- [x] Added `updateRelationshipSchema` / `updateEventSchema` (Zod), the
+      `updateRelationship` / `updateEvent` services (both route through the existing
+      auto-approved change set with `_baseVersion`), and `updateRelationshipAction`
+      / `updateEventAction` (revalidate the viewed entity, both endpoints /
+      participants, and the campaign timeline).
+- [x] Added inline edit forms to the Connections panel (type picker reusing
+      `relationshipPickerOptions` + disposition/notes/secret) and the Timeline panel
+      (title/summary/floor/time-label/secret). Both are prefilled from the current
+      record, hidden when the edge/event is locked, and surface service errors
+      without losing input.
+- [x] Added DB-backed service coverage (edit applies + version bump + provenance,
+      optional-field clearing, locked-edit block, missing-target + player denial),
+      server-action coverage (revalidation, validation, ServiceError + generic
+      error paths), and component coverage (prefilled form, submit/close, error
+      retains form, cancel/toggle, hidden-when-locked). Verified in-browser against
+      the seeded Demo Campaign: edited Carl↔Donut edge `ALLY_OF→RIVAL_OF` (secret,
+      disposition `60→-40`) and the Floor 9 boss event (floor `9→10`), both with
+      version bumps + provenance. lint, typecheck, build, and coverage gate green
+      (statements ratcheted back over the 95% floor).
+
 ### Done — slice 7: campaign timeline page + multi-participant logging (2026-06-01)
 
 - [x] Added `listCampaignTimeline` to the `events` service: a campaign-wide,
@@ -249,12 +281,12 @@ relationships/events are reviewable + lockable.
 
 ### Notes / follow-ups (M3)
 
-- Next slices: event effects (structured deltas applied on approval);
-      relationship/event editing and pending (AI/import) relationship/event
-      proposals in the Review Queue; knowledge/reveal grants for fog of war.
-      (Group hierarchy crawler→party→guild rollup view shipped in slice 5; the
-      campaign-wide relationship graph view shipped in slice 6; the campaign
-      timeline page with multi-participant logging shipped in slice 7.)
+- Next slices: event effects (structured deltas applied on approval); pending
+      (AI/import) relationship/event proposals in the Review Queue; knowledge/reveal
+      grants for fog of war. (Group hierarchy crawler→party→guild rollup view
+      shipped in slice 5; the campaign-wide relationship graph view shipped in
+      slice 6; the campaign timeline page with multi-participant logging shipped in
+      slice 7; relationship + event field editing shipped in slice 8.)
 - The relationship graph now follows the M3 graph mockup's force-directed
       pan/zoom + connections-panel shape and shows only connected entities. At
       scale, node labels will crowd — the same typeahead/search note as the
@@ -268,8 +300,9 @@ relationships/events are reviewable + lockable.
       at scale this should become a typeahead/search (revisit with M5 search).
 - The entity Timeline panel still logs events with the viewed entity plus one
       optional co-participant. Use the campaign timeline page for arbitrary
-      multi-participant event logging; existing event field/participant editing
-      is still a later M3 slice.
+      multi-participant event logging. Event/relationship field editing landed in
+      slice 8; editing an event's *participants* (adding/removing/re-roling them
+      after the fact) is still a later M3 slice.
 
 ## M2 — Review pipeline ✅ (complete)
 

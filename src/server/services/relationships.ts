@@ -9,7 +9,9 @@ import {
 import { ServiceError } from "@/lib/errors";
 import {
   createRelationshipSchema,
+  updateRelationshipSchema,
   type CreateRelationshipInput,
+  type UpdateRelationshipInput,
 } from "@/lib/validation";
 import { prisma } from "@/server/db";
 import {
@@ -123,6 +125,41 @@ export async function createRelationship(
     operations: [{ op: OpKind.CREATE_RELATIONSHIP, patch }],
   });
   return { id: result.targetIds[0] };
+}
+
+/**
+ * Edit a live edge's mutable fields (type/disposition/notes/secret) through the
+ * review pipeline as an auto-approved DM change set, so the edit carries
+ * provenance and respects locks. Endpoints are never edited. DM/co-DM only.
+ */
+export async function updateRelationship(
+  userId: string,
+  campaignId: string,
+  relationshipId: string,
+  input: UpdateRelationshipInput,
+) {
+  const parsed = updateRelationshipSchema.parse(input);
+  await assertCampaignDm(userId, campaignId);
+
+  const existing = await prisma.relationship.findFirst({
+    where: { id: relationshipId, campaignId, status: { not: CanonStatus.ARCHIVED } },
+    select: { id: true, version: true, sourceId: true, targetId: true },
+  });
+  if (!existing) throw new ServiceError("Relationship not found.");
+
+  const patch: ReviewPatch = {
+    _baseVersion: { to: existing.version },
+    type: { to: parsed.type },
+    disposition: { to: parsed.disposition ?? null },
+    notes: { to: nullIfEmpty(parsed.notes) },
+    secret: { to: parsed.secret },
+  };
+
+  await applyAutoApprovedRelationshipChangeSet(userId, campaignId, {
+    title: "Edit connection",
+    operations: [{ op: OpKind.UPDATE_RELATIONSHIP, targetId: relationshipId, patch }],
+  });
+  return { id: relationshipId, sourceId: existing.sourceId, targetId: existing.targetId };
 }
 
 /**

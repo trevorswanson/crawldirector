@@ -36,9 +36,12 @@ campaign-wide **Relationship Graph** view (`/campaigns/[id]/graph`, linked from
 the nav) renders every visibility-scoped edge as a mockup-aligned force-directed
 node-link diagram with filters, pan/zoom, and a connections panel. A campaign
 **Timeline** page (`/campaigns/[id]/timeline`) renders the visibility-scoped
-event stream and logs multi-participant events. Still to come in M3: structured
-event effects, edge/event editing and pending relationship/event proposals,
-time-bounded membership, and knowledge/reveal grants. **M3.5 (tagging)** is
+event stream and logs multi-participant events. DMs can also **edit** live edges
+(type/disposition/notes/secret) and events (title/summary/in-game time/secret)
+inline through the pipeline (version-bumped, provenance-tracked, lock-aware).
+Still to come in M3: structured event effects, event *participant* editing,
+pending relationship/event proposals, time-bounded membership, and
+knowledge/reveal grants. **M3.5 (tagging)** is
 underway: the service layer (campaign tag list, tag filtering, tag-aware search)
 plus the UI — a tag-selection input with campaign autocomplete on the entity
 form, a Tags facet in the World Browser sidebar, and clickable tag badges — are

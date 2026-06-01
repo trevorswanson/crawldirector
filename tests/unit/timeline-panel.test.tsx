@@ -10,12 +10,14 @@ import {
 
 const {
   createEventAction,
+  updateEventAction,
   archiveEventAction,
   toggleEventLockAction,
   linkEventCauseAction,
   archiveEventCausalityAction,
 } = vi.hoisted(() => ({
   createEventAction: vi.fn(),
+  updateEventAction: vi.fn(),
   archiveEventAction: vi.fn(),
   toggleEventLockAction: vi.fn(),
   linkEventCauseAction: vi.fn(),
@@ -24,6 +26,7 @@ const {
 
 vi.mock("@/app/(dm)/actions", () => ({
   createEventAction,
+  updateEventAction,
   archiveEventAction,
   toggleEventLockAction,
   linkEventCauseAction,
@@ -197,6 +200,98 @@ describe("TimelinePanel", () => {
     expect(screen.getByText("Locked")).toBeDefined();
     expect(screen.getByRole("button", { name: "Unlock event" })).toBeDefined();
     expect(screen.queryByRole("button", { name: /Remove event/ })).toBeNull();
+  });
+
+  it("edits an event: prefilled form, submits, and closes on success", async () => {
+    updateEventAction.mockResolvedValue(undefined);
+    render(
+      <TimelinePanel
+        campaignId="c1"
+        entityId="e1"
+        events={[event()]}
+        candidates={candidates}
+        initialEventId="ev1"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit event" }));
+
+    // current values are prefilled into the edit form
+    const titleInput = screen.getByLabelText("Event title") as HTMLInputElement;
+    expect(titleInput.value).toBe("Floor 9 boss fight");
+    expect((screen.getByLabelText("Floor") as HTMLInputElement).value).toBe("9");
+    expect((screen.getByLabelText("Time label") as HTMLInputElement).value).toBe("Day 3");
+
+    fireEvent.change(titleInput, { target: { value: "Revised title" } });
+    fireEvent.submit(titleInput.closest("form")!);
+
+    await waitFor(() => expect(updateEventAction).toHaveBeenCalledTimes(1));
+    expect(updateEventAction).toHaveBeenCalledWith(
+      "c1",
+      "e1",
+      "ev1",
+      undefined,
+      expect.any(FormData),
+    );
+    await waitFor(() => expect(screen.queryByLabelText("Event title")).toBeNull());
+  });
+
+  it("keeps the edit form open and shows the error when an event edit fails", async () => {
+    updateEventAction.mockResolvedValue({ error: "This event is locked." });
+    render(
+      <TimelinePanel
+        campaignId="c1"
+        entityId="e1"
+        events={[event()]}
+        candidates={candidates}
+        initialEventId="ev1"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit event" }));
+    fireEvent.submit(screen.getByLabelText("Event title").closest("form")!);
+
+    await waitFor(() =>
+      expect(screen.getByText("This event is locked.")).toBeDefined(),
+    );
+    expect(screen.getByLabelText("Event title")).toBeDefined();
+  });
+
+  it("cancels and toggles the event edit form closed without submitting", () => {
+    render(
+      <TimelinePanel
+        campaignId="c1"
+        entityId="e1"
+        events={[event()]}
+        candidates={candidates}
+        initialEventId="ev1"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit event" }));
+    expect(screen.getByLabelText("Event title")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByLabelText("Event title")).toBeNull();
+
+    // toggling the edit control off again closes it
+    fireEvent.click(screen.getByRole("button", { name: "Edit event" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit event" }));
+    expect(screen.queryByLabelText("Event title")).toBeNull();
+    expect(updateEventAction).not.toHaveBeenCalled();
+  });
+
+  it("hides the edit control for locked events", () => {
+    render(
+      <TimelinePanel
+        campaignId="c1"
+        entityId="e1"
+        events={[event({ locked: true })]}
+        candidates={candidates}
+        initialEventId="ev1"
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Edit event" })).toBeNull();
   });
 
   it("re-opens the targeted event when the deep link changes", () => {

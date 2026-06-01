@@ -3,12 +3,13 @@
 import { useMemo, useState } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
-import { ArrowRight, Lock, Plus, Unlock, X } from "lucide-react";
+import { ArrowRight, Lock, Pencil, Plus, Unlock, X } from "lucide-react";
 
 import {
   archiveRelationshipAction,
   createRelationshipAction,
   toggleRelationshipLockAction,
+  updateRelationshipAction,
 } from "@/app/(dm)/actions";
 import {
   EntityTypeahead,
@@ -184,6 +185,113 @@ function AddConnectionForm({
   );
 }
 
+function SaveButton({ label }: { label: string }) {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      className="inline-flex items-center justify-center gap-[6px] border border-[var(--line-strong)] bg-[var(--bg-3)] px-[10px] py-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-dim)] transition-[filter,color] hover:text-[var(--ink)] hover:brightness-110 disabled:opacity-50"
+    >
+      {pending ? "Saving..." : label}
+    </button>
+  );
+}
+
+function EditConnectionForm({
+  connection,
+  viewerType,
+  onSubmit,
+  onCancel,
+  error,
+}: {
+  connection: EntityConnection;
+  viewerType: EntityTypeValue;
+  onSubmit: (formData: FormData) => Promise<void>;
+  onCancel: () => void;
+  error: string | null;
+}) {
+  // Restore the edge's true orientation so the type picker ranks sensibly: for
+  // an incoming edge the other entity is the source and the viewed entity the
+  // target.
+  const edgeSourceType = (
+    connection.direction === "out" ? viewerType : connection.other.type
+  ) as EntityTypeValue;
+  const edgeTargetType = (
+    connection.direction === "out" ? connection.other.type : viewerType
+  ) as EntityTypeValue;
+  const options = useMemo(
+    () => relationshipPickerOptions(edgeSourceType, edgeTargetType),
+    [edgeSourceType, edgeTargetType],
+  );
+
+  return (
+    <form action={onSubmit} className="mt-[6px] flex flex-col gap-2 border border-[var(--line)] bg-[var(--bg-3)] px-[10px] py-[9px]">
+      <select
+        name="type"
+        defaultValue={connection.type}
+        aria-label="Relationship type"
+        className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] font-mono text-[11px] text-[var(--ink)]"
+      >
+        <optgroup label="Suggested">
+          {options.suggested.map((t) => (
+            <option key={t} value={t}>
+              {relationshipOptionLabel(t)}
+            </option>
+          ))}
+        </optgroup>
+        {options.categories.map((cat) => (
+          <optgroup key={cat.group} label={cat.label}>
+            {cat.types.map((t) => (
+              <option key={t} value={t}>
+                {relationshipOptionLabel(t)}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+      <input
+        name="disposition"
+        type="number"
+        min={-100}
+        max={100}
+        defaultValue={connection.disposition ?? ""}
+        placeholder="Disposition (−100…100)"
+        aria-label="Disposition"
+        className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
+      />
+      <textarea
+        name="notes"
+        rows={2}
+        maxLength={500}
+        defaultValue={connection.notes ?? ""}
+        placeholder="Notes (optional)"
+        aria-label="Notes"
+        className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
+      />
+      <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
+        <input type="checkbox" name="secret" value="true" defaultChecked={connection.secret} />
+        DM-only (secret)
+      </label>
+      {error && (
+        <p role="alert" className="text-[11px] text-[var(--no)]">
+          {error}
+        </p>
+      )}
+      <div className="flex gap-2">
+        <SaveButton label="Save connection" />
+        <button
+          type="button"
+          onClick={onCancel}
+          className="border border-[var(--line)] px-[10px] py-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:text-[var(--ink-dim)]"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export function ConnectionsPanel({
   campaignId,
   entityId,
@@ -199,6 +307,9 @@ export function ConnectionsPanel({
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Which edge is being edited inline, with its own error slot.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const handleSubmit = async (formData: FormData) => {
     setError(null);
@@ -207,6 +318,22 @@ export function ConnectionsPanel({
       setError(res.error);
     } else {
       setOpen(false);
+    }
+  };
+
+  const handleEdit = (relationshipId: string) => async (formData: FormData) => {
+    setEditError(null);
+    const res = await updateRelationshipAction(
+      campaignId,
+      entityId,
+      relationshipId,
+      undefined,
+      formData,
+    );
+    if (res?.error) {
+      setEditError(res.error);
+    } else {
+      setEditingId(null);
     }
   };
 
@@ -222,8 +349,8 @@ export function ConnectionsPanel({
 
       <div className="flex flex-col gap-[6px]">
         {connections.map((c) => (
+          <div key={c.id}>
           <div
-            key={c.id}
             className="group flex items-start gap-2 border border-[var(--line)] px-[10px] py-[9px]"
           >
             <Link
@@ -252,6 +379,21 @@ export function ConnectionsPanel({
                 </span>
               </div>
             </Link>
+            {!c.locked && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditError(null);
+                  setEditingId(editingId === c.id ? null : c.id);
+                }}
+                aria-label="Edit connection"
+                title="Edit connection"
+                aria-expanded={editingId === c.id}
+                className="inline-flex items-center border border-[var(--line)] px-[5px] py-[3px] text-[var(--ink-faint)] transition-colors hover:text-[var(--ink)]"
+              >
+                <Pencil aria-hidden size={12} />
+              </button>
+            )}
             <form
               action={toggleRelationshipLockAction.bind(
                 null,
@@ -297,6 +439,19 @@ export function ConnectionsPanel({
               </button>
             </form>
             )}
+          </div>
+          {editingId === c.id && (
+            <EditConnectionForm
+              connection={c}
+              viewerType={sourceType as EntityTypeValue}
+              onSubmit={handleEdit(c.id)}
+              onCancel={() => {
+                setEditError(null);
+                setEditingId(null);
+              }}
+              error={editError}
+            />
+          )}
           </div>
         ))}
       </div>

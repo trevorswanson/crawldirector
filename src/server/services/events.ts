@@ -7,7 +7,12 @@ import {
   Visibility,
 } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
-import { createEventSchema, type CreateEventInput } from "@/lib/validation";
+import {
+  createEventSchema,
+  updateEventSchema,
+  type CreateEventInput,
+  type UpdateEventInput,
+} from "@/lib/validation";
 import { prisma } from "@/server/db";
 import {
   applyAutoApprovedEventChangeSet,
@@ -97,7 +102,7 @@ function isPlayerVisible(entity: {
 // Build the flexible in-game time JSON ({ floor?, label? }) the Event stores,
 // plus the integer order key the timeline sorts by (DCC time is irregular, so
 // floor is the natural coarse ordering — see docs/01-domain-model.md).
-function buildInGameTime(input: CreateEventInput) {
+function buildInGameTime(input: { floor?: number; timeLabel?: string }) {
   const time: { floor?: number; label?: string } = {};
   if (typeof input.floor === "number") time.floor = input.floor;
   const label = nullIfEmpty(input.timeLabel);
@@ -175,6 +180,47 @@ export async function createEvent(
     operations: [{ op: OpKind.CREATE_EVENT, patch }],
   });
   return { id: result.targetIds[0] };
+}
+
+/**
+ * Edit an event's scalar fields (title/summary/in-game time/secret) through the
+ * review pipeline as an auto-approved DM change set, so the edit carries
+ * provenance and respects locks. Participant editing is a separate slice.
+ * DM/co-DM only.
+ */
+export async function updateEvent(
+  userId: string,
+  campaignId: string,
+  eventId: string,
+  input: UpdateEventInput,
+) {
+  const parsed = updateEventSchema.parse(input);
+  await assertCampaignDm(userId, campaignId);
+
+  const existing = await prisma.event.findFirst({
+    where: { id: eventId, campaignId, status: { not: CanonStatus.ARCHIVED } },
+    select: { id: true, version: true, participants: { select: { entityId: true } } },
+  });
+  if (!existing) throw new ServiceError("Event not found.");
+
+  const inGameTime = buildInGameTime(parsed);
+  const patch: ReviewPatch = {
+    _baseVersion: { to: existing.version },
+    title: { to: parsed.title },
+    summary: { to: nullIfEmpty(parsed.summary) },
+    inGameTime: { to: inGameTime },
+    orderKey: { to: typeof parsed.floor === "number" ? parsed.floor : 0 },
+    secret: { to: parsed.secret },
+  };
+
+  await applyAutoApprovedEventChangeSet(userId, campaignId, {
+    title: "Edit event",
+    operations: [{ op: OpKind.UPDATE_EVENT, targetId: eventId, patch }],
+  });
+  return {
+    id: eventId,
+    participantIds: existing.participants.map((participant) => participant.entityId),
+  };
 }
 
 /**

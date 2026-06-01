@@ -13,6 +13,7 @@ import {
   listCampaignTimeline,
   listEventsForEntity,
   setEventLock,
+  updateEvent,
 } from "@/server/services/events";
 
 function makeUser(email: string) {
@@ -710,5 +711,123 @@ describe("event service", () => {
     expect(succeeded.length).toBe(1);
     expect(failed.length).toBe(1);
     expect((failed[0] as PromiseRejectedResult).reason.message).toMatch(/cycle/i);
+  });
+});
+
+describe("updateEvent", () => {
+  it("edits an event's scalar fields through the pipeline, bumping version + provenance", async () => {
+    const owner = await makeUser("owner-edit@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Boss fight",
+      summary: "Initial summary",
+      floor: 9,
+      timeLabel: "Day 3",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    const before = await prisma.event.findUnique({ where: { id: event.id } });
+
+    const result = await updateEvent(owner.id, campaign.id, event.id, {
+      title: "Boss fight (revised)",
+      summary: "They actually fled",
+      floor: 10,
+      timeLabel: "Day 4",
+      secret: true,
+    });
+    expect(result.participantIds).toContain(carl.id);
+
+    const row = await prisma.event.findUnique({ where: { id: event.id } });
+    expect(row?.title).toBe("Boss fight (revised)");
+    expect(row?.summary).toBe("They actually fled");
+    expect(row?.secret).toBe(true);
+    expect(row?.orderKey).toBe(10);
+    expect(row?.inGameTime).toMatchObject({ floor: 10, label: "Day 4" });
+    expect(row?.version).toBe((before?.version ?? 0) + 1);
+
+    // The edit is visible on the entity timeline.
+    const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    expect(timeline[0].title).toBe("Boss fight (revised)");
+    expect(timeline[0].time).toMatchObject({ floor: 10, label: "Day 4" });
+
+    const provenance = await prisma.provenance.findMany({
+      where: { eventId: event.id, field: "title" },
+    });
+    expect(provenance.length).toBeGreaterThan(0);
+  });
+
+  it("clears optional time fields when omitted on edit", async () => {
+    const owner = await makeUser("owner-edit-clear@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Event",
+      floor: 5,
+      timeLabel: "Day 1",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    await updateEvent(owner.id, campaign.id, event.id, {
+      title: "Event",
+      secret: false,
+    });
+
+    const row = await prisma.event.findUnique({ where: { id: event.id } });
+    expect(row?.orderKey).toBe(0);
+    expect(row?.inGameTime).toMatchObject({});
+  });
+
+  it("blocks editing a locked event", async () => {
+    const owner = await makeUser("owner-edit-lock@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Sealed",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await setEventLock(owner.id, campaign.id, event.id, true);
+
+    await expect(
+      updateEvent(owner.id, campaign.id, event.id, {
+        title: "Tampered",
+        secret: false,
+      }),
+    ).rejects.toThrow(/locked/);
+
+    const row = await prisma.event.findUnique({ where: { id: event.id } });
+    expect(row?.title).toBe("Sealed");
+  });
+
+  it("rejects editing a missing event and blocks players", async () => {
+    const owner = await makeUser("owner-edit-missing@test.com");
+    const player = await makeUser("player-edit@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Event",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    await expect(
+      updateEvent(owner.id, campaign.id, "missing", {
+        title: "Event",
+        secret: false,
+      }),
+    ).rejects.toThrow(/not found/);
+
+    await expect(
+      updateEvent(player.id, campaign.id, event.id, {
+        title: "Event",
+        secret: false,
+      }),
+    ).rejects.toBeInstanceOf(ServiceError);
   });
 });
