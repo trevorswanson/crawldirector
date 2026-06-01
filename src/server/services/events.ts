@@ -124,12 +124,10 @@ function isPlayerVisibleEvent(
   },
   isPlayer: boolean,
 ) {
+  if (!isPlayer) return true;
   if (event.status === CanonStatus.ARCHIVED) return false;
-  if (isPlayer) {
-    if (event.secret) return false;
-    return event.participants.some((p) => isPlayerVisible(p.entity));
-  }
-  return true;
+  if (event.secret) return false;
+  return event.participants.some((p) => isPlayerVisible(p.entity));
 }
 
 /**

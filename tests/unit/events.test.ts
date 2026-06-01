@@ -574,6 +574,49 @@ describe("event service", () => {
     );
   });
 
+  it("keeps causality links to archived events visible to DMs but hidden from players", async () => {
+    const owner = await makeUser("owner-cause-archived-event@test.com");
+    const player = await makeUser("player-cause-archived-event@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const carl = await makeEntity(
+      owner.id,
+      campaign.id,
+      "Carl",
+      "SHARED_WITH_PLAYERS",
+    );
+
+    const publicEvent = await createEvent(owner.id, campaign.id, {
+      title: "Public consequence",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "AFFECTED" }],
+    });
+    const causeEvent = await createEvent(owner.id, campaign.id, {
+      title: "Archived cause",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    await linkEventCause(owner.id, campaign.id, {
+      causeId: causeEvent.id,
+      effectId: publicEvent.id,
+    });
+
+    await archiveEvent(owner.id, campaign.id, causeEvent.id);
+
+    const asDm = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    expect(asDm.find((event) => event.id === publicEvent.id)?.causedBy[0]).toMatchObject(
+      { id: causeEvent.id, title: "Archived cause" },
+    );
+
+    const asPlayer = await listEventsForEntity(player.id, campaign.id, carl.id);
+    expect(asPlayer.find((event) => event.id === publicEvent.id)?.causedBy).toEqual(
+      [],
+    );
+  });
+
   it("soft-archives a causality link and drops it from timelines", async () => {
     const owner = await makeUser("owner-cause-archive@test.com");
     const campaign = await createCampaign(owner.id, { name: "Dungeon" });
