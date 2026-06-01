@@ -30,7 +30,7 @@ export default function SignUpPage() {
         <Kicker className="mb-1">Access · Enlist</Kicker>
         <CardTitle>Create your account</CardTitle>
         <CardDescription>
-          Start modeling your Dungeon Crawler Carl campaign.
+          Build the crawl. Curate the chaos.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">

@@ -28,9 +28,9 @@ export default function SignInPage() {
     <Card>
       <CardHeader>
         <Kicker className="mb-1">Access · Console</Kicker>
-        <CardTitle>Sign in</CardTitle>
+        <CardTitle>Welcome back.</CardTitle>
         <CardDescription>
-          Welcome back, Crawler. Sign in to run your campaign.
+          Sign in to continue your crawl.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
