@@ -15,7 +15,7 @@ const { requireUser, getCampaignForUser, getCampaignRelationshipGraph, notFound 
 vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/campaigns", () => ({ getCampaignForUser }));
 vi.mock("@/server/services/relationships", () => ({ getCampaignRelationshipGraph }));
-vi.mock("next/navigation", () => ({ notFound, useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("next/navigation", () => ({ notFound }));
 vi.mock("next/link", () => ({
   default: ({ href, children }: { href: string; children: React.ReactNode }) => (
     <a href={href}>{children}</a>
@@ -26,29 +26,41 @@ import RelationshipGraphPage from "@/app/(dm)/campaigns/[id]/graph/page";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubGlobal("requestAnimationFrame", () => 0);
+  vi.stubGlobal("cancelAnimationFrame", () => {});
   requireUser.mockResolvedValue({ id: "u1" });
   getCampaignForUser.mockResolvedValue({ id: "c1", name: "World One" });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("RelationshipGraphPage", () => {
-  it("renders the graph with a node/connection count", async () => {
+  it("renders the graph with its selected-node connections panel", async () => {
     getCampaignRelationshipGraph.mockResolvedValue({
       nodes: [
         { id: "carl", name: "Carl", type: "CRAWLER", locked: false },
         { id: "donut", name: "Donut", type: "CRAWLER", locked: false },
       ],
       edges: [
-        { id: "e1", type: "ALLY_OF", sourceId: "carl", targetId: "donut", secret: false, locked: false },
+        {
+          id: "e1",
+          type: "ALLY_OF",
+          sourceId: "carl",
+          targetId: "donut",
+          disposition: 40,
+          secret: false,
+          locked: false,
+        },
       ],
     });
 
     render(await RelationshipGraphPage({ params: Promise.resolve({ id: "c1" }) }));
 
-    expect(screen.getByRole("heading", { name: "World One" })).toBeDefined();
-    expect(screen.getByText("2 entities · 1 connections")).toBeDefined();
-    expect(screen.getByText("Carl")).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Carl" })).toBeDefined();
+    expect(screen.getByText("1 connections")).toBeDefined();
   });
 
   it("shows an honest empty state when there are no connections", async () => {

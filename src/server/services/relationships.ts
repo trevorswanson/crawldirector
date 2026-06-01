@@ -196,6 +196,7 @@ export type GraphEdge = {
   type: RelationshipType;
   sourceId: string;
   targetId: string;
+  disposition: number | null;
   secret: boolean;
   locked: boolean;
 };
@@ -236,6 +237,7 @@ export async function getCampaignRelationshipGraph(
       type: true,
       sourceId: true,
       targetId: true,
+      disposition: true,
       secret: true,
       locked: true,
       sourceEntity: { select: graphEndpointSelect },
@@ -275,6 +277,7 @@ export async function getCampaignRelationshipGraph(
       type: edge.type,
       sourceId: edge.sourceId,
       targetId: edge.targetId,
+      disposition: edge.disposition,
       secret: edge.secret,
       locked: edge.locked,
     });

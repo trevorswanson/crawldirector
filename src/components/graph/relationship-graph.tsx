@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { ArrowRight, Eye, EyeOff, Lock } from "lucide-react";
 
 import { entityTypeColor, formatEntityType } from "@/lib/entities";
 import {
@@ -10,33 +11,31 @@ import {
 } from "@/lib/relationship-types";
 import type { GraphEdge, GraphNode } from "@/server/services/relationships";
 
-// Square SVG canvas; nodes sit on a circle inside it and labels splay outward,
-// so the radius leaves room for text on either side.
-const SIZE = 920;
-const CENTER = SIZE / 2;
-const RADIUS = 330;
+// World-space canvas the force simulation runs in; the SVG scales to fit.
+const W = 1200;
+const H = 820;
 
-type Placed = GraphNode & { x: number; y: number; angle: number };
-
-function layout(nodes: GraphNode[]): Placed[] {
-  const n = nodes.length;
-  return nodes.map((node, i) => {
-    // Start at the top (-90°) and walk clockwise so order is stable/predictable.
-    const angle = -Math.PI / 2 + (2 * Math.PI * i) / Math.max(n, 1);
-    return {
-      ...node,
-      angle,
-      x: CENTER + RADIUS * Math.cos(angle),
-      y: CENTER + RADIUS * Math.sin(angle),
-    };
-  });
+// Disposition → edge color: warm allies, hot rivals, faint neutral/unknown.
+function edgeColor(disp: number | null): string {
+  if (disp != null && disp > 20) return "var(--ok)";
+  if (disp != null && disp < -20) return "var(--hot)";
+  return "var(--ink-faint)";
 }
 
+type SimNode = GraphNode & {
+  px: number;
+  py: number;
+  vx: number;
+  vy: number;
+  r: number;
+  pinned: boolean;
+};
+
 /**
- * Basic, dependency-free relationship graph: entities placed on a circle with
- * their edges drawn between them (docs/11-roadmap.md M3 — "start simple"). Hover
- * a node to highlight its edges; click to open the entity. All data is already
- * visibility-scoped by the service.
+ * Force-directed relationship graph (docs/design/mockup/screen-graph.jsx): a
+ * draggable, pan/zoomable node-link diagram with a connections side panel. Type
+ * and secret-edge filters live in the toolbar. All data arrives already
+ * visibility-scoped from the service; nothing is faked.
  */
 export function RelationshipGraph({
   campaignId,
@@ -47,160 +46,546 @@ export function RelationshipGraph({
   nodes: GraphNode[];
   edges: GraphEdge[];
 }) {
-  const router = useRouter();
-  const [active, setActive] = useState<string | null>(null);
+  // Degree per node sizes the circles and seeds a stable starting layout.
+  const degree = useMemo(() => {
+    const d = new Map<string, number>();
+    for (const e of edges) {
+      d.set(e.sourceId, (d.get(e.sourceId) ?? 0) + 1);
+      d.set(e.targetId, (d.get(e.targetId) ?? 0) + 1);
+    }
+    return d;
+  }, [edges]);
 
-  const placed = useMemo(() => layout(nodes), [nodes]);
-  const byId = useMemo(
-    () => new Map(placed.map((p) => [p.id, p])),
-    [placed],
+  // Seed positions on a circle, then let the simulation settle. Kept in a ref so
+  // the rAF loop can mutate without re-seeding on every React render.
+  const nodesRef = useRef<SimNode[]>([]);
+  const seedKey = useRef<string>("");
+  const key = useMemo(
+    () => nodes.map((n) => n.id).join(",") + "|" + edges.map((e) => e.id).join(","),
+    [nodes, edges],
   );
+  if (seedKey.current !== key) {
+    seedKey.current = key;
+    const n = nodes.length;
+    nodesRef.current = nodes.map((node, i) => {
+      const angle = -Math.PI / 2 + (2 * Math.PI * i) / Math.max(n, 1);
+      return {
+        ...node,
+        px: W / 2 + 320 * Math.cos(angle),
+        py: H / 2 + 320 * Math.sin(angle),
+        vx: 0,
+        vy: 0,
+        r: 13 + Math.min(10, (degree.get(node.id) ?? 0) * 2),
+        pinned: false,
+      };
+    });
+  }
 
-  // Distinct entity types present, for the legend.
-  const legend = useMemo(() => {
+  const byId = (id: string) => nodesRef.current.find((n) => n.id === id);
+
+  const [, force] = useState(0);
+  const [view, setView] = useState({ x: 0, y: 0, k: 1 });
+  const [hover, setHover] = useState<string | null>(null);
+  const [sel, setSel] = useState<string>(() => nodes[0]?.id ?? "");
+  const [activeTypes, setActiveTypes] = useState<Set<string>>(
+    () => new Set(nodes.map((n) => n.type)),
+  );
+  const [showSecret, setShowSecret] = useState(true);
+
+  const drag = useRef<string | null>(null);
+  const pan = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
+  // Force simulation: repulsion + edge springs + centering, with damping.
+  useEffect(() => {
+    let raf = 0;
+    let alpha = 1;
+    const step = () => {
+      const ns = nodesRef.current;
+      for (let i = 0; i < ns.length; i++) {
+        for (let j = i + 1; j < ns.length; j++) {
+          const a = ns[i];
+          const b = ns[j];
+          const dx = a.px - b.px;
+          const dy = a.py - b.py;
+          const d2 = dx * dx + dy * dy || 1;
+          const d = Math.sqrt(d2);
+          const rep = 9000 / d2;
+          const fx = (dx / d) * rep;
+          const fy = (dy / d) * rep;
+          a.vx += fx;
+          a.vy += fy;
+          b.vx -= fx;
+          b.vy -= fy;
+        }
+      }
+      for (const e of edges) {
+        const a = byId(e.sourceId);
+        const b = byId(e.targetId);
+        if (!a || !b) continue;
+        const dx = b.px - a.px;
+        const dy = b.py - a.py;
+        const d = Math.sqrt(dx * dx + dy * dy) || 1;
+        const k = 0.012 * (d - 190);
+        const fx = (dx / d) * k;
+        const fy = (dy / d) * k;
+        a.vx += fx;
+        a.vy += fy;
+        b.vx -= fx;
+        b.vy -= fy;
+      }
+      for (const n of ns) {
+        n.vx += (W / 2 - n.px) * 0.0016;
+        n.vy += (H / 2 - n.py) * 0.0016;
+        if (!n.pinned && drag.current !== n.id) {
+          n.vx *= 0.86;
+          n.vy *= 0.86;
+          n.px += n.vx * alpha;
+          n.py += n.vy * alpha;
+        } else {
+          n.vx = 0;
+          n.vy = 0;
+        }
+      }
+      alpha *= 0.992;
+      if (alpha < 0.02) alpha = 0.02;
+      force((x) => x + 1);
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+    // The loop reads `edges` and mutates `nodesRef`; re-arm only when they change.
+  }, [edges]);
+
+  // Screen → world coordinate transform for pointer interactions.
+  const toWorld = (clientX: number, clientY: number) => {
+    const rect = svgRef.current!.getBoundingClientRect();
+    const sx = ((clientX - rect.left) / rect.width) * W;
+    const sy = ((clientY - rect.top) / rect.height) * H;
+    return { x: (sx - view.x) / view.k, y: (sy - view.y) / view.k };
+  };
+
+  const onPointerDownNode = (e: React.PointerEvent, id: string) => {
+    e.stopPropagation();
+    drag.current = id;
+    const n = byId(id);
+    if (n) n.pinned = true;
+    setSel(id);
+  };
+  const onPointerDownBg = (e: React.PointerEvent) => {
+    pan.current = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (drag.current) {
+      const w = toWorld(e.clientX, e.clientY);
+      const n = byId(drag.current);
+      if (n) {
+        n.px = w.x;
+        n.py = w.y;
+        n.vx = 0;
+        n.vy = 0;
+      }
+    } else if (pan.current) {
+      const p = pan.current;
+      setView((v) => ({ ...v, x: p.vx + (e.clientX - p.x), y: p.vy + (e.clientY - p.y) }));
+    }
+  };
+  const onPointerUp = () => {
+    drag.current = null;
+    pan.current = null;
+  };
+  const zoom = (f: number) =>
+    setView((v) => ({ ...v, k: Math.min(2.4, Math.max(0.4, v.k * f)) }));
+
+  const visibleNode = (n: { type: string }) => activeTypes.has(n.type);
+  const visibleEdge = (e: GraphEdge) => {
+    const a = byId(e.sourceId);
+    const b = byId(e.targetId);
+    return (
+      (showSecret || !e.secret) &&
+      !!a &&
+      !!b &&
+      activeTypes.has(a.type) &&
+      activeTypes.has(b.type)
+    );
+  };
+
+  const neighbors = (id: string) => {
+    const s = new Set<string>();
+    for (const e of edges) {
+      if (e.sourceId === id) s.add(e.targetId);
+      if (e.targetId === id) s.add(e.sourceId);
+    }
+    return s;
+  };
+  const active = hover ?? sel;
+  const nbrs = active ? neighbors(active) : null;
+
+  const toggleType = (t: string) =>
+    setActiveTypes((s) => {
+      const next = new Set(s);
+      if (next.has(t)) next.delete(t);
+      else next.add(t);
+      return next;
+    });
+
+  const typesPresent = useMemo(() => {
     const seen = new Map<string, number>();
-    for (const node of nodes) seen.set(node.type, (seen.get(node.type) ?? 0) + 1);
+    for (const n of nodes) seen.set(n.type, (seen.get(n.type) ?? 0) + 1);
     return [...seen.entries()].sort((a, b) => b[1] - a[1]);
   }, [nodes]);
+  const hasSecret = useMemo(() => edges.some((e) => e.secret), [edges]);
 
-  const open = (id: string) =>
-    router.push(`/campaigns/${campaignId}/entities/${id}`);
+  const selNode = byId(sel) ?? nodesRef.current[0];
+  const selEdges = edges.filter(
+    (e) => selNode && (e.sourceId === selNode.id || e.targetId === selNode.id),
+  );
 
   return (
-    <div className="flex h-full flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        {legend.map(([type, count]) => (
-          <span
-            key={type}
-            className="flex items-center gap-[6px] font-mono text-[10px] uppercase tracking-[.06em] text-[var(--ink-dim)]"
-          >
-            <span
-              aria-hidden
-              className="inline-block size-[8px] rounded-full"
-              style={{ background: entityTypeColor(type) }}
-            />
-            {formatEntityType(type)}
-            <span className="text-[var(--ink-faint)]">{count}</span>
-          </span>
-        ))}
-      </div>
+    <div className="grid h-full min-h-0 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_300px]">
+      {/* CANVAS */}
+      <div className="relative min-w-0 overflow-hidden">
+        {/* Toolbar: type filters + secret toggle */}
+        <div className="pointer-events-none absolute inset-x-4 top-3 z-[5] flex flex-wrap items-center gap-2">
+          <span className="kicker dim pointer-events-auto">Relationship graph</span>
+          <div className="pointer-events-auto ml-auto flex flex-wrap gap-[5px]">
+            {typesPresent.map(([type, count]) => {
+              const on = activeTypes.has(type);
+              return (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => toggleType(type)}
+                  aria-pressed={on}
+                  className="inline-flex items-center gap-[6px] border px-2 py-[3px] font-mono text-[9.5px] uppercase tracking-[.06em] transition-colors"
+                  style={{
+                    background: on ? "var(--bg-2)" : "transparent",
+                    color: on ? "var(--ink-dim)" : "var(--ink-faint)",
+                    borderColor: on ? "var(--line-strong)" : "var(--line)",
+                    opacity: on ? 1 : 0.5,
+                  }}
+                >
+                  <span
+                    aria-hidden
+                    className="inline-block size-[8px] rounded-full"
+                    style={{ background: entityTypeColor(type) }}
+                  />
+                  {formatEntityType(type)}
+                  <span className="text-[var(--ink-faint)]">{count}</span>
+                </button>
+              );
+            })}
+            {hasSecret && (
+              <button
+                type="button"
+                onClick={() => setShowSecret((v) => !v)}
+                aria-pressed={showSecret}
+                title="Toggle secret edges"
+                className="inline-flex items-center gap-[6px] border bg-[var(--bg-2)] px-2 py-[3px] font-mono text-[9.5px] uppercase tracking-[.06em]"
+                style={{
+                  color: showSecret ? "var(--hot)" : "var(--ink-faint)",
+                  borderColor: showSecret
+                    ? "color-mix(in srgb, var(--hot) 40%, transparent)"
+                    : "var(--line)",
+                }}
+              >
+                {showSecret ? (
+                  <Eye aria-hidden size={11} />
+                ) : (
+                  <EyeOff aria-hidden size={11} />
+                )}
+                Secret
+              </button>
+            )}
+          </div>
+        </div>
 
-      <div className="min-h-0 flex-1">
         <svg
+          ref={svgRef}
           role="img"
           aria-label="Relationship graph"
-          viewBox={`0 0 ${SIZE} ${SIZE}`}
-          className="mx-auto h-full max-h-[78vh] w-full max-w-[920px]"
+          viewBox={`0 0 ${W} ${H}`}
+          preserveAspectRatio="xMidYMid slice"
+          className="block h-full w-full"
+          style={{
+            cursor: pan.current ? "grabbing" : "grab",
+            background:
+              "radial-gradient(120% 100% at 50% 0%, var(--bg-1), var(--bg))",
+          }}
+          onPointerDown={onPointerDownBg}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerLeave={onPointerUp}
+          onWheel={(e) => zoom(e.deltaY < 0 ? 1.12 : 0.89)}
         >
           <defs>
             <marker
               id="rg-arrow"
-              viewBox="0 0 10 10"
-              refX="9"
-              refY="5"
-              markerWidth="7"
-              markerHeight="7"
-              orient="auto-start-reverse"
+              markerWidth="9"
+              markerHeight="9"
+              refX="8"
+              refY="3"
+              orient="auto"
             >
-              <path d="M0,0 L10,5 L0,10 z" fill="var(--ink-faint)" />
+              <path d="M0,0 L8,3 L0,6" fill="var(--ink-faint)" />
             </marker>
           </defs>
 
-          {/* Edges first, so nodes sit on top. */}
-          {edges.map((edge) => {
-            const a = byId.get(edge.sourceId);
-            const b = byId.get(edge.targetId);
-            if (!a || !b) return null;
-            const dim = active !== null && active !== a.id && active !== b.id;
-            const highlight =
-              active !== null && (active === a.id || active === b.id);
-            const color = edge.secret
-              ? "var(--hot)"
-              : highlight
-                ? "var(--accent)"
-                : "var(--line-strong)";
-            return (
-              <line
-                key={edge.id}
-                x1={a.x}
-                y1={a.y}
-                x2={b.x}
-                y2={b.y}
-                stroke={color}
-                strokeWidth={highlight ? 1.8 : 1}
-                strokeDasharray={edge.secret ? "5 4" : undefined}
-                strokeOpacity={dim ? 0.15 : 0.8}
-                markerEnd="url(#rg-arrow)"
-              >
-                <title>
-                  {a.name}{" "}
-                  {relationshipEdgeLabel(edge.type as RelationshipTypeValue, "out")}{" "}
-                  {b.name}
-                  {edge.secret ? " · secret" : ""}
-                </title>
-              </line>
-            );
-          })}
+          <g transform={`translate(${view.x},${view.y}) scale(${view.k})`}>
+            {/* Edges */}
+            {edges.map((edge) => {
+              if (!visibleEdge(edge)) return null;
+              const a = byId(edge.sourceId);
+              const b = byId(edge.targetId);
+              if (!a || !b) return null;
+              const dim =
+                active !== null && active !== edge.sourceId && active !== edge.targetId;
+              const onActive = active === edge.sourceId || active === edge.targetId;
+              const disp = edge.disposition;
+              return (
+                <g key={edge.id} style={{ opacity: dim ? 0.12 : 1 }}>
+                  <line
+                    x1={a.px}
+                    y1={a.py}
+                    x2={b.px}
+                    y2={b.py}
+                    stroke={edge.secret ? "var(--hot)" : edgeColor(disp)}
+                    strokeWidth={Math.max(1, Math.abs(disp ?? 0) / 45 + 0.7)}
+                    strokeDasharray={edge.secret ? "5 4" : undefined}
+                    markerEnd="url(#rg-arrow)"
+                    opacity={0.7}
+                  >
+                    <title>
+                      {a.name}{" "}
+                      {relationshipEdgeLabel(
+                        edge.type as RelationshipTypeValue,
+                        "out",
+                      )}{" "}
+                      {b.name}
+                      {edge.secret ? " · secret" : ""}
+                    </title>
+                  </line>
+                  {onActive && (
+                    <text
+                      x={(a.px + b.px) / 2}
+                      y={(a.py + b.py) / 2 - 4}
+                      textAnchor="middle"
+                      className="font-mono"
+                      fontSize={10}
+                      fill={edge.secret ? "var(--hot)" : "var(--ink-dim)"}
+                      style={{ pointerEvents: "none" }}
+                    >
+                      {relationshipEdgeLabel(
+                        edge.type as RelationshipTypeValue,
+                        "out",
+                      )}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
 
-          {/* Nodes */}
-          {placed.map((node) => {
-            const dim = active !== null && active !== node.id;
-            // Splay labels outward from the circle center.
-            const onRight = Math.cos(node.angle) >= 0;
-            const lx = node.x + (onRight ? 11 : -11);
-            return (
-              <g
-                key={node.id}
-                role="button"
-                tabIndex={0}
-                aria-label={node.name}
-                className="cursor-pointer"
-                opacity={dim ? 0.3 : 1}
-                onClick={() => open(node.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    open(node.id);
-                  }
-                }}
-                onMouseEnter={() => setActive(node.id)}
-                onMouseLeave={() => setActive(null)}
-                onFocus={() => setActive(node.id)}
-                onBlur={() => setActive(null)}
-              >
-                <circle
-                  cx={node.x}
-                  cy={node.y}
-                  r={6}
-                  fill={entityTypeColor(node.type)}
-                  stroke="var(--bg-1)"
-                  strokeWidth={1.5}
-                />
-                {node.locked && (
-                  <circle
-                    cx={node.x}
-                    cy={node.y}
-                    r={9}
-                    fill="none"
-                    stroke="var(--sys)"
-                    strokeWidth={1.2}
-                  />
-                )}
-                <text
-                  x={lx}
-                  y={node.y}
-                  textAnchor={onRight ? "start" : "end"}
-                  dominantBaseline="middle"
-                  className="font-mono"
-                  fontSize={12}
-                  fill={active === node.id ? "var(--ink)" : "var(--ink-dim)"}
+            {/* Nodes */}
+            {nodesRef.current.map((node) => {
+              if (!visibleNode(node)) return null;
+              const isActive = active === node.id;
+              const isNbr = nbrs?.has(node.id) ?? false;
+              const dim = active !== null && !isActive && !isNbr;
+              const color = entityTypeColor(node.type);
+              return (
+                <g
+                  key={node.id}
+                  transform={`translate(${node.px},${node.py})`}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={node.name}
+                  className="cursor-pointer"
+                  style={{ opacity: dim ? 0.25 : 1 }}
+                  onPointerDown={(e) => onPointerDownNode(e, node.id)}
+                  onMouseEnter={() => setHover(node.id)}
+                  onMouseLeave={() => setHover(null)}
+                  onFocus={() => setHover(node.id)}
+                  onBlur={() => setHover(null)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSel(node.id);
+                    }
+                  }}
                 >
-                  {node.name}
-                </text>
-              </g>
-            );
-          })}
+                  <circle
+                    r={node.r + 4}
+                    fill="none"
+                    stroke={color}
+                    strokeWidth={isActive ? 2 : 0}
+                    opacity={0.5}
+                  />
+                  <circle r={node.r} fill="var(--bg-1)" stroke={color} strokeWidth={2} />
+                  <circle
+                    r={Math.max(2, node.r - 5)}
+                    fill={color}
+                    opacity={node.type === "NPC" ? 0.18 : 0.32}
+                  />
+                  {node.locked && (
+                    <circle
+                      r={node.r + 7}
+                      fill="none"
+                      stroke="var(--sys)"
+                      strokeWidth={1.2}
+                      strokeDasharray="3 3"
+                    />
+                  )}
+                  <text
+                    y={node.r + 15}
+                    textAnchor="middle"
+                    fontSize={13}
+                    fontWeight={600}
+                    fill={isActive ? "var(--ink)" : "var(--ink-dim)"}
+                    style={{ pointerEvents: "none" }}
+                  >
+                    {node.name}
+                  </text>
+                </g>
+              );
+            })}
+          </g>
         </svg>
+
+        {/* Zoom + hint */}
+        <div className="absolute bottom-3 left-4 flex items-center gap-2">
+          <div className="flex border border-[var(--line-strong)] bg-[var(--bg-1)]">
+            {(
+              [
+                ["−", 0.85],
+                ["+", 1.18],
+              ] as const
+            ).map(([label, f]) => (
+              <button
+                key={label}
+                type="button"
+                aria-label={f > 1 ? "Zoom in" : "Zoom out"}
+                onClick={() => zoom(f)}
+                className="h-7 w-[30px] text-[16px] text-[var(--ink-dim)] hover:text-[var(--ink)]"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              for (const n of nodesRef.current) n.pinned = false;
+              setView({ x: 0, y: 0, k: 1 });
+            }}
+            className="hud-tag cursor-pointer bg-[var(--bg-1)]"
+          >
+            Reset layout
+          </button>
+          <span className="font-mono text-[10px] text-[var(--ink-faint)]">
+            drag node · drag bg to pan · scroll to zoom
+          </span>
+        </div>
+      </div>
+
+      {/* CONNECTIONS PANEL */}
+      <div className="hidden min-h-0 flex-col border-l border-[var(--line)] bg-[var(--bg-1)] lg:flex">
+        {selNode && (
+          <>
+            <div className="border-b border-[var(--line)] px-[18px] py-4">
+              <div className="mb-2 flex items-center gap-[9px]">
+                <span
+                  aria-hidden
+                  className="inline-block size-[11px] rounded-full"
+                  style={{ background: entityTypeColor(selNode.type) }}
+                />
+                <span className="font-mono text-[10px] uppercase tracking-[.1em] text-[var(--ink-faint)]">
+                  {formatEntityType(selNode.type)}
+                </span>
+                {selNode.locked && (
+                  <Lock aria-hidden size={12} style={{ color: "var(--sys)" }} />
+                )}
+              </div>
+              <h2 className="font-display text-xl font-semibold">{selNode.name}</h2>
+              <div className="mt-2 flex items-center justify-between font-mono text-[11px] text-[var(--ink-faint)]">
+                <span>{selEdges.length} connections</span>
+                <Link
+                  href={`/campaigns/${campaignId}/entities/${selNode.id}`}
+                  className="inline-flex items-center gap-1 uppercase tracking-[.06em] text-[var(--accent)] hover:underline"
+                >
+                  Open
+                  <ArrowRight aria-hidden size={11} />
+                </Link>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-[14px] py-3">
+              {selEdges.length === 0 && (
+                <p className="px-1 text-[12px] text-[var(--ink-faint)]">
+                  No connections.
+                </p>
+              )}
+              {selEdges.map((e) => {
+                const out = e.sourceId === selNode.id;
+                const other = byId(out ? e.targetId : e.sourceId);
+                if (!other) return null;
+                const disp = e.disposition ?? 0;
+                return (
+                  <button
+                    key={e.id}
+                    type="button"
+                    onClick={() => setSel(other.id)}
+                    className="mb-[6px] block w-full border border-[var(--line)] px-[11px] py-[10px] text-left transition-colors hover:border-[var(--line-strong)]"
+                  >
+                    <div className="mb-[6px] flex items-center gap-[7px]">
+                      <ArrowRight
+                        aria-hidden
+                        size={12}
+                        className={out ? "" : "rotate-180"}
+                        style={{ color: "var(--ink-faint)" }}
+                      />
+                      <span
+                        className="font-mono text-[10px] uppercase tracking-[.04em]"
+                        style={{ color: e.secret ? "var(--hot)" : "var(--accent)" }}
+                      >
+                        {relationshipEdgeLabel(
+                          e.type as RelationshipTypeValue,
+                          out ? "out" : "in",
+                        )}
+                        {e.secret ? " · secret" : ""}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span
+                        aria-hidden
+                        className="inline-block size-[8px] shrink-0 rounded-full"
+                        style={{ background: entityTypeColor(other.type) }}
+                      />
+                      <span className="text-[13px] font-semibold">{other.name}</span>
+                    </div>
+                    {e.disposition != null && (
+                      <>
+                        <div className="relative mt-2 h-1 bg-[var(--bg-3)]">
+                          <div className="absolute inset-y-0 left-1/2 w-px bg-[var(--ink-faint)]" />
+                          <div
+                            className="absolute inset-y-0"
+                            style={{
+                              background: edgeColor(disp),
+                              left: disp < 0 ? `${50 + disp / 2}%` : "50%",
+                              width: `${Math.abs(disp) / 2}%`,
+                            }}
+                          />
+                        </div>
+                        <div className="mt-1 font-mono text-[9.5px] text-[var(--ink-faint)]">
+                          disposition {disp > 0 ? "+" : ""}
+                          {disp}
+                        </div>
+                      </>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
