@@ -7,7 +7,10 @@ It is excluded from ESLint (`eslint.config.mjs`) and is not type-checked (tsconf
 only includes `*.ts`/`*.tsx`).
 
 When you build UI for any milestone, **match this mockup** and use the design system
-codified in [`../../13-design-language.md`](../../13-design-language.md).
+codified in [`../../13-design-language.md`](../../13-design-language.md). Treat the
+matching screen as the visual acceptance target: layout, density, controls, and
+interaction model should carry into the app unless a real data, accessibility, or
+implementation constraint is documented in `../../PROGRESS.md` or an ADR.
 
 ## Source
 

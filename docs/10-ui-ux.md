@@ -11,7 +11,10 @@ Two distinct surfaces share one app and one data layer but feel different:
 > [`13-design-language.md`](./13-design-language.md), and the visual source of
 > truth is the saved mockup in [`design/mockup/`](./design/mockup/). Each IA
 > section below names the mockup screen that realizes it. Build every milestone's
-> UI from those primitives; the provenance/status visual semantics here are a
+> UI to match its named mockup first, then adapt only where real product data or
+> accessibility requires it. Any intentional deviation belongs in
+> `docs/PROGRESS.md` (or an ADR for lasting decisions) in the same change. Build
+> from the shared primitives; the provenance/status visual semantics here are a
 > cross-cutting contract, not per-screen decisions.
 
 ## DM Console

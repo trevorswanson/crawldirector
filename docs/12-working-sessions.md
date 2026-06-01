@@ -14,6 +14,10 @@ drifting from the plan.
    `docs/PROGRESS.md` (create it on first build session) to see what's done.
 3. **Pick the lowest-numbered unfinished milestone.** Don't skip ahead;
    dependencies are real (M2 underpins everything).
+4. **Open the milestone's mockup screen** in [`design/mockup/`](./design/mockup/)
+   before building UI. The mockup is the visual acceptance target; match its
+   layout, density, controls, and interaction model unless real data,
+   accessibility, or implementation constraints require a documented deviation.
 
 ## Decompose the milestone into tasks
 
@@ -22,6 +26,10 @@ verifiable tasks. For each task note: the files it touches, the service-layer
 function(s), the migration (if any), and how you'll verify it (test or manual).
 Prefer a vertical slice (schema → service → minimal UI → test) over building a
 whole layer in isolation.
+
+For UI slices, "minimal" still means mockup-aligned: implement the smallest real
+version of the mockup's intended surface, not a throwaway placeholder. If a later
+polish pass is still needed, call that out explicitly in `docs/PROGRESS.md`.
 
 If a milestone is large, it's fine to land it across multiple sessions/PRs —
 just keep each PR coherent and green.
@@ -35,6 +43,8 @@ just keep each PR coherent and green.
 - **Player reads only via the visibility projection.** Never hand a player query
   raw canon.
 - **Secrets (API keys) never reach the client, logs, or provenance.**
+- **Mockups are the source of truth for UI.** Do not invent a different layout or
+  interaction model because it is faster; document any intentional divergence.
 - **Keep `01-domain-model.md` and `09-data-schema.md` honest.** If you change the
   model, update the docs in the same PR.
 

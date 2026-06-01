@@ -11,6 +11,34 @@ Running checklist of milestones/tasks, newest first. See
 membership, log events with participants, and traverse cause→effect chains;
 relationships/events are reviewable + lockable.
 
+### Done — slice 6: campaign relationship graph view (2026-06-01)
+
+- [x] Added `getCampaignRelationshipGraph` to the `relationships` service: a
+      campaign-wide projection returning the live edges and the entities they
+      connect (nodes carry the entity's `locked` flag). It's a connectivity view
+      — only entities in at least one visible edge are returned, not the full
+      entity list (the World Browser is that). Visibility-scoped: players never
+      see secret edges, edges to an endpoint they can't see, or edges to an
+      archived endpoint (archiving leaves edges in place, so those drop for
+      everyone). Returns null for non-members.
+- [x] Added the `RelationshipGraph` client component: a dependency-free SVG
+      force-directed node-link diagram matched to
+      `docs/design/mockup/screen-graph.jsx`, with type/secret filters, pan/zoom,
+      reset, type-colored nodes, directional disposition-weighted edges,
+      dashed/hot secret edges, locked-node rings, neighbor highlighting, and a
+      selected-node connections panel with entity navigation. The graph still
+      shows only real visibility-scoped data — no mock/filler nodes.
+- [x] Added the `/campaigns/[id]/graph` route (full-bleed graph canvas with an
+      honest empty state when there are no edges) and turned the nav's
+      "Relationship Graph · Planned M3" stub into a real, active link.
+- [x] Added DB-backed service coverage (connectivity nodes, isolated-entity
+      omission, locked node flag, player secret/invisible/archived scoping,
+      non-member null), component coverage (render, filters, selected-node
+      connections panel, side-panel entity navigation, secret edge label), and
+      page coverage (graph shell, empty state, 404). Verified in-browser against
+      a seeded 5-node/4-edge graph (secret edges dashed, Donut's lock ring,
+      node→entity navigation). lint, typecheck, build, and coverage green.
+
 ### Done — slice 5: group hierarchy roster rollup (2026-06-01)
 
 - [x] Added the `groups` service (`getGroupRoster`, `isGroupEntityType`,
@@ -154,10 +182,15 @@ relationships/events are reviewable + lockable.
 
 - Next slices: event effects (structured deltas applied on approval);
       relationship/event editing and pending (AI/import) relationship/event
-      proposals in the Review Queue; the campaign-wide relationship graph
-      view + a campaign timeline page (with full multi-participant editing);
-      knowledge/reveal grants for fog of war. (Group hierarchy crawler→party→
-      guild rollup view shipped in slice 5.)
+      proposals in the Review Queue; a campaign timeline page (with full
+      multi-participant editing); knowledge/reveal grants for fog of war. (Group
+      hierarchy crawler→party→guild rollup view shipped in slice 5; the
+      campaign-wide relationship graph view shipped in slice 6.)
+- The relationship graph now follows the M3 graph mockup's force-directed
+      pan/zoom + connections-panel shape and shows only connected entities. At
+      scale, node labels will crowd — the same typeahead/search note as the
+      connections panel applies, and deeper clustering/analytics can be revisited
+      with M12 graph analytics.
 - The roster rollup is read-only and surfaces only on group-type entities
       (PARTY/GUILD/FACTION/ORGANIZATION). Time-bounded membership ("who was where,
       when") isn't modeled yet — current rollup reflects live edges only; revisit

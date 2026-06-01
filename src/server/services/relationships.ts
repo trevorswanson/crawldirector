@@ -56,6 +56,15 @@ const otherEntitySelect = {
   visibility: true,
 } as const;
 
+const graphEndpointSelect = {
+  id: true,
+  name: true,
+  type: true,
+  status: true,
+  visibility: true,
+  locked: true,
+} as const;
+
 function isPlayerVisible(entity: {
   status: CanonStatus;
   visibility: Visibility;
@@ -173,6 +182,108 @@ export async function listConnectionsForEntity(
     });
   }
   return connections;
+}
+
+export type GraphNode = {
+  id: string;
+  name: string;
+  type: string;
+  locked: boolean;
+};
+
+export type GraphEdge = {
+  id: string;
+  type: RelationshipType;
+  sourceId: string;
+  targetId: string;
+  disposition: number | null;
+  secret: boolean;
+  locked: boolean;
+};
+
+export type CampaignRelationshipGraph = {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+};
+
+/**
+ * Campaign-wide relationship graph: every live edge and the entities it
+ * connects, for the relationship-graph view (docs/11-roadmap.md M3). Only
+ * entities that take part in at least one visible edge are returned — the graph
+ * is a connectivity view, not the full entity list (the World Browser is that).
+ *
+ * Visibility-scoped: players never see secret edges, edges to an endpoint they
+ * can't see, or edges to an archived endpoint (archiving an entity leaves its
+ * edges in place, so those are dropped for everyone). Returns null for
+ * non-members.
+ */
+export async function getCampaignRelationshipGraph(
+  userId: string,
+  campaignId: string,
+): Promise<CampaignRelationshipGraph | null> {
+  const membership = await getMembership(userId, campaignId);
+  if (!membership) return null;
+  const isPlayer = membership.role === Role.PLAYER;
+
+  const edges = await prisma.relationship.findMany({
+    where: {
+      campaignId,
+      status: { not: CanonStatus.ARCHIVED },
+      ...(isPlayer ? { secret: false } : {}),
+    },
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      type: true,
+      sourceId: true,
+      targetId: true,
+      disposition: true,
+      secret: true,
+      locked: true,
+      sourceEntity: { select: graphEndpointSelect },
+      targetEntity: { select: graphEndpointSelect },
+    },
+  });
+
+  const nodes = new Map<string, GraphNode>();
+  const graphEdges: GraphEdge[] = [];
+  for (const edge of edges) {
+    const { sourceEntity, targetEntity } = edge;
+    if (
+      sourceEntity.status === CanonStatus.ARCHIVED ||
+      targetEntity.status === CanonStatus.ARCHIVED
+    ) {
+      continue;
+    }
+    if (
+      isPlayer &&
+      (!isPlayerVisible(sourceEntity) || !isPlayerVisible(targetEntity))
+    ) {
+      continue;
+    }
+
+    for (const node of [sourceEntity, targetEntity]) {
+      if (!nodes.has(node.id)) {
+        nodes.set(node.id, {
+          id: node.id,
+          name: node.name,
+          type: node.type,
+          locked: node.locked,
+        });
+      }
+    }
+    graphEdges.push({
+      id: edge.id,
+      type: edge.type,
+      sourceId: edge.sourceId,
+      targetId: edge.targetId,
+      disposition: edge.disposition,
+      secret: edge.secret,
+      locked: edge.locked,
+    });
+  }
+
+  return { nodes: [...nodes.values()], edges: graphEdges };
 }
 
 /**

@@ -31,10 +31,13 @@ pipeline (auto-approved DM path with provenance); the entity detail page's
 Connections panel shows real edges, and its Timeline panel shows real events
 plus simple cause/effect traversal and add/remove. Group-type entities
 (PARTY/GUILD/FACTION/ORGANIZATION) show a read-only roster that rolls up
-`MEMBER_OF`/`LEADS` edges into a crawler→party→guild membership hierarchy. Still
-to come in M3: structured event effects, the relationship graph view + campaign
-timeline page, edge/event editing and pending relationship/event proposals,
-time-bounded membership, and knowledge/reveal grants.
+`MEMBER_OF`/`LEADS` edges into a crawler→party→guild membership hierarchy. A
+campaign-wide **Relationship Graph** view (`/campaigns/[id]/graph`, linked from
+the nav) renders every visibility-scoped edge as a mockup-aligned force-directed
+node-link diagram with filters, pan/zoom, and a connections panel. Still to come
+in M3: structured event effects, the campaign timeline page, edge/event editing
+and pending relationship/event proposals, time-bounded membership, and
+knowledge/reveal grants.
 See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
 ## Start here, every session
@@ -93,8 +96,11 @@ relevant milestone exists.
 - **Design language is codified — follow it.** All UI uses the tokens + primitives
   in [`src/app/globals.css`](./src/app/globals.css) and
   [`src/components/ui`](./src/components/ui) (+ the console shell in
-  `src/components/console`). **Match the mockup** in
-  [`docs/design/mockup/`](./docs/design/mockup) — the spec is
+  `src/components/console`). **Match the milestone mockup** in
+  [`docs/design/mockup/`](./docs/design/mockup); treat it as the UI acceptance
+  target, not loose inspiration. If implementation constraints require a
+  deviation, document it in `docs/PROGRESS.md` (or an ADR for durable decisions)
+  in the same change. The spec is
   [`docs/13-design-language.md`](./docs/13-design-language.md). Honor the
   provenance/status visual semantics (AI/player/import/locked colors), **never
   hardcode hex values** (use a CSS var or shadcn alias), and keep broadcast FX

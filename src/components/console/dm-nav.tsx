@@ -53,9 +53,16 @@ const NAV: NavItem[] = [
     href: (campaignId) => (campaignId ? `/campaigns/${campaignId}/review` : "/dashboard"),
     match: (p) => /^\/campaigns\/[^/]+\/review/.test(p),
   },
+  {
+    label: "Relationship Graph",
+    icon: Network,
+    group: "dm",
+    href: (campaignId) =>
+      campaignId ? `/campaigns/${campaignId}/graph` : "/dashboard",
+    match: (p) => /^\/campaigns\/[^/]+\/graph/.test(p),
+  },
   { label: "AI · Persona Studio", icon: SlidersHorizontal, group: "dm", planned: "M6 — System AI persona engine" },
   { label: "Simulation", icon: Workflow, group: "dm", planned: "M11 — Entity agents & simulation" },
-  { label: "Relationship Graph", icon: Network, group: "dm", planned: "M3 — Relationships & events graph" },
   { label: "Crawler Interface", icon: MonitorSmartphone, group: "player", planned: "M7 — Player crawler interface" },
 ];
 
