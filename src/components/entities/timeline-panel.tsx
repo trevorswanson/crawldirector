@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ChevronRight, Lock, Pencil, Plus, Trash2, Unlock, X } from "lucide-react";
 
 import {
+  applyEventEffectsAction,
   archiveEventCausalityAction,
   archiveEventAction,
   createEventAction,
@@ -18,6 +19,11 @@ import {
   EntityTypeahead,
   type EntityCandidate,
 } from "@/components/entities/entity-typeahead";
+import {
+  EffectRows,
+  type EffectRowValue,
+} from "@/components/entities/effect-rows";
+import { EventEffectsSection } from "@/components/entities/event-effects-section";
 import {
   ParticipantRows,
   type ParticipantRowValue,
@@ -126,6 +132,8 @@ function EditEventForm({
   event,
   self,
   candidates,
+  crawlerCandidates,
+  resolveName,
   onSubmit,
   onCancel,
   error,
@@ -133,6 +141,8 @@ function EditEventForm({
   event: EntityEvent;
   self: EntityCandidate;
   candidates: EntityCandidate[];
+  crawlerCandidates: EntityCandidate[];
+  resolveName: (targetId: string) => string;
   onSubmit: (formData: FormData) => Promise<void>;
   onCancel: () => void;
   error: string | null;
@@ -147,6 +157,25 @@ function EditEventForm({
       role: other.role,
     })),
   ];
+  // The effect editor manages only *unapplied* effects; applied effects are
+  // immutable history (preserved by the service).
+  const initialEffects: EffectRowValue[] = event.effects
+    .filter((effect) => !effect.applied)
+    .map((effect) => ({
+      id: effect.id,
+      kind: effect.kind,
+      target:
+        crawlerCandidates.find((candidate) => candidate.id === effect.targetId) ?? {
+          id: effect.targetId,
+          name: resolveName(effect.targetId),
+          type: "CRAWLER",
+        },
+      stat: effect.stat ?? "gold",
+      delta: effect.delta != null ? String(effect.delta) : "",
+      valueNumber: effect.valueNumber != null ? String(effect.valueNumber) : "",
+      alive: effect.value ? "alive" : "dead",
+      note: effect.note ?? "",
+    }));
   return (
     <form action={onSubmit} className="flex flex-col gap-2 border border-[var(--line)] bg-[var(--bg-3)] px-[10px] py-[9px]">
       <input
@@ -188,6 +217,7 @@ function EditEventForm({
         />
       </div>
       <ParticipantRows candidates={candidates} initial={initialParticipants} />
+      <EffectRows candidates={crawlerCandidates} initial={initialEffects} />
       <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
         <input type="checkbox" name="secret" value="true" defaultChecked={event.secret} />
         DM-only (secret)
@@ -243,6 +273,16 @@ export function TimelinePanel({
   initialEventId?: string;
 }) {
   const self: EntityCandidate = { id: entityId, name: entityName, type: entityType };
+  // Effect targets are crawlers; resolve target names from the candidate list
+  // (the viewed entity included, since it can be its own effect target).
+  const crawlerCandidates = [self, ...candidates].filter(
+    (candidate) => candidate.type === "CRAWLER",
+  );
+  const nameById = new Map(
+    [self, ...candidates].map((candidate) => [candidate.id, candidate.name] as const),
+  );
+  const resolveName = (targetId: string) =>
+    nameById.get(targetId) ?? "Unknown crawler";
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [participant, setParticipant] = useState<TimelineCandidate | null>(null);
@@ -481,11 +521,20 @@ export function TimelinePanel({
                           candidates={causeCandidates}
                         />
                       )}
+                      <EventEffectsSection
+                        effects={e.effects}
+                        resolveName={resolveName}
+                        onApply={() =>
+                          applyEventEffectsAction(campaignId, entityId, e.id)
+                        }
+                      />
                       {editingId === e.id ? (
                         <EditEventForm
                           event={e}
                           self={self}
                           candidates={candidates}
+                          crawlerCandidates={crawlerCandidates}
+                          resolveName={resolveName}
                           onSubmit={handleEdit(e.id)}
                           onCancel={() => {
                             setEditError(null);
