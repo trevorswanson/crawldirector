@@ -4,10 +4,11 @@ import { CanonStatus, Role } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
-import { createGenericEntity } from "@/server/services/entities";
+import { createCrawler, createGenericEntity } from "@/server/services/entities";
 import {
   archiveEvent,
   archiveEventCausality,
+  applyEventEffects,
   createEvent,
   linkEventCause,
   listCampaignTimeline,
@@ -35,6 +36,28 @@ async function makeEntity(
     description: "",
     visibility,
     tags: [],
+  });
+}
+
+async function makeCrawler(
+  userId: string,
+  campaignId: string,
+  name: string,
+  visibility: "DM_ONLY" | "SHARED_WITH_PLAYERS" = "DM_ONLY",
+) {
+  return createCrawler(userId, campaignId, {
+    name,
+    summary: "",
+    description: "",
+    visibility,
+    tags: [],
+    level: 1,
+    gold: 0,
+    viewCount: BigInt(0),
+    followerCount: BigInt(0),
+    favoriteCount: BigInt(0),
+    killCount: 0,
+    isAlive: true,
   });
 }
 
@@ -294,6 +317,9 @@ describe("event service", () => {
     const locked = await setEventLock(owner.id, campaign.id, event.id, true);
     expect(locked.locked).toBe(true);
     expect(locked.participantIds).toEqual([carl.id]);
+    const alreadyLocked = await setEventLock(owner.id, campaign.id, event.id, true);
+    expect(alreadyLocked.locked).toBe(true);
+    expect(alreadyLocked.participantIds).toEqual([carl.id]);
     await expect(archiveEvent(owner.id, campaign.id, event.id)).rejects.toThrow(
       /locked/,
     );
@@ -649,6 +675,161 @@ describe("event service", () => {
     expect(timeline.flatMap((event) => event.causedBy)).toEqual([]);
   });
 
+  it("projects causality summaries on the campaign timeline", async () => {
+    const owner = await makeUser("owner-campaign-causality@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const cause = await createEvent(owner.id, campaign.id, {
+      title: "Cause",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const effect = await createEvent(owner.id, campaign.id, {
+      title: "Effect",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "AFFECTED" }],
+    });
+    const link = await linkEventCause(owner.id, campaign.id, {
+      causeId: cause.id,
+      effectId: effect.id,
+    });
+
+    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    const causeRow = timeline.find((event) => event.id === cause.id);
+    const effectRow = timeline.find((event) => event.id === effect.id);
+
+    expect(causeRow?.causes).toEqual([
+      { id: effect.id, title: "Effect", linkId: link.id },
+    ]);
+    expect(effectRow?.causedBy).toEqual([
+      { id: cause.id, title: "Cause", linkId: link.id },
+    ]);
+  });
+
+  it("rejects malformed direct event operations defensively", async () => {
+    const owner = await makeUser("owner-event-defensive@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Existing",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    await expect(
+      applyAutoApprovedEventChangeSet(owner.id, campaign.id, {
+        title: "Bad title",
+        operations: [
+          {
+            op: OpKind.UPDATE_EVENT,
+            targetId: event.id,
+            patch: { title: { to: "" } },
+          },
+        ],
+      }),
+    ).rejects.toThrow(/title is required/i);
+
+    await expect(
+      applyAutoApprovedEventChangeSet(owner.id, campaign.id, {
+        title: "No effects",
+        operations: [
+          {
+            op: OpKind.APPLY_EVENT_EFFECTS,
+            targetId: event.id,
+            patch: {},
+          },
+        ],
+      }),
+    ).rejects.toThrow(/no effects left/i);
+
+    await expect(
+      applyAutoApprovedEventChangeSet(owner.id, campaign.id, {
+        title: "Bad causality",
+        operations: [
+          {
+            op: OpKind.CREATE_EVENT_CAUSALITY,
+            patch: {},
+          },
+        ],
+      }),
+    ).rejects.toThrow(/endpoints are required/i);
+
+    await expect(
+      applyAutoApprovedEventChangeSet(owner.id, campaign.id, {
+        title: "Bad event effect",
+        operations: [
+          {
+            op: OpKind.CREATE_EVENT,
+            patch: {
+              title: { to: "Effectful event" },
+              participants: {
+                to: [{ entityId: carl.id, role: "ACTOR" }],
+              },
+              effects: {
+                to: [
+                  {
+                    kind: "ADJUST_STAT",
+                    targetEntityId: carl.id,
+                    stat: "gold",
+                    delta: 1,
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      }),
+    ).rejects.toThrow(/target must be a crawler/i);
+  });
+
+  it("refuses to create a self-causality link", async () => {
+    const owner = await makeUser("owner-self-cause@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Loop",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    await expect(
+      linkEventCause(owner.id, campaign.id, {
+        causeId: event.id,
+        effectId: event.id,
+      }),
+    ).rejects.toThrow(/cannot cause itself/i);
+  });
+
+  it("blocks archiving a locked causality link", async () => {
+    const owner = await makeUser("owner-cause-locked@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const cause = await createEvent(owner.id, campaign.id, {
+      title: "Cause",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const effect = await createEvent(owner.id, campaign.id, {
+      title: "Effect",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "AFFECTED" }],
+    });
+    const link = await linkEventCause(owner.id, campaign.id, {
+      causeId: cause.id,
+      effectId: effect.id,
+    });
+    await prisma.eventCausality.update({
+      where: { id: link.id },
+      data: { locked: true },
+    });
+
+    await expect(
+      archiveEventCausality(owner.id, campaign.id, link.id),
+    ).rejects.toThrow(/locked/);
+    const row = await prisma.eventCausality.findUnique({ where: { id: link.id } });
+    expect(row?.status).toBe(CanonStatus.CANON);
+  });
+
   it("allows relinking after archiving a causality link", async () => {
     const owner = await makeUser("owner-relink@test.com");
     const campaign = await createCampaign(owner.id, { name: "Dungeon" });
@@ -902,6 +1083,91 @@ describe("updateEvent", () => {
 
     const rows = await prisma.eventParticipant.findMany({ where: { eventId: event.id } });
     expect(rows).toHaveLength(2);
+  });
+
+  it("does not add effect targets as affected participants until effects apply", async () => {
+    const owner = await makeUser("owner-effect-declare@test.com");
+    const player = await makeUser("player-effect-declare@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const hiddenNpc = await makeEntity(owner.id, campaign.id, "Secret source");
+    const crawler = await makeCrawler(
+      owner.id,
+      campaign.id,
+      "Public crawler",
+      "SHARED_WITH_PLAYERS",
+    );
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Hidden consequence",
+      secret: false,
+      participants: [{ entityId: hiddenNpc.id, role: "ACTOR" }],
+    });
+
+    await updateEvent(owner.id, campaign.id, event.id, {
+      title: "Hidden consequence",
+      secret: false,
+      effects: [
+        {
+          kind: "ADJUST_STAT",
+          targetEntityId: crawler.id,
+          stat: "gold",
+          delta: 50,
+        },
+      ],
+    });
+
+    const rows = await prisma.eventParticipant.findMany({
+      where: { eventId: event.id },
+      select: { entityId: true, role: true },
+    });
+    expect(rows.map((row) => `${row.entityId}:${row.role}`).sort()).toEqual([
+      `${hiddenNpc.id}:ACTOR`,
+    ]);
+
+    const playerTimeline = await listEventsForEntity(player.id, campaign.id, crawler.id);
+    expect(playerTimeline).toHaveLength(0);
+  });
+
+  it("keeps applied effect targets as affected participants during later edits", async () => {
+    const owner = await makeUser("owner-applied-effect-parts@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const hiddenNpc = await makeEntity(owner.id, campaign.id, "Secret source");
+    const crawler = await makeCrawler(owner.id, campaign.id, "Carl");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Loot consequence",
+      secret: false,
+      participants: [{ entityId: hiddenNpc.id, role: "ACTOR" }],
+    });
+
+    await updateEvent(owner.id, campaign.id, event.id, {
+      title: "Loot consequence",
+      secret: false,
+      effects: [
+        {
+          kind: "ADJUST_STAT",
+          targetEntityId: crawler.id,
+          stat: "gold",
+          delta: 50,
+        },
+      ],
+    });
+    await applyEventEffects(owner.id, campaign.id, event.id);
+
+    await updateEvent(owner.id, campaign.id, event.id, {
+      title: "Loot consequence renamed",
+      secret: false,
+      participants: [{ entityId: hiddenNpc.id, role: "ACTOR" }],
+    });
+
+    const rows = await prisma.eventParticipant.findMany({
+      where: { eventId: event.id },
+      select: { entityId: true, role: true },
+    });
+    expect(rows.map((row) => `${row.entityId}:${row.role}`).sort()).toEqual(
+      [`${crawler.id}:AFFECTED`, `${hiddenNpc.id}:ACTOR`].sort(),
+    );
   });
 
   it("rejects an edit that drops all participants or names a non-canon one", async () => {

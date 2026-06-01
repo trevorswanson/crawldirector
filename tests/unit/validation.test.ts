@@ -10,6 +10,7 @@ import {
   signInSchema,
   signUpSchema,
   updateEntitySchema,
+  updateEventSchema,
 } from "@/lib/validation";
 
 describe("signUpSchema", () => {
@@ -328,5 +329,56 @@ describe("createEventSchema", () => {
       participants: [{ entityId: "e1", role: "NOPE" }],
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe("updateEventSchema effects", () => {
+  it("parses a SET_STAT effect value", () => {
+    const parsed = updateEventSchema.parse({
+      title: "Floor shift",
+      effects: [
+        {
+          kind: "SET_STAT",
+          targetEntityId: "crawler1",
+          stat: "currentFloor",
+          valueNumber: "1",
+        },
+      ],
+    });
+
+    expect(parsed.effects?.[0]).toMatchObject({
+      kind: "SET_STAT",
+      stat: "currentFloor",
+      valueNumber: 1,
+    });
+  });
+
+  it("rejects incomplete event effects", () => {
+    const missingAdjustStat = updateEventSchema.safeParse({
+      title: "Bad adjust",
+      effects: [{ kind: "ADJUST_STAT", targetEntityId: "crawler1", delta: "1" }],
+    });
+    const missingStat = updateEventSchema.safeParse({
+      title: "Bad set",
+      effects: [{ kind: "SET_STAT", targetEntityId: "crawler1", valueNumber: "1" }],
+    });
+    const missingValue = updateEventSchema.safeParse({
+      title: "Bad set",
+      effects: [{ kind: "SET_STAT", targetEntityId: "crawler1", stat: "currentFloor" }],
+    });
+    const missingDelta = updateEventSchema.safeParse({
+      title: "Bad adjust",
+      effects: [{ kind: "ADJUST_STAT", targetEntityId: "crawler1", stat: "gold" }],
+    });
+    const missingAliveValue = updateEventSchema.safeParse({
+      title: "Bad alive",
+      effects: [{ kind: "SET_ALIVE", targetEntityId: "crawler1" }],
+    });
+
+    expect(missingAdjustStat.success).toBe(false);
+    expect(missingStat.success).toBe(false);
+    expect(missingValue.success).toBe(false);
+    expect(missingDelta.success).toBe(false);
+    expect(missingAliveValue.success).toBe(false);
   });
 });

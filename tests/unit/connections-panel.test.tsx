@@ -311,6 +311,54 @@ describe("ConnectionsPanel", () => {
     expect(screen.queryByText("DM-only (secret)")).toBeNull();
   });
 
+  it("submits a new connection and closes the add form on success", async () => {
+    createRelationshipAction.mockResolvedValue(undefined);
+    render(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="e1"
+        sourceType="CRAWLER"
+        connections={[]}
+        candidates={candidates}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Add connection/ }));
+    fireEvent.change(screen.getByPlaceholderText("Search entity to connect…"), {
+      target: { value: "Donut" },
+    });
+    fireEvent.click(screen.getByText("Donut"));
+    fireEvent.submit(screen.getByRole("combobox").closest("form")!);
+
+    await waitFor(() => expect(createRelationshipAction).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText("DM-only (secret)")).toBeNull();
+  });
+
+  it("keeps the add form open when connection creation fails", async () => {
+    createRelationshipAction.mockResolvedValue({ error: "Choose a target entity." });
+    render(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="e1"
+        sourceType="CRAWLER"
+        connections={[]}
+        candidates={candidates}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Add connection/ }));
+    fireEvent.change(screen.getByPlaceholderText("Search entity to connect…"), {
+      target: { value: "Donut" },
+    });
+    fireEvent.click(screen.getByText("Donut"));
+    fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toBe("Choose a target entity.");
+    });
+    expect(screen.getByText("DM-only (secret)")).toBeDefined();
+  });
+
   it("prompts to create more entities when there are no candidates", () => {
     render(
       <ConnectionsPanel

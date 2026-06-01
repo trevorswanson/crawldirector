@@ -323,6 +323,77 @@ const eventParticipantSchema = z.object({
   role: z.enum(eventParticipantRoleValues).default("ACTOR"),
 });
 
+// Structured event effects: changes an event can apply to entity state
+// (docs/01-domain-model.md). v1 targets a crawler and adjusts or sets a numeric
+// stat, or sets the alive flag; applying routes APPLY_EVENT_EFFECTS through the
+// review pipeline. Generic-entity / disposition / PERSONA_SHIFT effects are
+// follow-ups.
+export const eventEffectKindValues = ["ADJUST_STAT", "SET_STAT", "SET_ALIVE"] as const;
+export type EventEffectKind = (typeof eventEffectKindValues)[number];
+
+// Crawler numeric fields an event effect can update — these map to the review
+// service's `crawler.*` patch fields.
+export const eventEffectStatValues = [
+  "gold",
+  "hp",
+  "mp",
+  "level",
+  "killCount",
+  "currentFloor",
+] as const;
+export type EventEffectStat = (typeof eventEffectStatValues)[number];
+
+export const eventEffectSchema = z
+  .object({
+    // Stable id within the event. Optional on input (the service assigns one for
+    // newly declared effects); present when editing an existing effect.
+    id: z.string().trim().max(60).optional(),
+    kind: z.enum(eventEffectKindValues),
+    targetEntityId: z.string().trim().min(1, "Effect target is required."),
+    stat: z.enum(eventEffectStatValues).optional(),
+    delta: z.preprocess(
+      (value) =>
+        value === "" || value === null || value === undefined ? undefined : value,
+      z.coerce.number().int("Delta must be a whole number.").optional(),
+    ),
+    valueNumber: z.preprocess(
+      (value) =>
+        value === "" || value === null || value === undefined ? undefined : value,
+      z.coerce.number().int("Value must be a whole number.").optional(),
+    ),
+    // "alive" -> true, "dead" -> false; absent -> undefined (non-alive effects).
+    value: z.preprocess(
+      (value) =>
+        value === "" || value === null || value === undefined
+          ? undefined
+          : value === true || value === "true" || value === "on" || value === "alive",
+      z.boolean().optional(),
+    ),
+    note: optionalText(200),
+  })
+  .superRefine((effect, ctx) => {
+    if (effect.kind === "ADJUST_STAT") {
+      if (!effect.stat) {
+        ctx.addIssue({ code: "custom", message: "Choose a stat to adjust.", path: ["stat"] });
+      }
+      if (effect.delta === undefined || effect.delta === 0) {
+        ctx.addIssue({ code: "custom", message: "Enter a non-zero delta.", path: ["delta"] });
+      }
+    }
+    if (effect.kind === "SET_STAT") {
+      if (!effect.stat) {
+        ctx.addIssue({ code: "custom", message: "Choose a stat to set.", path: ["stat"] });
+      }
+      if (effect.valueNumber === undefined) {
+        ctx.addIssue({ code: "custom", message: "Enter a value.", path: ["valueNumber"] });
+      }
+    }
+    if (effect.kind === "SET_ALIVE" && effect.value === undefined) {
+      ctx.addIssue({ code: "custom", message: "Choose alive or dead.", path: ["value"] });
+    }
+  });
+export type EventEffectInput = z.infer<typeof eventEffectSchema>;
+
 // floor: optional in-game floor number. Empty/absent => undefined.
 const optionalFloor = z.preprocess(
   (value) => (value === "" || value === null || value === undefined ? undefined : value),
@@ -366,6 +437,10 @@ export const updateEventSchema = z.object({
     .min(1, "An event needs at least one participant.")
     .max(20, "Too many participants.")
     .optional(),
+  // The desired set of *unapplied* effects. When present it replaces the event's
+  // unapplied effects (applied effects are immutable history, preserved by the
+  // service); when absent the effect set is left untouched.
+  effects: z.array(eventEffectSchema).max(20, "Too many effects.").optional(),
 });
 export type UpdateEventInput = z.infer<typeof updateEventSchema>;
 
