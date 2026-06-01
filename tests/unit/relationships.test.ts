@@ -4,10 +4,11 @@ import { CanonStatus, Role } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
-import { createGenericEntity } from "@/server/services/entities";
+import { archiveEntity, createGenericEntity } from "@/server/services/entities";
 import {
   archiveRelationship,
   createRelationship,
+  getCampaignRelationshipGraph,
   listConnectionsForEntity,
   setRelationshipLock,
 } from "@/server/services/relationships";
@@ -279,5 +280,123 @@ describe("relationship service", () => {
     });
 
     expect(await listConnectionsForEntity(stranger.id, campaign.id, a.id)).toEqual([]);
+  });
+});
+
+describe("getCampaignRelationshipGraph", () => {
+  it("returns connected entities and their edges, omitting isolated entities", async () => {
+    const owner = await makeUser("graph-owner@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const donut = await makeEntity(owner.id, campaign.id, "Donut");
+    await makeEntity(owner.id, campaign.id, "Loner"); // no edges
+
+    const edge = await createRelationship(owner.id, campaign.id, carl.id, {
+      type: "ALLY_OF",
+      targetId: donut.id,
+      secret: false,
+    });
+
+    const graph = await getCampaignRelationshipGraph(owner.id, campaign.id);
+    expect(graph).not.toBeNull();
+    expect(graph!.edges).toHaveLength(1);
+    expect(graph!.edges[0]).toMatchObject({
+      id: edge.id,
+      type: "ALLY_OF",
+      sourceId: carl.id,
+      targetId: donut.id,
+      secret: false,
+    });
+    // Only the two connected entities — the loner is not a graph node.
+    expect(graph!.nodes.map((n) => n.name).sort()).toEqual(["Carl", "Donut"]);
+  });
+
+  it("flags a locked node", async () => {
+    const owner = await makeUser("graph-lock@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const a = await makeEntity(owner.id, campaign.id, "A");
+    const b = await makeEntity(owner.id, campaign.id, "B");
+    await createRelationship(owner.id, campaign.id, a.id, {
+      type: "ALLY_OF",
+      targetId: b.id,
+      secret: false,
+    });
+    await prisma.entity.update({ where: { id: a.id }, data: { locked: true } });
+
+    const graph = await getCampaignRelationshipGraph(owner.id, campaign.id);
+    expect(graph!.nodes.find((n) => n.id === a.id)?.locked).toBe(true);
+    expect(graph!.nodes.find((n) => n.id === b.id)?.locked).toBe(false);
+  });
+
+  it("hides secret edges and edges to invisible/archived endpoints from players", async () => {
+    const owner = await makeUser("graph-owner2@test.com");
+    const player = await makeUser("graph-player@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+
+    const hub = await makeEntity(owner.id, campaign.id, "Hub", "SHARED_WITH_PLAYERS");
+    const shared = await makeEntity(owner.id, campaign.id, "Shared", "SHARED_WITH_PLAYERS");
+    const hidden = await makeEntity(owner.id, campaign.id, "Hidden", "DM_ONLY");
+
+    await createRelationship(owner.id, campaign.id, hub.id, {
+      type: "ALLY_OF",
+      targetId: shared.id,
+      secret: false,
+    });
+    await createRelationship(owner.id, campaign.id, hub.id, {
+      type: "BETRAYED",
+      targetId: shared.id,
+      secret: true,
+    });
+    await createRelationship(owner.id, campaign.id, hub.id, {
+      type: "KNOWS_ABOUT",
+      targetId: hidden.id,
+      secret: false,
+    });
+
+    const asDm = await getCampaignRelationshipGraph(owner.id, campaign.id);
+    expect(asDm!.edges).toHaveLength(3);
+    expect(asDm!.nodes).toHaveLength(3);
+
+    const asPlayer = await getCampaignRelationshipGraph(player.id, campaign.id);
+    expect(asPlayer!.edges).toHaveLength(1);
+    expect(asPlayer!.edges[0].type).toBe("ALLY_OF");
+    // The DM-only "Hidden" entity never becomes a player-visible node.
+    expect(asPlayer!.nodes.map((n) => n.name).sort()).toEqual(["Hub", "Shared"]);
+  });
+
+  it("drops edges to an archived endpoint for everyone", async () => {
+    const owner = await makeUser("graph-archive@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const a = await makeEntity(owner.id, campaign.id, "A");
+    const b = await makeEntity(owner.id, campaign.id, "B");
+    await createRelationship(owner.id, campaign.id, a.id, {
+      type: "ALLY_OF",
+      targetId: b.id,
+      secret: false,
+    });
+
+    await archiveEntity(owner.id, campaign.id, b.id);
+
+    const graph = await getCampaignRelationshipGraph(owner.id, campaign.id);
+    expect(graph!.edges).toHaveLength(0);
+    expect(graph!.nodes).toHaveLength(0);
+  });
+
+  it("returns null for a non-member", async () => {
+    const owner = await makeUser("graph-owner3@test.com");
+    const stranger = await makeUser("graph-stranger@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const a = await makeEntity(owner.id, campaign.id, "A");
+    const b = await makeEntity(owner.id, campaign.id, "B");
+    await createRelationship(owner.id, campaign.id, a.id, {
+      type: "ALLY_OF",
+      targetId: b.id,
+      secret: false,
+    });
+
+    expect(await getCampaignRelationshipGraph(stranger.id, campaign.id)).toBeNull();
   });
 });
