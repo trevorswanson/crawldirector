@@ -229,4 +229,25 @@ describe("getGroupRoster", () => {
     const roster = await getGroupRoster(outsider.id, campaign.id, party.id);
     expect(roster).toBeNull();
   });
+
+  it("returns null for a missing group id", async () => {
+    const dm = await makeUser("dm6@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+
+    const roster = await getGroupRoster(dm.id, campaign.id, "does-not-exist");
+    expect(roster).toBeNull();
+  });
+
+  it("hides a DM-only group's roster from players", async () => {
+    const dm = await makeUser("dm7@test.com");
+    const player = await makeUser("player7@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const party = await makeEntity(dm.id, campaign.id, "PARTY", "Secret Party");
+
+    expect(await getGroupRoster(dm.id, campaign.id, party.id)).not.toBeNull();
+    expect(await getGroupRoster(player.id, campaign.id, party.id)).toBeNull();
+  });
 });
