@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Pencil, Plus, Trash2, X } from "lucide-react";
 
 import {
+  applyCampaignEventEffectsAction,
   createCampaignEventAction,
   updateCampaignEventAction,
   type EventActionState,
@@ -13,6 +14,11 @@ import {
   EntityTypeahead,
   type EntityCandidate,
 } from "@/components/entities/entity-typeahead";
+import {
+  EffectRows,
+  type EffectRowValue,
+} from "@/components/entities/effect-rows";
+import { EventEffectsSection } from "@/components/entities/event-effects-section";
 import {
   ParticipantRows,
   type ParticipantRowValue,
@@ -214,11 +220,15 @@ function EditEventForm({
   campaignId,
   event,
   candidates,
+  crawlerCandidates,
+  resolveName,
   onClose,
 }: {
   campaignId: string;
   event: CampaignTimelineEvent;
   candidates: EntityCandidate[];
+  crawlerCandidates: EntityCandidate[];
+  resolveName: (targetId: string) => string;
   onClose: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -232,6 +242,23 @@ function EditEventForm({
       role: participant.role,
     }),
   );
+  const initialEffects: EffectRowValue[] = event.effects
+    .filter((effect) => !effect.applied)
+    .map((effect) => ({
+      id: effect.id,
+      kind: effect.kind,
+      target:
+        crawlerCandidates.find((candidate) => candidate.id === effect.targetId) ?? {
+          id: effect.targetId,
+          name: resolveName(effect.targetId),
+          type: "CRAWLER",
+        },
+      stat: effect.stat ?? "gold",
+      delta: effect.delta != null ? String(effect.delta) : "",
+      valueNumber: effect.valueNumber != null ? String(effect.valueNumber) : "",
+      alive: effect.value ? "alive" : "dead",
+      note: effect.note ?? "",
+    }));
 
   const handleSubmit = async (formData: FormData) => {
     setError(null);
@@ -296,6 +323,7 @@ function EditEventForm({
       </div>
 
       <ParticipantRows candidates={candidates} initial={initialParticipants} />
+      <EffectRows candidates={crawlerCandidates} initial={initialEffects} />
 
       {error && (
         <p role="alert" className="text-[11px] text-[var(--no)]">
@@ -334,6 +362,15 @@ export function CampaignTimeline({
 }) {
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  const crawlerCandidates = candidates.filter(
+    (candidate) => candidate.type === "CRAWLER",
+  );
+  const nameById = new Map(
+    candidates.map((candidate) => [candidate.id, candidate.name] as const),
+  );
+  const resolveName = (targetId: string) =>
+    nameById.get(targetId) ?? "Unknown crawler";
 
   return (
     <div className="h-full overflow-y-auto">
@@ -422,6 +459,8 @@ export function CampaignTimeline({
                       campaignId={campaignId}
                       event={event}
                       candidates={candidates}
+                      crawlerCandidates={crawlerCandidates}
+                      resolveName={resolveName}
                       onClose={() => setEditingId(null)}
                     />
                   )}
@@ -455,6 +494,17 @@ export function CampaignTimeline({
                       {event.causes.length > 0 && (
                         <p>Causes {event.causes.map((effect) => effect.title).join(", ")}</p>
                       )}
+                    </div>
+                  )}
+                  {event.effects.length > 0 && (
+                    <div className="mt-3">
+                      <EventEffectsSection
+                        effects={event.effects}
+                        resolveName={resolveName}
+                        onApply={() =>
+                          applyCampaignEventEffectsAction(campaignId, event.id)
+                        }
+                      />
                     </div>
                   )}
                 </article>

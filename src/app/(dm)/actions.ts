@@ -29,6 +29,7 @@ import {
   updateRelationship,
 } from "@/server/services/relationships";
 import {
+  applyEventEffects,
   archiveEvent,
   archiveEventCausality,
   createEvent,
@@ -602,6 +603,39 @@ function parseParticipantRows(formData: FormData) {
   return participants;
 }
 
+// Read the indexed effect rows an event edit form submits (`effectKind_N` /
+// `effectTarget_N` / `effectStat_N` / `effectDelta_N` / `effectValue_N` /
+// `effectNote_N` / `effectId_N`, counted by `effectCount`) into raw effect
+// objects for the Zod schema to validate. Returns `undefined` when no effect
+// rows are present so the service leaves the effect set untouched. Rows without a
+// target are skipped (empty trailing rows). `effectValue` carries "alive"/"dead".
+function parseEffectRows(formData: FormData) {
+  if (formData.get("effectCount") == null) return undefined;
+  const count = Number(formData.get("effectCount") ?? 0);
+  const effects: Record<string, unknown>[] = [];
+  for (let index = 0; index < Math.min(count, 20); index += 1) {
+    const targetEntityId = formData.get(`effectTarget_${index}`)?.toString().trim();
+    if (!targetEntityId) continue;
+    const effect: Record<string, unknown> = {
+      kind: formData.get(`effectKind_${index}`)?.toString(),
+      targetEntityId,
+      note: formData.get(`effectNote_${index}`)?.toString() ?? "",
+    };
+    const id = formData.get(`effectId_${index}`)?.toString().trim();
+    if (id) effect.id = id;
+    const stat = formData.get(`effectStat_${index}`)?.toString();
+    if (stat) effect.stat = stat;
+    const delta = formData.get(`effectDelta_${index}`);
+    if (delta != null && delta !== "") effect.delta = delta;
+    const valueNumber = formData.get(`effectValueNumber_${index}`);
+    if (valueNumber != null && valueNumber !== "") effect.valueNumber = valueNumber;
+    const value = formData.get(`effectValue_${index}`);
+    if (value != null && value !== "") effect.value = value;
+    effects.push(effect);
+  }
+  return effects;
+}
+
 export async function createEventAction(
   campaignId: string,
   sourceId: string,
@@ -660,6 +694,7 @@ export async function updateEventAction(
 ): Promise<EventActionState> {
   const user = await requireUser();
   const participants = parseParticipantRows(formData);
+  const effects = parseEffectRows(formData);
   const parsed = updateEventSchema.safeParse({
     title: formData.get("title"),
     summary: formData.get("summary"),
@@ -667,6 +702,7 @@ export async function updateEventAction(
     timeLabel: formData.get("timeLabel"),
     secret: formData.get("secret"),
     ...(participants ? { participants } : {}),
+    ...(effects ? { effects } : {}),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -674,7 +710,12 @@ export async function updateEventAction(
 
   let result: { participantIds: string[] };
   try {
-    result = await updateEvent(user.id, campaignId, eventId, parsed.data);
+    result =
+      effects && effects.length > 0
+        ? await updateEvent(user.id, campaignId, eventId, parsed.data, {
+            applyEffects: true,
+          })
+        : await updateEvent(user.id, campaignId, eventId, parsed.data);
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message };
     return { error: "Could not edit the event. Please try again." };
@@ -697,6 +738,7 @@ export async function updateCampaignEventAction(
 ): Promise<EventActionState> {
   const user = await requireUser();
   const participants = parseParticipantRows(formData);
+  const effects = parseEffectRows(formData);
   const parsed = updateEventSchema.safeParse({
     title: formData.get("title"),
     summary: formData.get("summary"),
@@ -704,6 +746,7 @@ export async function updateCampaignEventAction(
     timeLabel: formData.get("timeLabel"),
     secret: formData.get("secret"),
     ...(participants ? { participants } : {}),
+    ...(effects ? { effects } : {}),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -711,7 +754,12 @@ export async function updateCampaignEventAction(
 
   let result: { participantIds: string[] };
   try {
-    result = await updateEvent(user.id, campaignId, eventId, parsed.data);
+    result =
+      effects && effects.length > 0
+        ? await updateEvent(user.id, campaignId, eventId, parsed.data, {
+            applyEffects: true,
+          })
+        : await updateEvent(user.id, campaignId, eventId, parsed.data);
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message };
     return { error: "Could not edit the event. Please try again." };
@@ -801,6 +849,50 @@ export async function toggleEventLockAction(
     revalidatePath(`/campaigns/${campaignId}/entities/${participantId}`);
   }
   revalidatePath(`/campaigns/${campaignId}/timeline`);
+}
+
+// Apply an event's effects from the entity Timeline panel: revalidates every
+// affected entity (participants + effect targets, plus the viewed entity) and
+// the campaign timeline.
+export async function applyEventEffectsAction(
+  campaignId: string,
+  entityId: string,
+  eventId: string,
+): Promise<EventActionState> {
+  const user = await requireUser();
+  let result: { affectedEntityIds: string[] };
+  try {
+    result = await applyEventEffects(user.id, campaignId, eventId);
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    return { error: "Could not apply the effects. Please try again." };
+  }
+  for (const id of new Set([...result.affectedEntityIds, entityId])) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${id}`);
+  }
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
+  return undefined;
+}
+
+// Apply an event's effects from the campaign timeline page (no single viewed
+// entity): revalidates every affected entity and the campaign timeline.
+export async function applyCampaignEventEffectsAction(
+  campaignId: string,
+  eventId: string,
+): Promise<EventActionState> {
+  const user = await requireUser();
+  let result: { affectedEntityIds: string[] };
+  try {
+    result = await applyEventEffects(user.id, campaignId, eventId);
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    return { error: "Could not apply the effects. Please try again." };
+  }
+  for (const id of result.affectedEntityIds) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${id}`);
+  }
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
+  return undefined;
 }
 
 export async function linkEventCauseAction(

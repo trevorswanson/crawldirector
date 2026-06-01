@@ -42,7 +42,8 @@ export type EventReviewOperationInput = {
     | "CREATE_EVENT"
     | "UPDATE_EVENT"
     | "CREATE_EVENT_CAUSALITY"
-    | "DELETE_EVENT_CAUSALITY";
+    | "DELETE_EVENT_CAUSALITY"
+    | "APPLY_EVENT_EFFECTS";
   targetId?: string;
   patch: ReviewPatch;
 };
@@ -1798,6 +1799,191 @@ function jsonObject(value: JsonValue | undefined): Prisma.InputJsonValue {
   return {};
 }
 
+// ── Structured event effects (docs/01-domain-model.md) ───────────────────────
+// An effect is a structured event consequence applied to entity state. v1 targets
+// a crawler: ADJUST_STAT deltas a numeric field, SET_STAT writes an absolute
+// numeric value, and SET_ALIVE flips the alive flag. Applying routes through the
+// entity-update path so the write is lock-aware + provenance-tracked.
+type StoredEventEffect = {
+  id: string;
+  kind: "ADJUST_STAT" | "SET_STAT" | "SET_ALIVE";
+  targetEntityId: string;
+  stat?: string;
+  delta?: number;
+  valueNumber?: number;
+  value?: boolean;
+  note: string | null;
+  applied: boolean;
+  appliedChangeSetId: string | null;
+};
+
+const eventEffectKinds = new Set<string>(["ADJUST_STAT", "SET_STAT", "SET_ALIVE"]);
+// Crawler numeric fields an event effect can update -> `crawler.*` patch field +
+// a floor the result is clamped to (DCC stats never go negative; level and floor
+// are 1-based).
+const eventEffectStatFloors: Record<string, number> = {
+  gold: 0,
+  hp: 0,
+  mp: 0,
+  killCount: 0,
+  level: 1,
+  currentFloor: 1,
+};
+
+// Read an effects JSON array (stored on the event, or carried in a patch) into
+// normalized effects. Unknown kinds/targets are dropped; ids are minted when
+// absent so newly declared effects get a stable handle.
+function parseEventEffects(value: JsonValue | undefined): StoredEventEffect[] {
+  if (!Array.isArray(value)) return [];
+  const effects: StoredEventEffect[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const record = item as Record<string, JsonValue>;
+    const kind = record.kind;
+    const targetEntityId = record.targetEntityId;
+    if (typeof kind !== "string" || !eventEffectKinds.has(kind)) continue;
+    if (typeof targetEntityId !== "string" || targetEntityId.length === 0) continue;
+    const stat = record.stat;
+    effects.push({
+      id:
+        typeof record.id === "string" && record.id.length > 0
+          ? record.id
+          : crypto.randomUUID(),
+      kind: kind as StoredEventEffect["kind"],
+      targetEntityId,
+      stat:
+        typeof stat === "string" && stat in eventEffectStatFloors ? stat : undefined,
+      delta: typeof record.delta === "number" ? record.delta : undefined,
+      valueNumber:
+        typeof record.valueNumber === "number" ? record.valueNumber : undefined,
+      value: typeof record.value === "boolean" ? record.value : undefined,
+      note:
+        typeof record.note === "string" && record.note.length > 0 ? record.note : null,
+      applied: record.applied === true,
+      appliedChangeSetId:
+        typeof record.appliedChangeSetId === "string" ? record.appliedChangeSetId : null,
+    });
+  }
+  return effects;
+}
+
+function assertValidDeclaredEffect(effect: StoredEventEffect) {
+  if (effect.kind === "ADJUST_STAT") {
+    if (!effect.stat) throw new ServiceError("Effect is missing a stat to adjust.");
+    if (typeof effect.delta !== "number" || effect.delta === 0) {
+      throw new ServiceError("Effect needs a non-zero delta.");
+    }
+  }
+  if (effect.kind === "SET_STAT") {
+    if (!effect.stat) throw new ServiceError("Effect is missing a stat to set.");
+    if (typeof effect.valueNumber !== "number") {
+      throw new ServiceError("Effect needs a value.");
+    }
+  }
+  if (effect.kind === "SET_ALIVE" && typeof effect.value !== "boolean") {
+    throw new ServiceError("Effect needs an alive/dead value.");
+  }
+}
+
+function serializeEventEffects(
+  effects: StoredEventEffect[],
+): Prisma.InputJsonValue {
+  return effects.map((effect) => ({
+    id: effect.id,
+    kind: effect.kind,
+    targetEntityId: effect.targetEntityId,
+    ...(effect.stat ? { stat: effect.stat } : {}),
+    ...(typeof effect.delta === "number" ? { delta: effect.delta } : {}),
+    ...(typeof effect.valueNumber === "number" ? { valueNumber: effect.valueNumber } : {}),
+    ...(typeof effect.value === "boolean" ? { value: effect.value } : {}),
+    ...(effect.note ? { note: effect.note } : {}),
+    applied: effect.applied,
+    ...(effect.appliedChangeSetId
+      ? { appliedChangeSetId: effect.appliedChangeSetId }
+      : {}),
+  }));
+}
+
+// Resolve + validate an effect's target as a live canon crawler, returning the
+// current stat values the apply step deltas from.
+async function loadEffectTargetCrawler(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  entityId: string,
+) {
+  const entity = await tx.entity.findFirst({
+    where: {
+      id: entityId,
+      campaignId,
+      status: CanonStatus.CANON,
+      type: EntityType.CRAWLER,
+    },
+    select: {
+      id: true,
+      crawler: {
+        select: {
+          gold: true,
+          hp: true,
+          mp: true,
+          level: true,
+          killCount: true,
+          currentFloor: true,
+          isAlive: true,
+        },
+      },
+    },
+  });
+  if (!entity || !entity.crawler) {
+    throw new ServiceError("Effect target must be a crawler.");
+  }
+  return entity.crawler;
+}
+
+// Build the entity patch an effect applies (absolute `to` values the
+// entity-update path consumes). Returns null when the effect would be a no-op
+// (e.g. an ADJUST_STAT against an unset hp/mp, or an already-matching alive
+// flag) so we don't churn version/provenance for nothing.
+function effectEntityPatch(
+  effect: StoredEventEffect,
+  crawler: {
+    gold: number;
+    hp: number | null;
+    mp: number | null;
+    level: number;
+    killCount: number;
+    currentFloor: number | null;
+    isAlive: boolean;
+  },
+): ReviewPatch | null {
+  if (effect.kind === "SET_ALIVE") {
+    if (typeof effect.value !== "boolean" || crawler.isAlive === effect.value) {
+      return null;
+    }
+    return { "crawler.isAlive": { from: crawler.isAlive, to: effect.value } };
+  }
+  const stat = effect.stat;
+  if (!stat) return null;
+  const current = (crawler as unknown as Record<string, number | null>)[stat];
+  if (effect.kind === "SET_STAT") {
+    if (typeof effect.valueNumber !== "number") return null;
+    const floor = eventEffectStatFloors[stat] ?? 0;
+    const next = Math.max(floor, effect.valueNumber);
+    if (current === next) return null;
+    return { [`crawler.${stat}`]: { from: current, to: next } };
+  }
+
+  // ADJUST_STAT
+  if (typeof effect.delta !== "number") return null;
+  if (typeof current !== "number") {
+    // hp/mp/currentFloor may be null (unset) — an event can't delta nothing.
+    throw new ServiceError(`Cannot adjust ${stat}: the crawler has no value set.`);
+  }
+  const floor = eventEffectStatFloors[stat] ?? 0;
+  const next = Math.max(floor, current + effect.delta);
+  if (next === current) return null;
+  return { [`crawler.${stat}`]: { from: current, to: next } };
+}
+
 async function applyEventOperation(
   tx: Prisma.TransactionClient,
   changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
@@ -1818,6 +2004,12 @@ async function applyEventOperation(
       }
       if (!operation.targetId) throw new ServiceError("Missing event target.");
       return applyUpdateEvent(tx, changeSet, operation.id, operation.targetId, patch);
+    case OpKind.APPLY_EVENT_EFFECTS:
+      if (operation.targetType !== "EVENT") {
+        throw new ServiceError("Unsupported operation target.");
+      }
+      if (!operation.targetId) throw new ServiceError("Missing event target.");
+      return applyApplyEventEffects(tx, changeSet, operation.id, operation.targetId);
     case OpKind.CREATE_EVENT_CAUSALITY:
       if (operation.targetType !== "EVENT_CAUSALITY") {
         throw new ServiceError("Unsupported operation target.");
@@ -1858,6 +2050,21 @@ async function applyCreateEvent(
     await assertCanonEntity(tx, changeSet.campaignId, participant.entityId);
   }
 
+  // Effects declared at creation start unapplied; validate each and confirm its
+  // target is a crawler so a bad effect is caught now, not at apply time.
+  let effects: StoredEventEffect[] = [];
+  if ("effects" in patch) {
+    effects = parseEventEffects(readTo(patch, "effects")).map((effect) => ({
+      ...effect,
+      applied: false,
+      appliedChangeSetId: null,
+    }));
+    for (const effect of effects) {
+      assertValidDeclaredEffect(effect);
+      await loadEffectTargetCrawler(tx, changeSet.campaignId, effect.targetEntityId);
+    }
+  }
+
   const event = await tx.event.create({
     data: {
       campaignId: changeSet.campaignId,
@@ -1866,6 +2073,7 @@ async function applyCreateEvent(
       description: nullableString(readTo(patch, "description")),
       inGameTime: jsonObject(readTo(patch, "inGameTime")),
       orderKey: numberWithDefault(readTo(patch, "orderKey"), 0),
+      effects: serializeEventEffects(effects),
       secret: booleanWithDefault(readTo(patch, "secret"), false),
       source: changeSet.source,
       status: CanonStatus.CANON,
@@ -1906,7 +2114,7 @@ async function applyUpdateEvent(
       campaignId: changeSet.campaignId,
       status: { not: CanonStatus.ARCHIVED },
     },
-    select: { id: true, locked: true, version: true },
+    select: { id: true, locked: true, version: true, effects: true },
   });
   if (!event) throw new ServiceError("Event not found.");
 
@@ -1951,26 +2159,58 @@ async function applyUpdateEvent(
   if ("orderKey" in patch) data.orderKey = numberWithDefault(readTo(patch, "orderKey"), 0);
   if ("secret" in patch) data.secret = booleanWithDefault(readTo(patch, "secret"), false);
 
+  let nextEffects = parseEventEffects(event.effects as JsonValue);
+
+  // Effects edit replaces the *unapplied* set; applied effects are immutable
+  // history and are preserved. Each newly declared effect is validated and its
+  // target confirmed to be a crawler.
+  if ("effects" in patch) {
+    const applied = nextEffects.filter((effect) => effect.applied);
+    const declared = parseEventEffects(readTo(patch, "effects")).map((effect) => ({
+      ...effect,
+      applied: false,
+      appliedChangeSetId: null,
+    }));
+    for (const effect of declared) {
+      assertValidDeclaredEffect(effect);
+      await loadEffectTargetCrawler(tx, changeSet.campaignId, effect.targetEntityId);
+    }
+    nextEffects = [...applied, ...declared];
+    data.effects = serializeEventEffects(nextEffects);
+  }
+
   await tx.event.update({ where: { id: eventId }, data, select: { id: true } });
 
   // Participant editing: when the patch carries a participant list, reconcile it
   // against the live rows — add new (entity, role) pairs, drop removed ones, and
   // leave unchanged rows in place (preserving their order). Every desired
   // participant must be live canon, and an event always keeps ≥1 participant.
-  if ("participants" in patch) {
-    const desired = parseEventParticipants(readTo(patch, "participants"));
-    if (desired.length === 0) {
-      throw new ServiceError("An event needs at least one participant.");
-    }
-    for (const participant of desired) {
-      await assertCanonEntity(tx, changeSet.campaignId, participant.entityId);
-    }
+  if ("participants" in patch || "effects" in patch) {
     const existing = await tx.eventParticipant.findMany({
       where: { eventId },
       select: { id: true, entityId: true, role: true },
     });
+    const desired = "participants" in patch
+      ? parseEventParticipants(readTo(patch, "participants"))
+      : existing.map((participant) => ({
+          entityId: participant.entityId,
+          role: participant.role,
+        }));
     const key = (entityId: string, role: EventParticipantRole) => `${entityId}:${role}`;
     const desiredKeys = new Set(desired.map((p) => key(p.entityId, p.role)));
+    for (const effect of nextEffects) {
+      const affectedKey = key(effect.targetEntityId, EventParticipantRole.AFFECTED);
+      if (desiredKeys.has(affectedKey)) continue;
+      desired.push({
+        entityId: effect.targetEntityId,
+        role: EventParticipantRole.AFFECTED,
+      });
+      desiredKeys.add(affectedKey);
+    }
+    if (desired.length === 0) throw new ServiceError("An event needs at least one participant.");
+    for (const participant of desired) {
+      await assertCanonEntity(tx, changeSet.campaignId, participant.entityId);
+    }
     const existingKeys = new Set(existing.map((p) => key(p.entityId, p.role)));
     const toDelete = existing.filter((p) => !desiredKeys.has(key(p.entityId, p.role)));
     const toCreate = desired.filter((p) => !existingKeys.has(key(p.entityId, p.role)));
@@ -1994,6 +2234,103 @@ async function applyUpdateEvent(
       targetType: "CHANGE_OPERATION",
       targetId: operationId,
       detail: { eventId, op: OpKind.UPDATE_EVENT },
+    },
+  });
+  return eventId;
+}
+
+// Apply an event's unapplied effects to entity state. Each effect's entity write
+// goes through `applyUpdateEntity`, so it is lock-aware (a locked target / field
+// blocks the whole operation), version-bumped, and provenance-tracked. Marks the
+// effects applied on the event afterward. Atomic: one locked target rolls the
+// whole apply back (no partial application).
+async function applyApplyEventEffects(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operationId: string,
+  eventId: string,
+) {
+  const event = await tx.event.findFirst({
+    where: {
+      id: eventId,
+      campaignId: changeSet.campaignId,
+      status: { not: CanonStatus.ARCHIVED },
+    },
+    select: { id: true, effects: true },
+  });
+  if (!event) throw new ServiceError("Event not found.");
+
+  const effects = parseEventEffects(event.effects as JsonValue);
+  const pending = effects.filter((effect) => !effect.applied);
+  if (pending.length === 0) {
+    throw new ServiceError("This event has no effects left to apply.");
+  }
+
+  const appliedIds: string[] = [];
+  const affectedParticipantIds = Array.from(
+    new Set(pending.map((effect) => effect.targetEntityId)),
+  );
+  for (const effect of pending) {
+    const crawler = await loadEffectTargetCrawler(
+      tx,
+      changeSet.campaignId,
+      effect.targetEntityId,
+    );
+    const entityPatch = effectEntityPatch(effect, crawler);
+    if (entityPatch) {
+      // Routes through the lock-aware entity-update path (throws + flags the op
+      // blockedByLock if the target / field is locked, rolling back the apply).
+      await applyUpdateEntity(
+        tx,
+        changeSet,
+        operationId,
+        effect.targetEntityId,
+        entityPatch,
+      );
+    }
+    effect.applied = true;
+    effect.appliedChangeSetId = changeSet.id;
+    appliedIds.push(effect.id);
+  }
+
+  if (affectedParticipantIds.length > 0) {
+    await tx.eventParticipant.createMany({
+      data: affectedParticipantIds.map((entityId) => ({
+        eventId,
+        entityId,
+        role: EventParticipantRole.AFFECTED,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  await tx.event.update({
+    where: { id: eventId },
+    data: { effects: serializeEventEffects(effects) },
+    select: { id: true },
+  });
+  await tx.provenance.create({
+    data: {
+      campaignId: changeSet.campaignId,
+      eventId,
+      changeSetId: changeSet.id,
+      source: changeSet.source,
+      field: "effects",
+      actorUserId: changeSet.actorUserId,
+      providerId: changeSet.providerId,
+      model: changeSet.model,
+      promptId: changeSet.promptId,
+      runId: changeSet.runId,
+    },
+  });
+  await tx.auditLog.create({
+    data: {
+      campaignId: changeSet.campaignId,
+      actorUserId: changeSet.reviewedById ?? changeSet.actorUserId ?? "",
+      action: "APPLY_OPERATION",
+      targetType: "CHANGE_OPERATION",
+      targetId: operationId,
+      detail: { eventId, op: OpKind.APPLY_EVENT_EFFECTS, appliedEffectIds: appliedIds },
     },
   });
   return eventId;

@@ -9,14 +9,20 @@ import {
   within,
 } from "@testing-library/react";
 
-const { createCampaignEventAction, updateCampaignEventAction } = vi.hoisted(() => ({
+const {
+  createCampaignEventAction,
+  updateCampaignEventAction,
+  applyCampaignEventEffectsAction,
+} = vi.hoisted(() => ({
   createCampaignEventAction: vi.fn(),
   updateCampaignEventAction: vi.fn(),
+  applyCampaignEventEffectsAction: vi.fn(),
 }));
 
 vi.mock("@/app/(dm)/actions", () => ({
   createCampaignEventAction,
   updateCampaignEventAction,
+  applyCampaignEventEffectsAction,
 }));
 vi.mock("next/link", () => ({
   default: ({ href, children, className }: {
@@ -54,6 +60,7 @@ const events: CampaignTimelineEvent[] = [
     ],
     causedBy: [],
     causes: [],
+    effects: [],
   },
 ];
 
@@ -95,6 +102,7 @@ describe("CampaignTimeline", () => {
             participants: [],
             causedBy: [{ id: "cause", title: "Earlier scene", linkId: "link1" }],
             causes: [{ id: "effect", title: "Later scene", linkId: "link2" }],
+            effects: [],
           },
         ]}
       />,
@@ -243,6 +251,100 @@ describe("CampaignTimeline", () => {
 
     fireEvent.click(screen.getAllByTitle("Remove participant row")[1]);
 
+    expect(screen.getAllByLabelText("Participant role")).toHaveLength(1);
+  });
+
+  it("renders and applies event effects from the campaign timeline", async () => {
+    applyCampaignEventEffectsAction.mockResolvedValue(undefined);
+    render(
+      <CampaignTimeline
+        campaignId="c1"
+        candidates={candidates}
+        events={[
+          {
+            ...events[0],
+            effects: [
+              {
+                id: "fx1",
+                kind: "SET_STAT",
+                targetId: "e1",
+                stat: "currentFloor",
+                delta: null,
+                valueNumber: 1,
+                value: null,
+                note: "Entered the crawl",
+                applied: false,
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Floor = 1")).toBeDefined();
+    expect(screen.getByText("unapplied")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: /Apply unapplied/ }));
+
+    await waitFor(() =>
+      expect(applyCampaignEventEffectsAction).toHaveBeenCalledWith("c1", "ev1"),
+    );
+  });
+
+  it("prefills effect rows in the edit form and keeps it open on save errors", async () => {
+    updateCampaignEventAction.mockResolvedValue({ error: "Effect target is locked." });
+    render(
+      <CampaignTimeline
+        campaignId="c1"
+        candidates={candidates}
+        events={[
+          {
+            ...events[0],
+            effects: [
+              {
+                id: "fx-unknown",
+                kind: "SET_STAT",
+                targetId: "missing-crawler",
+                stat: "currentFloor",
+                delta: null,
+                valueNumber: 1,
+                value: null,
+                note: "Entered the crawl",
+                applied: false,
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit event" }));
+    const form = screen.getByLabelText("Event title").closest("form")!;
+
+    expect(
+      (form.querySelector('input[name="effectId_0"]') as HTMLInputElement).value,
+    ).toBe("fx-unknown");
+    expect(screen.getAllByText("Unknown crawler").length).toBeGreaterThan(0);
+    expect((form.querySelector('input[name="effectValueNumber_0"]') as HTMLInputElement).value).toBe(
+      "1",
+    );
+
+    fireEvent.submit(form);
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain("locked");
+    });
+    expect(screen.getByLabelText("Event title")).toBeDefined();
+  });
+
+  it("shows the no-candidate state in the new-event participant picker", () => {
+    render(<CampaignTimeline campaignId="c1" events={[]} candidates={[]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Log event" }));
+
+    expect(
+      (screen.getByRole("button", { name: "Add participant" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
     expect(screen.getAllByLabelText("Participant role")).toHaveLength(1);
   });
 });

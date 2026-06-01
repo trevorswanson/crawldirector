@@ -266,11 +266,23 @@ Event fields:
 - **Causality:** `causes` / `causedBy` links to other Events, forming a DAG.
   This is how "Carl's stunt → sponsor stock drop → faction defunded → war shift"
   is represented and traversed.
-- **Effects:** structured deltas (e.g. "Faction X strength −10", "Crawler Y
-  gained Title Z", or a **`PERSONA_SHIFT`** that nudges the System AI's dials —
-  see [`05-system-ai-persona.md`](./05-system-ai-persona.md)) that can optionally
-  be *applied* to entity state on approval.
+- **Effects:** structured changes (e.g. "Crawler Y gold +50", "Crawler Y current
+  floor = 1", "Faction X strength −10", "Crawler Y gained Title Z", or a
+  **`PERSONA_SHIFT`** that nudges the System AI's dials — see
+  [`05-system-ai-persona.md`](./05-system-ai-persona.md)) that can be applied to
+  entity state through the review pipeline. Effect declarations are distinct
+  from applied state changes: an event can carry **unapplied** effect rows, but
+  mutating the target entity should be represented as a Review Queue
+  `PENDING` `APPLY_EVENT_EFFECTS` proposal until the DM approves, edits, rejects,
+  or supersedes it. A future "apply now" shortcut may create an auto-approved
+  `DM` change set for ergonomics, but the default path for unapplied effects is
+  the Review Queue because it is already the product's place for inspecting
+  pending canon mutations.
 - provenance + review state.
+
+When an effect is approved and applied, the event should link the target entity
+as an `AFFECTED` participant so the event appears on that entity's timeline even
+if the entity did not act in or witness the original scene.
 
 > **Causality view** is a headline feature: given any entity or event, show the
 > upstream causes and downstream effects as a navigable chain/graph.

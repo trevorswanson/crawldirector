@@ -1,0 +1,210 @@
+"use client";
+
+import { useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
+
+import {
+  EntityTypeahead,
+  type EntityCandidate,
+} from "@/components/entities/entity-typeahead";
+import { effectStatLabels } from "@/lib/event-effects";
+import {
+  eventEffectKindValues,
+  eventEffectStatValues,
+  type EventEffectKind,
+  type EventEffectStat,
+} from "@/lib/validation";
+
+export type EffectRowValue = {
+  id?: string;
+  kind: EventEffectKind;
+  target: EntityCandidate | null;
+  stat: EventEffectStat;
+  delta: string;
+  valueNumber: string;
+  // "alive" | "dead" — only meaningful for SET_ALIVE.
+  alive: "alive" | "dead";
+  note: string;
+};
+
+const kindLabels: Record<EventEffectKind, string> = {
+  ADJUST_STAT: "Adjust stat",
+  SET_STAT: "Set stat",
+  SET_ALIVE: "Set alive/dead",
+};
+
+function emptyRow(): EffectRowValue {
+  return {
+    kind: "ADJUST_STAT",
+    target: null,
+    stat: "gold",
+    delta: "",
+    valueNumber: "",
+    alive: "dead",
+    note: "",
+  };
+}
+
+/**
+ * Editor for an event's structured effects (deltas applied to a crawler on
+ * approval). Emits indexed `effectKind_N` / `effectTarget_N` / `effectStat_N` /
+ * `effectDelta_N` / `effectValueNumber_N` / `effectValue_N` / `effectNote_N` / `effectId_N` fields
+ * counted by a hidden `effectCount`, parsed by `parseEffectRows`. `candidates`
+ * should be the campaign's crawler entities (the only valid effect targets).
+ */
+export function EffectRows({
+  candidates,
+  initial,
+}: {
+  candidates: EntityCandidate[];
+  initial?: EffectRowValue[];
+}) {
+  const [rows, setRows] = useState(
+    (initial ?? []).map((row, index) => ({ key: index, ...row })),
+  );
+  const [nextKey, setNextKey] = useState(initial?.length ?? 0);
+
+  const addRow = () => {
+    if (rows.length >= 20) return;
+    setRows((current) => [...current, { key: nextKey, ...emptyRow() }]);
+    setNextKey((current) => current + 1);
+  };
+
+  const removeRow = (key: number) => {
+    setRows((current) => current.filter((row) => row.key !== key));
+  };
+
+  const patchRow = (key: number, patch: Partial<EffectRowValue>) => {
+    setRows((current) =>
+      current.map((row) => (row.key === key ? { ...row, ...patch } : row)),
+    );
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <input type="hidden" name="effectCount" value={rows.length} />
+      <div className="flex items-center justify-between gap-3">
+        <span className="font-mono text-[9.5px] uppercase tracking-[.08em] text-[var(--ink-faint)]">
+          Effects
+        </span>
+        <button
+          type="button"
+          onClick={addRow}
+          disabled={rows.length >= 20 || candidates.length === 0}
+          className="inline-flex items-center gap-[6px] border border-[var(--line)] px-[8px] py-[5px] font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:text-[var(--ink-dim)] disabled:opacity-50"
+        >
+          <Plus aria-hidden size={11} />
+          Add effect
+        </button>
+      </div>
+      {candidates.length === 0 && (
+        <p className="text-[10.5px] text-[var(--ink-faint)]">
+          No crawlers in this campaign to apply effects to.
+        </p>
+      )}
+      {rows.map((row, index) => (
+        <div
+          key={row.key}
+          className="flex flex-col gap-2 border border-[var(--line)] bg-[var(--bg)] px-[8px] py-[7px]"
+        >
+          {row.id ? (
+            <input type="hidden" name={`effectId_${index}`} value={row.id} />
+          ) : null}
+          <div className="grid gap-2 sm:grid-cols-[150px_minmax(0,1fr)_auto]">
+            <select
+              name={`effectKind_${index}`}
+              aria-label="Effect kind"
+              value={row.kind}
+              onChange={(event) =>
+                patchRow(row.key, { kind: event.target.value as EventEffectKind })
+              }
+              className="self-start border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[7px] font-mono text-[11px] text-[var(--ink)]"
+            >
+              {eventEffectKindValues.map((kind) => (
+                <option key={kind} value={kind}>
+                  {kindLabels[kind]}
+                </option>
+              ))}
+            </select>
+            <EntityTypeahead
+              name={`effectTarget_${index}`}
+              candidates={candidates}
+              value={row.target}
+              onChange={(target) => patchRow(row.key, { target })}
+              placeholder="Search crawler..."
+            />
+            <button
+              type="button"
+              title="Remove effect row"
+              onClick={() => removeRow(row.key)}
+              className="inline-flex h-[34px] items-center justify-center border border-[var(--line)] px-[8px] text-[var(--ink-faint)] hover:text-[var(--no)]"
+            >
+              <Trash2 aria-hidden size={12} />
+            </button>
+          </div>
+          {row.kind !== "SET_ALIVE" ? (
+            <div className="grid gap-2 sm:grid-cols-[150px_120px]">
+              <select
+                name={`effectStat_${index}`}
+                aria-label="Stat to adjust"
+                value={row.stat}
+                onChange={(event) =>
+                  patchRow(row.key, { stat: event.target.value as EventEffectStat })
+                }
+                className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[7px] font-mono text-[11px] text-[var(--ink)]"
+              >
+                {eventEffectStatValues.map((stat) => (
+                  <option key={stat} value={stat}>
+                    {effectStatLabels[stat]}
+                  </option>
+                ))}
+              </select>
+              <input
+                name={
+                  row.kind === "ADJUST_STAT"
+                    ? `effectDelta_${index}`
+                    : `effectValueNumber_${index}`
+                }
+                type="number"
+                aria-label={row.kind === "ADJUST_STAT" ? "Delta" : "Value"}
+                value={row.kind === "ADJUST_STAT" ? row.delta : row.valueNumber}
+                onChange={(event) =>
+                  patchRow(
+                    row.key,
+                    row.kind === "ADJUST_STAT"
+                      ? { delta: event.target.value }
+                      : { valueNumber: event.target.value },
+                  )
+                }
+                placeholder={row.kind === "ADJUST_STAT" ? "± amount" : "Value"}
+                className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
+              />
+            </div>
+          ) : (
+            <select
+              name={`effectValue_${index}`}
+              aria-label="Alive or dead"
+              value={row.alive}
+              onChange={(event) =>
+                patchRow(row.key, { alive: event.target.value as "alive" | "dead" })
+              }
+              className="w-[150px] border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[7px] font-mono text-[11px] text-[var(--ink)]"
+            >
+              <option value="dead">Mark dead</option>
+              <option value="alive">Mark alive</option>
+            </select>
+          )}
+          <input
+            name={`effectNote_${index}`}
+            maxLength={200}
+            value={row.note}
+            onChange={(event) => patchRow(row.key, { note: event.target.value })}
+            aria-label="Effect note"
+            placeholder="Note (optional)"
+            className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
+          />
+        </div>
+      ))}
+    </div>
+  );
+}

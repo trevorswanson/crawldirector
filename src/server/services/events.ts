@@ -11,6 +11,8 @@ import {
   createEventSchema,
   updateEventSchema,
   type CreateEventInput,
+  type EventEffectKind,
+  type EventEffectStat,
   type UpdateEventInput,
 } from "@/lib/validation";
 import { prisma } from "@/server/db";
@@ -42,6 +44,61 @@ export type EventTimeInfo = { floor: number | null; label: string | null };
 
 export type EventCausalitySummary = { id: string; title: string; linkId: string };
 
+// A declared event effect, projected for display. DM-only — never surfaced to
+// players (effects are a DM mechanic and can spoil unrevealed canon). The target
+// name is resolved client-side from the campaign entity candidates.
+export type EventEffectView = {
+  id: string;
+  kind: EventEffectKind;
+  targetId: string;
+  stat: EventEffectStat | null;
+  delta: number | null;
+  valueNumber: number | null;
+  value: boolean | null;
+  note: string | null;
+  applied: boolean;
+};
+
+// Project the event.effects JSON for display. Players get an empty list.
+function projectEventEffects(value: unknown, isPlayer: boolean): EventEffectView[] {
+  if (isPlayer || !Array.isArray(value)) return [];
+  const views: EventEffectView[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const record = item as Record<string, unknown>;
+    if (typeof record.id !== "string") continue;
+    if (typeof record.kind !== "string") continue;
+    if (typeof record.targetEntityId !== "string") continue;
+    views.push({
+      id: record.id,
+      kind: record.kind as EventEffectKind,
+      targetId: record.targetEntityId,
+      stat: typeof record.stat === "string" ? (record.stat as EventEffectStat) : null,
+      delta: typeof record.delta === "number" ? record.delta : null,
+      valueNumber:
+        typeof record.valueNumber === "number" ? record.valueNumber : null,
+      value: typeof record.value === "boolean" ? record.value : null,
+      note: typeof record.note === "string" ? record.note : null,
+      applied: record.applied === true,
+    });
+  }
+  return views;
+}
+
+// Unapplied effect target entity ids — used to revalidate affected entity
+// timelines after applying effects.
+function unappliedEffectTargetIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const ids = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const record = item as Record<string, unknown>;
+    if (record.applied === true) continue;
+    if (typeof record.targetEntityId === "string") ids.add(record.targetEntityId);
+  }
+  return Array.from(ids);
+}
+
 export type EntityEvent = {
   id: string;
   title: string;
@@ -61,6 +118,8 @@ export type EntityEvent = {
   others: { id: string; name: string; type: string; role: EventParticipantRole }[];
   causedBy: EventCausalitySummary[];
   causes: EventCausalitySummary[];
+  // Declared effects (DM-only — empty for players).
+  effects: EventEffectView[];
 };
 
 export type CampaignTimelineParticipant = {
@@ -82,6 +141,8 @@ export type CampaignTimelineEvent = {
   participants: CampaignTimelineParticipant[];
   causedBy: EventCausalitySummary[];
   causes: EventCausalitySummary[];
+  // Declared effects (DM-only — empty for players).
+  effects: EventEffectView[];
 };
 
 const otherEntitySelect = {
@@ -197,6 +258,7 @@ export async function updateEvent(
   campaignId: string,
   eventId: string,
   input: UpdateEventInput,
+  options: { applyEffects?: boolean } = {},
 ) {
   const parsed = updateEventSchema.parse(input);
   await assertCampaignDm(userId, campaignId);
@@ -238,10 +300,33 @@ export async function updateEvent(
       })),
     };
   }
+  if (parsed.effects) {
+    // The desired unapplied effect set; the review service preserves any already
+    // applied effects and validates these targets are crawlers.
+    patch.effects = {
+      to: parsed.effects.map((effect) => ({
+        ...(effect.id ? { id: effect.id } : {}),
+        kind: effect.kind,
+        targetEntityId: effect.targetEntityId,
+        ...(effect.stat ? { stat: effect.stat } : {}),
+        ...(typeof effect.delta === "number" ? { delta: effect.delta } : {}),
+        ...(typeof effect.valueNumber === "number" ? { valueNumber: effect.valueNumber } : {}),
+        ...(typeof effect.value === "boolean" ? { value: effect.value } : {}),
+        ...(effect.note ? { note: effect.note } : {}),
+      })),
+    };
+  }
+
+  const operations: Parameters<typeof applyAutoApprovedEventChangeSet>[2]["operations"] = [
+    { op: OpKind.UPDATE_EVENT, targetId: eventId, patch },
+  ];
+  if (options.applyEffects && parsed.effects && parsed.effects.length > 0) {
+    operations.push({ op: OpKind.APPLY_EVENT_EFFECTS, targetId: eventId, patch: {} });
+  }
 
   await applyAutoApprovedEventChangeSet(userId, campaignId, {
     title: "Edit event",
-    operations: [{ op: OpKind.UPDATE_EVENT, targetId: eventId, patch }],
+    operations,
   });
 
   // Affected pages = entities that were participants before OR after the edit,
@@ -250,9 +335,10 @@ export async function updateEvent(
   const newIds = parsed.participants
     ? parsed.participants.map((participant) => participant.entityId)
     : oldIds;
+  const effectTargetIds = parsed.effects?.map((effect) => effect.targetEntityId) ?? [];
   return {
     id: eventId,
-    participantIds: Array.from(new Set([...oldIds, ...newIds])),
+    participantIds: Array.from(new Set([...oldIds, ...newIds, ...effectTargetIds])),
   };
 }
 
@@ -287,6 +373,7 @@ export async function listEventsForEntity(
       secret: true,
       locked: true,
       source: true,
+      effects: true,
       participants: {
         select: {
           role: true,
@@ -364,6 +451,7 @@ export async function listEventsForEntity(
       role: self.role,
       selfRoles: selfParticipations.map((p) => p.role),
       others,
+      effects: projectEventEffects(event.effects, isPlayer),
       causedBy: event.causedBy
         .filter((edge) => isPlayerVisibleEvent(edge.cause, isPlayer))
         .map((edge) => ({
@@ -413,6 +501,7 @@ export async function listCampaignTimeline(
       secret: true,
       locked: true,
       source: true,
+      effects: true,
       participants: {
         orderBy: { createdAt: "asc" },
         select: {
@@ -483,6 +572,7 @@ export async function listCampaignTimeline(
       locked: event.locked,
       source: event.source,
       participants,
+      effects: projectEventEffects(event.effects, isPlayer),
       causedBy: event.causedBy
         .filter((edge) => isPlayerVisibleEvent(edge.cause, isPlayer))
         .map((edge) => ({
@@ -568,6 +658,47 @@ export async function setEventLock(
       participantIds: updated.participants.map((participant) => participant.entityId),
     };
   });
+}
+
+/**
+ * Apply an event's declared (unapplied) effects to entity state. Routes
+ * APPLY_EVENT_EFFECTS through the review pipeline as an auto-approved DM change
+ * set, so each entity write is lock-aware and provenance-tracked. Returns the
+ * entity ids whose timelines/details may have changed (participants + effect
+ * targets) for revalidation. DM-only.
+ */
+export async function applyEventEffects(
+  userId: string,
+  campaignId: string,
+  eventId: string,
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  const existing = await prisma.event.findFirst({
+    where: { id: eventId, campaignId, status: { not: CanonStatus.ARCHIVED } },
+    select: {
+      id: true,
+      effects: true,
+      participants: { select: { entityId: true } },
+    },
+  });
+  if (!existing) throw new ServiceError("Event not found.");
+
+  const targetIds = unappliedEffectTargetIds(existing.effects);
+  if (targetIds.length === 0) {
+    throw new ServiceError("This event has no effects left to apply.");
+  }
+
+  await applyAutoApprovedEventChangeSet(userId, campaignId, {
+    title: "Apply event effects",
+    operations: [{ op: OpKind.APPLY_EVENT_EFFECTS, targetId: eventId, patch: {} }],
+  });
+
+  const participantIds = existing.participants.map((p) => p.entityId);
+  return {
+    id: eventId,
+    affectedEntityIds: Array.from(new Set([...participantIds, ...targetIds])),
+  };
 }
 
 export async function linkEventCause(

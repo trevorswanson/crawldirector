@@ -16,6 +16,7 @@ const {
   toggleEventLockAction,
   linkEventCauseAction,
   archiveEventCausalityAction,
+  applyEventEffectsAction,
 } = vi.hoisted(() => ({
   createEventAction: vi.fn(),
   updateEventAction: vi.fn(),
@@ -23,6 +24,7 @@ const {
   toggleEventLockAction: vi.fn(),
   linkEventCauseAction: vi.fn(),
   archiveEventCausalityAction: vi.fn(),
+  applyEventEffectsAction: vi.fn(),
 }));
 
 vi.mock("@/app/(dm)/actions", () => ({
@@ -32,6 +34,7 @@ vi.mock("@/app/(dm)/actions", () => ({
   toggleEventLockAction,
   linkEventCauseAction,
   archiveEventCausalityAction,
+  applyEventEffectsAction,
 }));
 vi.mock("next/link", () => ({
   default: ({ href, children }: { href: string; children: React.ReactNode }) => (
@@ -64,6 +67,7 @@ function event(overrides: Partial<EntityEvent> = {}): EntityEvent {
     others: [{ id: "e2", name: "Donut", type: "CRAWLER", role: "ACTOR" }],
     causedBy: [],
     causes: [],
+    effects: [],
     ...overrides,
   };
 }

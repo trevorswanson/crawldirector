@@ -112,6 +112,41 @@ is complete. The UI makes this invisible/instant for the DM.
 > still captured. Decide the exact threshold during M2 implementation; the
 > invariant is *provenance is always recorded*.
 
+### 1a. Event effects (reviewable consequences)
+
+Event effects are structured consequences of an event: examples include
+`Crawler.gold +50`, `Crawler.currentFloor = 1`, or `Crawler.isAlive = false`.
+The event itself can store the declared effect rows, but applying those rows to
+the target entity is a canon mutation and should enter the Review Queue as an
+`APPLY_EVENT_EFFECTS` operation.
+
+Default flow:
+
+1. A DM, AI run, player suggestion, or import declares one or more unapplied
+   effects on an event.
+2. The service creates or updates a `PENDING` Change Set with an
+   `APPLY_EVENT_EFFECTS` operation that targets the event and shows the resolved
+   entity patch in the queue (for example, `Crawler.gold: 20 -> 70`).
+3. The Review Queue owns approve/edit/reject/supersede. Editing the queued
+   operation should let the DM fix the target, effect kind, stat, or value before
+   approval.
+4. Approval applies the resolved patch atomically, marks the event effect rows as
+   applied, records the applying Change Set id on those rows, and attaches every
+   target as an `AFFECTED` participant so affected entities show the event in
+   their timelines.
+5. Rejection or supersede must not mutate the target entity. The UI must also
+   avoid leaving a rejected effect looking like a still-actionable unapplied
+   effect; either remove it from the active effect list or mark it with an
+   explicit rejected/superseded review state.
+
+A later "apply now" button can exist for DM speed, but it should still be an
+explicit auto-approved `DM` Change Set using the same `APPLY_EVENT_EFFECTS`
+application path. The distinction is:
+
+- Review Queue `PENDING` means the entity mutation has not been approved.
+- Event effect `unapplied` means the declared consequence has not changed entity
+  state yet.
+
 ### 2. AI generation (the core flow)
 1. DM triggers a generator (e.g. "flesh out Floor 7", "generate 5 mob types for
    the goblin neighborhood", "propose consequences of Carl's Floor-3 stunt").
