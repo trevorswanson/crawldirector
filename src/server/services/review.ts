@@ -2198,7 +2198,7 @@ async function applyUpdateEvent(
         }));
     const key = (entityId: string, role: EventParticipantRole) => `${entityId}:${role}`;
     const desiredKeys = new Set(desired.map((p) => key(p.entityId, p.role)));
-    for (const effect of nextEffects) {
+    for (const effect of nextEffects.filter((candidate) => candidate.applied)) {
       const affectedKey = key(effect.targetEntityId, EventParticipantRole.AFFECTED);
       if (desiredKeys.has(affectedKey)) continue;
       desired.push({

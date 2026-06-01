@@ -1150,7 +1150,7 @@ describe("updateCampaignEventAction", () => {
 });
 
 describe("event effect rows", () => {
-  it("parses ADJUST_STAT and SET_ALIVE effect rows on an event edit", async () => {
+  it("parses ADJUST_STAT and SET_ALIVE effect rows without auto-applying on event edit", async () => {
     updateEvent.mockResolvedValue({ id: "ev1", participantIds: ["e1"] });
 
     await updateEventAction(
@@ -1192,11 +1192,10 @@ describe("event effect rows", () => {
           }),
         ],
       }),
-      { applyEffects: true },
     );
   });
 
-  it("parses SET_STAT effect rows as direct values", async () => {
+  it("parses SET_STAT effect rows as direct values without auto-applying", async () => {
     updateEvent.mockResolvedValue({ id: "ev1", participantIds: ["e1"] });
 
     await updateEventAction(
@@ -1228,7 +1227,40 @@ describe("event effect rows", () => {
           }),
         ],
       }),
-      { applyEffects: true },
+    );
+  });
+
+  it("parses campaign timeline effect rows without auto-applying", async () => {
+    updateEvent.mockResolvedValue({ id: "ev1", participantIds: ["e1"] });
+
+    await updateCampaignEventAction(
+      "c1",
+      "ev1",
+      undefined,
+      form({
+        title: "Floor change",
+        effectCount: "1",
+        effectKind_0: "ADJUST_STAT",
+        effectTarget_0: "e1",
+        effectStat_0: "gold",
+        effectDelta_0: "50",
+      }),
+    );
+
+    expect(updateEvent).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      "ev1",
+      expect.objectContaining({
+        effects: [
+          expect.objectContaining({
+            kind: "ADJUST_STAT",
+            targetEntityId: "e1",
+            stat: "gold",
+            delta: 50,
+          }),
+        ],
+      }),
     );
   });
 

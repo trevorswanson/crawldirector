@@ -710,12 +710,7 @@ export async function updateEventAction(
 
   let result: { participantIds: string[] };
   try {
-    result =
-      effects && effects.length > 0
-        ? await updateEvent(user.id, campaignId, eventId, parsed.data, {
-            applyEffects: true,
-          })
-        : await updateEvent(user.id, campaignId, eventId, parsed.data);
+    result = await updateEvent(user.id, campaignId, eventId, parsed.data);
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message };
     return { error: "Could not edit the event. Please try again." };
@@ -754,12 +749,7 @@ export async function updateCampaignEventAction(
 
   let result: { participantIds: string[] };
   try {
-    result =
-      effects && effects.length > 0
-        ? await updateEvent(user.id, campaignId, eventId, parsed.data, {
-            applyEffects: true,
-          })
-        : await updateEvent(user.id, campaignId, eventId, parsed.data);
+    result = await updateEvent(user.id, campaignId, eventId, parsed.data);
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message };
     return { error: "Could not edit the event. Please try again." };

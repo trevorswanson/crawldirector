@@ -4,10 +4,11 @@ import { CanonStatus, Role } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
-import { createGenericEntity } from "@/server/services/entities";
+import { createCrawler, createGenericEntity } from "@/server/services/entities";
 import {
   archiveEvent,
   archiveEventCausality,
+  applyEventEffects,
   createEvent,
   linkEventCause,
   listCampaignTimeline,
@@ -35,6 +36,28 @@ async function makeEntity(
     description: "",
     visibility,
     tags: [],
+  });
+}
+
+async function makeCrawler(
+  userId: string,
+  campaignId: string,
+  name: string,
+  visibility: "DM_ONLY" | "SHARED_WITH_PLAYERS" = "DM_ONLY",
+) {
+  return createCrawler(userId, campaignId, {
+    name,
+    summary: "",
+    description: "",
+    visibility,
+    tags: [],
+    level: 1,
+    gold: 0,
+    viewCount: BigInt(0),
+    followerCount: BigInt(0),
+    favoriteCount: BigInt(0),
+    killCount: 0,
+    isAlive: true,
   });
 }
 
@@ -1060,6 +1083,91 @@ describe("updateEvent", () => {
 
     const rows = await prisma.eventParticipant.findMany({ where: { eventId: event.id } });
     expect(rows).toHaveLength(2);
+  });
+
+  it("does not add effect targets as affected participants until effects apply", async () => {
+    const owner = await makeUser("owner-effect-declare@test.com");
+    const player = await makeUser("player-effect-declare@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const hiddenNpc = await makeEntity(owner.id, campaign.id, "Secret source");
+    const crawler = await makeCrawler(
+      owner.id,
+      campaign.id,
+      "Public crawler",
+      "SHARED_WITH_PLAYERS",
+    );
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Hidden consequence",
+      secret: false,
+      participants: [{ entityId: hiddenNpc.id, role: "ACTOR" }],
+    });
+
+    await updateEvent(owner.id, campaign.id, event.id, {
+      title: "Hidden consequence",
+      secret: false,
+      effects: [
+        {
+          kind: "ADJUST_STAT",
+          targetEntityId: crawler.id,
+          stat: "gold",
+          delta: 50,
+        },
+      ],
+    });
+
+    const rows = await prisma.eventParticipant.findMany({
+      where: { eventId: event.id },
+      select: { entityId: true, role: true },
+    });
+    expect(rows.map((row) => `${row.entityId}:${row.role}`).sort()).toEqual([
+      `${hiddenNpc.id}:ACTOR`,
+    ]);
+
+    const playerTimeline = await listEventsForEntity(player.id, campaign.id, crawler.id);
+    expect(playerTimeline).toHaveLength(0);
+  });
+
+  it("keeps applied effect targets as affected participants during later edits", async () => {
+    const owner = await makeUser("owner-applied-effect-parts@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const hiddenNpc = await makeEntity(owner.id, campaign.id, "Secret source");
+    const crawler = await makeCrawler(owner.id, campaign.id, "Carl");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Loot consequence",
+      secret: false,
+      participants: [{ entityId: hiddenNpc.id, role: "ACTOR" }],
+    });
+
+    await updateEvent(owner.id, campaign.id, event.id, {
+      title: "Loot consequence",
+      secret: false,
+      effects: [
+        {
+          kind: "ADJUST_STAT",
+          targetEntityId: crawler.id,
+          stat: "gold",
+          delta: 50,
+        },
+      ],
+    });
+    await applyEventEffects(owner.id, campaign.id, event.id);
+
+    await updateEvent(owner.id, campaign.id, event.id, {
+      title: "Loot consequence renamed",
+      secret: false,
+      participants: [{ entityId: hiddenNpc.id, role: "ACTOR" }],
+    });
+
+    const rows = await prisma.eventParticipant.findMany({
+      where: { eventId: event.id },
+      select: { entityId: true, role: true },
+    });
+    expect(rows.map((row) => `${row.entityId}:${row.role}`).sort()).toEqual(
+      [`${crawler.id}:AFFECTED`, `${hiddenNpc.id}:ACTOR`].sort(),
+    );
   });
 
   it("rejects an edit that drops all participants or names a non-canon one", async () => {
