@@ -11,6 +11,29 @@ Running checklist of milestones/tasks, newest first. See
 membership, log events with participants, and traverse cause→effect chains;
 relationships/events are reviewable + lockable.
 
+### Done — slice 5: group hierarchy roster rollup (2026-06-01)
+
+- [x] Added the `groups` service (`getGroupRoster`, `isGroupEntityType`,
+      `GROUP_ENTITY_TYPES`). For a group-type entity (PARTY/GUILD/FACTION/
+      ORGANIZATION) it rolls up the membership hierarchy from existing
+      `MEMBER_OF` (members) and `LEADS` (leaders) edges: members that are
+      themselves groups expand recursively, so a guild rolls up its parties and
+      each party's members. Each group is expanded once (breaks cycles and keeps
+      diamonds from ballooning) with a depth cap. `rolledUpMemberCount` reports
+      the distinct non-group members in a node's subtree.
+- [x] Visibility-scoped: players never see secret membership edges, members they
+      can't otherwise see, or the roster of a group they can't see; archived
+      edges are excluded. Non-members get null. No new write path — membership is
+      still added/removed through the existing Connections panel + pipeline.
+- [x] Added a read-only `RosterPanel` on group-type entity detail pages
+      (Leaders + Members with nested sub-group rosters, crown markers for
+      leaders, secret/lock indicators, rolled-up member count).
+- [x] Added DB-backed service coverage (guild→party→member rollup with nested
+      leaders, player visibility scoping, cycle termination, archived-edge
+      exclusion, non-member) plus component render coverage. Verified
+      in-browser against a seeded guild/party/member hierarchy. lint, typecheck,
+      build, and coverage green.
+
 ### Done — slice 4: relationship + event lock controls (2026-05-31)
 
 - [x] Added audited lock/unlock service functions for live relationship edges
@@ -133,8 +156,12 @@ relationships/events are reviewable + lockable.
       relationship/event editing and pending (AI/import) relationship/event
       proposals in the Review Queue; the campaign-wide relationship graph
       view + a campaign timeline page (with full multi-participant editing);
-      group hierarchy (crawler→party→guild) rollup view; knowledge/reveal grants
-      for fog of war.
+      knowledge/reveal grants for fog of war. (Group hierarchy crawler→party→
+      guild rollup view shipped in slice 5.)
+- The roster rollup is read-only and surfaces only on group-type entities
+      (PARTY/GUILD/FACTION/ORGANIZATION). Time-bounded membership ("who was where,
+      when") isn't modeled yet — current rollup reflects live edges only; revisit
+      when events can scope membership intervals.
 - The connections/timeline add forms list current campaign entities as targets;
       at scale this should become a typeahead/search (revisit with M5 search).
 - The Timeline panel currently logs events with the viewed entity plus one

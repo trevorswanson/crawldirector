@@ -14,6 +14,7 @@ import {
   TimelinePanel,
   type TimelineCandidate,
 } from "@/components/entities/timeline-panel";
+import { RosterPanel } from "@/components/entities/roster-panel";
 import {
   ArchiveEntityForm,
   EditEntityForm,
@@ -38,6 +39,7 @@ import {
 } from "@/server/services/entities";
 import { listConnectionsForEntity } from "@/server/services/relationships";
 import { listEventsForEntity } from "@/server/services/events";
+import { getGroupRoster, isGroupEntityType } from "@/server/services/groups";
 import { getEntityProvenance } from "@/server/services/review";
 
 export default async function EntityPage({
@@ -59,12 +61,15 @@ export default async function EntityPage({
 
   if (!campaign || !entity) notFound();
 
-  const [provenance, connections, events, candidateList] = await Promise.all([
-    getEntityProvenance(user.id, id, entityId),
-    listConnectionsForEntity(user.id, id, entityId),
-    listEventsForEntity(user.id, id, entityId),
-    listEntitiesForUser(user.id, id),
-  ]);
+  const isGroup = isGroupEntityType(entity.type);
+  const [provenance, connections, events, candidateList, roster] =
+    await Promise.all([
+      getEntityProvenance(user.id, id, entityId),
+      listConnectionsForEntity(user.id, id, entityId),
+      listEventsForEntity(user.id, id, entityId),
+      listEntitiesForUser(user.id, id),
+      isGroup ? getGroupRoster(user.id, id, entityId) : Promise.resolve(null),
+    ]);
   const candidates: ConnectionCandidate[] = candidateList.entities
     .filter((candidate) => candidate.id !== entityId)
     .map((candidate) => ({
@@ -278,6 +283,13 @@ export default async function EntityPage({
                       );
                     })}
                   </div>
+                </div>
+              )}
+
+              {/* roster — rolled-up membership for group-type entities */}
+              {isGroup && roster && (
+                <div className="mt-[26px]">
+                  <RosterPanel campaignId={id} roster={roster} />
                 </div>
               )}
 
