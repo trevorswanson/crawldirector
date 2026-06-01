@@ -13,6 +13,8 @@ import {
   setRelationshipLock,
   updateRelationship,
 } from "@/server/services/relationships";
+import { applyAutoApprovedRelationshipChangeSet } from "@/server/services/review";
+import { OpKind } from "@/generated/prisma/client";
 
 function makeUser(email: string) {
   return prisma.user.create({ data: { email } });
@@ -245,6 +247,41 @@ describe("relationship service", () => {
     const row = await prisma.relationship.findUnique({ where: { id: edge.id } });
     expect(row?.disposition).toBeNull();
     expect(row?.notes).toBeNull();
+  });
+
+  it("rejects a stale edge edit (base version mismatch)", async () => {
+    const owner = await makeUser("owner-stale-edge@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const source = await makeEntity(owner.id, campaign.id, "A");
+    const target = await makeEntity(owner.id, campaign.id, "B");
+    const edge = await createRelationship(owner.id, campaign.id, source.id, {
+      type: "ALLY_OF",
+      targetId: target.id,
+      secret: false,
+    });
+    const current = await prisma.relationship.findUniqueOrThrow({
+      where: { id: edge.id },
+      select: { type: true, version: true },
+    });
+
+    await expect(
+      applyAutoApprovedRelationshipChangeSet(owner.id, campaign.id, {
+        title: "Edit connection",
+        operations: [
+          {
+            op: OpKind.UPDATE_RELATIONSHIP,
+            targetId: edge.id,
+            patch: {
+              _baseVersion: { to: current.version + 5 },
+              type: { to: "RIVAL_OF" },
+            },
+          },
+        ],
+      }),
+    ).rejects.toThrow(/changed since you opened it/i);
+
+    const row = await prisma.relationship.findUnique({ where: { id: edge.id } });
+    expect(row?.type).toBe(current.type);
   });
 
   it("blocks editing a locked edge", async () => {

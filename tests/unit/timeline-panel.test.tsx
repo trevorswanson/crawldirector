@@ -60,6 +60,7 @@ function event(overrides: Partial<EntityEvent> = {}): EntityEvent {
     locked: false,
     source: "DM",
     role: "ACTOR",
+    selfRoles: ["ACTOR"],
     others: [{ id: "e2", name: "Donut", type: "CRAWLER", role: "ACTOR" }],
     causedBy: [],
     causes: [],
@@ -287,6 +288,41 @@ describe("TimelinePanel", () => {
     expect(submitted.get("participantId_0")).toBe("e1");
     expect(submitted.get("participantRole_0")).toBe("ACTOR");
     expect(submitted.get("participantId_1")).toBe("e2");
+  });
+
+  it("seeds a participant row for every role the viewed entity holds", async () => {
+    updateEventAction.mockResolvedValue(undefined);
+    render(
+      <TimelinePanel
+        campaignId="c1"
+        entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
+        events={[event({ role: "ACTOR", selfRoles: ["ACTOR", "WITNESS"] })]}
+        candidates={candidates}
+        initialEventId="ev1"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit event" }));
+    const form = screen.getByLabelText("Event title").closest("form")!;
+
+    // two self rows (ACTOR + WITNESS) plus the one co-participant => 3 rows
+    expect(
+      (form.querySelector('input[name="participantCount"]') as HTMLInputElement).value,
+    ).toBe("3");
+    expect(
+      Array.from(form.querySelectorAll('input[name^="participantId_"]')).map(
+        (i) => (i as HTMLInputElement).value,
+      ),
+    ).toEqual(["e1", "e1", "e2"]);
+
+    fireEvent.submit(form);
+    await waitFor(() => expect(updateEventAction).toHaveBeenCalledTimes(1));
+    const submitted = updateEventAction.mock.calls[0][4] as FormData;
+    // both of the viewed entity's roles are preserved in the submission
+    expect(submitted.get("participantRole_0")).toBe("ACTOR");
+    expect(submitted.get("participantRole_1")).toBe("WITNESS");
   });
 
   it("keeps the edit form open and shows the error when an event edit fails", async () => {

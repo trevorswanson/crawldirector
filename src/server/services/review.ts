@@ -1644,9 +1644,22 @@ async function applyUpdateRelationship(
       campaignId: changeSet.campaignId,
       status: { not: CanonStatus.ARCHIVED },
     },
-    select: { id: true, locked: true },
+    select: { id: true, locked: true, version: true },
   });
   if (!relationship) throw new ServiceError("Relationship not found.");
+
+  // Reject a stale edit (the row advanced since this edit was built), the same
+  // way applyUpdateEntity does — so concurrent DM edits don't silently clobber.
+  const expectedVersion = readTo(patch, "_baseVersion");
+  if (typeof expectedVersion === "number" && expectedVersion !== relationship.version) {
+    await tx.changeOperation.update({
+      where: { id: operationId },
+      data: { isStale: true },
+    });
+    throw new ServiceError(
+      "This relationship changed since you opened it. Reload and try again.",
+    );
+  }
 
   if (relationship.locked) {
     await tx.changeOperation.update({
@@ -1893,9 +1906,22 @@ async function applyUpdateEvent(
       campaignId: changeSet.campaignId,
       status: { not: CanonStatus.ARCHIVED },
     },
-    select: { id: true, locked: true },
+    select: { id: true, locked: true, version: true },
   });
   if (!event) throw new ServiceError("Event not found.");
+
+  // Reject a stale edit (the row advanced since this edit was built), the same
+  // way applyUpdateEntity does — so concurrent DM edits don't silently clobber.
+  const expectedVersion = readTo(patch, "_baseVersion");
+  if (typeof expectedVersion === "number" && expectedVersion !== event.version) {
+    await tx.changeOperation.update({
+      where: { id: operationId },
+      data: { isStale: true },
+    });
+    throw new ServiceError(
+      "This event changed since you opened it. Reload and try again.",
+    );
+  }
 
   if (event.locked) {
     await tx.changeOperation.update({

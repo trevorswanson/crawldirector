@@ -15,6 +15,8 @@ import {
   setEventLock,
   updateEvent,
 } from "@/server/services/events";
+import { applyAutoApprovedEventChangeSet } from "@/server/services/review";
+import { OpKind } from "@/generated/prisma/client";
 
 function makeUser(email: string) {
   return prisma.user.create({ data: { email } });
@@ -823,6 +825,60 @@ describe("updateEvent", () => {
     const mordTl = await listEventsForEntity(owner.id, campaign.id, mordecai.id);
     expect(mordTl).toHaveLength(1);
     expect(mordTl[0].role).toBe("TARGET");
+  });
+
+  it("exposes every role the viewed entity holds on an event", async () => {
+    const owner = await makeUser("owner-selfroles@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Dual role",
+      secret: false,
+      participants: [
+        { entityId: carl.id, role: "ACTOR" },
+        { entityId: carl.id, role: "WITNESS" },
+      ],
+    });
+    expect(event.id).toBeTruthy();
+
+    const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    expect(timeline).toHaveLength(1);
+    expect([...timeline[0].selfRoles].sort()).toEqual(["ACTOR", "WITNESS"]);
+  });
+
+  it("rejects a stale event edit (base version mismatch)", async () => {
+    const owner = await makeUser("owner-stale-event@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Original",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const current = await prisma.event.findUniqueOrThrow({
+      where: { id: event.id },
+      select: { version: true },
+    });
+
+    // An edit built against an older version must not clobber the current row.
+    await expect(
+      applyAutoApprovedEventChangeSet(owner.id, campaign.id, {
+        title: "Edit event",
+        operations: [
+          {
+            op: OpKind.UPDATE_EVENT,
+            targetId: event.id,
+            patch: {
+              _baseVersion: { to: current.version + 5 },
+              title: { to: "Stale clobber" },
+            },
+          },
+        ],
+      }),
+    ).rejects.toThrow(/changed since you opened it/i);
+
+    const row = await prisma.event.findUnique({ where: { id: event.id } });
+    expect(row?.title).toBe("Original");
   });
 
   it("leaves participants untouched when the edit omits them", async () => {

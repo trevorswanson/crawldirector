@@ -51,8 +51,12 @@ export type EntityEvent = {
   secret: boolean;
   locked: boolean;
   source: ChangeSource;
-  // The viewed entity's role in this event.
+  // The viewed entity's role in this event (its first, for the compact chip).
   role: EventParticipantRole;
+  // Every role the viewed entity holds on this event (an entity can be e.g.
+  // both ACTOR and TARGET). The edit form seeds a row per role so editing
+  // never silently drops the entity's other-role participations.
+  selfRoles: EventParticipantRole[];
   // Other participants (the viewed entity excluded), visibility-scoped.
   others: { id: string; name: string; type: string; role: EventParticipantRole }[];
   causedBy: EventCausalitySummary[];
@@ -333,7 +337,10 @@ export async function listEventsForEntity(
 
   const timeline: EntityEvent[] = [];
   for (const event of events) {
-    const self = event.participants.find((p) => p.entityId === entityId);
+    const selfParticipations = event.participants.filter(
+      (p) => p.entityId === entityId,
+    );
+    const self = selfParticipations[0];
     if (!self) continue;
     const others = event.participants
       .filter((p) => p.entityId !== entityId)
@@ -355,6 +362,7 @@ export async function listEventsForEntity(
       locked: event.locked,
       source: event.source,
       role: self.role,
+      selfRoles: selfParticipations.map((p) => p.role),
       others,
       causedBy: event.causedBy
         .filter((edge) => isPlayerVisibleEvent(edge.cause, isPlayer))

@@ -137,10 +137,11 @@ function EditEventForm({
   onCancel: () => void;
   error: string | null;
 }) {
-  // Prefill the participant editor with the full current set: the viewed entity
-  // (its role on this event) followed by the co-participants.
+  // Prefill the participant editor with the full current set: a row for every
+  // role the viewed entity holds (it can have more than one) followed by the
+  // co-participants — so editing never silently drops an extra self role.
   const initialParticipants: ParticipantRowValue[] = [
-    { entity: self, role: event.role },
+    ...event.selfRoles.map((role) => ({ entity: self, role })),
     ...event.others.map((other) => ({
       entity: { id: other.id, name: other.name, type: other.type },
       role: other.role,
