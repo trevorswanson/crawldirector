@@ -115,6 +115,7 @@ import {
   archiveRelationshipAction,
   toggleRelationshipLockAction,
   createEventAction,
+  createCampaignEventAction,
   archiveEventAction,
   toggleEventLockAction,
   linkEventCauseAction,
@@ -880,6 +881,55 @@ describe("createEventAction", () => {
     );
 
     expect(result?.error).toMatch(/Could not log the event/);
+  });
+});
+
+describe("createCampaignEventAction", () => {
+  it("logs a campaign event with multiple participants and revalidates timeline surfaces", async () => {
+    createEvent.mockResolvedValue({ id: "ev1" });
+    const fd = form({
+      title: "Arena cascade",
+      floor: "6",
+      timeLabel: "Night 2",
+      participantCount: "3",
+      participantId_0: "e1",
+      participantRole_0: "ACTOR",
+      participantId_1: "e2",
+      participantRole_1: "TARGET",
+      participantId_2: "e3",
+      participantRole_2: "WITNESS",
+    });
+
+    const result = await createCampaignEventAction("c1", undefined, fd);
+
+    expect(result).toBeUndefined();
+    expect(createEvent).toHaveBeenCalledWith("u1", "c1", {
+      title: "Arena cascade",
+      summary: undefined,
+      floor: 6,
+      timeLabel: "Night 2",
+      secret: false,
+      participants: [
+        { entityId: "e1", role: "ACTOR" },
+        { entityId: "e2", role: "TARGET" },
+        { entityId: "e3", role: "WITNESS" },
+      ],
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e3");
+  });
+
+  it("requires at least one selected participant", async () => {
+    const result = await createCampaignEventAction(
+      "c1",
+      undefined,
+      form({ title: "No witnesses", participantCount: "2" }),
+    );
+
+    expect(result?.error).toBe("Choose at least one participant.");
+    expect(createEvent).not.toHaveBeenCalled();
   });
 });
 

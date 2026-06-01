@@ -74,6 +74,16 @@ describe("DmNav", () => {
     await waitFor(() => {});
   });
 
+  it("links the campaign timeline to the current campaign and highlights it", async () => {
+    usePathname.mockReturnValue("/campaigns/c1/timeline");
+
+    render(<DmNav />);
+
+    const link = screen.getByRole("link", { name: /Timeline/ });
+    expect(link.getAttribute("href")).toBe("/campaigns/c1/timeline");
+    await waitFor(() => {});
+  });
+
   it("links world browser to the campaign picker when no campaign is active", async () => {
     usePathname.mockReturnValue("/dashboard");
 
