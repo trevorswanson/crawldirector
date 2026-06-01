@@ -219,11 +219,11 @@ describe("entity forms", () => {
     render(<QuickCreateStub campaignId="c1" />);
 
     expect(
-      screen.getByRole("button", { name: /Quick-create stub/ }),
+      screen.getByRole("button", { name: /Create Entity/ }),
     ).toBeDefined();
     expect(screen.queryByPlaceholderText(/New entity name/)).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: /Quick-create stub/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Create Entity/ }));
 
     expect(screen.getByPlaceholderText(/New entity name/)).toBeDefined();
     expect(screen.getByRole("button", { name: /Create stub/ })).toBeDefined();
@@ -233,7 +233,7 @@ describe("entity forms", () => {
     vi.useFakeTimers();
     const { rerender } = render(<QuickCreateStub campaignId="c1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Quick-create stub/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Create Entity/ }));
     expect(screen.getByPlaceholderText(/New entity name/)).toBeDefined();
 
     useActionState.mockReturnValueOnce([{ success: "Stub created." }, noopAction]);

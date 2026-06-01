@@ -636,7 +636,7 @@ export function QuickCreateStub({ campaignId }: { campaignId: string }) {
           className="h-7 px-2.5 py-1 text-[11px]"
         >
           <Plus aria-hidden size={13} />
-          Quick-create stub
+          Create Entity
         </Button>
       </div>
       {open && (
