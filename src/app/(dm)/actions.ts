@@ -168,6 +168,7 @@ export async function quickCreateEntityAction(
   const user = await requireUser();
   const type = String(formData.get("type") ?? "");
   const name = formData.get("name");
+  const actionType = String(formData.get("actionType") ?? "edit");
 
   // A thin reference the DM fleshes out on the detail page (or with AI later).
   let entityId: string;
@@ -204,6 +205,11 @@ export async function quickCreateEntityAction(
     console.error("Quick-create entity failed:", error);
     if (error instanceof ServiceError) return { error: error.message };
     return { error: "Could not create the entity. Please try again." };
+  }
+
+  if (actionType === "stay") {
+    revalidatePath(`/campaigns/${campaignId}`);
+    return { success: `Created stub "${name}".` };
   }
 
   redirect(`/campaigns/${campaignId}/entities/${entityId}`);

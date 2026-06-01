@@ -73,8 +73,6 @@ describe("CampaignPage", () => {
       }),
     );
 
-    expect(screen.getByRole("heading", { name: "World One" })).toBeDefined();
-    expect(screen.getByText("A grand world")).toBeDefined();
     expect(screen.getByText("Entity type")).toBeDefined();
     expect(screen.getByText("Locked only")).toBeDefined();
     expect(screen.getByText("Quick create c1")).toBeDefined();

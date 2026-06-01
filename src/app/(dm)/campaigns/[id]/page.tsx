@@ -140,8 +140,8 @@ export default async function CampaignPage({
                 key={type}
                 href={hrefWith({ type: active ? undefined : type })}
                 className={cn(
-                  "border border-transparent transition-colors hover:bg-[var(--bg-3)]",
-                  active && "border-[var(--line-strong)] bg-[var(--bg-3)]",
+                  "transition-colors hover:bg-[var(--bg-3)]",
+                  active && "bg-[var(--bg-3)]",
                 )}
               >
                 {row}
@@ -228,7 +228,7 @@ export default async function CampaignPage({
 
       {/* RESULTS */}
       <div className="order-1 flex min-h-0 min-w-0 flex-col lg:order-2">
-        <div className="flex flex-wrap items-center gap-3 border-b border-[var(--line)] bg-[var(--bg-1)] px-5 py-3">
+        <div className="flex flex-wrap items-center gap-3 border-b border-[var(--line)] bg-[var(--bg-1)] px-[22px] py-[14px]">
           <CampaignSearch
             initialQuery={filters.q ?? ""}
             activeTag={activeTag}
@@ -243,18 +243,7 @@ export default async function CampaignPage({
           <QuickCreateStub campaignId={id} />
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-          <div className="mb-4">
-            <h1 className="font-display text-2xl font-semibold tracking-tight">
-              {campaign.name}
-            </h1>
-            {campaign.summary && (
-              <p className="text-sm text-[var(--muted-foreground)]">
-                {campaign.summary}
-              </p>
-            )}
-          </div>
-
+        <div className="min-h-0 flex-1 overflow-y-auto px-[22px] py-[18px]">
           {entities.length === 0 ? (
             <div className="grid h-60 place-items-center text-center text-[var(--ink-faint)]">
               <div>

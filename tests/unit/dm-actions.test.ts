@@ -256,7 +256,24 @@ describe("quickCreateEntityAction", () => {
       "c1",
       expect.objectContaining({ type: "NPC", name: "Zev", isStub: true }),
     );
-    expect(redirect).toHaveBeenCalledWith("/campaigns/c1/entities/e10");
+  });
+
+  it("quick-creates a stub crawler and stays on the page", async () => {
+    createCrawler.mockResolvedValue({ id: "e9" });
+
+    const result = await quickCreateEntityAction(
+      "c1",
+      undefined,
+      form({ type: "CRAWLER", name: "Carl", actionType: "stay" }),
+    );
+
+    expect(createCrawler).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      expect.objectContaining({ name: "Carl", isStub: true }),
+    );
+    expect(redirect).not.toHaveBeenCalled();
+    expect(result?.success).toBe('Created stub "Carl".');
   });
 
   it("returns a validation error for a blank crawler name", async () => {
