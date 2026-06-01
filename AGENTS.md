@@ -31,10 +31,12 @@ pipeline (auto-approved DM path with provenance); the entity detail page's
 Connections panel shows real edges, and its Timeline panel shows real events
 plus simple cause/effect traversal and add/remove. Group-type entities
 (PARTY/GUILD/FACTION/ORGANIZATION) show a read-only roster that rolls up
-`MEMBER_OF`/`LEADS` edges into a crawler→party→guild membership hierarchy. Still
-to come in M3: structured event effects, the relationship graph view + campaign
-timeline page, edge/event editing and pending relationship/event proposals,
-time-bounded membership, and knowledge/reveal grants.
+`MEMBER_OF`/`LEADS` edges into a crawler→party→guild membership hierarchy. A
+campaign-wide **Relationship Graph** view (`/campaigns/[id]/graph`, linked from
+the nav) renders every visibility-scoped edge as a basic node-link diagram. Still
+to come in M3: structured event effects, the campaign timeline page, edge/event
+editing and pending relationship/event proposals, time-bounded membership, and
+knowledge/reveal grants.
 See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
 ## Start here, every session
