@@ -30,8 +30,9 @@
 > provenance and audit rows. `CREATE_RELATIONSHIP` / `DELETE_RELATIONSHIP`,
 > `CREATE_EVENT` / `UPDATE_EVENT`, `CREATE_EVENT_CAUSALITY` /
 > `DELETE_EVENT_CAUSALITY`, and `APPLY_EVENT_EFFECTS` now flow through the
-> pipeline. Pending relationship/event review and Review Queue integration for
-> unapplied event effects remain future M3 slices.
+> pipeline. Unapplied event effects now submit pending Review Queue proposals
+> before mutating target entities. Pending relationship/event proposals remain a
+> future M3 slice.
 
 ## Sketch
 
@@ -452,19 +453,14 @@ model SessionLogEntry {             // real-time capture; NOT canon until promot
 - `Event.effects` v1 stores crawler-targeted consequences in `Event.effects`
   JSON: `ADJUST_STAT` deltas non-null numeric crawler fields, `SET_STAT` writes
   an absolute numeric crawler field (for nullable values like `currentFloor`),
-  and `SET_ALIVE` flips `Crawler.isAlive`. Applying them routes
-  `APPLY_EVENT_EFFECTS` through the review pipeline and attaches effect targets
-  as `AFFECTED` participants so entity timelines include events that changed
-  that crawler.
-- Next event-effects slice: unapplied effect rows should be represented in the
-  Review Queue before they mutate target entities. Store a stable review pointer
-  on each effect row, such as `pendingChangeSetId` and/or `pendingOperationId`,
-  plus the existing applied pointer (`appliedChangeSetId`) once approved. This
-  lets timeline surfaces deep-link to the queue, prevents duplicate pending
-  apply proposals, and gives edits/removals a concrete proposal to supersede.
-  Approval should mark the effect applied and clear the pending pointer; reject
-  or supersede should leave an explicit non-actionable review state instead of
-  silently leaving an apparently unapplied effect behind.
+  and `SET_ALIVE` flips `Crawler.isAlive`. Submitting them creates a pending
+  `APPLY_EVENT_EFFECTS` Change Set and stores `pendingChangeSetId` /
+  `pendingOperationId` plus `reviewStatus` on each effect row. Approval applies
+  the reviewed effect rows through the review pipeline, writes
+  `appliedChangeSetId`, and attaches effect targets as `AFFECTED` participants
+  so entity timelines include events that changed that crawler. Rejection or
+  supersede clears pending pointers and marks the rows reviewed without mutating
+  target entities.
 - `Event.effects` entries include a `PERSONA_SHIFT` kind
   (`{ kind, entityId, dialDeltas, note }`); applying it (via
   `APPLY_EVENT_EFFECTS`, on approval) creates/updates a `PersonaSnapshot`. This

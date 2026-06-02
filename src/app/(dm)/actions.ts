@@ -841,9 +841,9 @@ export async function toggleEventLockAction(
   revalidatePath(`/campaigns/${campaignId}/timeline`);
 }
 
-// Apply an event's effects from the entity Timeline panel: revalidates every
-// affected entity (participants + effect targets, plus the viewed entity) and
-// the campaign timeline.
+// Submit an event's effects from the entity Timeline panel: revalidates every
+// affected entity (participants + effect targets, plus the viewed entity), the
+// campaign timeline, and Review Queue.
 export async function applyEventEffectsAction(
   campaignId: string,
   entityId: string,
@@ -855,17 +855,19 @@ export async function applyEventEffectsAction(
     result = await applyEventEffects(user.id, campaignId, eventId);
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message };
-    return { error: "Could not apply the effects. Please try again." };
+    return { error: "Could not submit the effects. Please try again." };
   }
   for (const id of new Set([...result.affectedEntityIds, entityId])) {
     revalidatePath(`/campaigns/${campaignId}/entities/${id}`);
   }
   revalidatePath(`/campaigns/${campaignId}/timeline`);
+  revalidatePath(`/campaigns/${campaignId}/review`);
   return undefined;
 }
 
-// Apply an event's effects from the campaign timeline page (no single viewed
-// entity): revalidates every affected entity and the campaign timeline.
+// Submit an event's effects from the campaign timeline page (no single viewed
+// entity): revalidates every affected entity, the campaign timeline, and Review
+// Queue.
 export async function applyCampaignEventEffectsAction(
   campaignId: string,
   eventId: string,
@@ -876,12 +878,13 @@ export async function applyCampaignEventEffectsAction(
     result = await applyEventEffects(user.id, campaignId, eventId);
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message };
-    return { error: "Could not apply the effects. Please try again." };
+    return { error: "Could not submit the effects. Please try again." };
   }
   for (const id of result.affectedEntityIds) {
     revalidatePath(`/campaigns/${campaignId}/entities/${id}`);
   }
   revalidatePath(`/campaigns/${campaignId}/timeline`);
+  revalidatePath(`/campaigns/${campaignId}/review`);
   return undefined;
 }
 

@@ -57,6 +57,34 @@ in the general search bar.
 membership, log events with participants, and traverse cause→effect chains;
 relationships/events are reviewable + lockable.
 
+### Done — slice 10: event effects Review Queue integration (2026-06-01)
+
+- [x] Changed the normal event-effect apply flow to create a `PENDING`
+      `APPLY_EVENT_EFFECTS` Change Set instead of mutating crawler canon
+      immediately. Effect rows now carry stable review pointers
+      (`pendingChangeSetId` / `pendingOperationId`) and a `reviewStatus`, so
+      timeline surfaces show **pending review** and cannot create duplicate
+      proposals for the same unapplied effect.
+- [x] Taught the generic Review Queue approval path to dispatch event operations,
+      so approving an `APPLY_EVENT_EFFECTS` proposal applies the reviewed effect
+      rows atomically, writes crawler provenance through the existing
+      lock-aware entity-update path, marks the effect rows applied with
+      `appliedChangeSetId`, and attaches effect targets as `AFFECTED`
+      participants. Editing the operation's JSON `effects` patch before approval
+      is honored, letting a DM correct target/stat/value through the existing
+      queue editor.
+- [x] Rejecting or superseding an effect proposal clears the pending pointers and
+      marks the effect rows `REJECTED` / `SUPERSEDED` without mutating target
+      entities, so rejected effects no longer look actionable. The explicit
+      auto-approved path remains for `updateEvent(..., { applyEffects: true })`.
+- [x] Updated the entity Timeline and campaign Timeline shared effects UI from
+      "Apply unapplied" to **Send to review**, with pending/rejected/superseded
+      status labels and Review Queue revalidation. Added DB-backed service
+      coverage for pending submission, approval, edited approval, rejection,
+      lock-block-on-approval, and existing auto-apply behavior, plus action and
+      component coverage. Focused event-effect/action/timeline tests and
+      typecheck are green.
+
 ### Done — slice 9: event participant editing + timeline-page event editing (2026-06-01)
 
 - [x] Taught `UPDATE_EVENT` to reconcile participants: when the patch carries a
@@ -311,34 +339,20 @@ relationships/events are reviewable + lockable.
 
 ### Notes / follow-ups (M3)
 
-- Event effects v1 is underway on `feat/m3-event-effects`: crawler effects now
-      distinguish unapplied/applied state from Review Queue `PENDING`, affected
-      crawler targets are attached to the event as `AFFECTED` participants so
-      their entity timelines show the event, and nullable crawler stats use
-      `SET_STAT` rather than arithmetic from `null`. The current branch still
-      auto-applies DM-edited effect rows through `APPLY_EVENT_EFFECTS`; product
-      decision for the next slice is to route unapplied effect application into
-      the Review Queue by default, including DM-entered effects, because those
-      rows are pending canon mutations and the queue is already built for
-      approve/edit/reject/supersede.
-- Next event-effects slice: create or update a `PENDING` `APPLY_EVENT_EFFECTS`
-      Change Set for unapplied event effects; show the resolved crawler patch in
-      `/review`; let the DM edit target/kind/stat/value before approval; on
-      approval apply atomically, mark effects applied, clear the pending review
-      pointer, and attach targets as `AFFECTED`; on reject/supersede do not
-      mutate entities and do not leave rejected effects looking actionable.
-      Store stable effect-to-review references (`pendingChangeSetId` and/or
-      `pendingOperationId`) in `Event.effects` or the eventual normalized effect
-      table so timeline buttons can deep-link to Review Queue and avoid duplicate
-      proposals. Undo/revert for already-applied effects remains a separate
-      design problem that should create a new compensating reviewed change set,
-      not erase provenance.
-- Next slices: event effects Review Queue integration; pending (AI/import)
-      relationship/event proposals in the Review Queue; knowledge/reveal
-      grants for fog of war. (Group hierarchy crawler→party→guild rollup view
-      shipped in slice 5; the campaign-wide relationship graph view shipped in
-      slice 6; the campaign timeline page with multi-participant logging shipped in
-      slice 7; relationship + event field editing shipped in slice 8.)
+- Event effects v1 is in place for crawler-targeted effects (`ADJUST_STAT`,
+      `SET_STAT`, `SET_ALIVE`). The normal UI path submits unapplied effects to
+      the Review Queue; approval applies atomically and rejection/supersede marks
+      the effect rows reviewed. Remaining refinements: render a dedicated
+      effect-row editor in `/review` instead of the current JSON patch editor,
+      deep-link timeline pending badges to the proposal, and design compensating
+      change sets for undo/revert of already-applied effects.
+- Next slices: pending (AI/import) relationship/event proposals in the Review
+      Queue; knowledge/reveal grants for fog of war; time-bounded membership.
+      (Group hierarchy crawler→party→guild rollup view shipped in slice 5; the
+      campaign-wide relationship graph view shipped in slice 6; the campaign
+      timeline page with multi-participant logging shipped in slice 7; relationship
+      + event field editing shipped in slice 8; participant editing shipped in
+      slice 9; event effects Review Queue integration shipped in slice 10.)
 - The relationship graph now follows the M3 graph mockup's force-directed
       pan/zoom + connections-panel shape and shows only connected entities. At
       scale, node labels will crowd — the same typeahead/search note as the

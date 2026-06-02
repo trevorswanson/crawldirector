@@ -27,7 +27,9 @@ export function EventEffectsSection({
   const [pending, setPending] = useState(false);
 
   if (effects.length === 0) return null;
-  const unapplied = effects.filter((effect) => !effect.applied);
+  const unapplied = effects.filter(
+    (effect) => !effect.applied && effect.reviewStatus === null,
+  );
 
   const apply = async () => {
     setError(null);
@@ -55,7 +57,7 @@ export function EventEffectsSection({
               className="font-mono text-[8.5px] uppercase tracking-[.06em]"
               style={{ color: effect.applied ? "var(--ok)" : "var(--ink-faint)" }}
             >
-              {effect.applied ? "applied" : "unapplied"}
+              {effectStatusLabel(effect)}
             </span>
             {effect.note && (
               <span className="text-[var(--ink-faint)]">— {effect.note}</span>
@@ -71,7 +73,7 @@ export function EventEffectsSection({
           className="inline-flex w-fit items-center gap-[6px] border border-[var(--line)] px-[8px] py-[5px] font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-50"
         >
           <Zap aria-hidden size={11} />
-          {pending ? "Applying..." : "Apply unapplied"}
+          {pending ? "Sending..." : "Send to review"}
         </button>
       )}
       {error && (
@@ -81,4 +83,12 @@ export function EventEffectsSection({
       )}
     </div>
   );
+}
+
+function effectStatusLabel(effect: EventEffectView) {
+  if (effect.applied || effect.reviewStatus === "APPLIED") return "applied";
+  if (effect.reviewStatus === "PENDING") return "pending review";
+  if (effect.reviewStatus === "REJECTED") return "rejected";
+  if (effect.reviewStatus === "SUPERSEDED") return "superseded";
+  return "unapplied";
 }

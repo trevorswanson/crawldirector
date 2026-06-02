@@ -1296,8 +1296,13 @@ describe("event effect rows", () => {
 });
 
 describe("applyEventEffectsAction", () => {
-  it("applies effects and revalidates affected entities + the campaign timeline", async () => {
-    applyEventEffects.mockResolvedValue({ id: "ev1", affectedEntityIds: ["e1", "e2"] });
+  it("submits effects for review and revalidates affected entities + review queue", async () => {
+    applyEventEffects.mockResolvedValue({
+      id: "ev1",
+      changeSetId: "cs1",
+      operationId: "op1",
+      affectedEntityIds: ["e1", "e2"],
+    });
 
     const result = await applyEventEffectsAction("c1", "e1", "ev1");
 
@@ -1306,6 +1311,7 @@ describe("applyEventEffectsAction", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
   });
 
   it("surfaces a ServiceError (e.g. a locked target) without throwing", async () => {
@@ -1319,13 +1325,18 @@ describe("applyEventEffectsAction", () => {
   it("hides unexpected errors behind a generic message", async () => {
     applyEventEffects.mockRejectedValueOnce(new Error("boom"));
     const result = await applyEventEffectsAction("c1", "e1", "ev1");
-    expect(result?.error).toMatch(/Could not apply the effects/);
+    expect(result?.error).toMatch(/Could not submit the effects/);
   });
 });
 
 describe("applyCampaignEventEffectsAction", () => {
-  it("applies effects from the campaign timeline and revalidates affected entities", async () => {
-    applyEventEffects.mockResolvedValue({ id: "ev1", affectedEntityIds: ["e1", "e3"] });
+  it("submits campaign timeline effects for review and revalidates affected entities", async () => {
+    applyEventEffects.mockResolvedValue({
+      id: "ev1",
+      changeSetId: "cs1",
+      operationId: "op1",
+      affectedEntityIds: ["e1", "e3"],
+    });
 
     const result = await applyCampaignEventEffectsAction("c1", "ev1");
 
@@ -1334,6 +1345,7 @@ describe("applyCampaignEventEffectsAction", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e3");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
   });
 
   it("surfaces a ServiceError from the campaign apply", async () => {

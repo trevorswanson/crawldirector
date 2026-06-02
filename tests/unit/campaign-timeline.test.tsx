@@ -274,6 +274,10 @@ describe("CampaignTimeline", () => {
                 value: null,
                 note: "Entered the crawl",
                 applied: false,
+                appliedChangeSetId: null,
+                pendingChangeSetId: null,
+                pendingOperationId: null,
+                reviewStatus: null,
               },
             ],
           },
@@ -283,7 +287,7 @@ describe("CampaignTimeline", () => {
 
     expect(screen.getByText("Floor = 1")).toBeDefined();
     expect(screen.getByText("unapplied")).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: /Apply unapplied/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Send to review/ }));
 
     await waitFor(() =>
       expect(applyCampaignEventEffectsAction).toHaveBeenCalledWith("c1", "ev1"),
@@ -310,6 +314,10 @@ describe("CampaignTimeline", () => {
                 value: null,
                 note: "Entered the crawl",
                 applied: false,
+                appliedChangeSetId: null,
+                pendingChangeSetId: null,
+                pendingOperationId: null,
+                reviewStatus: null,
               },
             ],
           },

@@ -16,7 +16,10 @@ import {
   setEventLock,
   updateEvent,
 } from "@/server/services/events";
-import { applyAutoApprovedEventChangeSet } from "@/server/services/review";
+import {
+  applyAutoApprovedEventChangeSet,
+  approveChangeSet,
+} from "@/server/services/review";
 import { OpKind } from "@/generated/prisma/client";
 
 function makeUser(email: string) {
@@ -1153,7 +1156,8 @@ describe("updateEvent", () => {
         },
       ],
     });
-    await applyEventEffects(owner.id, campaign.id, event.id);
+    const applyResult = await applyEventEffects(owner.id, campaign.id, event.id);
+    await approveChangeSet(owner.id, campaign.id, applyResult.changeSetId);
 
     await updateEvent(owner.id, campaign.id, event.id, {
       title: "Loot consequence renamed",
