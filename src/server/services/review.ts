@@ -980,27 +980,38 @@ async function refreshPendingOperationFlags(
           continue;
         }
         if (
-          operation.targetType !== "ENTITY" ||
-          !isEntityReviewOp(operation.op)
+          operation.targetType === "EVENT" &&
+          operation.op === OpKind.APPLY_EVENT_EFFECTS
         ) {
+          const flags = await evaluateApplyEventEffectsOperationFlags(
+            tx,
+            changeSet,
+            operation,
+            effectiveOperationPatch(operation),
+          );
+          await tx.changeOperation.update({
+            where: { id: operation.id },
+            data: flags,
+          });
           continue;
         }
-
-        const operationInput = {
-          op: operation.op,
-          targetId: operation.targetId ?? undefined,
-          patch: effectiveOperationPatch(operation),
-        };
-        const flags = await evaluatePendingOperationFlagsForRefresh(
-          tx,
-          operationInput,
-          campaignId,
-          baseVersions,
-        );
-        await tx.changeOperation.update({
-          where: { id: operation.id },
-          data: flags,
-        });
+        if (operation.targetType === "ENTITY" && isEntityReviewOp(operation.op)) {
+          const operationInput = {
+            op: operation.op,
+            targetId: operation.targetId ?? undefined,
+            patch: effectiveOperationPatch(operation),
+          };
+          const flags = await evaluatePendingOperationFlagsForRefresh(
+            tx,
+            operationInput,
+            campaignId,
+            baseVersions,
+          );
+          await tx.changeOperation.update({
+            where: { id: operation.id },
+            data: flags,
+          });
+        }
       }
     }
   });
@@ -1020,6 +1031,75 @@ async function evaluatePendingOperationFlagsForRefresh(
     }
     throw error;
   }
+}
+
+async function evaluateApplyEventEffectsOperationFlags(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operation: Prisma.ChangeOperationGetPayload<object>,
+  patch: ReviewPatch,
+) {
+  if (!operation.targetId) return { blockedByLock: false, isStale: true };
+  const event = await tx.event.findFirst({
+    where: {
+      id: operation.targetId,
+      campaignId: changeSet.campaignId,
+      status: { not: CanonStatus.ARCHIVED },
+    },
+    select: { id: true, effects: true },
+  });
+  if (!event) return { blockedByLock: false, isStale: true };
+
+  const reviewedEffects = parseEventEffects(readTo(patch, "effects"));
+  if ("effects" in patch && reviewedEffects.length === 0) {
+    return { blockedByLock: false, isStale: false };
+  }
+
+  const storedById = new Map(
+    parseEventEffects(event.effects as JsonValue).map((effect) => [effect.id, effect]),
+  );
+  let blockedByLock = false;
+  let isStale = false;
+  for (const reviewed of reviewedEffects) {
+    const stored = storedById.get(reviewed.id);
+    if (
+      !stored ||
+      stored.applied ||
+      !effectBelongsToOperation(stored, changeSet.id, operation.id)
+    ) {
+      isStale = true;
+      continue;
+    }
+    try {
+      assertValidDeclaredEffect(reviewed);
+      const crawler = await loadEffectTargetCrawler(
+        tx,
+        changeSet.campaignId,
+        reviewed.targetEntityId,
+      );
+      const entityPatch = effectEntityPatch(reviewed, crawler);
+      if (!entityPatch) continue;
+      const flags = await evaluateEntityOperationFlags(
+        tx,
+        {
+          op: OpKind.UPDATE_ENTITY,
+          targetId: reviewed.targetEntityId,
+          patch: entityPatch,
+        },
+        changeSet.campaignId,
+        {},
+      );
+      blockedByLock ||= flags.blockedByLock;
+    } catch (error) {
+      if (error instanceof ServiceError) {
+        isStale = true;
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return { blockedByLock, isStale };
 }
 
 async function markEventEffectReviewState(
@@ -2076,6 +2156,17 @@ function serializeEventEffects(
   }));
 }
 
+function effectBelongsToOperation(
+  effect: StoredEventEffect,
+  changeSetId: string,
+  operationId: string,
+) {
+  return (
+    effect.pendingOperationId === operationId ||
+    effect.pendingChangeSetId === changeSetId
+  );
+}
+
 // Resolve + validate an effect's target as a live canon crawler, returning the
 // current stat values the apply step deltas from.
 async function loadEffectTargetCrawler(
@@ -2447,11 +2538,20 @@ async function applyApplyEventEffects(
 
   const effects = parseEventEffects(event.effects as JsonValue);
   const reviewedEffects = parseEventEffects(readTo(patch, "effects"));
+  const patchCarriesEffects = "effects" in patch;
+  if (patchCarriesEffects && reviewedEffects.length === 0) {
+    throw new ServiceError("Effect review patch has no valid effects.");
+  }
   const reviewedById = new Map(reviewedEffects.map((effect) => [effect.id, effect]));
   const reviewedIds = new Set(reviewedEffects.map((effect) => effect.id));
   const pending = effects.filter((effect) => {
     if (effect.applied) return false;
-    if (reviewedIds.size > 0) return reviewedIds.has(effect.id);
+    if (reviewedIds.size > 0) {
+      return (
+        reviewedIds.has(effect.id) &&
+        effectBelongsToOperation(effect, changeSet.id, operationId)
+      );
+    }
     return (
       effect.pendingOperationId === operationId ||
       effect.pendingChangeSetId === changeSet.id ||

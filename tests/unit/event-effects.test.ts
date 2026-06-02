@@ -18,6 +18,7 @@ import {
   rejectChangeSet,
   setChangeOperationDecision,
   setEntityLock,
+  supersedeChangeSet,
 } from "@/server/services/review";
 
 function makeUser(email: string) {
@@ -290,6 +291,95 @@ describe("event effects", () => {
     });
   });
 
+  it("surfaces locked effect targets as blocked before approval", async () => {
+    const { owner, campaign, carl, event } = await setup("locked-pending@test.com");
+    await declareEffect(owner.id, campaign.id, event.id, [
+      { kind: "ADJUST_STAT", targetEntityId: carl.id, stat: "gold", delta: 500 },
+    ]);
+
+    const result = await applyEventEffects(owner.id, campaign.id, event.id);
+    await setEntityLock(owner.id, campaign.id, carl.id, { locked: true });
+
+    const queue = await listPendingChangeSetsForUser(owner.id, campaign.id);
+    expect(queue[0].operations[0]).toMatchObject({
+      id: result.operationId,
+      blockedByLock: true,
+      isStale: false,
+    });
+    await expect(approveChangeSet(owner.id, campaign.id, result.changeSetId)).rejects.toThrow(
+      /blocked by locks/i,
+    );
+  });
+
+  it("rejects malformed edited effect patches instead of applying all pending effects", async () => {
+    const { owner, campaign, carl, event } = await setup("bad-edit-effects@test.com");
+    await declareEffect(owner.id, campaign.id, event.id, [
+      { kind: "ADJUST_STAT", targetEntityId: carl.id, stat: "gold", delta: 500 },
+    ]);
+
+    const result = await applyEventEffects(owner.id, campaign.id, event.id);
+    await setChangeOperationDecision(
+      owner.id,
+      campaign.id,
+      result.changeSetId,
+      result.operationId,
+      {
+        decision: "EDITED",
+        editedPatch: {
+          effects: { to: [] },
+        },
+      },
+    );
+
+    await expect(approveChangeSet(owner.id, campaign.id, result.changeSetId)).rejects.toThrow(
+      /effect review patch/i,
+    );
+    const crawler = await prisma.crawler.findUnique({ where: { id: carl.id } });
+    expect(crawler?.gold).toBe(100);
+    const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    expect(timeline[0].effects[0]).toMatchObject({
+      applied: false,
+      reviewStatus: "PENDING",
+    });
+  });
+
+  it("does not approve replacement effect rows that reused the queued effect id", async () => {
+    const { owner, campaign, carl, event } = await setup("stale-effect-id@test.com");
+    await declareEffect(owner.id, campaign.id, event.id, [
+      { kind: "ADJUST_STAT", targetEntityId: carl.id, stat: "gold", delta: 500 },
+    ]);
+    const effectId = (await listEventsForEntity(owner.id, campaign.id, carl.id))[0].effects[0].id;
+
+    const result = await applyEventEffects(owner.id, campaign.id, event.id);
+    await updateEvent(owner.id, campaign.id, event.id, {
+      title: "Event",
+      secret: false,
+      effects: [
+        {
+          id: effectId,
+          kind: "ADJUST_STAT",
+          targetEntityId: carl.id,
+          stat: "gold",
+          delta: 50,
+        },
+      ],
+    });
+
+    await expect(approveChangeSet(owner.id, campaign.id, result.changeSetId)).rejects.toThrow(
+      /stale/i,
+    );
+    const crawler = await prisma.crawler.findUnique({ where: { id: carl.id } });
+    expect(crawler?.gold).toBe(100);
+    const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    expect(timeline[0].effects[0]).toMatchObject({
+      id: effectId,
+      applied: false,
+      delta: 50,
+      reviewStatus: null,
+      pendingChangeSetId: null,
+    });
+  });
+
   it("marks rejected effect proposals as reviewed without mutating canon", async () => {
     const { owner, campaign, carl, event } = await setup("reject-effects@test.com");
     await declareEffect(owner.id, campaign.id, event.id, [
@@ -311,6 +401,26 @@ describe("event effects", () => {
     await expect(applyEventEffects(owner.id, campaign.id, event.id)).rejects.toThrow(
       /no effects left/i,
     );
+  });
+
+  it("marks superseded effect proposals as reviewed without mutating canon", async () => {
+    const { owner, campaign, carl, event } = await setup("supersede-effects@test.com");
+    await declareEffect(owner.id, campaign.id, event.id, [
+      { kind: "ADJUST_STAT", targetEntityId: carl.id, stat: "gold", delta: 500 },
+    ]);
+
+    const result = await applyEventEffects(owner.id, campaign.id, event.id);
+    await supersedeChangeSet(owner.id, campaign.id, result.changeSetId);
+
+    const crawler = await prisma.crawler.findUnique({ where: { id: carl.id } });
+    expect(crawler?.gold).toBe(100);
+    const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    expect(timeline[0].effects[0]).toMatchObject({
+      applied: false,
+      reviewStatus: "SUPERSEDED",
+      pendingChangeSetId: null,
+      pendingOperationId: null,
+    });
   });
 
   it("auto-applies DM-declared effects and shows effect targets as affected participants", async () => {
