@@ -360,10 +360,12 @@ model Event {
   // Structured deltas this event can apply to entity state on approval
   // (docs/01-domain-model.md). Each entry:
   //   { id, kind: "ADJUST_STAT"|"SET_STAT"|"SET_ALIVE", targetEntityId,
-  //     stat?, delta?, valueNumber?, value?, note?, applied, appliedChangeSetId? }
-  // Applying them routes APPLY_EVENT_EFFECTS through the review pipeline so the
-  // entity write is lock-aware + provenance-tracked. DM-only (never projected to
-  // players). Generic-entity / disposition / PERSONA_SHIFT effects are follow-ups.
+  //     stat?, delta?, valueNumber?, value?, note?, applied,
+  //     appliedChangeSetId?, pendingChangeSetId?, pendingOperationId?,
+  //     reviewStatus? }. Submitting them creates a pending APPLY_EVENT_EFFECTS
+  // operation; approval applies the entity write atomically through the review
+  // pipeline. DM-only (never projected to players). Generic-entity /
+  // disposition / PERSONA_SHIFT effects are follow-ups.
   effects     Json         @default("[]")
   secret      Boolean      @default(false)
   source      ChangeSource @default(DM)

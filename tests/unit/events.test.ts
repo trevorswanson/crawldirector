@@ -16,7 +16,10 @@ import {
   setEventLock,
   updateEvent,
 } from "@/server/services/events";
-import { applyAutoApprovedEventChangeSet } from "@/server/services/review";
+import {
+  applyAutoApprovedEventChangeSet,
+  approveChangeSet,
+} from "@/server/services/review";
 import { OpKind } from "@/generated/prisma/client";
 
 function makeUser(email: string) {
@@ -148,6 +151,26 @@ describe("event service", () => {
 
     const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
     expect(timeline.map((e) => e.title)).toEqual(["Later", "Early"]);
+  });
+
+  it("projects malformed in-game time as empty timeline time", async () => {
+    const owner = await makeUser("owner-bad-time@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Bad time",
+      floor: 3,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await prisma.event.update({
+      where: { id: event.id },
+      data: { inGameTime: [] },
+    });
+
+    const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    expect(timeline[0].time).toEqual({ floor: null, label: null });
   });
 
   it("lists the campaign-wide timeline with visible participants", async () => {
@@ -1153,7 +1176,8 @@ describe("updateEvent", () => {
         },
       ],
     });
-    await applyEventEffects(owner.id, campaign.id, event.id);
+    const applyResult = await applyEventEffects(owner.id, campaign.id, event.id);
+    await approveChangeSet(owner.id, campaign.id, applyResult.changeSetId);
 
     await updateEvent(owner.id, campaign.id, event.id, {
       title: "Loot consequence renamed",
