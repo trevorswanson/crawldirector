@@ -3,6 +3,7 @@ import {
   ChangeSource,
   EventParticipantRole,
   OpKind,
+  Prisma,
   Role,
   Visibility,
 } from "@/generated/prisma/client";
@@ -18,6 +19,7 @@ import {
 import { prisma } from "@/server/db";
 import {
   applyAutoApprovedEventChangeSet,
+  createPendingEventChangeSet,
   type ReviewPatch,
 } from "@/server/services/review";
 
@@ -57,6 +59,10 @@ export type EventEffectView = {
   value: boolean | null;
   note: string | null;
   applied: boolean;
+  appliedChangeSetId: string | null;
+  pendingChangeSetId: string | null;
+  pendingOperationId: string | null;
+  reviewStatus: "PENDING" | "REJECTED" | "SUPERSEDED" | "APPLIED" | null;
 };
 
 // Project the event.effects JSON for display. Players get an empty list.
@@ -80,23 +86,43 @@ function projectEventEffects(value: unknown, isPlayer: boolean): EventEffectView
       value: typeof record.value === "boolean" ? record.value : null,
       note: typeof record.note === "string" ? record.note : null,
       applied: record.applied === true,
+      appliedChangeSetId:
+        typeof record.appliedChangeSetId === "string" ? record.appliedChangeSetId : null,
+      pendingChangeSetId:
+        typeof record.pendingChangeSetId === "string" ? record.pendingChangeSetId : null,
+      pendingOperationId:
+        typeof record.pendingOperationId === "string" ? record.pendingOperationId : null,
+      reviewStatus:
+        record.reviewStatus === "PENDING" ||
+        record.reviewStatus === "REJECTED" ||
+        record.reviewStatus === "SUPERSEDED" ||
+        record.reviewStatus === "APPLIED"
+          ? record.reviewStatus
+          : record.applied === true
+            ? "APPLIED"
+            : null,
     });
   }
   return views;
 }
 
-// Unapplied effect target entity ids — used to revalidate affected entity
-// timelines after applying effects.
-function unappliedEffectTargetIds(value: unknown): string[] {
+function reviewableEffectRecords(value: unknown): Record<string, unknown>[] {
   if (!Array.isArray(value)) return [];
-  const ids = new Set<string>();
+  const effects: Record<string, unknown>[] = [];
   for (const item of value) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
     const record = item as Record<string, unknown>;
     if (record.applied === true) continue;
-    if (typeof record.targetEntityId === "string") ids.add(record.targetEntityId);
+    if (record.reviewStatus === "PENDING") continue;
+    if (record.reviewStatus === "REJECTED" || record.reviewStatus === "SUPERSEDED") {
+      continue;
+    }
+    if (typeof record.id !== "string" || typeof record.targetEntityId !== "string") {
+      continue;
+    }
+    effects.push({ ...record });
   }
-  return Array.from(ids);
+  return effects;
 }
 
 export type EntityEvent = {
@@ -660,12 +686,35 @@ export async function setEventLock(
   });
 }
 
+function markEffectsPendingReview(
+  value: unknown,
+  effectIds: Set<string>,
+  changeSetId: string,
+  operationId: string,
+): Prisma.InputJsonValue {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      return item as Prisma.InputJsonValue;
+    }
+    const record = item as Record<string, unknown>;
+    if (typeof record.id !== "string" || !effectIds.has(record.id)) {
+      return record as Prisma.InputJsonValue;
+    }
+    return {
+      ...record,
+      pendingChangeSetId: changeSetId,
+      pendingOperationId: operationId,
+      reviewStatus: "PENDING",
+    } as Prisma.InputJsonValue;
+  });
+}
+
 /**
- * Apply an event's declared (unapplied) effects to entity state. Routes
- * APPLY_EVENT_EFFECTS through the review pipeline as an auto-approved DM change
- * set, so each entity write is lock-aware and provenance-tracked. Returns the
- * entity ids whose timelines/details may have changed (participants + effect
- * targets) for revalidation. DM-only.
+ * Submit an event's declared effects to the Review Queue. The entity mutations
+ * are not applied here; approving the resulting APPLY_EVENT_EFFECTS operation
+ * applies them atomically through the lock-aware review pipeline. Returns the
+ * entity ids whose pages may need to show pending review state. DM-only.
  */
 export async function applyEventEffects(
   userId: string,
@@ -684,19 +733,53 @@ export async function applyEventEffects(
   });
   if (!existing) throw new ServiceError("Event not found.");
 
-  const targetIds = unappliedEffectTargetIds(existing.effects);
-  if (targetIds.length === 0) {
+  const effects = reviewableEffectRecords(existing.effects);
+  if (effects.length === 0) {
     throw new ServiceError("This event has no effects left to apply.");
   }
+  const targetIds = Array.from(
+    new Set(
+      effects
+        .map((effect) => effect.targetEntityId)
+        .filter((id): id is string => typeof id === "string"),
+    ),
+  );
 
-  await applyAutoApprovedEventChangeSet(userId, campaignId, {
+  const changeSet = await createPendingEventChangeSet(userId, campaignId, {
     title: "Apply event effects",
-    operations: [{ op: OpKind.APPLY_EVENT_EFFECTS, targetId: eventId, patch: {} }],
+    operations: [
+      {
+        op: OpKind.APPLY_EVENT_EFFECTS,
+        targetId: eventId,
+        patch: { effects: { to: effects as ReviewPatch[string]["to"] } },
+      },
+    ],
+  });
+  const operationId = changeSet.operations[0]?.id;
+  if (!operationId) throw new ServiceError("Could not create effect review operation.");
+  const effectIds = new Set(
+    effects
+      .map((effect) => effect.id)
+      .filter((id): id is string => typeof id === "string"),
+  );
+  await prisma.event.update({
+    where: { id: eventId },
+    data: {
+      effects: markEffectsPendingReview(
+        existing.effects,
+        effectIds,
+        changeSet.id,
+        operationId,
+      ),
+    },
+    select: { id: true },
   });
 
   const participantIds = existing.participants.map((p) => p.entityId);
   return {
     id: eventId,
+    changeSetId: changeSet.id,
+    operationId,
     affectedEntityIds: Array.from(new Set([...participantIds, ...targetIds])),
   };
 }

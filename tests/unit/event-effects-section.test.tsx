@@ -18,6 +18,10 @@ const baseEffect: EventEffectView = {
   value: null,
   note: "Loot",
   applied: false,
+  appliedChangeSetId: null,
+  pendingChangeSetId: null,
+  pendingOperationId: null,
+  reviewStatus: null,
 };
 
 describe("describeEffect", () => {
@@ -58,7 +62,7 @@ describe("EventEffectsSection", () => {
     expect(screen.getAllByText("Gold +50")).toHaveLength(2);
     expect(screen.getByText("unapplied")).toBeDefined();
     expect(screen.getByText("applied")).toBeDefined();
-    expect(screen.getByRole("button", { name: /Apply unapplied/ })).toBeDefined();
+    expect(screen.getByRole("button", { name: /Send to review/ })).toBeDefined();
   });
 
   it("does not render an apply button when all effects are applied", () => {
@@ -70,7 +74,40 @@ describe("EventEffectsSection", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: /Apply unapplied/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Send to review/ })).toBeNull();
+  });
+
+  it("renders pending review state without another apply button", () => {
+    render(
+      <EventEffectsSection
+        effects={[
+          {
+            ...baseEffect,
+            pendingChangeSetId: "cs1",
+            pendingOperationId: "op1",
+            reviewStatus: "PENDING",
+          },
+        ]}
+        resolveName={() => "Carl"}
+        onApply={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("pending review")).toBeDefined();
+    expect(screen.queryByRole("button", { name: /Send to review/ })).toBeNull();
+  });
+
+  it("renders rejected effects as reviewed and not actionable", () => {
+    render(
+      <EventEffectsSection
+        effects={[{ ...baseEffect, reviewStatus: "REJECTED" }]}
+        resolveName={() => "Carl"}
+        onApply={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("rejected")).toBeDefined();
+    expect(screen.queryByRole("button", { name: /Send to review/ })).toBeNull();
   });
 
   it("surfaces apply errors", async () => {
@@ -83,7 +120,7 @@ describe("EventEffectsSection", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Apply unapplied/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Send to review/ }));
 
     await waitFor(() => {
       expect(onApply).toHaveBeenCalledTimes(1);

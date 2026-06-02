@@ -228,6 +228,16 @@ function isEntityReviewOp(op: OpKind): op is EntityReviewOperationInput["op"] {
   );
 }
 
+function isEventReviewOp(op: OpKind): op is EventReviewOperationInput["op"] {
+  return (
+    op === OpKind.CREATE_EVENT ||
+    op === OpKind.UPDATE_EVENT ||
+    op === OpKind.CREATE_EVENT_CAUSALITY ||
+    op === OpKind.DELETE_EVENT_CAUSALITY ||
+    op === OpKind.APPLY_EVENT_EFFECTS
+  );
+}
+
 export async function createPendingEntityChangeSet(
   userId: string,
   campaignId: string,
@@ -482,6 +492,46 @@ export async function applyAutoApprovedEventChangeSet(
   });
 }
 
+export async function createPendingEventChangeSet(
+  userId: string,
+  campaignId: string,
+  input: {
+    source?: ChangeSource;
+    title: string;
+    summary?: string;
+    runId?: string;
+    operations: EventReviewOperationInput[];
+  },
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  return prisma.$transaction(async (tx) =>
+    tx.changeSet.create({
+      data: {
+        campaignId,
+        source: input.source ?? ChangeSource.DM,
+        title: input.title,
+        summary: input.summary,
+        runId: input.runId,
+        actorUserId: userId,
+        operations: {
+          create: input.operations.map((operation) => ({
+            op: operation.op,
+            targetType:
+              operation.op === OpKind.CREATE_EVENT_CAUSALITY ||
+              operation.op === OpKind.DELETE_EVENT_CAUSALITY
+                ? "EVENT_CAUSALITY"
+                : "EVENT",
+            targetId: operation.targetId,
+            patch: operation.patch as Prisma.InputJsonValue,
+          })),
+        },
+      },
+      include: { operations: true },
+    }),
+  );
+}
+
 export async function listPendingChangeSetsForUser(
   userId: string,
   campaignId: string,
@@ -511,6 +561,16 @@ async function enrichReviewQueueItems(
       ),
     ),
   );
+  const eventTargetIds = Array.from(
+    new Set(
+      changeSets.flatMap((changeSet) =>
+        changeSet.operations
+          .filter((operation) => operation.targetType === "EVENT")
+          .map((operation) => operation.targetId)
+          .filter((targetId): targetId is string => Boolean(targetId)),
+      ),
+    ),
+  );
   const targets = targetIds.length
     ? await prisma.entity.findMany({
         where: { campaignId, id: { in: targetIds } },
@@ -518,6 +578,13 @@ async function enrichReviewQueueItems(
       })
     : [];
   const targetById = new Map(targets.map((target) => [target.id, target]));
+  const eventTargets = eventTargetIds.length
+    ? await prisma.event.findMany({
+        where: { campaignId, id: { in: eventTargetIds } },
+        select: { id: true, title: true },
+      })
+    : [];
+  const eventById = new Map(eventTargets.map((event) => [event.id, event]));
 
   return changeSets.map((changeSet) => ({
     ...changeSet,
@@ -525,8 +592,14 @@ async function enrichReviewQueueItems(
       const patch = operation.patch as ReviewPatch;
       const target =
         operation.targetId ? targetById.get(operation.targetId) : undefined;
+      const eventTarget =
+        operation.targetType === "EVENT" && operation.targetId
+          ? eventById.get(operation.targetId)
+          : undefined;
       const targetEntityType =
-        target?.type ?? stringFromReviewValue(readTo(patch, "type"));
+        target?.type ??
+        (eventTarget ? "EVENT" : null) ??
+        stringFromReviewValue(readTo(patch, "type"));
       const fields = patchFields(patch).filter((field) => field !== "_baseVersion");
       const currentValues: Record<string, unknown> = {};
       for (const field of fields) {
@@ -538,6 +611,7 @@ async function enrichReviewQueueItems(
         ...operation,
         targetLabel:
           target?.name ??
+          eventTarget?.title ??
           stringFromReviewValue(readTo(patch, "name")) ??
           operation.targetId ??
           null,
@@ -622,7 +696,11 @@ export async function setChangeOperationDecision(
 
     const operation = changeSet.operations.find((op) => op.id === operationId);
     if (!operation) throw new ServiceError("Change operation not found.");
-    if (operation.targetType !== "ENTITY" || !isEntityReviewOp(operation.op)) {
+    const entityOperation = operation.targetType === "ENTITY" && isEntityReviewOp(operation.op);
+    const eventOperation =
+      (operation.targetType === "EVENT" || operation.targetType === "EVENT_CAUSALITY") &&
+      isEventReviewOp(operation.op);
+    if (!entityOperation && !eventOperation) {
       throw new ServiceError("Unsupported operation target.");
     }
     if (input.decision === OpDecision.EDITED) {
@@ -644,12 +722,12 @@ export async function setChangeOperationDecision(
     const patchForFlags =
       input.decision === OpDecision.EDITED ? input.editedPatch : operation.patch as ReviewPatch;
     const flags =
-      input.decision === OpDecision.REJECTED
+      input.decision === OpDecision.REJECTED || eventOperation
         ? { blockedByLock: false, isStale: false }
         : await evaluateEntityOperationFlags(
             tx,
             {
-              op: operation.op,
+              op: operation.op as EntityReviewOperationInput["op"],
               targetId: operation.targetId ?? undefined,
               patch: patchForFlags,
             },
@@ -714,7 +792,7 @@ export async function approveChangeSet(
 
     const appliedIds: string[] = [];
     for (const operation of applicableOperations) {
-      const targetId = await applyEntityOperation(
+      const targetId = await applyReviewOperation(
         tx,
         changeSet,
         operation,
@@ -731,6 +809,18 @@ export async function approveChangeSet(
               : OpDecision.ACCEPTED,
         },
       });
+    }
+
+    const rejectedOperations = changeSet.operations.filter(
+      (operation) => operation.decision === OpDecision.REJECTED,
+    );
+    if (rejectedOperations.length > 0) {
+      await markEventEffectReviewState(
+        tx,
+        changeSet,
+        rejectedOperations,
+        "REJECTED",
+      );
     }
 
     const rejectedCount = changeSet.operations.length - applicableOperations.length;
@@ -761,6 +851,24 @@ export async function approveChangeSet(
 
     return { id: changeSet.id, targetIds: appliedIds };
   });
+}
+
+async function applyReviewOperation(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operation: Prisma.ChangeOperationGetPayload<object>,
+  patchOverride?: ReviewPatch,
+) {
+  if (operation.targetType === "ENTITY" && isEntityReviewOp(operation.op)) {
+    return applyEntityOperation(tx, changeSet, operation, patchOverride);
+  }
+  if (
+    (operation.targetType === "EVENT" || operation.targetType === "EVENT_CAUSALITY") &&
+    isEventReviewOp(operation.op)
+  ) {
+    return applyEventOperation(tx, changeSet, operation, patchOverride);
+  }
+  throw new ServiceError("Unsupported operation target.");
 }
 
 export type ChangeSetRunReviewResult = {
@@ -914,6 +1022,47 @@ async function evaluatePendingOperationFlagsForRefresh(
   }
 }
 
+async function markEventEffectReviewState(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operations: Prisma.ChangeOperationGetPayload<object>[],
+  reviewStatus: "REJECTED" | "SUPERSEDED",
+) {
+  for (const operation of operations) {
+    if (operation.op !== OpKind.APPLY_EVENT_EFFECTS || operation.targetType !== "EVENT") {
+      continue;
+    }
+    if (!operation.targetId) continue;
+    const event = await tx.event.findFirst({
+      where: { id: operation.targetId, campaignId: changeSet.campaignId },
+      select: { id: true, effects: true },
+    });
+    if (!event) continue;
+    const reviewed = parseEventEffects(readTo(operation.patch as ReviewPatch, "effects"));
+    const reviewedIds = new Set(reviewed.map((effect) => effect.id));
+    const effects = parseEventEffects(event.effects as JsonValue);
+    let changed = false;
+    for (const effect of effects) {
+      const matchesOperation =
+        effect.pendingChangeSetId === changeSet.id ||
+        effect.pendingOperationId === operation.id ||
+        reviewedIds.has(effect.id);
+      if (effect.applied || !matchesOperation) continue;
+      effect.pendingChangeSetId = null;
+      effect.pendingOperationId = null;
+      effect.reviewStatus = reviewStatus;
+      changed = true;
+    }
+    if (changed) {
+      await tx.event.update({
+        where: { id: event.id },
+        data: { effects: serializeEventEffects(effects) },
+        select: { id: true },
+      });
+    }
+  }
+}
+
 export async function rejectChangeSet(
   userId: string,
   campaignId: string,
@@ -924,10 +1073,11 @@ export async function rejectChangeSet(
   return prisma.$transaction(async (tx) => {
     const changeSet = await tx.changeSet.findFirst({
       where: { id: changeSetId, campaignId, status: ChangeSetStatus.PENDING },
-      select: { id: true },
+      include: { operations: true },
     });
     if (!changeSet) throw new ServiceError("Change set not found.");
 
+    await markEventEffectReviewState(tx, changeSet, changeSet.operations, "REJECTED");
     await tx.changeOperation.updateMany({
       where: { changeSetId },
       data: { decision: OpDecision.REJECTED },
@@ -1009,10 +1159,11 @@ export async function supersedeChangeSet(
   return prisma.$transaction(async (tx) => {
     const changeSet = await tx.changeSet.findFirst({
       where: { id: changeSetId, campaignId, status: ChangeSetStatus.PENDING },
-      select: { id: true },
+      include: { operations: true },
     });
     if (!changeSet) throw new ServiceError("Change set not found.");
 
+    await markEventEffectReviewState(tx, changeSet, changeSet.operations, "SUPERSEDED");
     await tx.changeSet.update({
       where: { id: changeSetId },
       data: {
@@ -1815,6 +1966,9 @@ type StoredEventEffect = {
   note: string | null;
   applied: boolean;
   appliedChangeSetId: string | null;
+  pendingChangeSetId: string | null;
+  pendingOperationId: string | null;
+  reviewStatus: "PENDING" | "REJECTED" | "SUPERSEDED" | "APPLIED" | null;
 };
 
 const eventEffectKinds = new Set<string>(["ADJUST_STAT", "SET_STAT", "SET_ALIVE"]);
@@ -1862,6 +2016,17 @@ function parseEventEffects(value: JsonValue | undefined): StoredEventEffect[] {
       applied: record.applied === true,
       appliedChangeSetId:
         typeof record.appliedChangeSetId === "string" ? record.appliedChangeSetId : null,
+      pendingChangeSetId:
+        typeof record.pendingChangeSetId === "string" ? record.pendingChangeSetId : null,
+      pendingOperationId:
+        typeof record.pendingOperationId === "string" ? record.pendingOperationId : null,
+      reviewStatus:
+        record.reviewStatus === "PENDING" ||
+        record.reviewStatus === "REJECTED" ||
+        record.reviewStatus === "SUPERSEDED" ||
+        record.reviewStatus === "APPLIED"
+          ? record.reviewStatus
+          : null,
     });
   }
   return effects;
@@ -1901,6 +2066,13 @@ function serializeEventEffects(
     ...(effect.appliedChangeSetId
       ? { appliedChangeSetId: effect.appliedChangeSetId }
       : {}),
+    ...(effect.pendingChangeSetId
+      ? { pendingChangeSetId: effect.pendingChangeSetId }
+      : {}),
+    ...(effect.pendingOperationId
+      ? { pendingOperationId: effect.pendingOperationId }
+      : {}),
+    ...(effect.reviewStatus ? { reviewStatus: effect.reviewStatus } : {}),
   }));
 }
 
@@ -2009,7 +2181,13 @@ async function applyEventOperation(
         throw new ServiceError("Unsupported operation target.");
       }
       if (!operation.targetId) throw new ServiceError("Missing event target.");
-      return applyApplyEventEffects(tx, changeSet, operation.id, operation.targetId);
+      return applyApplyEventEffects(
+        tx,
+        changeSet,
+        operation.id,
+        operation.targetId,
+        patch,
+      );
     case OpKind.CREATE_EVENT_CAUSALITY:
       if (operation.targetType !== "EVENT_CAUSALITY") {
         throw new ServiceError("Unsupported operation target.");
@@ -2058,6 +2236,9 @@ async function applyCreateEvent(
       ...effect,
       applied: false,
       appliedChangeSetId: null,
+      pendingChangeSetId: null,
+      pendingOperationId: null,
+      reviewStatus: null,
     }));
     for (const effect of effects) {
       assertValidDeclaredEffect(effect);
@@ -2170,6 +2351,9 @@ async function applyUpdateEvent(
       ...effect,
       applied: false,
       appliedChangeSetId: null,
+      pendingChangeSetId: null,
+      pendingOperationId: null,
+      reviewStatus: null,
     }));
     for (const effect of declared) {
       assertValidDeclaredEffect(effect);
@@ -2249,6 +2433,7 @@ async function applyApplyEventEffects(
   changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
   operationId: string,
   eventId: string,
+  patch: ReviewPatch,
 ) {
   const event = await tx.event.findFirst({
     where: {
@@ -2261,16 +2446,36 @@ async function applyApplyEventEffects(
   if (!event) throw new ServiceError("Event not found.");
 
   const effects = parseEventEffects(event.effects as JsonValue);
-  const pending = effects.filter((effect) => !effect.applied);
+  const reviewedEffects = parseEventEffects(readTo(patch, "effects"));
+  const reviewedById = new Map(reviewedEffects.map((effect) => [effect.id, effect]));
+  const reviewedIds = new Set(reviewedEffects.map((effect) => effect.id));
+  const pending = effects.filter((effect) => {
+    if (effect.applied) return false;
+    if (reviewedIds.size > 0) return reviewedIds.has(effect.id);
+    return (
+      effect.pendingOperationId === operationId ||
+      effect.pendingChangeSetId === changeSet.id ||
+      (!effect.pendingOperationId && !effect.pendingChangeSetId)
+    );
+  });
   if (pending.length === 0) {
     throw new ServiceError("This event has no effects left to apply.");
   }
 
   const appliedIds: string[] = [];
-  const affectedParticipantIds = Array.from(
-    new Set(pending.map((effect) => effect.targetEntityId)),
-  );
+  const affectedParticipantIds = new Set<string>();
   for (const effect of pending) {
+    const reviewed = reviewedById.get(effect.id);
+    if (reviewed) {
+      effect.kind = reviewed.kind;
+      effect.targetEntityId = reviewed.targetEntityId;
+      effect.stat = reviewed.stat;
+      effect.delta = reviewed.delta;
+      effect.valueNumber = reviewed.valueNumber;
+      effect.value = reviewed.value;
+      effect.note = reviewed.note;
+    }
+    assertValidDeclaredEffect(effect);
     const crawler = await loadEffectTargetCrawler(
       tx,
       changeSet.campaignId,
@@ -2288,14 +2493,18 @@ async function applyApplyEventEffects(
         entityPatch,
       );
     }
+    affectedParticipantIds.add(effect.targetEntityId);
     effect.applied = true;
     effect.appliedChangeSetId = changeSet.id;
+    effect.pendingChangeSetId = null;
+    effect.pendingOperationId = null;
+    effect.reviewStatus = "APPLIED";
     appliedIds.push(effect.id);
   }
 
-  if (affectedParticipantIds.length > 0) {
+  if (affectedParticipantIds.size > 0) {
     await tx.eventParticipant.createMany({
-      data: affectedParticipantIds.map((entityId) => ({
+      data: Array.from(affectedParticipantIds).map((entityId) => ({
         eventId,
         entityId,
         role: EventParticipantRole.AFFECTED,
