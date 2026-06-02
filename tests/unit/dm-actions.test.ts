@@ -26,6 +26,7 @@ const {
   setEventLock,
   linkEventCause,
   archiveEventCausality,
+  applyEventEffects,
   signOut,
   redirect,
   revalidatePath,
@@ -55,6 +56,7 @@ const {
   setEventLock: vi.fn(),
   linkEventCause: vi.fn(),
   archiveEventCausality: vi.fn(),
+  applyEventEffects: vi.fn(),
   signOut: vi.fn(),
   redirect: vi.fn(() => {
     throw new Error("NEXT_REDIRECT");
@@ -96,6 +98,7 @@ vi.mock("@/server/services/events", () => ({
   setEventLock,
   linkEventCause,
   archiveEventCausality,
+  applyEventEffects,
 }));
 vi.mock("@/server/auth", () => ({ signOut }));
 vi.mock("next/navigation", () => ({ redirect }));
@@ -129,6 +132,8 @@ import {
   toggleEventLockAction,
   linkEventCauseAction,
   archiveEventCausalityAction,
+  applyEventEffectsAction,
+  applyCampaignEventEffectsAction,
   signOutAction,
   updateEntityAction,
 } from "@/app/(dm)/actions";
@@ -1141,6 +1146,200 @@ describe("updateCampaignEventAction", () => {
       form({ title: "X" }),
     );
     expect(result?.error).toBe("This event is locked.");
+  });
+});
+
+describe("event effect rows", () => {
+  it("parses ADJUST_STAT and SET_ALIVE effect rows without auto-applying on event edit", async () => {
+    updateEvent.mockResolvedValue({ id: "ev1", participantIds: ["e1"] });
+
+    await updateEventAction(
+      "c1",
+      "e1",
+      "ev1",
+      undefined,
+      form({
+        title: "Loot drop",
+        effectCount: "2",
+        effectKind_0: "ADJUST_STAT",
+        effectTarget_0: "e1",
+        effectStat_0: "gold",
+        effectDelta_0: "500",
+        effectNote_0: "Boss loot",
+        effectKind_1: "SET_ALIVE",
+        effectTarget_1: "e2",
+        effectValue_1: "dead",
+      }),
+    );
+
+    expect(updateEvent).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      "ev1",
+      expect.objectContaining({
+        effects: [
+          expect.objectContaining({
+            kind: "ADJUST_STAT",
+            targetEntityId: "e1",
+            stat: "gold",
+            delta: 500,
+            note: "Boss loot",
+          }),
+          expect.objectContaining({
+            kind: "SET_ALIVE",
+            targetEntityId: "e2",
+            value: false,
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("parses SET_STAT effect rows as direct values without auto-applying", async () => {
+    updateEvent.mockResolvedValue({ id: "ev1", participantIds: ["e1"] });
+
+    await updateEventAction(
+      "c1",
+      "e1",
+      "ev1",
+      undefined,
+      form({
+        title: "Floor change",
+        effectCount: "1",
+        effectKind_0: "SET_STAT",
+        effectTarget_0: "e1",
+        effectStat_0: "currentFloor",
+        effectValueNumber_0: "1",
+      }),
+    );
+
+    expect(updateEvent).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      "ev1",
+      expect.objectContaining({
+        effects: [
+          expect.objectContaining({
+            kind: "SET_STAT",
+            targetEntityId: "e1",
+            stat: "currentFloor",
+            valueNumber: 1,
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("parses campaign timeline effect rows without auto-applying", async () => {
+    updateEvent.mockResolvedValue({ id: "ev1", participantIds: ["e1"] });
+
+    await updateCampaignEventAction(
+      "c1",
+      "ev1",
+      undefined,
+      form({
+        title: "Floor change",
+        effectCount: "1",
+        effectKind_0: "ADJUST_STAT",
+        effectTarget_0: "e1",
+        effectStat_0: "gold",
+        effectDelta_0: "50",
+      }),
+    );
+
+    expect(updateEvent).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      "ev1",
+      expect.objectContaining({
+        effects: [
+          expect.objectContaining({
+            kind: "ADJUST_STAT",
+            targetEntityId: "e1",
+            stat: "gold",
+            delta: 50,
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("skips effect rows without a target and leaves effects absent when no rows", async () => {
+    updateEvent.mockResolvedValue({ id: "ev1", participantIds: ["e1"] });
+
+    // effectCount present but the only row has no target -> empty effects array.
+    await updateCampaignEventAction(
+      "c1",
+      "ev1",
+      undefined,
+      form({
+        title: "Loot drop",
+        effectCount: "1",
+        effectKind_0: "ADJUST_STAT",
+        effectTarget_0: "",
+        effectStat_0: "gold",
+        effectDelta_0: "10",
+      }),
+    );
+    expect(updateEvent).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      "ev1",
+      expect.objectContaining({ effects: [] }),
+    );
+
+    updateEvent.mockClear();
+    // No effectCount -> effects key omitted entirely (set untouched).
+    await updateCampaignEventAction("c1", "ev1", undefined, form({ title: "Loot drop" }));
+    expect(updateEvent.mock.calls[0][3]).not.toHaveProperty("effects");
+  });
+});
+
+describe("applyEventEffectsAction", () => {
+  it("applies effects and revalidates affected entities + the campaign timeline", async () => {
+    applyEventEffects.mockResolvedValue({ id: "ev1", affectedEntityIds: ["e1", "e2"] });
+
+    const result = await applyEventEffectsAction("c1", "e1", "ev1");
+
+    expect(result).toBeUndefined();
+    expect(applyEventEffects).toHaveBeenCalledWith("u1", "c1", "ev1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+  });
+
+  it("surfaces a ServiceError (e.g. a locked target) without throwing", async () => {
+    applyEventEffects.mockRejectedValueOnce(
+      new ServiceError("Cannot update because the entity is locked."),
+    );
+    const result = await applyEventEffectsAction("c1", "e1", "ev1");
+    expect(result?.error).toMatch(/locked/);
+  });
+
+  it("hides unexpected errors behind a generic message", async () => {
+    applyEventEffects.mockRejectedValueOnce(new Error("boom"));
+    const result = await applyEventEffectsAction("c1", "e1", "ev1");
+    expect(result?.error).toMatch(/Could not apply the effects/);
+  });
+});
+
+describe("applyCampaignEventEffectsAction", () => {
+  it("applies effects from the campaign timeline and revalidates affected entities", async () => {
+    applyEventEffects.mockResolvedValue({ id: "ev1", affectedEntityIds: ["e1", "e3"] });
+
+    const result = await applyCampaignEventEffectsAction("c1", "ev1");
+
+    expect(result).toBeUndefined();
+    expect(applyEventEffects).toHaveBeenCalledWith("u1", "c1", "ev1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e3");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+  });
+
+  it("surfaces a ServiceError from the campaign apply", async () => {
+    applyEventEffects.mockRejectedValueOnce(new ServiceError("This event has no effects left to apply."));
+    const result = await applyCampaignEventEffectsAction("c1", "ev1");
+    expect(result?.error).toMatch(/no effects left/);
   });
 });
 

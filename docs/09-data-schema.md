@@ -24,14 +24,14 @@
 
 > **Implementation note (M2 → M3):** the committed schema includes the identity/
 > tenancy foundation, `Entity`/`Crawler`, the review-pipeline tables, M3
-> `Relationship`, `Event`/`EventParticipant`, and `EventCausality`. Direct
-> DM/co-DM writes still feel instant in the UI, but the service layer records
-> them as auto-approved `DM` change sets with provenance and audit rows.
-> `CREATE_RELATIONSHIP` / `DELETE_RELATIONSHIP`, `CREATE_EVENT` /
-> `UPDATE_EVENT` (archive), and `CREATE_EVENT_CAUSALITY` /
-> `DELETE_EVENT_CAUSALITY` now flow through the pipeline. Pending (AI/import)
-> relationship/event review, relationship/event field editing + locking UI, and
-> structured event effects remain future M3 slices.
+> `Relationship`, `Event`/`EventParticipant`, `EventCausality`, and the v1
+> `Event.effects` JSON field. Direct DM/co-DM writes still feel instant in the
+> UI, but the service layer records them as auto-approved `DM` change sets with
+> provenance and audit rows. `CREATE_RELATIONSHIP` / `DELETE_RELATIONSHIP`,
+> `CREATE_EVENT` / `UPDATE_EVENT`, `CREATE_EVENT_CAUSALITY` /
+> `DELETE_EVENT_CAUSALITY`, and `APPLY_EVENT_EFFECTS` now flow through the
+> pipeline. Pending relationship/event review and Review Queue integration for
+> unapplied event effects remain future M3 slices.
 
 ## Sketch
 
@@ -449,6 +449,22 @@ model SessionLogEntry {             // real-time capture; NOT canon until promot
   hard-delete where history matters).
 - Revisit whether more types deserve satellites once query patterns are known
   (likely candidates next: `Faction`, `Floor`).
+- `Event.effects` v1 stores crawler-targeted consequences in `Event.effects`
+  JSON: `ADJUST_STAT` deltas non-null numeric crawler fields, `SET_STAT` writes
+  an absolute numeric crawler field (for nullable values like `currentFloor`),
+  and `SET_ALIVE` flips `Crawler.isAlive`. Applying them routes
+  `APPLY_EVENT_EFFECTS` through the review pipeline and attaches effect targets
+  as `AFFECTED` participants so entity timelines include events that changed
+  that crawler.
+- Next event-effects slice: unapplied effect rows should be represented in the
+  Review Queue before they mutate target entities. Store a stable review pointer
+  on each effect row, such as `pendingChangeSetId` and/or `pendingOperationId`,
+  plus the existing applied pointer (`appliedChangeSetId`) once approved. This
+  lets timeline surfaces deep-link to the queue, prevents duplicate pending
+  apply proposals, and gives edits/removals a concrete proposal to supersede.
+  Approval should mark the effect applied and clear the pending pointer; reject
+  or supersede should leave an explicit non-actionable review state instead of
+  silently leaving an apparently unapplied effect behind.
 - `Event.effects` entries include a `PERSONA_SHIFT` kind
   (`{ kind, entityId, dialDeltas, note }`); applying it (via
   `APPLY_EVENT_EFFECTS`, on approval) creates/updates a `PersonaSnapshot`. This

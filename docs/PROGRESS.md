@@ -311,8 +311,30 @@ relationships/events are reviewable + lockable.
 
 ### Notes / follow-ups (M3)
 
-- Next slices: event effects (structured deltas applied on approval); pending
-      (AI/import) relationship/event proposals in the Review Queue; knowledge/reveal
+- Event effects v1 is underway on `feat/m3-event-effects`: crawler effects now
+      distinguish unapplied/applied state from Review Queue `PENDING`, affected
+      crawler targets are attached to the event as `AFFECTED` participants so
+      their entity timelines show the event, and nullable crawler stats use
+      `SET_STAT` rather than arithmetic from `null`. The current branch still
+      auto-applies DM-edited effect rows through `APPLY_EVENT_EFFECTS`; product
+      decision for the next slice is to route unapplied effect application into
+      the Review Queue by default, including DM-entered effects, because those
+      rows are pending canon mutations and the queue is already built for
+      approve/edit/reject/supersede.
+- Next event-effects slice: create or update a `PENDING` `APPLY_EVENT_EFFECTS`
+      Change Set for unapplied event effects; show the resolved crawler patch in
+      `/review`; let the DM edit target/kind/stat/value before approval; on
+      approval apply atomically, mark effects applied, clear the pending review
+      pointer, and attach targets as `AFFECTED`; on reject/supersede do not
+      mutate entities and do not leave rejected effects looking actionable.
+      Store stable effect-to-review references (`pendingChangeSetId` and/or
+      `pendingOperationId`) in `Event.effects` or the eventual normalized effect
+      table so timeline buttons can deep-link to Review Queue and avoid duplicate
+      proposals. Undo/revert for already-applied effects remains a separate
+      design problem that should create a new compensating reviewed change set,
+      not erase provenance.
+- Next slices: event effects Review Queue integration; pending (AI/import)
+      relationship/event proposals in the Review Queue; knowledge/reveal
       grants for fog of war. (Group hierarchy crawler→party→guild rollup view
       shipped in slice 5; the campaign-wide relationship graph view shipped in
       slice 6; the campaign timeline page with multi-participant logging shipped in
