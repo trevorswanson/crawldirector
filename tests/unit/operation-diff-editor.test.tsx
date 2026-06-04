@@ -25,27 +25,30 @@ function field(overrides: Partial<ReviewFieldInit>): ReviewFieldInit {
   };
 }
 
-// Render a form whose action captures the submitted FormData so we can assert
-// the editedPatch the page action would receive.
+// Capture per-row decisions and edits so one field cannot decide its siblings.
 function renderWithCapture(
   fields: ReviewFieldInit[],
   opRejected = false,
   candidates: EntityCandidate[] = [],
 ) {
-  const submitted: FormData[] = [];
-  const action = (formData: FormData) => {
-    submitted.push(formData);
+  const decisions: { field: string; decision: string }[] = [];
+  const edits: { field: string; data: FormData }[] = [];
+  const decisionAction = (field: string, decision: string) => {
+    decisions.push({ field, decision });
+  };
+  const editAction = (field: string, formData: FormData) => {
+    edits.push({ field, data: formData });
   };
   const view = render(
     <OperationDiffEditor
-      action={action}
       candidates={candidates}
+      decisionAction={decisionAction}
+      editAction={editAction}
       fields={fields}
       opRejected={opRejected}
     />,
   );
-  const form = view.container.querySelector("form") as HTMLFormElement;
-  return { view, submitted, form };
+  return { view, decisions, edits };
 }
 
 describe("OperationDiffEditor", () => {
@@ -66,49 +69,39 @@ describe("OperationDiffEditor", () => {
       screen.getByRole("button", { name: "Reject summary" }).getAttribute("aria-pressed"),
     ).toBe("false");
     // Read-first: no visible value input until Edit is clicked.
-    expect(view.container.querySelector('input[name="value:summary"]')?.getAttribute("type")).toBe(
-      "hidden",
-    );
-    // Save is disabled until something changes.
-    expect(
-      (screen.getByRole("button", { name: "Save field edits" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
+    expect(view.container.querySelector('input[name="value"]')).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save field edits" })).toBeNull();
   });
 
-  it("omits a rejected field from the submitted patch", () => {
-    const { submitted, form } = renderWithCapture([
+  it("persists accept and reject decisions for only the clicked rows", () => {
+    const { decisions } = renderWithCapture([
       field({ field: "summary" }),
       field({ field: "title", fromText: null, toText: "Hi", draft: "Hi" }),
     ]);
 
     fireEvent.click(screen.getByRole("button", { name: "Accept title" }));
     fireEvent.click(screen.getByRole("button", { name: "Reject summary" }));
-    // Save is enabled once a field is rejected.
-    expect(
-      (screen.getByRole("button", { name: "Save field edits" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(false);
-    fireEvent.submit(form);
 
-    const data = submitted.at(-1)!;
-    // Rejected field carries no apply flag; accepted field does.
-    expect(data.get("apply:summary")).toBeNull();
-    expect(data.get("apply:title")).toBe("on");
-    expect(data.get("value:title")).toBe("Hi");
+    expect(decisions).toEqual([
+      { field: "title", decision: "ACCEPTED" },
+      { field: "summary", decision: "REJECTED" },
+    ]);
   });
 
-  it("reveals an input on Edit and submits the edited value", () => {
-    const { submitted, form } = renderWithCapture([field({ field: "summary", draft: "New" })]);
+  it("replaces row controls with save/discard while editing", () => {
+    const { edits } = renderWithCapture([field({ field: "summary", draft: "New" })]);
 
     fireEvent.click(screen.getByRole("button", { name: "Edit summary" }));
+    expect(screen.queryByRole("button", { name: "Accept summary" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reject summary" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Save summary" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Discard summary edit" })).toBeDefined();
     const input = screen.getByLabelText("summary value") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "Edited summary" } });
-    fireEvent.submit(form);
+    fireEvent.click(screen.getByRole("button", { name: "Save summary" }));
 
-    const data = submitted.at(-1)!;
-    expect(data.get("apply:summary")).toBe("on");
-    expect(data.get("value:summary")).toBe("Edited summary");
+    expect(edits.at(-1)?.field).toBe("summary");
+    expect(edits.at(-1)?.data.get("value")).toBe("Edited summary");
   });
 
   it("renders typed inputs only after Edit and lets Edit be cancelled", () => {
@@ -149,18 +142,24 @@ describe("OperationDiffEditor", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
     expect(screen.getByLabelText("description value").tagName).toBe("TEXTAREA");
-    fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard description edit" }));
     expect(screen.queryByLabelText("description value")).toBeNull();
   });
 
   it("can re-accept an initially rejected field", () => {
-    renderWithCapture([field({ decision: "REJECTED" })]);
+    const { decisions } = renderWithCapture([field({ decision: "REJECTED" })]);
 
     fireEvent.click(screen.getByRole("button", { name: "Accept summary" }));
 
-    expect(
-      screen.getByRole("button", { name: "Accept summary" }).getAttribute("aria-pressed"),
-    ).toBe("true");
+    expect(decisions).toEqual([{ field: "summary", decision: "ACCEPTED" }]);
+  });
+
+  it("can return an accepted field to pending", () => {
+    const { decisions } = renderWithCapture([field({ decision: "ACCEPTED" })]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Accept summary" }));
+
+    expect(decisions).toEqual([{ field: "summary", decision: "PENDING" }]);
   });
 
   it("renders a blocked field display-only with no controls", () => {
@@ -184,7 +183,8 @@ describe("OperationDiffEditor", () => {
   it("renders completed operation diffs as read-only history", () => {
     render(
       <OperationDiffEditor
-        action={() => {}}
+        decisionAction={() => {}}
+        editAction={() => {}}
         fields={[field({ field: "summary" })]}
         opRejected={false}
         readOnly
@@ -196,17 +196,16 @@ describe("OperationDiffEditor", () => {
     expect(screen.queryByRole("button", { name: "Save field edits" })).toBeNull();
   });
 
-  it("does not mark an already-rejected initial field dirty", () => {
+  it("renders an already-rejected field as selected", () => {
     renderWithCapture([field({ decision: "REJECTED" })]);
 
     expect(
-      (screen.getByRole("button", { name: "Save field edits" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
+      screen.getByRole("button", { name: "Reject summary" }).getAttribute("aria-pressed"),
+    ).toBe("true");
   });
 
   it("edits an entity reference with the entity picker", () => {
-    const { submitted, form } = renderWithCapture(
+    const { edits } = renderWithCapture(
       [
         field({
           field: "sourceId",
@@ -229,14 +228,13 @@ describe("OperationDiffEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit sourceId" }));
     fireEvent.click(screen.getByTitle("Choose a different entity"));
     fireEvent.click(screen.getByRole("button", { name: /Princess Donut/ }));
-    fireEvent.submit(form);
+    fireEvent.click(screen.getByRole("button", { name: "Save sourceId" }));
 
-    expect(submitted.at(-1)?.get("value:sourceId")).toBe("entity-donut");
-    expect(submitted.at(-1)?.get("apply:sourceId")).toBe("on");
+    expect(edits.at(-1)?.data.get("value")).toBe("entity-donut");
   });
 
   it("edits in-game time as a floor and text label", () => {
-    const { submitted, form } = renderWithCapture([
+    const { edits } = renderWithCapture([
       field({
         field: "inGameTime",
         kind: "json",
@@ -255,15 +253,15 @@ describe("OperationDiffEditor", () => {
     fireEvent.change(screen.getByLabelText("In-game time label"), {
       target: { value: "After the collapse" },
     });
-    fireEvent.submit(form);
+    fireEvent.click(screen.getByRole("button", { name: "Save inGameTime" }));
 
-    expect(submitted.at(-1)?.get("value:inGameTime")).toBe(
+    expect(edits.at(-1)?.data.get("value")).toBe(
       JSON.stringify({ floor: 10, label: "After the collapse" }),
     );
   });
 
   it("edits participants as entity and role rows", () => {
-    const { submitted, form } = renderWithCapture([
+    const { edits } = renderWithCapture([
       field({
         field: "participants",
         kind: "json",
@@ -285,15 +283,15 @@ describe("OperationDiffEditor", () => {
     fireEvent.change(screen.getByLabelText("Participant role"), {
       target: { value: "ACTOR" },
     });
-    fireEvent.submit(form);
+    fireEvent.click(screen.getByRole("button", { name: "Save participants" }));
 
-    expect(submitted.at(-1)?.get("value:participants")).toBe(
+    expect(edits.at(-1)?.data.get("value")).toBe(
       JSON.stringify([{ entityId: "entity-carl", role: "ACTOR" }]),
     );
   });
 
   it("adds, selects, and removes participant rows", () => {
-    const { submitted, form } = renderWithCapture(
+    const { edits } = renderWithCapture(
       [
         field({
           field: "participants",
@@ -316,9 +314,9 @@ describe("OperationDiffEditor", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: /Carl/ })[0]);
     fireEvent.click(screen.getAllByRole("button", { name: "Remove participant" })[1]);
-    fireEvent.submit(form);
+    fireEvent.click(screen.getByRole("button", { name: "Save participants" }));
 
-    expect(submitted.at(-1)?.get("value:participants")).toBe(
+    expect(edits.at(-1)?.data.get("value")).toBe(
       JSON.stringify([{ entityId: "entity-carl", role: "ACTOR" }]),
     );
   });

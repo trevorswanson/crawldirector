@@ -50,7 +50,6 @@ export type ReviewFieldInit = {
 };
 
 type FieldState = {
-  decision: FieldDecision;
   editing: boolean;
   draft: string;
 };
@@ -58,19 +57,24 @@ type FieldState = {
 /**
  * Read-first operation diff. Each field renders as a before/after diff
  * (mockup `screen-review.jsx`); a DM Accepts / Rejects / Edits per field, and
- * only an Edit reveals an input. Saving persists an EDITED decision via
- * `editChangeOperationPatchAction` (accepted fields → `editedPatch`); rejected
- * fields are omitted. Op-level Accept all / Reject (in the header) handle the
- * bulk path. Blocked fields are display-only.
+ * only an Edit reveals an input. Accept/Reject persist one row immediately;
+ * editing replaces those controls with row-local Save/Discard buttons. Op-level
+ * Accept all / Reject (in the header) handle the bulk path. Blocked fields are
+ * display-only.
  */
 export function OperationDiffEditor({
-  action,
+  decisionAction,
+  editAction,
   fields,
   opRejected,
   readOnly = false,
   candidates = [],
 }: {
-  action: (formData: FormData) => void | Promise<void>;
+  decisionAction: (
+    field: string,
+    decision: "ACCEPTED" | "PENDING" | "REJECTED",
+  ) => void | Promise<void>;
+  editAction: (field: string, formData: FormData) => void | Promise<void>;
   fields: ReviewFieldInit[];
   opRejected: boolean;
   readOnly?: boolean;
@@ -80,7 +84,7 @@ export function OperationDiffEditor({
     Object.fromEntries(
       fields.map((field) => [
         field.field,
-        { decision: field.decision, editing: field.editing, draft: field.draft },
+        { editing: field.editing, draft: field.draft },
       ]),
     ),
   );
@@ -88,20 +92,11 @@ export function OperationDiffEditor({
   const patchField = (name: string, patch: Partial<FieldState>) =>
     setState((current) => ({ ...current, [name]: { ...current[name], ...patch } }));
 
-  const dirty = fields.some((field) => {
-    const fs = state[field.field];
-    return (
-      fs.decision !== field.decision ||
-      fs.editing !== field.editing ||
-      fs.draft !== field.draft
-    );
-  });
-
   return (
-    <form action={action}>
+    <>
       {fields.map((field) => {
         const fs = state[field.field];
-        const rejected = opRejected || fs.decision === "REJECTED";
+        const rejected = opRejected || field.decision === "REJECTED";
 
         return (
           <div
@@ -112,139 +107,174 @@ export function OperationDiffEditor({
               rejected && "opacity-45",
             )}
           >
-            <div className="font-mono text-[10.5px] uppercase tracking-[.08em] text-[var(--ink-faint)]">
-              {field.field}
-            </div>
-
-            <div className="min-w-0 text-[12.5px] leading-[1.5]">
-              {field.fromText !== null && (
-                <div
-                  className={cn(
-                    "mb-[3px] break-words text-[var(--del)] opacity-80",
-                    !rejected && "line-through",
-                  )}
-                >
-                  <span className="mono mr-[6px] text-[10px] opacity-70">-</span>
-                  {field.fromText}
-                </div>
-              )}
-
-              {fs.editing && !field.blocked ? (
-                <div className="mt-1">
-                  <input type="hidden" name="field" value={field.field} />
-                  <input type="hidden" name={`kind:${field.field}`} value={field.kind} />
-                  {fs.decision === "ACCEPTED" && (
-                    <input type="hidden" name={`apply:${field.field}`} value="on" />
-                  )}
-                  <ValueInput
-                    field={field.field}
-                    kind={field.kind}
-                    value={fs.draft}
-                    structured={field.structured}
-                    candidates={candidates}
-                    onChange={(draft) => patchField(field.field, { draft })}
-                  />
-                </div>
-              ) : (
-                <div className="break-words text-[var(--add)]">
-                  <span className="mono mr-[6px] text-[10px] opacity-70">+</span>
-                  <span
-                    className={cn(
-                      field.blocked ? "text-[var(--ink-faint)]" : "text-[var(--ink)]",
-                      rejected && "line-through",
-                    )}
+            {fs.editing && !field.blocked && !opRejected && !readOnly ? (
+              <form action={editAction.bind(null, field.field)} className="contents">
+                <FieldLabel field={field.field} />
+                <FieldValue
+                  candidates={candidates}
+                  draft={fs.draft}
+                  editing
+                  field={field}
+                  onChange={(draft) => patchField(field.field, { draft })}
+                  rejected={rejected}
+                />
+                <div className="flex gap-1">
+                  <Button aria-label={`Save ${field.field}`} size="sm" type="submit" variant="ok">
+                    <Save aria-hidden size={12} />
+                    Save
+                  </Button>
+                  <Button
+                    aria-label={`Discard ${field.field} edit`}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                    onClick={() =>
+                      patchField(field.field, { editing: false, draft: field.draft })
+                    }
                   >
-                    {field.toText}
-                  </span>
-                  {/* Carry the accepted (non-editing) value so Save persists it. */}
-                  {!field.blocked && (
-                    <>
-                      <input type="hidden" name="field" value={field.field} />
-                      <input type="hidden" name={`kind:${field.field}`} value={field.kind} />
-                      <input type="hidden" name={`value:${field.field}`} value={field.draft} />
-                      {fs.decision === "ACCEPTED" && (
-                        <input type="hidden" name={`apply:${field.field}`} value="on" />
-                      )}
-                    </>
-                  )}
+                    <X aria-hidden size={12} />
+                    Discard
+                  </Button>
                 </div>
-              )}
-
-              {field.blocked && (
-                <div className="mt-[5px] inline-flex items-center gap-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--sys)]">
-                  <Lock aria-hidden size={11} />
-                  BLOCKED BY LOCK — UNLOCK TARGET TO APPLY
-                </div>
-              )}
-              {field.stale && !field.blocked && (
-                <div className="mt-[5px] inline-flex items-center gap-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--hot)]">
-                  <TriangleAlert aria-hidden size={11} />
-                  CANON CHANGED UNDER THIS — RESOLVE BELOW
-                </div>
-              )}
-            </div>
-
-            {!field.blocked && !opRejected && !readOnly ? (
-              <div className="flex gap-1">
-                <FieldToggle
-                  active={fs.decision === "ACCEPTED"}
-                  label={`Accept ${field.field}`}
-                  color="var(--ok)"
-                  onClick={() =>
-                    patchField(field.field, {
-                      decision:
-                        fs.decision === "ACCEPTED" ? "PENDING" : "ACCEPTED",
-                    })
-                  }
-                >
-                  <Check aria-hidden size={13} />
-                </FieldToggle>
-                <FieldToggle
-                  active={fs.decision === "REJECTED"}
-                  label={`Reject ${field.field}`}
-                  color="var(--no)"
-                  onClick={() =>
-                    patchField(field.field, {
-                      decision:
-                        fs.decision === "REJECTED" ? "PENDING" : "REJECTED",
-                      editing: false,
-                    })
-                  }
-                >
-                  <X aria-hidden size={13} />
-                </FieldToggle>
-                <FieldToggle
-                  active={fs.editing}
-                  label={`Edit ${field.field}`}
-                  color="var(--accent)"
-                  onClick={() =>
-                    patchField(
-                      field.field,
-                      fs.editing
-                        ? { editing: false, draft: field.draft }
-                        : { editing: true, decision: "ACCEPTED" },
-                    )
-                  }
-                >
-                  <Pencil aria-hidden size={12} />
-                </FieldToggle>
-              </div>
+              </form>
             ) : (
-              <div className="w-[84px]" />
+              <>
+                <FieldLabel field={field.field} />
+                <FieldValue
+                  candidates={candidates}
+                  draft={fs.draft}
+                  field={field}
+                  onChange={(draft) => patchField(field.field, { draft })}
+                  rejected={rejected}
+                />
+                {!field.blocked && !opRejected && !readOnly ? (
+                  <div className="flex gap-1">
+                    <form
+                      action={decisionAction.bind(
+                        null,
+                        field.field,
+                        field.decision === "ACCEPTED" ? "PENDING" : "ACCEPTED",
+                      )}
+                    >
+                      <FieldToggle
+                        active={field.decision === "ACCEPTED"}
+                        label={`Accept ${field.field}`}
+                        color="var(--ok)"
+                      >
+                        <Check aria-hidden size={13} />
+                      </FieldToggle>
+                    </form>
+                    <form
+                      action={decisionAction.bind(
+                        null,
+                        field.field,
+                        field.decision === "REJECTED" ? "PENDING" : "REJECTED",
+                      )}
+                    >
+                      <FieldToggle
+                        active={field.decision === "REJECTED"}
+                        label={`Reject ${field.field}`}
+                        color="var(--no)"
+                      >
+                        <X aria-hidden size={13} />
+                      </FieldToggle>
+                    </form>
+                    <FieldToggle
+                      active={false}
+                      label={`Edit ${field.field}`}
+                      color="var(--accent)"
+                      type="button"
+                      onClick={() => patchField(field.field, { editing: true })}
+                    >
+                      <Pencil aria-hidden size={12} />
+                    </FieldToggle>
+                  </div>
+                ) : (
+                  <div className="w-[84px]" />
+                )}
+              </>
             )}
           </div>
         );
       })}
+    </>
+  );
+}
 
-      {!readOnly && !opRejected && (
-        <div className="border-t border-[var(--line)] px-3 py-3">
-          <Button type="submit" size="sm" variant="outline" disabled={!dirty}>
-            <Save aria-hidden size={14} />
-            Save field edits
-          </Button>
+function FieldLabel({ field }: { field: string }) {
+  return (
+    <div className="font-mono text-[10.5px] uppercase tracking-[.08em] text-[var(--ink-faint)]">
+      {field}
+    </div>
+  );
+}
+
+function FieldValue({
+  candidates,
+  draft,
+  editing = false,
+  field,
+  onChange,
+  rejected,
+}: {
+  candidates: EntityCandidate[];
+  draft: string;
+  editing?: boolean;
+  field: ReviewFieldInit;
+  onChange: (draft: string) => void;
+  rejected: boolean;
+}) {
+  return (
+    <div className="min-w-0 text-[12.5px] leading-[1.5]">
+      {field.fromText !== null && (
+        <div
+          className={cn(
+            "mb-[3px] break-words text-[var(--del)] opacity-80",
+            !rejected && "line-through",
+          )}
+        >
+          <span className="mono mr-[6px] text-[10px] opacity-70">-</span>
+          {field.fromText}
         </div>
       )}
-    </form>
+      {editing ? (
+        <div className="mt-1">
+          <input type="hidden" name="kind" value={field.kind} />
+          <ValueInput
+            field={field.field}
+            kind={field.kind}
+            value={draft}
+            structured={field.structured}
+            candidates={candidates}
+            onChange={onChange}
+          />
+        </div>
+      ) : (
+        <div className="break-words text-[var(--add)]">
+          <span className="mono mr-[6px] text-[10px] opacity-70">+</span>
+          <span
+            className={cn(
+              field.blocked ? "text-[var(--ink-faint)]" : "text-[var(--ink)]",
+              rejected && "line-through",
+            )}
+          >
+            {field.toText}
+          </span>
+        </div>
+      )}
+      {field.blocked && (
+        <div className="mt-[5px] inline-flex items-center gap-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--sys)]">
+          <Lock aria-hidden size={11} />
+          BLOCKED BY LOCK — UNLOCK TARGET TO APPLY
+        </div>
+      )}
+      {field.stale && !field.blocked && (
+        <div className="mt-[5px] inline-flex items-center gap-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--hot)]">
+          <TriangleAlert aria-hidden size={11} />
+          CANON CHANGED UNDER THIS — RESOLVE BELOW
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -253,17 +283,19 @@ function FieldToggle({
   label,
   color,
   onClick,
+  type = "submit",
   children,
 }: {
   active: boolean;
   label: string;
   color: string;
-  onClick: () => void;
+  onClick?: () => void;
+  type?: "button" | "submit";
   children: React.ReactNode;
 }) {
   return (
     <button
-      type="button"
+      type={type}
       aria-label={label}
       aria-pressed={active}
       title={label}
@@ -295,7 +327,7 @@ function ValueInput({
   candidates: EntityCandidate[];
   onChange: (value: string) => void;
 }) {
-  const name = `value:${field}`;
+  const name = "value";
   if (structured?.kind === "entity") {
     return (
       <EntityReviewInput
@@ -309,7 +341,6 @@ function ValueInput({
   if (structured?.kind === "inGameTime") {
     return (
       <InGameTimeReviewInput
-        field={field}
         floor={structured.floor}
         label={structured.label}
         onChange={onChange}
@@ -379,7 +410,7 @@ function EntityReviewInput({
   const [value, setValue] = useState(initial);
   return (
     <>
-      <input type="hidden" name={`value:${field}`} value={value?.id ?? ""} />
+      <input type="hidden" name="value" value={value?.id ?? ""} />
       <EntityTypeahead
         name={`entity:${field}`}
         candidates={candidates}
@@ -394,12 +425,10 @@ function EntityReviewInput({
 }
 
 function InGameTimeReviewInput({
-  field,
   floor: initialFloor,
   label: initialLabel,
   onChange,
 }: {
-  field: string;
   floor: number | null;
   label: string;
   onChange: (value: string) => void;
@@ -415,7 +444,7 @@ function InGameTimeReviewInput({
   };
   return (
     <div className="grid gap-2 sm:grid-cols-[110px_minmax(0,1fr)]">
-      <input type="hidden" name={`value:${field}`} value={JSON.stringify({
+      <input type="hidden" name="value" value={JSON.stringify({
         ...(floor.trim() ? { floor: Number(floor) } : {}),
         ...(label.trim() ? { label: label.trim() } : {}),
       })} />
@@ -481,7 +510,7 @@ function ParticipantsReviewInput({
 
   return (
     <div className="flex flex-col gap-2">
-      <input type="hidden" name={`value:${field}`} value={value} />
+      <input type="hidden" name="value" value={value} />
       <div className="flex justify-end">
         <Button
           type="button"

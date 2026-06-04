@@ -52,6 +52,21 @@ export type ChangeOperationDecisionInput =
   | { decision: "PENDING" | "ACCEPTED" | "REJECTED"; editedPatch?: never }
   | { decision: "EDITED"; editedPatch: ReviewPatch };
 
+export type ReviewFieldDecision = "ACCEPTED" | "REJECTED";
+
+export type ChangeOperationFieldDecisionInput = {
+  field: string;
+  decision: ReviewFieldDecision | "PENDING";
+  editedValue?: ReviewPatch[string];
+};
+
+export type ReviewEffectPreview = {
+  id: string;
+  targetEntityId: string;
+  before: number | boolean | null;
+  after: number | boolean | null;
+};
+
 export type ReviewQueueOperation =
   Prisma.ChangeOperationGetPayload<object> & {
     targetLabel: string | null;
@@ -59,6 +74,7 @@ export type ReviewQueueOperation =
     targetLocked: boolean;
     lockedFields: string[];
     currentValues: Record<string, unknown>;
+    effectPreviews: ReviewEffectPreview[];
   };
 
 export type ReviewQueueItem = Omit<
@@ -149,6 +165,52 @@ function baseVersionsObject(baseVersions: Prisma.JsonValue): Record<string, numb
 
 function patchFields(patch: ReviewPatch) {
   return Object.keys(patch).filter((field) => field !== "campaignId");
+}
+
+function reviewablePatchFields(patch: ReviewPatch) {
+  return patchFields(patch).filter((field) => field !== "_baseVersion");
+}
+
+function readFieldDecisions(value: Prisma.JsonValue): Record<string, ReviewFieldDecision> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const decisions: Record<string, ReviewFieldDecision> = {};
+  for (const [field, decision] of Object.entries(value)) {
+    if (decision === "ACCEPTED" || decision === "REJECTED") {
+      decisions[field] = decision;
+    }
+  }
+  return decisions;
+}
+
+function operationFieldDecisions(
+  operation: Pick<
+    Prisma.ChangeOperationGetPayload<object>,
+    "decision" | "editedPatch" | "fieldDecisions" | "patch"
+  >,
+) {
+  const persisted = readFieldDecisions(operation.fieldDecisions);
+  if (Object.keys(persisted).length > 0) return persisted;
+
+  const fields = reviewablePatchFields(operation.patch as ReviewPatch);
+  if (operation.decision === OpDecision.ACCEPTED) {
+    return Object.fromEntries(fields.map((field) => [field, "ACCEPTED"])) as Record<
+      string,
+      ReviewFieldDecision
+    >;
+  }
+  if (operation.decision === OpDecision.REJECTED) {
+    return Object.fromEntries(fields.map((field) => [field, "REJECTED"])) as Record<
+      string,
+      ReviewFieldDecision
+    >;
+  }
+  if (operation.decision === OpDecision.EDITED && operation.editedPatch) {
+    const accepted = new Set(reviewablePatchFields(operation.editedPatch as ReviewPatch));
+    return Object.fromEntries(
+      fields.map((field) => [field, accepted.has(field) ? "ACCEPTED" : "REJECTED"]),
+    ) as Record<string, ReviewFieldDecision>;
+  }
+  return {};
 }
 
 function effectiveOperationPatch(
@@ -675,7 +737,7 @@ async function enrichReviewQueueItems(
   const entityTargetIds = new Set<string>();
   for (const changeSet of changeSets) {
     for (const operation of changeSet.operations) {
-      const patch = operation.patch as ReviewPatch;
+      const patch = effectiveOperationPatch(operation);
       if (operation.targetType === "ENTITY" && operation.targetId) {
         entityTargetIds.add(operation.targetId);
       }
@@ -693,6 +755,11 @@ async function enrichReviewQueueItems(
           }
           const entityId = (participant as Record<string, unknown>).entityId;
           if (typeof entityId === "string") entityTargetIds.add(entityId);
+        }
+      }
+      if (operation.op === OpKind.APPLY_EVENT_EFFECTS) {
+        for (const effect of parseEventEffects(readTo(patch, "effects"))) {
+          entityTargetIds.add(effect.targetEntityId);
         }
       }
     }
@@ -781,6 +848,7 @@ async function enrichReviewQueueItems(
       const targetEntityType =
         target?.type ??
         (eventTarget ? "EVENT" : null) ??
+        (operation.targetType === "EVENT" ? "EVENT" : null) ??
         relationshipTarget?.type ??
         (operation.targetType === "RELATIONSHIP"
           ? stringFromReviewValue(readTo(patch, "type"))
@@ -806,12 +874,17 @@ async function enrichReviewQueueItems(
           eventTarget?.title ??
           relationshipLabel ??
           stringFromReviewValue(readTo(patch, "name")) ??
+          stringFromReviewValue(readTo(patch, "title")) ??
           operation.targetId ??
           null,
         targetEntityType,
         targetLocked: Boolean(target?.locked) || Boolean(relationshipTarget?.locked),
         lockedFields: target?.lockedFields ?? [],
         currentValues,
+        effectPreviews:
+          operation.op === OpKind.APPLY_EVENT_EFFECTS
+            ? buildEffectPreviews(effectiveOperationPatch(operation), targetById)
+            : [],
       };
     }),
   }));
@@ -1022,6 +1095,7 @@ export async function setChangeOperationDecision(
       data: {
         decision: input.decision,
         editedPatch,
+        fieldDecisions: {},
         ...flags,
       },
     });
@@ -1040,6 +1114,122 @@ export async function setChangeOperationDecision(
             input.decision === OpDecision.EDITED
               ? patchFields(input.editedPatch)
               : [],
+        },
+      },
+    });
+
+    return updated;
+  });
+}
+
+export async function setChangeOperationFieldDecision(
+  userId: string,
+  campaignId: string,
+  changeSetId: string,
+  operationId: string,
+  input: ChangeOperationFieldDecisionInput,
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  return prisma.$transaction(async (tx) => {
+    const changeSet = await tx.changeSet.findFirst({
+      where: { id: changeSetId, campaignId, status: ChangeSetStatus.PENDING },
+      include: { operations: true },
+    });
+    if (!changeSet) throw new ServiceError("Change set not found.");
+
+    const operation = changeSet.operations.find((candidate) => candidate.id === operationId);
+    if (!operation) throw new ServiceError("Change operation not found.");
+    const originalPatch = operation.patch as ReviewPatch;
+    const fields = reviewablePatchFields(originalPatch);
+    if (!fields.includes(input.field)) {
+      throw new ServiceError(`Change operation has no reviewable field "${input.field}".`);
+    }
+
+    const fieldDecisions = operationFieldDecisions(operation);
+    if (input.decision === "PENDING") delete fieldDecisions[input.field];
+    else fieldDecisions[input.field] = input.decision;
+    const priorEdits = operation.editedPatch as ReviewPatch | null;
+    const editedPatch: ReviewPatch = {};
+    for (const field of fields) {
+      if (fieldDecisions[field] !== "ACCEPTED") continue;
+      editedPatch[field] =
+        field === input.field && input.editedValue
+          ? input.editedValue
+          : priorEdits?.[field] ?? originalPatch[field];
+    }
+
+    const acceptedFields = fields.filter((field) => fieldDecisions[field] === "ACCEPTED");
+    const allRejected =
+      fields.length > 0 &&
+      fields.every((field) => fieldDecisions[field] === "REJECTED");
+    const decision = acceptedFields.length > 0
+      ? OpDecision.EDITED
+      : allRejected
+        ? OpDecision.REJECTED
+        : OpDecision.PENDING;
+    const entityOperation =
+      operation.targetType === "ENTITY" && isEntityReviewOp(operation.op);
+    const relationshipOperation =
+      operation.targetType === "RELATIONSHIP" && isRelationshipReviewOp(operation.op);
+    const eventOperation =
+      (operation.targetType === "EVENT" || operation.targetType === "EVENT_CAUSALITY") &&
+      isEventReviewOp(operation.op);
+    if (!entityOperation && !relationshipOperation && !eventOperation) {
+      throw new ServiceError("Unsupported operation target.");
+    }
+    const flags =
+      decision === OpDecision.REJECTED ||
+      decision === OpDecision.PENDING ||
+      eventOperation
+        ? { blockedByLock: false, isStale: false }
+        : relationshipOperation
+          ? await evaluateRelationshipOperationFlags(
+              tx,
+              {
+                op: operation.op,
+                targetId: operation.targetId ?? undefined,
+                patch: editedPatch,
+              },
+              campaignId,
+              baseVersionsObject(changeSet.baseVersions),
+            )
+          : await evaluateEntityOperationFlags(
+              tx,
+              {
+                op: operation.op as EntityReviewOperationInput["op"],
+                targetId: operation.targetId ?? undefined,
+                patch: editedPatch,
+              },
+              campaignId,
+              baseVersionsObject(changeSet.baseVersions),
+            );
+
+    const updated = await tx.changeOperation.update({
+      where: { id: operation.id },
+      data: {
+        decision,
+        editedPatch:
+          acceptedFields.length > 0
+            ? (editedPatch as Prisma.InputJsonValue)
+            : Prisma.DbNull,
+        fieldDecisions: fieldDecisions as Prisma.InputJsonValue,
+        ...flags,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        campaignId,
+        actorUserId: userId,
+        action: "SET_FIELD_DECISION",
+        targetType: "CHANGE_OPERATION",
+        targetId: operation.id,
+        detail: {
+          changeSetId,
+          field: input.field,
+          decision: input.decision,
+          edited: Boolean(input.editedValue),
         },
       },
     });
@@ -2744,6 +2934,62 @@ function effectEntityPatch(
   const next = Math.max(floor, current + effect.delta);
   if (next === current) return null;
   return { [`crawler.${stat}`]: { from: current, to: next } };
+}
+
+function buildEffectPreviews(
+  patch: ReviewPatch,
+  targetById: ReadonlyMap<
+    string,
+    {
+      crawler: {
+        gold: number;
+        hp: number | null;
+        mp: number | null;
+        level: number;
+        killCount: number;
+        currentFloor: number | null;
+        isAlive: boolean;
+      } | null;
+    }
+  >,
+): ReviewEffectPreview[] {
+  const previews: ReviewEffectPreview[] = [];
+  for (const effect of parseEventEffects(readTo(patch, "effects"))) {
+    const crawler = targetById.get(effect.targetEntityId)?.crawler;
+    if (!crawler) continue;
+    if (effect.kind === "SET_ALIVE") {
+      if (typeof effect.value !== "boolean") continue;
+      previews.push({
+        id: effect.id,
+        targetEntityId: effect.targetEntityId,
+        before: crawler.isAlive,
+        after: effect.value,
+      });
+      continue;
+    }
+    if (!effect.stat) continue;
+    const before = (crawler as unknown as Record<string, number | null>)[effect.stat];
+    if (before === undefined) continue;
+    const floor = eventEffectStatFloors[effect.stat] ?? 0;
+    if (effect.kind === "SET_STAT") {
+      if (typeof effect.valueNumber !== "number") continue;
+      previews.push({
+        id: effect.id,
+        targetEntityId: effect.targetEntityId,
+        before,
+        after: Math.max(floor, effect.valueNumber),
+      });
+      continue;
+    }
+    if (typeof before !== "number" || typeof effect.delta !== "number") continue;
+    previews.push({
+      id: effect.id,
+      targetEntityId: effect.targetEntityId,
+      before,
+      after: Math.max(floor, before + effect.delta),
+    });
+  }
+  return previews;
 }
 
 async function applyEventOperation(

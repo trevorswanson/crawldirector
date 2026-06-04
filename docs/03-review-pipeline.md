@@ -69,6 +69,7 @@ ChangeOperation {
     | APPLY_EVENT_EFFECTS
   targetType, targetId?           // null targetId => create
   patch: { field -> { from?, to } }   // field-level diff
+  fieldDecisions: { field -> ACCEPTED | REJECTED }   // absent => PENDING
   decision: PENDING | ACCEPTED | EDITED | REJECTED   // per-operation
   editedPatch?                    // DM's edited version of the proposed change
 }
@@ -79,8 +80,10 @@ proposal's new `description` but reject its change to `level`, or edit the
 proposed value before accepting. Review fields begin `PENDING`; nothing is
 implicitly accepted just because the proposal was opened. The read-first UI
 shows the diff by default, exposes per-field accept/reject controls, and reveals
-an input only when the DM chooses **Edit**. Decisions are recorded per operation;
-an `EDITED` operation patch stores the accepted field subset.
+an input only when the DM chooses **Edit**. Each field decision persists
+independently, so accepting or editing one row leaves untouched rows `PENDING`.
+An `EDITED` operation patch stores the accepted field subset that approval
+applies; the separate field-decision map preserves the UI/review history.
 
 ### Provenance
 

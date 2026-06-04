@@ -301,6 +301,7 @@ model ChangeOperation {
   targetId    String?                 // null => create
   patch       Json                    // { field: { from?, to } }
   editedPatch Json?                    // DM's edited version
+  fieldDecisions Json @default("{}")  // { field: "ACCEPTED" | "REJECTED" }
   decision    OpDecision @default(PENDING)
   blockedByLock Boolean @default(false)
   isStale     Boolean  @default(false)

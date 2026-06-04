@@ -57,6 +57,26 @@ in the general search bar.
 membership, log events with participants, and traverse cause→effect chains;
 relationships/events are reviewable + lockable.
 
+### Done — slice 14: independent field decisions + resolved effect previews (2026-06-04)
+
+- [x] Fixed per-field review persistence by adding `ChangeOperation.fieldDecisions`.
+      Accepting/rejecting one row or saving one edited value now updates only that
+      field; untouched siblings remain **PENDING** instead of being implicitly
+      rejected. The row's Accept/Reject/Edit controls are replaced by
+      **Save/Discard** only while that row is being edited, and the old
+      operation-wide **Save field edits** footer is gone.
+- [x] Kept `editedPatch` as the exact accepted subset applied by approval while
+      storing field decisions separately for queue state/history. Required event
+      fields such as `title` and `participants` can now be accepted individually
+      and successfully create the event without unrelated pending fields.
+- [x] Enriched pending `APPLY_EVENT_EFFECTS` operations with resolved live-canon
+      previews. Effect summaries now show actual before/after values (for example
+      `HP 200 → 80`, including stat floors and alive/dead transitions) rather than
+      an isolated delta such as `HP -120`.
+- [x] Added a migration plus focused service/action/page/component regressions for
+      independent pending fields, individual event-title approval, row-local
+      Save/Discard, and resolved effect previews.
+
 ### Done — slice 13: read-first per-field Review Queue + Done/reopen state (2026-06-04)
 
 - [x] Corrected the read-first decision contract so a fresh proposal's fields

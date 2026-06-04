@@ -196,6 +196,30 @@ describe("event effects", () => {
         ],
       },
     });
+    expect(queue[0].operations[0].effectPreviews).toEqual([
+      expect.objectContaining({
+        targetEntityId: carl.id,
+        before: 100,
+        after: 600,
+      }),
+    ]);
+  });
+
+  it("previews set-stat and alive effects while omitting unresolved deltas", async () => {
+    const { owner, campaign, carl, event } = await setup("preview-effects@test.com");
+    await declareEffect(owner.id, campaign.id, event.id, [
+      { kind: "SET_STAT", targetEntityId: carl.id, stat: "gold", valueNumber: -5 },
+      { kind: "SET_ALIVE", targetEntityId: carl.id, value: false },
+      { kind: "ADJUST_STAT", targetEntityId: carl.id, stat: "currentFloor", delta: 1 },
+    ]);
+
+    await applyEventEffects(owner.id, campaign.id, event.id);
+    const queue = await listPendingChangeSetsForUser(owner.id, campaign.id);
+
+    expect(queue[0].operations[0].effectPreviews).toEqual([
+      expect.objectContaining({ before: 100, after: 0 }),
+      expect.objectContaining({ before: true, after: false }),
+    ]);
   });
 
   it("ignores malformed stored effect rows when submitting valid effects for review", async () => {

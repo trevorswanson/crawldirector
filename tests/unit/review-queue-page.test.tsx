@@ -12,12 +12,13 @@ const {
   notFound,
   approveChangeSetAction,
   approveChangeSetRunAction,
-  editChangeOperationPatchAction,
+  editChangeOperationFieldAction,
   editEventEffectsOperationAction,
   rejectChangeSetAction,
   rejectChangeSetRunAction,
   reopenChangeSetAction,
   setChangeOperationDecisionAction,
+  setChangeOperationFieldDecisionAction,
   supersedeChangeSetAction,
 } = vi.hoisted(() => ({
   requireUser: vi.fn(),
@@ -31,12 +32,13 @@ const {
   }),
   approveChangeSetAction: vi.fn(),
   approveChangeSetRunAction: vi.fn(),
-  editChangeOperationPatchAction: vi.fn(),
+  editChangeOperationFieldAction: vi.fn(),
   editEventEffectsOperationAction: vi.fn(),
   rejectChangeSetAction: vi.fn(),
   rejectChangeSetRunAction: vi.fn(),
   reopenChangeSetAction: vi.fn(),
   setChangeOperationDecisionAction: vi.fn(),
+  setChangeOperationFieldDecisionAction: vi.fn(),
   supersedeChangeSetAction: vi.fn(),
 }));
 
@@ -51,12 +53,13 @@ vi.mock("@/server/services/entities", () => ({ listEntitiesForUser }));
 vi.mock("@/app/(dm)/actions", () => ({
   approveChangeSetAction,
   approveChangeSetRunAction,
-  editChangeOperationPatchAction,
+  editChangeOperationFieldAction,
   editEventEffectsOperationAction,
   rejectChangeSetAction,
   rejectChangeSetRunAction,
   reopenChangeSetAction,
   setChangeOperationDecisionAction,
+  setChangeOperationFieldDecisionAction,
   supersedeChangeSetAction,
 }));
 vi.mock("next/navigation", () => ({ notFound }));
@@ -181,7 +184,7 @@ describe("ReviewQueuePage", () => {
     expect(
       screen.getByRole("button", { name: "Reject summary" }).getAttribute("aria-pressed"),
     ).toBe("false");
-    expect(screen.getByRole("button", { name: "Save field edits" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Save field edits" })).toBeNull();
     // The locked field is display-only — no per-field controls.
     expect(
       screen.queryByRole("button", { name: "Accept crawler.level" }),
@@ -235,6 +238,14 @@ describe("ReviewQueuePage", () => {
             targetLocked: false,
             lockedFields: [],
             currentValues: {},
+            effectPreviews: [
+              {
+                id: "fx-1",
+                targetEntityId: "crawler-1",
+                before: 500,
+                after: 1000,
+              },
+            ],
             patch: {
               effects: {
                 to: [
@@ -298,7 +309,7 @@ describe("ReviewQueuePage", () => {
     expect(view.container.querySelector('input[name="effectId_0"]')).toBeNull();
     // Summary row: resolved target name, described effect, and note.
     expect(screen.getByText("Carl")).toBeDefined();
-    expect(screen.getByText("Gold +500")).toBeDefined();
+    expect(screen.getByText("Gold 500 → 1,000")).toBeDefined();
     expect(screen.getByText("— Boss loot")).toBeDefined();
     expect(screen.getByText("No effects in this proposal.")).toBeDefined();
   });
@@ -391,6 +402,7 @@ describe("ReviewQueuePage", () => {
             lockedFields: [],
             currentValues: {},
             patch: {
+              title: { to: "Borant throttles Carl's air supply" },
               inGameTime: { to: { floor: 9, label: "After the collapse" } },
               participants: {
                 to: [
@@ -412,6 +424,7 @@ describe("ReviewQueuePage", () => {
 
     expect(screen.getByText("Floor 9 · After the collapse")).toBeDefined();
     expect(screen.getByText("Carl · Affected; Borant Syndicate · Actor")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Accept title" })).toBeDefined();
     expect(screen.queryByText('{"floor":9,"label":"After the collapse"}')).toBeNull();
     expect(screen.getByRole("button", { name: "Edit inGameTime" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Edit participants" })).toBeDefined();
@@ -968,6 +981,70 @@ describe("ReviewQueuePage", () => {
       name: "Edited",
     }) as HTMLButtonElement;
     expect(acceptButton.disabled).toBe(true);
+  });
+
+  it("counts persisted field decisions without deciding pending siblings", async () => {
+    listPendingChangeSetsForUser.mockResolvedValue([
+      {
+        id: "cs-fields",
+        campaignId: "c1",
+        source: "AI",
+        title: "Review fields independently",
+        summary: null,
+        status: "PENDING",
+        actorUserId: "u1",
+        providerId: null,
+        model: null,
+        promptId: null,
+        promptVersion: null,
+        runId: null,
+        baseVersions: {},
+        reviewedById: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        operations: [
+          {
+            id: "op-fields",
+            changeSetId: "cs-fields",
+            op: "UPDATE_ENTITY",
+            targetType: "ENTITY",
+            targetId: "entity-1",
+            targetLabel: "Zev",
+            targetEntityType: "NPC",
+            targetLocked: false,
+            lockedFields: [],
+            currentValues: {},
+            effectPreviews: [],
+            patch: {
+              summary: { to: "Accepted" },
+              description: { to: "Rejected" },
+              name: { to: "Still pending" },
+            },
+            editedPatch: { summary: { to: "Accepted" } },
+            fieldDecisions: {
+              summary: "ACCEPTED",
+              description: "REJECTED",
+              junk: "NOPE",
+            },
+            decision: "EDITED",
+            blockedByLock: false,
+            isStale: false,
+          },
+        ],
+      },
+    ]);
+
+    render(await ReviewQueuePage({ params: Promise.resolve({ id: "c1" }) }));
+
+    expect(screen.getByRole("button", { name: "Approve 1 accepted" })).toBeDefined();
+    expect(
+      screen.getByRole("button", { name: "Accept name" }).getAttribute("aria-pressed"),
+    ).toBe("false");
+    expect(
+      screen.getByRole("button", { name: "Reject description" }).getAttribute("aria-pressed"),
+    ).toBe("true");
   });
 
   it("shows the committed done state after an approval", async () => {

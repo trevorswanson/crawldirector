@@ -12,12 +12,13 @@ import {
 import {
   approveChangeSetAction,
   approveChangeSetRunAction,
-  editChangeOperationPatchAction,
+  editChangeOperationFieldAction,
   editEventEffectsOperationAction,
   rejectChangeSetAction,
   rejectChangeSetRunAction,
   reopenChangeSetAction,
   setChangeOperationDecisionAction,
+  setChangeOperationFieldDecisionAction,
   supersedeChangeSetAction,
 } from "@/app/(dm)/actions";
 import type { EntityCandidate } from "@/components/entities/entity-typeahead";
@@ -617,6 +618,7 @@ function OperationBlock({
           effects={readEffectSeeds(
             operation.patch as ReviewPatch,
             operation.editedPatch as ReviewPatch | null,
+            operation.effectPreviews,
           )}
           rejected={rejected}
           readOnly={readOnly}
@@ -624,7 +626,13 @@ function OperationBlock({
       ) : (
         <OperationDiffEditor
           key={operationEditorKey(operation)}
-          action={editChangeOperationPatchAction.bind(
+          decisionAction={setChangeOperationFieldDecisionAction.bind(
+            null,
+            campaignId,
+            changeSetId,
+            operation.id,
+          )}
+          editAction={editChangeOperationFieldAction.bind(
             null,
             campaignId,
             changeSetId,
@@ -642,7 +650,7 @@ function OperationBlock({
 }
 
 function operationEditorKey(operation: ReviewQueueOperation) {
-  return `${operation.id}:${operation.decision}:${JSON.stringify(operation.editedPatch)}`;
+  return `${operation.id}:${operation.decision}:${JSON.stringify(operation.editedPatch)}:${JSON.stringify(operation.fieldDecisions)}`;
 }
 
 // Pre-compute each diff field's display text + initial Accept/Edit state for the
@@ -654,6 +662,8 @@ function buildFieldInits(
 ): ReviewFieldInit[] {
   const patch = operation.patch as ReviewPatch;
   const editedPatch = operation.editedPatch as ReviewPatch | null;
+  const fieldDecisions = readFieldDecisions(operation.fieldDecisions);
+  const hasFieldDecisions = Object.keys(fieldDecisions).length > 0;
   const candidatesById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
   const entries = Object.entries(patch).filter(([field]) => field !== "_baseVersion");
 
@@ -675,7 +685,9 @@ function buildFieldInits(
       blocked: fieldBlocked(operation, field),
       stale: fieldStale(operation, field, value.from),
       decision:
-        operation.decision === "PENDING"
+        hasFieldDecisions
+          ? fieldDecisions[field] ?? "PENDING"
+          : operation.decision === "PENDING"
           ? "PENDING"
           : operation.decision === "REJECTED"
             ? "REJECTED"
@@ -845,6 +857,7 @@ function ConflictChoice({
 function readEffectSeeds(
   patch: ReviewPatch,
   editedPatch: ReviewPatch | null,
+  previews: ReviewQueueOperation["effectPreviews"] = [],
 ): ReviewEffectSeed[] {
   const raw =
     editedPatch && "effects" in editedPatch
@@ -852,6 +865,7 @@ function readEffectSeeds(
       : patch.effects?.to;
   if (!Array.isArray(raw)) return [];
 
+  const previewById = new Map(previews.map((preview) => [preview.id, preview]));
   const seeds: ReviewEffectSeed[] = [];
   for (const item of raw) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
@@ -862,8 +876,10 @@ function readEffectSeeds(
     }
     if (typeof record.targetEntityId !== "string") continue;
 
+    const id = typeof record.id === "string" ? record.id : "";
+    const preview = previewById.get(id);
     seeds.push({
-      id: typeof record.id === "string" ? record.id : "",
+      id,
       kind,
       targetEntityId: record.targetEntityId,
       stat:
@@ -875,6 +891,8 @@ function readEffectSeeds(
         typeof record.valueNumber === "number" ? record.valueNumber : null,
       value: typeof record.value === "boolean" ? record.value : null,
       note: typeof record.note === "string" ? record.note : null,
+      before: preview?.before,
+      after: preview?.after,
     });
   }
   return seeds;
@@ -936,6 +954,16 @@ function acceptedFieldCount(changeSet: ReviewQueueItem) {
   return changeSet.operations.reduce((count, operation) => {
     if (operation.decision === "REJECTED") return count;
     const patch = operation.patch as ReviewPatch;
+    const fieldDecisions = readFieldDecisions(operation.fieldDecisions);
+    if (Object.keys(fieldDecisions).length > 0) {
+      return (
+        count +
+        Object.entries(fieldDecisions).filter(
+          ([field, decision]) =>
+            decision === "ACCEPTED" && !fieldBlocked(operation, field),
+        ).length
+      );
+    }
     if (operation.decision === "EDITED") {
       const editedPatch = operation.editedPatch as ReviewPatch | null;
       return (
@@ -955,6 +983,17 @@ function acceptedFieldCount(changeSet: ReviewQueueItem) {
     }
     return count;
   }, 0);
+}
+
+function readFieldDecisions(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {} as Record<string, "ACCEPTED" | "REJECTED">;
+  }
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      ([, decision]) => decision === "ACCEPTED" || decision === "REJECTED",
+    ),
+  ) as Record<string, "ACCEPTED" | "REJECTED">;
 }
 
 function fieldBlocked(operation: ReviewQueueOperation, field: string) {

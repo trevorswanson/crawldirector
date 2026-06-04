@@ -28,6 +28,8 @@ describe("EffectOperationEditor", () => {
         valueNumber: null,
         value: null,
         note: "Loot",
+        before: 500,
+        after: 1000,
       },
       {
         id: "fx-2",
@@ -38,6 +40,8 @@ describe("EffectOperationEditor", () => {
         valueNumber: null,
         value: false,
         note: null,
+        before: true,
+        after: false,
       },
     ];
 
@@ -51,9 +55,9 @@ describe("EffectOperationEditor", () => {
     );
 
     // Read-first: described effects, no live editor yet.
-    expect(screen.getByText("Gold +500")).toBeDefined();
+    expect(screen.getByText("Gold 500 → 1,000")).toBeDefined();
     expect(screen.getByText("— Loot")).toBeDefined();
-    expect(screen.getByText("Marked dead")).toBeDefined();
+    expect(screen.getByText("Alive → Dead")).toBeDefined();
     expect(screen.queryByRole("button", { name: "Save effects" })).toBeNull();
     expect(container.querySelector('input[name="effectId_0"]')).toBeNull();
 
@@ -83,6 +87,8 @@ describe("EffectOperationEditor", () => {
         valueNumber: 40,
         value: null,
         note: null,
+        before: 120,
+        after: 40,
       },
     ];
 
@@ -97,7 +103,7 @@ describe("EffectOperationEditor", () => {
 
     // Summary shows the raw id when unresolved.
     expect(screen.getByText("archived-crawler")).toBeDefined();
-    expect(screen.getByText("HP = 40")).toBeDefined();
+    expect(screen.getByText("HP 120 → 40")).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Edit effect 1" }));
 
@@ -156,6 +162,8 @@ describe("EffectOperationEditor", () => {
             valueNumber: null,
             value: null,
             note: null,
+            before: 100,
+            after: 150,
           },
         ]}
         rejected={false}
@@ -163,7 +171,79 @@ describe("EffectOperationEditor", () => {
       />,
     );
 
-    expect(screen.getByText("Gold +50")).toBeDefined();
+    expect(screen.getByText("Gold 100 → 150")).toBeDefined();
     expect(screen.queryByRole("button", { name: "Edit effect 1" })).toBeNull();
+  });
+
+  it("falls back to proposal descriptions when a live preview is unavailable", () => {
+    render(
+      <EffectOperationEditor
+        action={noop}
+        candidates={candidates}
+        effects={[
+          {
+            id: "fx-1",
+            kind: "ADJUST_STAT",
+            targetEntityId: "crawler-1",
+            stat: "gold",
+            delta: -50,
+            valueNumber: null,
+            value: null,
+            note: null,
+          },
+          {
+            id: "fx-2",
+            kind: "SET_STAT",
+            targetEntityId: "crawler-1",
+            stat: "hp",
+            delta: null,
+            valueNumber: 40,
+            value: null,
+            note: null,
+          },
+          {
+            id: "fx-3",
+            kind: "SET_ALIVE",
+            targetEntityId: "crawler-1",
+            stat: null,
+            delta: null,
+            valueNumber: null,
+            value: true,
+            note: null,
+          },
+        ]}
+        rejected={false}
+      />,
+    );
+
+    expect(screen.getByText("Gold -50")).toBeDefined();
+    expect(screen.getByText("HP = 40")).toBeDefined();
+    expect(screen.getByText("Revived (alive)")).toBeDefined();
+  });
+
+  it("labels an unset preview value", () => {
+    render(
+      <EffectOperationEditor
+        action={noop}
+        candidates={candidates}
+        effects={[
+          {
+            id: "fx-1",
+            kind: "SET_STAT",
+            targetEntityId: "crawler-1",
+            stat: "hp",
+            delta: null,
+            valueNumber: 40,
+            value: null,
+            note: null,
+            before: null,
+            after: 40,
+          },
+        ]}
+        rejected={false}
+      />,
+    );
+
+    expect(screen.getByText("HP Unset → 40")).toBeDefined();
   });
 });

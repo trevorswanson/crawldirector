@@ -466,16 +466,17 @@ model ChangeSet {
 }
 
 model ChangeOperation {
-  id            String     @id @default(cuid())
-  changeSetId   String
-  op            OpKind
-  targetType    String
-  targetId      String?
-  patch         Json
-  editedPatch   Json?
-  decision      OpDecision @default(PENDING)
-  blockedByLock Boolean    @default(false)
-  isStale       Boolean    @default(false)
+  id             String     @id @default(cuid())
+  changeSetId    String
+  op             OpKind
+  targetType     String
+  targetId       String?
+  patch          Json
+  editedPatch    Json?
+  fieldDecisions Json       @default("{}")
+  decision       OpDecision @default(PENDING)
+  blockedByLock  Boolean    @default(false)
+  isStale        Boolean    @default(false)
 
   changeSet ChangeSet @relation(fields: [changeSetId], references: [id], onDelete: Cascade)
 

@@ -52,6 +52,7 @@ import {
   rejectChangeSetRun,
   reopenChangeSet,
   setChangeOperationDecision,
+  setChangeOperationFieldDecision,
   setEntityLock,
   supersedeChangeSet,
   type ReviewPatch,
@@ -387,35 +388,44 @@ export async function setChangeOperationDecisionAction(
   revalidatePath(`/campaigns/${campaignId}/review`);
 }
 
-export async function editChangeOperationPatchAction(
+export async function setChangeOperationFieldDecisionAction(
   campaignId: string,
   changeSetId: string,
   operationId: string,
+  field: string,
+  decision: string,
+): Promise<void> {
+  const user = await requireUser();
+  const parsed = z.enum(["ACCEPTED", "PENDING", "REJECTED"]).safeParse(decision);
+  const normalizedField = field.trim();
+  if (!parsed.success || !normalizedField) return;
+
+  await setChangeOperationFieldDecision(user.id, campaignId, changeSetId, operationId, {
+    field: normalizedField,
+    decision: parsed.data,
+  });
+  revalidatePath(`/campaigns/${campaignId}/review`);
+}
+
+export async function editChangeOperationFieldAction(
+  campaignId: string,
+  changeSetId: string,
+  operationId: string,
+  field: string,
   formData: FormData,
 ): Promise<void> {
   const user = await requireUser();
-  const editedPatch = parseReviewEditedPatch(formData);
-  if (!editedPatch) {
-    const fields = formData.getAll("field");
-    if (
-      fields.length === 0 ||
-      fields.some(
-        (field) =>
-          typeof field === "string" && formData.get(`apply:${field}`) === "on",
-      )
-    ) {
-      return;
-    }
-    await setChangeOperationDecision(user.id, campaignId, changeSetId, operationId, {
-      decision: "REJECTED",
-    });
-    revalidatePath(`/campaigns/${campaignId}/review`);
-    return;
-  }
+  const normalizedField = field.trim();
+  const kind = reviewEditValueKindSchema.safeParse(formData.get("kind"));
+  const rawValue = formData.get("value");
+  if (!normalizedField || !kind.success || typeof rawValue !== "string") return;
+  const parsed = parseReviewEditedValue(kind.data, rawValue);
+  if (parsed === undefined) return;
 
-  await setChangeOperationDecision(user.id, campaignId, changeSetId, operationId, {
-    decision: "EDITED",
-    editedPatch,
+  await setChangeOperationFieldDecision(user.id, campaignId, changeSetId, operationId, {
+    field: normalizedField,
+    decision: "ACCEPTED",
+    editedValue: { to: parsed as ReviewPatch[string]["to"] },
   });
   revalidatePath(`/campaigns/${campaignId}/review`);
 }
@@ -485,29 +495,6 @@ export async function supersedeChangeSetAction(
   await supersedeChangeSet(user.id, campaignId, changeSetId);
   revalidatePath(`/campaigns/${campaignId}`);
   revalidatePath(`/campaigns/${campaignId}/review`);
-}
-
-function parseReviewEditedPatch(formData: FormData): ReviewPatch | null {
-  const fields = formData
-    .getAll("field")
-    .map((field) => (typeof field === "string" ? field.trim() : ""))
-    .filter(Boolean);
-  const uniqueFields = Array.from(new Set(fields));
-  const editedPatch: ReviewPatch = {};
-
-  for (const field of uniqueFields) {
-    if (formData.get(`apply:${field}`) !== "on") continue;
-
-    const kind = reviewEditValueKindSchema.safeParse(formData.get(`kind:${field}`));
-    const rawValue = formData.get(`value:${field}`);
-    if (!kind.success || typeof rawValue !== "string") return null;
-
-    const parsed = parseReviewEditedValue(kind.data, rawValue);
-    if (parsed === undefined) return null;
-    editedPatch[field] = { to: parsed };
-  }
-
-  return Object.keys(editedPatch).length > 0 ? editedPatch : null;
 }
 
 function parseReviewEditedValue(

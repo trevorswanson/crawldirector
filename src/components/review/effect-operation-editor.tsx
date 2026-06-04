@@ -24,6 +24,8 @@ export type ReviewEffectSeed = {
   valueNumber: number | null;
   value: boolean | null;
   note: string | null;
+  before?: number | boolean | null;
+  after?: number | boolean | null;
 };
 
 function toRow(
@@ -58,11 +60,29 @@ function toRow(
 // Compact, target-prefixed description of one effect for the read-only summary,
 // e.g. "Gold +500", "HP = 40", "Marked dead".
 function describeSeed(seed: ReviewEffectSeed): string {
+  if (seed.before !== undefined && seed.after !== undefined) {
+    const label =
+      seed.kind === "SET_ALIVE"
+        ? ""
+        : `${seed.stat ? effectStatLabels[seed.stat] : "Stat"} `;
+    return `${label}${formatEffectValue(seed.before, seed.kind)} → ${formatEffectValue(seed.after, seed.kind)}`;
+  }
   if (seed.kind === "SET_ALIVE") return seed.value ? "Revived (alive)" : "Marked dead";
   const label = seed.stat ? effectStatLabels[seed.stat] : "Stat";
   if (seed.kind === "SET_STAT") return `${label} = ${seed.valueNumber ?? "?"}`;
   const delta = seed.delta ?? 0;
   return `${label} ${delta >= 0 ? "+" : ""}${delta}`;
+}
+
+function formatEffectValue(
+  value: number | boolean | null,
+  kind: ReviewEffectSeed["kind"],
+) {
+  if (value === null) return "Unset";
+  if (kind === "SET_ALIVE" && typeof value === "boolean") {
+    return value ? "Alive" : "Dead";
+  }
+  return typeof value === "number" ? value.toLocaleString("en-US") : String(value);
 }
 
 export function EffectOperationEditor({

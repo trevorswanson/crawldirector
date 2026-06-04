@@ -16,12 +16,14 @@ import {
   applyAutoApprovedRelationshipChangeSet,
   approveChangeSet,
   createPendingEntityChangeSet,
+  createPendingEventChangeSet,
   getEntityProvenance,
   getReviewChangeSetForUser,
   listPendingChangeSetsForUser,
   rejectChangeSet,
   reopenChangeSet,
   setChangeOperationDecision,
+  setChangeOperationFieldDecision,
 } from "@/server/services/review";
 
 function makeUser(email: string, name?: string) {
@@ -419,6 +421,228 @@ describe("review service — setChangeOperationDecision", () => {
         editedPatch: { name: { to: "not in original" } },
       }),
     ).rejects.toThrow(/unknown field/);
+  });
+});
+
+describe("review service — setChangeOperationFieldDecision", () => {
+  async function pendingUpdate(dmId: string, campaignId: string, entityId: string) {
+    const set = await createPendingEntityChangeSet(dmId, campaignId, {
+      source: "AI",
+      title: "AI proposal",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: entityId,
+          patch: {
+            _baseVersion: { to: await versionOf(entityId) },
+            summary: { to: "AI summary" },
+            description: { to: "AI description" },
+          },
+        },
+      ],
+    });
+    const operation = await prisma.changeOperation.findFirstOrThrow({
+      where: { changeSetId: set.id },
+    });
+    return { set, operation };
+  }
+
+  it("keeps untouched fields pending when one field is accepted", async () => {
+    const { dmId, campaignId } = await seed();
+    const entityId = await createEntity(dmId, campaignId, "NPC");
+    const baseVersion = await versionOf(entityId);
+    const set = await createPendingEntityChangeSet(dmId, campaignId, {
+      source: "AI",
+      title: "AI proposal",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: entityId,
+          patch: {
+            _baseVersion: { to: baseVersion },
+            summary: { to: "Accepted summary" },
+            description: { to: "Still pending description" },
+          },
+        },
+      ],
+    });
+    const operation = await prisma.changeOperation.findFirstOrThrow({
+      where: { changeSetId: set.id },
+    });
+
+    const updated = await setChangeOperationFieldDecision(
+      dmId,
+      campaignId,
+      set.id,
+      operation.id,
+      { field: "summary", decision: "ACCEPTED" },
+    );
+
+    expect(updated).toMatchObject({
+      decision: "EDITED",
+      fieldDecisions: { summary: "ACCEPTED" },
+      editedPatch: { summary: { to: "Accepted summary" } },
+    });
+    const queued = await getReviewChangeSetForUser(dmId, campaignId, set.id);
+    expect(queued?.operations[0]).toMatchObject({
+      fieldDecisions: { summary: "ACCEPTED" },
+      editedPatch: { summary: { to: "Accepted summary" } },
+    });
+  });
+
+  it("creates an event after its required fields are accepted individually", async () => {
+    const { dmId, campaignId } = await seed();
+    const actor = await createEntity(dmId, campaignId, "Actor");
+    const set = await createPendingEventChangeSet(dmId, campaignId, {
+      source: "AI",
+      title: "Proposed event",
+      operations: [
+        {
+          op: "CREATE_EVENT",
+          patch: {
+            title: { to: "The title can be accepted" },
+            summary: { to: "Still pending" },
+            participants: { to: [{ entityId: actor, role: "ACTOR" }] },
+          },
+        },
+      ],
+    });
+    const operation = set.operations[0];
+
+    await setChangeOperationFieldDecision(dmId, campaignId, set.id, operation.id, {
+      field: "title",
+      decision: "ACCEPTED",
+    });
+    await setChangeOperationFieldDecision(dmId, campaignId, set.id, operation.id, {
+      field: "participants",
+      decision: "ACCEPTED",
+    });
+    const result = await approveChangeSet(dmId, campaignId, set.id);
+
+    await expect(
+      prisma.event.findUniqueOrThrow({ where: { id: result.targetIds[0] } }),
+    ).resolves.toMatchObject({
+      title: "The title can be accepted",
+      summary: null,
+    });
+  });
+
+  it("can reset a saved field to pending and reject every field", async () => {
+    const { dmId, campaignId } = await seed();
+    const entityId = await createEntity(dmId, campaignId, "NPC");
+    const { set, operation } = await pendingUpdate(dmId, campaignId, entityId);
+
+    await setChangeOperationFieldDecision(dmId, campaignId, set.id, operation.id, {
+      field: "summary",
+      decision: "ACCEPTED",
+    });
+    const reset = await setChangeOperationFieldDecision(
+      dmId,
+      campaignId,
+      set.id,
+      operation.id,
+      { field: "summary", decision: "PENDING" },
+    );
+    expect(reset).toMatchObject({
+      decision: "PENDING",
+      fieldDecisions: {},
+      editedPatch: null,
+    });
+
+    await setChangeOperationFieldDecision(dmId, campaignId, set.id, operation.id, {
+      field: "summary",
+      decision: "REJECTED",
+    });
+    const rejected = await setChangeOperationFieldDecision(
+      dmId,
+      campaignId,
+      set.id,
+      operation.id,
+      { field: "description", decision: "REJECTED" },
+    );
+    expect(rejected.decision).toBe("REJECTED");
+  });
+
+  it("derives field decisions from existing operation-level decisions", async () => {
+    const { dmId, campaignId } = await seed();
+    const entityId = await createEntity(dmId, campaignId, "NPC");
+
+    const accepted = await pendingUpdate(dmId, campaignId, entityId);
+    await setChangeOperationDecision(dmId, campaignId, accepted.set.id, accepted.operation.id, {
+      decision: "ACCEPTED",
+    });
+    await expect(
+      setChangeOperationFieldDecision(
+        dmId,
+        campaignId,
+        accepted.set.id,
+        accepted.operation.id,
+        { field: "summary", decision: "REJECTED" },
+      ),
+    ).resolves.toMatchObject({
+      fieldDecisions: { summary: "REJECTED", description: "ACCEPTED" },
+    });
+
+    const rejected = await pendingUpdate(dmId, campaignId, entityId);
+    await setChangeOperationDecision(dmId, campaignId, rejected.set.id, rejected.operation.id, {
+      decision: "REJECTED",
+    });
+    await expect(
+      setChangeOperationFieldDecision(
+        dmId,
+        campaignId,
+        rejected.set.id,
+        rejected.operation.id,
+        { field: "summary", decision: "ACCEPTED" },
+      ),
+    ).resolves.toMatchObject({
+      fieldDecisions: { summary: "ACCEPTED", description: "REJECTED" },
+    });
+
+    const edited = await pendingUpdate(dmId, campaignId, entityId);
+    await setChangeOperationDecision(dmId, campaignId, edited.set.id, edited.operation.id, {
+      decision: "EDITED",
+      editedPatch: { summary: { to: "DM summary" } },
+    });
+    await expect(
+      setChangeOperationFieldDecision(
+        dmId,
+        campaignId,
+        edited.set.id,
+        edited.operation.id,
+        { field: "description", decision: "ACCEPTED" },
+      ),
+    ).resolves.toMatchObject({
+      fieldDecisions: { summary: "ACCEPTED", description: "ACCEPTED" },
+    });
+  });
+
+  it("rejects missing sets, operations, and fields", async () => {
+    const { dmId, campaignId } = await seed();
+    await expect(
+      setChangeOperationFieldDecision(dmId, campaignId, "missing", "missing", {
+        field: "summary",
+        decision: "ACCEPTED",
+      }),
+    ).rejects.toThrow(/change set not found/i);
+
+    const entityId = await createEntity(dmId, campaignId, "NPC");
+    const { set } = await pendingUpdate(dmId, campaignId, entityId);
+    await expect(
+      setChangeOperationFieldDecision(dmId, campaignId, set.id, "missing", {
+        field: "summary",
+        decision: "ACCEPTED",
+      }),
+    ).rejects.toThrow(/operation not found/i);
+    const operation = await prisma.changeOperation.findFirstOrThrow({
+      where: { changeSetId: set.id },
+    });
+    await expect(
+      setChangeOperationFieldDecision(dmId, campaignId, set.id, operation.id, {
+        field: "_baseVersion",
+        decision: "ACCEPTED",
+      }),
+    ).rejects.toThrow(/no reviewable field/i);
   });
 });
 
