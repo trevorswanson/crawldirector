@@ -43,9 +43,13 @@ provenance-tracked, lock-aware), from both the entity Timeline panel and the
 campaign timeline page. Structured crawler event effects (`ADJUST_STAT`,
 `SET_STAT`, `SET_ALIVE`) live on `Event.effects`; the normal UI path sends
 unapplied effects to the Review Queue as `PENDING` `APPLY_EVENT_EFFECTS`
-operations, and approval applies them atomically with provenance. Still to come
-in M3: a dedicated Review Queue effect-row editor, pending relationship/event
-proposals, time-bounded membership, and knowledge/reveal grants. **M3.5 (tagging)** is
+operations, and approval applies them atomically with provenance. Relationships
+are now fully reviewable, not just auto-approved: `createPendingRelationshipChangeSet`
+routes any-to-any edge create/update/delete through the Review Queue as `PENDING`
+proposals (lock-/staleness-flagged, with `Source → Target` queue labels), the
+counterpart to the entity and event pending paths — ready for AI/import (M4+)
+producers. Still to come in M3: a dedicated Review Queue effect-row editor,
+time-bounded membership, and knowledge/reveal grants. **M3.5 (tagging)** is
 underway: the service layer (campaign tag list, tag filtering, tag-aware search)
 plus the UI — a tag-selection input with campaign autocomplete on the entity
 form, a Tags facet in the World Browser sidebar, and clickable tag badges — are

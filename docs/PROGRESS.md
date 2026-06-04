@@ -57,6 +57,50 @@ in the general search bar.
 membership, log events with participants, and traverse cause→effect chains;
 relationships/events are reviewable + lockable.
 
+### Done — slice 11: pending relationship proposals through the Review Queue (2026-06-04)
+
+- [x] Made relationships fully **reviewable**, not just auto-approved. Added
+      `createPendingRelationshipChangeSet` (the symmetric counterpart to
+      `createPendingEntityChangeSet`): AI/import producers (M4+) can route
+      any-to-any `CREATE`/`UPDATE`/`DELETE_RELATIONSHIP` edges through the Review
+      Queue as `PENDING` change sets that the DM reviews, edits, approves, or
+      rejects before they touch canon.
+- [x] Wired `RELATIONSHIP` targets into the generic approval dispatch
+      (`applyReviewOperation`), which previously threw "Unsupported operation
+      target" for them, so approving a pending relationship proposal applies the
+      edge through the existing lock-aware `applyRelationshipOperation` path
+      (provenance + audit preserved). Edited-then-approved relationship operations
+      honor the `editedPatch`.
+- [x] Added relationship lock/staleness flagging
+      (`evaluateRelationshipOperationFlags`): an edit/remove of a locked edge is
+      `blockedByLock`; a base-version mismatch is `isStale`. Both are computed at
+      proposal time, re-evaluated on every queue read
+      (`refreshPendingOperationFlags`, with archived edges held as stale instead
+      of throwing), and respected by `setChangeOperationDecision` so per-op
+      Accept/Edit/Reject works for relationship ops too. `approveChangeSet`
+      refuses a proposal carrying a blocked or stale relationship op.
+- [x] Enriched the Review Queue projection for relationship ops: target label
+      renders as `Source → Target` (resolved from the live edge, or the proposed
+      endpoints for a CREATE, falling back to the edge type when an endpoint can't
+      be resolved), `targetEntityType` is the edge type, lock state comes from the
+      edge, and `currentValues` surface the live type/disposition/notes/secret —
+      so the existing two-pane Review Queue UI (which already had relationship
+      verb labels) renders relationship proposals with no UI change.
+- [x] Added DB-backed service coverage in
+      `tests/unit/review-relationships.test.ts` (pending create/update/delete
+      approval with provenance + source, queue enrichment labels/types/current
+      values, EDITED-decision apply, rejection leaves canon untouched, locked-edge
+      block, stale-edit hold, archived-underneath hold, CREATE label fallback,
+      non-DM denial). No schema/migration change. lint, typecheck, build, and the
+      full coverage gate are green (statements back over the 95% floor).
+- [x] **Verification note:** this is pipeline infrastructure with no in-UI
+      producer yet — pending relationship proposals are produced by AI/import
+      (M4+), mirroring how `createPendingEntityChangeSet` shipped in M2 ahead of
+      M4. The Review Queue rendering of these ops is covered by the
+      `listPendingChangeSetsForUser` service tests (the function the page calls)
+      plus the existing `review-queue-page.test.tsx`; full in-browser queue
+      verification lands with the M4 producer.
+
 ### Done — slice 10: event effects Review Queue integration (2026-06-01)
 
 - [x] Changed the normal event-effect apply flow to create a `PENDING`
@@ -346,8 +390,12 @@ relationships/events are reviewable + lockable.
       effect-row editor in `/review` instead of the current JSON patch editor,
       deep-link timeline pending badges to the proposal, and design compensating
       change sets for undo/revert of already-applied effects.
-- Next slices: pending (AI/import) relationship/event proposals in the Review
-      Queue; knowledge/reveal grants for fog of war; time-bounded membership.
+- Next slices: knowledge/reveal grants for fog of war; time-bounded membership;
+      a dedicated Review Queue effect-row editor. (Pending (AI/import)
+      relationship proposals route through the Review Queue as of slice 11, and
+      events already carry a pending path — `createPendingEventChangeSet` plus the
+      `EVENT` approval dispatch — so relationships/events are now both fully
+      reviewable, not just auto-approved.)
       (Group hierarchy crawler→party→guild rollup view shipped in slice 5; the
       campaign-wide relationship graph view shipped in slice 6; the campaign
       timeline page with multi-participant logging shipped in slice 7; relationship
