@@ -405,21 +405,13 @@ const optionalFloor = z.preprocess(
     .optional(),
 );
 
-// Structured in-fiction time anchor (ADR 0004 slice 2). `basis` chooses how an
-// `offset` is measured; the human phrasing is generated from the structure (see
-// src/lib/time-ref.ts), with `timeLabel` kept as the optional one-off override.
-export const timeBasisValues = [
-  "COLLAPSE",
-  "FLOOR_START",
-  "FLOOR_COLLAPSE",
-  "EVENT",
-  "ABSOLUTE_DAY",
-  "UNSCHEDULED",
-] as const;
-export type TimeBasisValue = (typeof timeBasisValues)[number];
-
-export const timeUnitValues = ["DAY", "HOUR", "MINUTE"] as const;
-export type TimeUnitValue = (typeof timeUnitValues)[number];
+// Structured in-fiction time anchor (ADR 0004 slice 2). The canonical
+// definitions live in src/lib/time-ref.ts; imported here for the Zod schemas and
+// re-exported so UI components that import from validation.ts get them without a
+// second import.
+import { timeBasisValues, timeUnitValues } from "@/lib/time-ref";
+export { timeBasisValues, timeUnitValues };
+export type { TimeBasis as TimeBasisValue, TimeUnit as TimeUnitValue } from "@/lib/time-ref";
 
 const optionalBasis = z.preprocess(
   (value) => (value === "" || value === null || value === undefined ? undefined : value),
