@@ -28,6 +28,7 @@ import {
 import {
   OperationDiffEditor,
   type ReviewFieldInit,
+  type ReviewStructuredField,
 } from "@/components/review/operation-diff-editor";
 import { Button } from "@/components/ui/button";
 import { HudTag } from "@/components/ui/hud-tag";
@@ -46,7 +47,11 @@ import {
   type ReviewQueueItem,
   type ReviewQueueOperation,
 } from "@/server/services/review";
-import { eventEffectStatValues, type EventEffectStat } from "@/lib/validation";
+import {
+  eventEffectStatValues,
+  eventParticipantRoleValues,
+  type EventEffectStat,
+} from "@/lib/validation";
 import {
   formatInputValue,
   formatReviewValue,
@@ -102,19 +107,31 @@ export default async function ReviewQueuePage({
     reopenedCandidate?.status === "PENDING" ? null : reopenedCandidate;
 
   const changeSets = await listPendingChangeSetsForUser(user.id, id);
-  // Only the structured effect-row editor needs the campaign's crawlers; skip
-  // the query entirely when no pending proposal applies event effects.
-  const hasEffectOps = [
+  const reviewedChangeSets = [
     ...changeSets,
     ...(reopenedChangeSet ? [reopenedChangeSet] : []),
-  ].some((changeSet) =>
-    changeSet.operations.some((operation) => operation.op === "APPLY_EVENT_EFFECTS"),
+  ];
+  const needsEntityCandidates = reviewedChangeSets.some((changeSet) =>
+    changeSet.operations.some((operation) => {
+      const fields = Object.keys(operation.patch as ReviewPatch);
+      return (
+        operation.op === "APPLY_EVENT_EFFECTS" ||
+        fields.some((field) =>
+          ["participants", "sourceId", "targetId"].includes(field),
+        )
+      );
+    }),
   );
-  const crawlerCandidates: EntityCandidate[] = hasEffectOps
-    ? (await listEntitiesForUser(user.id, id)).entities
-        .filter((entity) => entity.type === "CRAWLER")
-        .map((entity) => ({ id: entity.id, name: entity.name, type: entity.type }))
+  const entityCandidates: EntityCandidate[] = needsEntityCandidates
+    ? (await listEntitiesForUser(user.id, id)).entities.map((entity) => ({
+        id: entity.id,
+        name: entity.name,
+        type: entity.type,
+      }))
     : [];
+  const crawlerCandidates = entityCandidates.filter(
+    (entity) => entity.type === "CRAWLER",
+  );
   const activeSource = sourceFilter(query.source);
   const filteredChangeSets = changeSets.filter((changeSet) =>
     sourceMatches(changeSet.source, activeSource),
@@ -282,6 +299,7 @@ export default async function ReviewQueuePage({
             campaignId={id}
             changeSet={selected}
             crawlerCandidates={crawlerCandidates}
+            entityCandidates={entityCandidates}
             run={selected.runId ? runGroups.find((run) => run.runId === selected.runId) : undefined}
             readOnly={Boolean(reopenedChangeSet)}
           />
@@ -353,12 +371,14 @@ function ReviewDetail({
   campaignId,
   changeSet,
   crawlerCandidates,
+  entityCandidates,
   run,
   readOnly = false,
 }: {
   campaignId: string;
   changeSet: ReviewQueueItem;
   crawlerCandidates: EntityCandidate[];
+  entityCandidates: EntityCandidate[];
   run?: PendingRunGroup;
   readOnly?: boolean;
 }) {
@@ -423,7 +443,7 @@ function ReviewDetail({
           ) : (
             <>
               <form action={approveChangeSetAction.bind(null, campaignId, changeSet.id)}>
-                <Button type="submit" variant="ok">
+                <Button type="submit" variant="ok" disabled={acceptedCount === 0}>
                   <Check aria-hidden size={14} />
                   Approve {acceptedCount} accepted
                 </Button>
@@ -479,6 +499,7 @@ function ReviewDetail({
             campaignId={campaignId}
             changeSetId={changeSet.id}
             crawlerCandidates={crawlerCandidates}
+            entityCandidates={entityCandidates}
             operation={operation}
             readOnly={readOnly}
           />
@@ -492,12 +513,14 @@ function OperationBlock({
   campaignId,
   changeSetId,
   crawlerCandidates,
+  entityCandidates,
   operation,
   readOnly,
 }: {
   campaignId: string;
   changeSetId: string;
   crawlerCandidates: EntityCandidate[];
+  entityCandidates: EntityCandidate[];
   operation: ReviewQueueOperation;
   readOnly: boolean;
 }) {
@@ -607,7 +630,8 @@ function OperationBlock({
             changeSetId,
             operation.id,
           )}
-          fields={buildFieldInits(operation)}
+          candidates={entityCandidates}
+          fields={buildFieldInits(operation, entityCandidates)}
           opRejected={rejected}
           readOnly={readOnly}
         />
@@ -622,32 +646,129 @@ function operationEditorKey(operation: ReviewQueueOperation) {
 }
 
 // Pre-compute each diff field's display text + initial Accept/Edit state for the
-// read-first client editor. Initial accept state mirrors the persisted decision:
-// no editedPatch → all fields accepted (approve-all default); an editedPatch →
-// only its fields are accepted (the rest were rejected). Previously edited fields
-// surface their edited value as the proposed (`+`) value.
-function buildFieldInits(operation: ReviewQueueOperation): ReviewFieldInit[] {
+// read-first client editor. Pending operations start with every field pending;
+// an editedPatch carries the accepted subset and omits rejected fields.
+function buildFieldInits(
+  operation: ReviewQueueOperation,
+  candidates: EntityCandidate[],
+): ReviewFieldInit[] {
   const patch = operation.patch as ReviewPatch;
   const editedPatch = operation.editedPatch as ReviewPatch | null;
+  const candidatesById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
   const entries = Object.entries(patch).filter(([field]) => field !== "_baseVersion");
 
   return entries.map(([field, value]) => {
     const hasEditedField = Boolean(editedPatch && field in editedPatch);
     const proposed = hasEditedField ? editedPatch![field]?.to : value.to;
     const kind = reviewInputKind(proposed);
+    const structured = reviewStructuredField(field, proposed, candidatesById);
+    const fromStructured = reviewStructuredField(field, value.from, candidatesById);
 
     return {
       field,
-      fromText: value.from !== undefined ? formatReviewValue(value.from) : null,
-      toText: formatReviewValue(proposed),
+      fromText:
+        value.from !== undefined
+          ? structuredReviewText(fromStructured, value.from)
+          : null,
+      toText: structuredReviewText(structured, proposed),
       kind,
       blocked: fieldBlocked(operation, field),
       stale: fieldStale(operation, field, value.from),
-      accepted: editedPatch ? hasEditedField : true,
+      decision:
+        operation.decision === "PENDING"
+          ? "PENDING"
+          : operation.decision === "REJECTED"
+            ? "REJECTED"
+            : editedPatch
+              ? hasEditedField
+                ? "ACCEPTED"
+                : "REJECTED"
+              : "ACCEPTED",
       editing: false,
       draft: formatInputValue(proposed, kind),
+      structured,
     };
   });
+}
+
+function reviewStructuredField(
+  field: string,
+  value: unknown,
+  candidatesById: Map<string, EntityCandidate>,
+): ReviewStructuredField | undefined {
+  if ((field === "sourceId" || field === "targetId") && typeof value === "string") {
+    return {
+      kind: "entity",
+      value:
+        candidatesById.get(value) ?? { id: value, name: value, type: "ENTITY" },
+    };
+  }
+  if (field === "inGameTime" && value && typeof value === "object" && !Array.isArray(value)) {
+    const time = value as Record<string, unknown>;
+    return {
+      kind: "inGameTime",
+      floor: typeof time.floor === "number" ? time.floor : null,
+      label: typeof time.label === "string" ? time.label : "",
+    };
+  }
+  if (field === "participants" && Array.isArray(value)) {
+    return {
+      kind: "participants",
+      value: value.flatMap((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+        const participant = item as Record<string, unknown>;
+        if (
+          typeof participant.entityId !== "string" ||
+          typeof participant.role !== "string"
+        ) {
+          return [];
+        }
+        return [{
+          entity:
+            candidatesById.get(participant.entityId) ?? {
+              id: participant.entityId,
+              name: participant.entityId,
+              type: "ENTITY",
+            },
+          role: participant.role as (typeof eventParticipantRoleValues)[number],
+        }];
+      }),
+    };
+  }
+  return undefined;
+}
+
+function structuredReviewText(
+  structured: ReviewStructuredField | undefined,
+  fallback: unknown,
+) {
+  if (!structured) return formatReviewValue(fallback);
+  if (structured.kind === "entity") return structured.value?.name ?? "No entity selected";
+  if (structured.kind === "inGameTime") {
+    return [
+      structured.floor != null ? `Floor ${structured.floor}` : null,
+      structured.label || null,
+    ]
+      .filter(Boolean)
+      .join(" · ") || "Unscheduled";
+  }
+  return (
+    structured.value
+      .map((participant) =>
+        participant.entity
+          ? `${participant.entity.name} · ${formatParticipantRole(participant.role)}`
+          : null,
+      )
+      .filter(Boolean)
+      .join("; ") || "No participants"
+  );
+}
+
+function formatParticipantRole(role: string) {
+  return role
+    .toLowerCase()
+    .replaceAll("_", " ")
+    .replace(/^\w/, (letter) => letter.toUpperCase());
 }
 
 function ThreeWay({ operation }: { operation: ReviewQueueOperation }) {
@@ -824,7 +945,7 @@ function acceptedFieldCount(changeSet: ReviewQueueItem) {
         ).length
       );
     }
-    if (operation.decision === "ACCEPTED" || operation.decision === "PENDING") {
+    if (operation.decision === "ACCEPTED") {
       return (
         count +
         Object.keys(patch).filter(

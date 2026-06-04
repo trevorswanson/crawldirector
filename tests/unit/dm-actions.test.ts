@@ -626,11 +626,6 @@ describe("review queue actions", () => {
   });
 
   it("ignores invalid edited operation patch submissions", async () => {
-    const noneSelected = new FormData();
-    noneSelected.append("field", "summary");
-    noneSelected.set("kind:summary", "string");
-    noneSelected.set("value:summary", "DM-edited summary");
-
     const badNumber = new FormData();
     badNumber.append("field", "crawler.level");
     badNumber.set("apply:crawler.level", "on");
@@ -655,13 +650,30 @@ describe("review queue actions", () => {
     badKind.set("kind:summary", "not-a-kind");
     badKind.set("value:summary", "whatever");
 
-    await editChangeOperationPatchAction("c1", "cs1", "op1", noneSelected);
     await editChangeOperationPatchAction("c1", "cs1", "op1", badNumber);
     await editChangeOperationPatchAction("c1", "cs1", "op1", emptyNumber);
     await editChangeOperationPatchAction("c1", "cs1", "op1", badJson);
     await editChangeOperationPatchAction("c1", "cs1", "op1", badKind);
 
     expect(setChangeOperationDecision).not.toHaveBeenCalled();
+  });
+
+  it("rejects an operation when all submitted fields are rejected", async () => {
+    const noneSelected = new FormData();
+    noneSelected.append("field", "summary");
+    noneSelected.set("kind:summary", "string");
+    noneSelected.set("value:summary", "DM-edited summary");
+
+    await editChangeOperationPatchAction("c1", "cs1", "op1", noneSelected);
+
+    expect(setChangeOperationDecision).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      "cs1",
+      "op1",
+      { decision: "REJECTED" },
+    );
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
   });
 
   it("saves edited effect rows as an EDITED effects patch", async () => {

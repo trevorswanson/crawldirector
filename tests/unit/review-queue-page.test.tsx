@@ -175,6 +175,12 @@ describe("ReviewQueuePage", () => {
     expect(screen.getByRole("button", { name: "Accept summary" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Reject summary" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Edit summary" })).toBeDefined();
+    expect(
+      screen.getByRole("button", { name: "Accept summary" }).getAttribute("aria-pressed"),
+    ).toBe("false");
+    expect(
+      screen.getByRole("button", { name: "Reject summary" }).getAttribute("aria-pressed"),
+    ).toBe("false");
     expect(screen.getByRole("button", { name: "Save field edits" })).toBeDefined();
     // The locked field is display-only — no per-field controls.
     expect(
@@ -182,7 +188,10 @@ describe("ReviewQueuePage", () => {
     ).toBeNull();
     expect(screen.getByRole("button", { name: "Accept all" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Reject op" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "Approve 5 accepted" })).toBeDefined();
+    expect(
+      (screen.getByRole("button", { name: "Approve 0 accepted" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
     expect(screen.getByRole("button", { name: "Reject set" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Supersede" })).toBeDefined();
   });
@@ -294,7 +303,7 @@ describe("ReviewQueuePage", () => {
     expect(screen.getByText("No effects in this proposal.")).toBeDefined();
   });
 
-  it("skips the crawler lookup when no effect op is pending", async () => {
+  it("skips the entity lookup when no structured entity field is pending", async () => {
     listPendingChangeSetsForUser.mockResolvedValue([
       {
         id: "cs-ent",
@@ -340,6 +349,262 @@ describe("ReviewQueuePage", () => {
     await ReviewQueuePage({ params: Promise.resolve({ id: "c1" }) });
 
     expect(listEntitiesForUser).not.toHaveBeenCalled();
+  });
+
+  it("renders event time and participants as structured review fields", async () => {
+    listEntitiesForUser.mockResolvedValue({
+      entities: [
+        { id: "carl", name: "Carl", type: "CRAWLER" },
+        { id: "borant", name: "Borant Syndicate", type: "FACTION" },
+      ],
+    });
+    listPendingChangeSetsForUser.mockResolvedValue([
+      {
+        id: "cs-event",
+        campaignId: "c1",
+        source: "AI",
+        title: "Borant throttles Carl's air supply",
+        summary: null,
+        status: "PENDING",
+        actorUserId: "u1",
+        providerId: null,
+        model: null,
+        promptId: null,
+        promptVersion: null,
+        runId: null,
+        baseVersions: {},
+        reviewedById: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        operations: [
+          {
+            id: "op-event",
+            changeSetId: "cs-event",
+            op: "CREATE_EVENT",
+            targetType: "EVENT",
+            targetId: null,
+            targetLabel: "Borant throttles Carl's air supply",
+            targetEntityType: "EVENT",
+            targetLocked: false,
+            lockedFields: [],
+            currentValues: {},
+            patch: {
+              inGameTime: { to: { floor: 9, label: "After the collapse" } },
+              participants: {
+                to: [
+                  { entityId: "carl", role: "AFFECTED" },
+                  { entityId: "borant", role: "ACTOR" },
+                ],
+              },
+            },
+            editedPatch: null,
+            decision: "PENDING",
+            blockedByLock: false,
+            isStale: false,
+          },
+        ],
+      },
+    ]);
+
+    render(await ReviewQueuePage({ params: Promise.resolve({ id: "c1" }) }));
+
+    expect(screen.getByText("Floor 9 · After the collapse")).toBeDefined();
+    expect(screen.getByText("Carl · Affected; Borant Syndicate · Actor")).toBeDefined();
+    expect(screen.queryByText('{"floor":9,"label":"After the collapse"}')).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit inGameTime" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Edit participants" })).toBeDefined();
+    expect(listEntitiesForUser).toHaveBeenCalledWith("u1", "c1");
+  });
+
+  it("resolves pending relationship endpoints to entity names", async () => {
+    listEntitiesForUser.mockResolvedValue({
+      entities: [
+        { id: "carl", name: "Carl", type: "CRAWLER" },
+        { id: "borant", name: "Borant Syndicate", type: "FACTION" },
+      ],
+    });
+    listPendingChangeSetsForUser.mockResolvedValue([
+      {
+        id: "cs-relationship",
+        campaignId: "c1",
+        source: "AI",
+        title: "Borant controls Carl",
+        summary: null,
+        status: "PENDING",
+        actorUserId: "u1",
+        providerId: null,
+        model: null,
+        promptId: null,
+        promptVersion: null,
+        runId: null,
+        baseVersions: {},
+        reviewedById: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        operations: [
+          {
+            id: "op-relationship",
+            changeSetId: "cs-relationship",
+            op: "CREATE_RELATIONSHIP",
+            targetType: "RELATIONSHIP",
+            targetId: null,
+            targetLabel: "Borant Syndicate → Carl",
+            targetEntityType: "CONTROLS",
+            targetLocked: false,
+            lockedFields: [],
+            currentValues: {},
+            patch: {
+              sourceId: { to: "borant" },
+              targetId: { to: "carl" },
+            },
+            editedPatch: null,
+            decision: "PENDING",
+            blockedByLock: false,
+            isStale: false,
+          },
+        ],
+      },
+    ]);
+
+    render(await ReviewQueuePage({ params: Promise.resolve({ id: "c1" }) }));
+
+    expect(screen.getAllByText("Borant Syndicate").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Carl").length).toBeGreaterThan(0);
+    expect(screen.queryByText("borant")).toBeNull();
+    expect(screen.queryByText("carl")).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit sourceId" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Edit targetId" })).toBeDefined();
+  });
+
+  it("handles malformed structured rows and review projection edge states", async () => {
+    listPendingChangeSetsForUser.mockResolvedValue([
+      {
+        id: "cs-edge",
+        campaignId: "c1",
+        source: "DM",
+        title: "Review edge states",
+        summary: null,
+        status: "PENDING",
+        actorUserId: "u1",
+        providerId: null,
+        model: null,
+        promptId: null,
+        promptVersion: null,
+        runId: null,
+        baseVersions: null,
+        reviewedById: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+        updatedAt: new Date(),
+        operations: [
+          {
+            id: "op-target-locked",
+            changeSetId: "cs-edge",
+            op: "UPDATE_EVENT",
+            targetType: "EVENT",
+            targetId: "event-1",
+            targetLabel: "Malformed participants",
+            targetEntityType: "EVENT",
+            targetLocked: true,
+            lockedFields: [],
+            currentValues: {},
+            patch: {
+              participants: { to: [null, { entityId: "carl" }] },
+            },
+            editedPatch: null,
+            decision: "PENDING",
+            blockedByLock: true,
+            isStale: false,
+          },
+          {
+            id: "op-no-lock-fields",
+            changeSetId: "cs-edge",
+            op: "UPDATE_ENTITY",
+            targetType: "ENTITY",
+            targetId: "entity-1",
+            targetLabel: "No lock field list",
+            targetEntityType: "NPC",
+            targetLocked: false,
+            lockedFields: [],
+            currentValues: {},
+            patch: { summary: { to: "Blocked" } },
+            editedPatch: null,
+            decision: "PENDING",
+            blockedByLock: true,
+            isStale: false,
+          },
+          {
+            id: "op-rejected",
+            changeSetId: "cs-edge",
+            op: "UPDATE_ENTITY",
+            targetType: "ENTITY",
+            targetId: "entity-2",
+            targetLabel: "Rejected",
+            targetEntityType: "NPC",
+            targetLocked: false,
+            lockedFields: [],
+            currentValues: {},
+            patch: { summary: { to: "No" } },
+            editedPatch: null,
+            decision: "REJECTED",
+            blockedByLock: false,
+            isStale: false,
+          },
+          {
+            id: "op-stale-empty",
+            changeSetId: "cs-edge",
+            op: "UPDATE_ENTITY",
+            targetType: "ENTITY",
+            targetId: "entity-3",
+            targetLabel: "Empty stale patch",
+            targetEntityType: "NPC",
+            targetLocked: false,
+            lockedFields: [],
+            currentValues: {},
+            patch: { _baseVersion: { to: 1 } },
+            editedPatch: null,
+            decision: "PENDING",
+            blockedByLock: false,
+            isStale: true,
+          },
+        ],
+      },
+      {
+        id: "cs-hours",
+        campaignId: "c1",
+        source: "AI",
+        title: "Two hours old",
+        summary: null,
+        status: "PENDING",
+        actorUserId: "u1",
+        providerId: null,
+        model: null,
+        promptId: null,
+        promptVersion: null,
+        runId: null,
+        baseVersions: {},
+        reviewedById: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+        updatedAt: new Date(),
+        operations: [],
+      },
+    ]);
+
+    render(await ReviewQueuePage({ params: Promise.resolve({ id: "c1" }) }));
+
+    expect(screen.getByText("No participants")).toBeDefined();
+    expect(screen.getByText("2d ago")).toBeDefined();
+    expect(screen.getByText("2h ago")).toBeDefined();
+    expect(screen.getByText("base none")).toBeDefined();
+    expect(screen.queryByText(/Conflict on/)).toBeNull();
+    expect(screen.getAllByText("BLOCKED BY LOCK — UNLOCK TARGET TO APPLY")).toHaveLength(2);
   });
 
   it("renders the mockup queue rail with source filters and selected detail", async () => {

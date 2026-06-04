@@ -76,8 +76,11 @@ ChangeOperation {
 
 **Field-level granularity is essential.** A DM must be able to accept an AI
 proposal's new `description` but reject its change to `level`, or edit the
-proposed value before accepting. Decisions are recorded per operation (and the
-UI may expose per-field accept/reject within an operation's patch).
+proposed value before accepting. Review fields begin `PENDING`; nothing is
+implicitly accepted just because the proposal was opened. The read-first UI
+shows the diff by default, exposes per-field accept/reject controls, and reveals
+an input only when the DM chooses **Edit**. Decisions are recorded per operation;
+an `EDITED` operation patch stores the accepted field subset.
 
 ### Provenance
 
@@ -161,10 +164,12 @@ application path. The distinction is:
    is sent as read-only context), calls the provider, and parses output into a
    Change Set with `source: AI` and full origin provenance.
 3. The Change Set lands as **PENDING** in the review queue. Nothing is canon yet.
-4. DM opens the review view: sees a **diff** (new entities highlighted, field
-   changes shown as from→to), can **accept / edit / reject per operation/field**,
-   add review notes, then **approve** (commit accepted ops to canon),
-   **reject**, or **save edits and re-review**.
+4. DM opens the review view: sees a read-only **diff** (new entities highlighted,
+   field changes shown as from→to) whose fields remain **pending** until the DM
+   chooses **accept**, **reject**, or **edit** per operation/field. Edit reveals
+   the relevant structured control (for example an entity picker, event
+   participant rows, or floor + time label). The DM can then **approve** (commit
+   accepted ops to canon), **reject**, or **save edits and re-review**.
 5. Approved operations apply atomically; provenance is written; optionally
    "approve & lock."
 

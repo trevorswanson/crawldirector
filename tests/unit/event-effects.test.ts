@@ -26,6 +26,18 @@ function makeUser(email: string) {
   return prisma.user.create({ data: { email } });
 }
 
+async function approveAcceptedChangeSet(
+  userId: string,
+  campaignId: string,
+  changeSetId: string,
+) {
+  await prisma.changeOperation.updateMany({
+    where: { changeSetId, decision: "PENDING" },
+    data: { decision: "ACCEPTED" },
+  });
+  return approveChangeSet(userId, campaignId, changeSetId);
+}
+
 async function makeCrawler(
   userId: string,
   campaignId: string,
@@ -230,7 +242,7 @@ describe("event effects", () => {
     ]);
 
     const result = await applyEventEffects(owner.id, campaign.id, event.id);
-    await approveChangeSet(owner.id, campaign.id, result.changeSetId);
+    await approveAcceptedChangeSet(owner.id, campaign.id, result.changeSetId);
 
     const crawler = await prisma.crawler.findUnique({ where: { id: carl.id } });
     expect(crawler?.gold).toBe(600);
@@ -280,7 +292,7 @@ describe("event effects", () => {
       },
     );
 
-    await approveChangeSet(owner.id, campaign.id, result.changeSetId);
+    await approveAcceptedChangeSet(owner.id, campaign.id, result.changeSetId);
 
     const crawler = await prisma.crawler.findUnique({ where: { id: carl.id } });
     expect(crawler?.gold).toBe(150);
@@ -307,7 +319,7 @@ describe("event effects", () => {
       blockedByLock: true,
       isStale: false,
     });
-    await expect(approveChangeSet(owner.id, campaign.id, result.changeSetId)).rejects.toThrow(
+    await expect(approveAcceptedChangeSet(owner.id, campaign.id, result.changeSetId)).rejects.toThrow(
       /blocked by locks/i,
     );
   });
@@ -332,7 +344,7 @@ describe("event effects", () => {
       },
     );
 
-    await expect(approveChangeSet(owner.id, campaign.id, result.changeSetId)).rejects.toThrow(
+    await expect(approveAcceptedChangeSet(owner.id, campaign.id, result.changeSetId)).rejects.toThrow(
       /effect review patch/i,
     );
     const crawler = await prisma.crawler.findUnique({ where: { id: carl.id } });
@@ -366,7 +378,7 @@ describe("event effects", () => {
       ],
     });
 
-    await expect(approveChangeSet(owner.id, campaign.id, result.changeSetId)).rejects.toThrow(
+    await expect(approveAcceptedChangeSet(owner.id, campaign.id, result.changeSetId)).rejects.toThrow(
       /stale/i,
     );
     const crawler = await prisma.crawler.findUnique({ where: { id: carl.id } });
@@ -493,7 +505,7 @@ describe("event effects", () => {
       { kind: "ADJUST_STAT", targetEntityId: carl.id, stat: "gold", delta: -9999 },
     ]);
     const result = await applyEventEffects(owner.id, campaign.id, event.id);
-    await approveChangeSet(owner.id, campaign.id, result.changeSetId);
+    await approveAcceptedChangeSet(owner.id, campaign.id, result.changeSetId);
     const crawler = await prisma.crawler.findUnique({ where: { id: carl.id } });
     expect(crawler?.gold).toBe(0);
   });
@@ -504,7 +516,7 @@ describe("event effects", () => {
       { kind: "SET_ALIVE", targetEntityId: carl.id, value: false, note: "Killed by Sledge" },
     ]);
     const result = await applyEventEffects(owner.id, campaign.id, event.id);
-    await approveChangeSet(owner.id, campaign.id, result.changeSetId);
+    await approveAcceptedChangeSet(owner.id, campaign.id, result.changeSetId);
     const crawler = await prisma.crawler.findUnique({ where: { id: carl.id } });
     expect(crawler?.isAlive).toBe(false);
   });
@@ -517,7 +529,7 @@ describe("event effects", () => {
     await setEntityLock(owner.id, campaign.id, carl.id, { locked: true });
 
     const result = await applyEventEffects(owner.id, campaign.id, event.id);
-    await expect(approveChangeSet(owner.id, campaign.id, result.changeSetId)).rejects.toThrow(
+    await expect(approveAcceptedChangeSet(owner.id, campaign.id, result.changeSetId)).rejects.toThrow(
       ServiceError,
     );
     // Canon unchanged and the effect stays pending (no partial apply).
@@ -550,7 +562,7 @@ describe("event effects", () => {
       { kind: "ADJUST_STAT", targetEntityId: carl.id, stat: "gold", delta: 500 },
     ]);
     const result = await applyEventEffects(owner.id, campaign.id, event.id);
-    await approveChangeSet(owner.id, campaign.id, result.changeSetId);
+    await approveAcceptedChangeSet(owner.id, campaign.id, result.changeSetId);
 
     // Edit: add a new (unapplied) effect; the applied one must survive.
     await declareEffect(owner.id, campaign.id, event.id, [

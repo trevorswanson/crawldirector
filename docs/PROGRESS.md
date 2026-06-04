@@ -59,12 +59,22 @@ relationships/events are reviewable + lockable.
 
 ### Done — slice 13: read-first per-field Review Queue + Done/reopen state (2026-06-04)
 
+- [x] Corrected the read-first decision contract so a fresh proposal's fields
+      begin **PENDING**, the accepted count begins at zero, and approval cannot
+      silently apply or dismiss untouched operations. Per-field
+      Accept/Reject/Edit choices remain explicit; generator-run **Accept all
+      non-conflicting** is still the deliberate bulk shortcut.
 - [x] Reworked normal Review Queue operations to match the milestone mockup's
       read-first diff contract: every field shows `-` current / `+` proposed
       values by default, with per-field **Accept**, **Reject**, and **Edit**
       controls. Inputs are now opt-in and appear only for the field being edited;
       saving persists the accepted field subset as the operation's existing
       `EDITED` patch.
+- [x] Replaced raw event/relationship reference JSON in normal review diffs:
+      `inGameTime` renders as floor + optional text label and edits through those
+      two controls; event participants render as resolved entity + role rows and
+      edit through entity pickers; relationship `sourceId` / `targetId` values
+      resolve to names and edit through entity pickers.
 - [x] Made `APPLY_EVENT_EFFECTS` follow the same rule: effect rows render as
       compact read-only summaries by default, each row has its own **Edit**
       affordance, and the shared `EffectRows` editor is revealed only after a DM

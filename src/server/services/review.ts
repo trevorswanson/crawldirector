@@ -685,6 +685,16 @@ async function enrichReviewQueueItems(
         if (typeof sourceId === "string") entityTargetIds.add(sourceId);
         if (typeof endpointTargetId === "string") entityTargetIds.add(endpointTargetId);
       }
+      const participants = readTo(patch, "participants");
+      if (Array.isArray(participants)) {
+        for (const participant of participants) {
+          if (!participant || typeof participant !== "object" || Array.isArray(participant)) {
+            continue;
+          }
+          const entityId = (participant as Record<string, unknown>).entityId;
+          if (typeof entityId === "string") entityTargetIds.add(entityId);
+        }
+      }
     }
   }
   const eventTargetIds = Array.from(
@@ -717,7 +727,15 @@ async function enrichReviewQueueItems(
   const eventTargets = eventTargetIds.length
     ? await prisma.event.findMany({
         where: { campaignId, id: { in: eventTargetIds } },
-        select: { id: true, title: true },
+        select: {
+          id: true,
+          title: true,
+          summary: true,
+          inGameTime: true,
+          orderKey: true,
+          secret: true,
+          participants: { select: { entityId: true, role: true } },
+        },
       })
     : [];
   const eventById = new Map(eventTargets.map((event) => [event.id, event]));
@@ -775,6 +793,8 @@ async function enrichReviewQueueItems(
           ? currentEntityValue(target, field)
           : relationshipTarget
             ? currentRelationshipValue(relationshipTarget, field)
+            : eventTarget
+              ? currentEventValue(eventTarget, field)
             : undefined;
         if (current !== undefined) currentValues[field] = current;
       }
@@ -795,6 +815,37 @@ async function enrichReviewQueueItems(
       };
     }),
   }));
+}
+
+function currentEventValue(
+  event: {
+    title: string;
+    summary: string | null;
+    inGameTime: Prisma.JsonValue;
+    orderKey: number | null;
+    secret: boolean;
+    participants: { entityId: string; role: EventParticipantRole }[];
+  },
+  field: string,
+): unknown {
+  switch (field) {
+    case "title":
+      return event.title;
+    case "summary":
+      return event.summary;
+    case "inGameTime":
+      return event.inGameTime;
+    case "orderKey":
+      return event.orderKey;
+    case "secret":
+      return event.secret;
+    case "participants":
+      return event.participants.map((participant) => ({
+        entityId: participant.entityId,
+        role: participant.role,
+      }));
+  }
+  return undefined;
 }
 
 // "Source → Target" label for a relationship op. UPDATE/DELETE resolve from the
@@ -1012,8 +1063,13 @@ export async function approveChangeSet(
     });
     if (!changeSet) throw new ServiceError("Change set not found.");
     const applicableOperations = changeSet.operations.filter(
-      (operation) => operation.decision !== OpDecision.REJECTED,
+      (operation) =>
+        operation.decision === OpDecision.ACCEPTED ||
+        operation.decision === OpDecision.EDITED,
     );
+    if (applicableOperations.length === 0) {
+      throw new ServiceError("Accept at least one operation before approval.");
+    }
     if (applicableOperations.some((operation) => operation.blockedByLock)) {
       throw new ServiceError("One or more operations are blocked by locks.");
     }
@@ -1043,7 +1099,7 @@ export async function approveChangeSet(
     }
 
     const rejectedOperations = changeSet.operations.filter(
-      (operation) => operation.decision === OpDecision.REJECTED,
+      (operation) => !applicableOperations.some((applied) => applied.id === operation.id),
     );
     if (rejectedOperations.length > 0) {
       await markEventEffectReviewState(
@@ -1156,6 +1212,13 @@ export async function approveChangeSetRun(
     }
 
     try {
+      await prisma.changeOperation.updateMany({
+        where: {
+          changeSetId: changeSet.id,
+          decision: OpDecision.PENDING,
+        },
+        data: { decision: OpDecision.ACCEPTED },
+      });
       await approveChangeSet(userId, campaignId, changeSet.id);
       approvedIds.push(changeSet.id);
     } catch (error) {

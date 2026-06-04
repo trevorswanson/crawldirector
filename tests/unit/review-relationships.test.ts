@@ -21,6 +21,18 @@ function makeUser(email: string, name?: string) {
   return prisma.user.create({ data: { email, name } });
 }
 
+async function approveAcceptedChangeSet(
+  userId: string,
+  campaignId: string,
+  changeSetId: string,
+) {
+  await prisma.changeOperation.updateMany({
+    where: { changeSetId, decision: "PENDING" },
+    data: { decision: "ACCEPTED" },
+  });
+  return approveChangeSet(userId, campaignId, changeSetId);
+}
+
 async function makeEntity(userId: string, campaignId: string, name: string) {
   return createGenericEntity(userId, campaignId, {
     type: "NPC",
@@ -83,7 +95,7 @@ describe("pending relationship proposals", () => {
     // Nothing applied while pending.
     expect(await prisma.relationship.count()).toBe(0);
 
-    await approveChangeSet(dmId, campaignId, set.id);
+    await approveAcceptedChangeSet(dmId, campaignId, set.id);
 
     const edge = await prisma.relationship.findFirstOrThrow({
       where: { campaignId },
@@ -195,7 +207,7 @@ describe("pending relationship proposals", () => {
         },
       ],
     });
-    await approveChangeSet(dmId, campaignId, set.id);
+    await approveAcceptedChangeSet(dmId, campaignId, set.id);
 
     const after = await prisma.relationship.findUniqueOrThrow({ where: { id: edge.id } });
     expect(after.secret).toBe(true);
@@ -223,7 +235,7 @@ describe("pending relationship proposals", () => {
         },
       ],
     });
-    await approveChangeSet(dmId, campaignId, set.id);
+    await approveAcceptedChangeSet(dmId, campaignId, set.id);
 
     const after = await prisma.relationship.findUniqueOrThrow({ where: { id: edge.id } });
     expect(after.status).toBe(CanonStatus.ARCHIVED);
@@ -258,7 +270,7 @@ describe("pending relationship proposals", () => {
         disposition: { to: -50 },
       },
     });
-    await approveChangeSet(dmId, campaignId, set.id);
+    await approveAcceptedChangeSet(dmId, campaignId, set.id);
 
     const edge = await prisma.relationship.findFirstOrThrow({ where: { campaignId } });
     expect(edge.type).toBe("RIVAL_OF");
@@ -318,7 +330,7 @@ describe("pending relationship lock + staleness flags", () => {
     const [queued] = await listPendingChangeSetsForUser(dmId, campaignId);
     expect(queued.operations[0].blockedByLock).toBe(true);
 
-    await expect(approveChangeSet(dmId, campaignId, set.id)).rejects.toThrow(
+    await expect(approveAcceptedChangeSet(dmId, campaignId, set.id)).rejects.toThrow(
       /blocked by locks/i,
     );
   });
@@ -354,7 +366,7 @@ describe("pending relationship lock + staleness flags", () => {
     const [queued] = await listPendingChangeSetsForUser(dmId, campaignId);
     expect(queued.operations[0].isStale).toBe(true);
 
-    await expect(approveChangeSet(dmId, campaignId, set.id)).rejects.toThrow(/stale/i);
+    await expect(approveAcceptedChangeSet(dmId, campaignId, set.id)).rejects.toThrow(/stale/i);
   });
 
   it("holds a proposal as stale when the edge is archived underneath", async () => {
@@ -424,7 +436,7 @@ describe("pending relationship lock + staleness flags", () => {
     const [queued] = await listPendingChangeSetsForUser(dmId, campaignId);
     expect(queued.operations[0].isStale).toBe(false); // gate missed it
 
-    await expect(approveChangeSet(dmId, campaignId, set.id)).rejects.toThrow(
+    await expect(approveAcceptedChangeSet(dmId, campaignId, set.id)).rejects.toThrow(
       /changed since you opened it/i,
     );
     const after = await prisma.relationship.findUniqueOrThrow({ where: { id: edge.id } });

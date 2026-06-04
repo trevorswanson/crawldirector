@@ -395,7 +395,23 @@ export async function editChangeOperationPatchAction(
 ): Promise<void> {
   const user = await requireUser();
   const editedPatch = parseReviewEditedPatch(formData);
-  if (!editedPatch) return;
+  if (!editedPatch) {
+    const fields = formData.getAll("field");
+    if (
+      fields.length === 0 ||
+      fields.some(
+        (field) =>
+          typeof field === "string" && formData.get(`apply:${field}`) === "on",
+      )
+    ) {
+      return;
+    }
+    await setChangeOperationDecision(user.id, campaignId, changeSetId, operationId, {
+      decision: "REJECTED",
+    });
+    revalidatePath(`/campaigns/${campaignId}/review`);
+    return;
+  }
 
   await setChangeOperationDecision(user.id, campaignId, changeSetId, operationId, {
     decision: "EDITED",
