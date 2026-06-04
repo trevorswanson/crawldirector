@@ -388,6 +388,49 @@ describe("pending relationship lock + staleness flags", () => {
     expect(set.status).toBe("PENDING");
   });
 
+  it("re-checks the base version in-transaction so a stale delete the flag gate missed is held", async () => {
+    const { dmId, campaignId, carlId, donutId } = await seed();
+    const edge = await createRelationship(dmId, campaignId, carlId, {
+      type: "ALLY_OF",
+      targetId: donutId,
+      secret: false,
+    });
+    const live = await prisma.relationship.findUniqueOrThrow({ where: { id: edge.id } });
+
+    // Simulate the TOCTOU window: a pending delete whose patch carries a base
+    // version, but with empty changeSet.baseVersions so the pre-flight flag
+    // refresh can't flag it stale. The in-transaction guard must still hold it.
+    const set = await prisma.changeSet.create({
+      data: {
+        campaignId,
+        source: "AI",
+        title: "Racy delete",
+        actorUserId: dmId,
+        baseVersions: {},
+        operations: {
+          create: [
+            {
+              op: "DELETE_RELATIONSHIP",
+              targetType: "RELATIONSHIP",
+              targetId: edge.id,
+              patch: { _baseVersion: { to: live.version + 5 } },
+            },
+          ],
+        },
+      },
+      select: { id: true },
+    });
+
+    const [queued] = await listPendingChangeSetsForUser(dmId, campaignId);
+    expect(queued.operations[0].isStale).toBe(false); // gate missed it
+
+    await expect(approveChangeSet(dmId, campaignId, set.id)).rejects.toThrow(
+      /changed since you opened it/i,
+    );
+    const after = await prisma.relationship.findUniqueOrThrow({ where: { id: edge.id } });
+    expect(after.status).toBe(CanonStatus.CANON);
+  });
+
   it("denies a non-DM from creating a pending relationship proposal", async () => {
     const { campaignId, carlId, donutId } = await seed();
     const player = await makeUser("player@test.com");

@@ -2055,7 +2055,13 @@ async function applyRelationshipOperation(
       );
     case OpKind.DELETE_RELATIONSHIP:
       if (!operation.targetId) throw new ServiceError("Missing relationship target.");
-      return applyDeleteRelationship(tx, changeSet, operation.id, operation.targetId);
+      return applyDeleteRelationship(
+        tx,
+        changeSet,
+        operation.id,
+        operation.targetId,
+        patch,
+      );
     default:
       throw new ServiceError("Unsupported relationship operation.");
   }
@@ -2198,6 +2204,7 @@ async function applyDeleteRelationship(
   changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
   operationId: string,
   relationshipId: string,
+  patch: ReviewPatch,
 ) {
   const relationship = await tx.relationship.findFirst({
     where: {
@@ -2205,9 +2212,24 @@ async function applyDeleteRelationship(
       campaignId: changeSet.campaignId,
       status: { not: CanonStatus.ARCHIVED },
     },
-    select: { id: true, locked: true },
+    select: { id: true, locked: true, version: true },
   });
   if (!relationship) throw new ServiceError("Relationship not found.");
+
+  // Re-check staleness in-transaction, the same way applyUpdateRelationship
+  // does — the pre-flight flag refresh runs in a separate transaction, so an
+  // edge edited in that window must hold the delete rather than archive the
+  // newer edge.
+  const expectedVersion = readTo(patch, "_baseVersion");
+  if (typeof expectedVersion === "number" && expectedVersion !== relationship.version) {
+    await tx.changeOperation.update({
+      where: { id: operationId },
+      data: { isStale: true },
+    });
+    throw new ServiceError(
+      "This relationship changed since you opened it. Reload and try again.",
+    );
+  }
 
   if (relationship.locked) {
     await tx.changeOperation.update({
