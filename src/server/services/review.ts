@@ -210,7 +210,9 @@ async function evaluateEntityOperationFlags(
   };
 }
 
-function operationBaseVersions(operations: EntityReviewOperationInput[]) {
+function operationBaseVersions(
+  operations: { targetId?: string; patch: ReviewPatch }[],
+) {
   const baseVersions: Record<string, number> = {};
   for (const operation of operations) {
     if (!operation.targetId) continue;
@@ -226,6 +228,50 @@ function isEntityReviewOp(op: OpKind): op is EntityReviewOperationInput["op"] {
     op === OpKind.UPDATE_ENTITY ||
     op === OpKind.DELETE_ENTITY
   );
+}
+
+function isRelationshipReviewOp(
+  op: OpKind,
+): op is RelationshipReviewOperationInput["op"] {
+  return (
+    op === OpKind.CREATE_RELATIONSHIP ||
+    op === OpKind.UPDATE_RELATIONSHIP ||
+    op === OpKind.DELETE_RELATIONSHIP
+  );
+}
+
+// Lock/staleness flags for a pending relationship operation, mirroring
+// evaluateEntityOperationFlags. CREATE has no target, so it is never blocked or
+// stale. Edges carry a whole-edge lock (no per-field locks), so any edit/remove
+// of a locked edge is blocked. Staleness compares the captured base version
+// against the live edge version.
+async function evaluateRelationshipOperationFlags(
+  tx: Prisma.TransactionClient,
+  operation: { op: OpKind; targetId?: string; patch: ReviewPatch },
+  campaignId: string,
+  baseVersions: Record<string, number>,
+) {
+  if (operation.op === OpKind.CREATE_RELATIONSHIP || !operation.targetId) {
+    return { blockedByLock: false, isStale: false };
+  }
+
+  const relationship = await tx.relationship.findFirst({
+    where: {
+      id: operation.targetId,
+      campaignId,
+      status: { not: CanonStatus.ARCHIVED },
+    },
+    select: { id: true, version: true, locked: true },
+  });
+  if (!relationship) throw new ServiceError("Relationship not found.");
+
+  const expectedVersion = baseVersions[operation.targetId];
+  return {
+    blockedByLock: relationship.locked,
+    isStale:
+      typeof expectedVersion === "number" &&
+      expectedVersion !== relationship.version,
+  };
 }
 
 function isEventReviewOp(op: OpKind): op is EventReviewOperationInput["op"] {
@@ -424,6 +470,64 @@ export async function applyAutoApprovedRelationshipChangeSet(
   });
 }
 
+// Pending (not auto-approved) relationship proposal — the symmetric counterpart
+// to createPendingEntityChangeSet. AI/import producers (M4+) route any-to-any
+// edges through the Review Queue this way; the DM reviews, edits, approves, or
+// rejects before they touch canon. Operations are flagged for lock/staleness so
+// the queue can hold blocked/stale edits instead of erroring on approval.
+export async function createPendingRelationshipChangeSet(
+  userId: string,
+  campaignId: string,
+  input: {
+    source?: ChangeSource;
+    title: string;
+    summary?: string;
+    runId?: string;
+    operations: RelationshipReviewOperationInput[];
+  },
+) {
+  await assertCampaignDm(userId, campaignId);
+  const baseVersions = operationBaseVersions(input.operations);
+
+  return prisma.$transaction(async (tx) => {
+    const flaggedOperations = [];
+    for (const operation of input.operations) {
+      flaggedOperations.push({
+        operation,
+        ...(await evaluateRelationshipOperationFlags(
+          tx,
+          operation,
+          campaignId,
+          baseVersions,
+        )),
+      });
+    }
+
+    return tx.changeSet.create({
+      data: {
+        campaignId,
+        source: input.source ?? ChangeSource.DM,
+        title: input.title,
+        summary: input.summary,
+        runId: input.runId,
+        actorUserId: userId,
+        baseVersions,
+        operations: {
+          create: flaggedOperations.map(({ operation, blockedByLock, isStale }) => ({
+            op: operation.op,
+            targetType: "RELATIONSHIP",
+            targetId: operation.targetId,
+            patch: operation.patch as Prisma.InputJsonValue,
+            blockedByLock,
+            isStale,
+          })),
+        },
+      },
+      select: { id: true, title: true, status: true },
+    });
+  });
+}
+
 export async function applyAutoApprovedEventChangeSet(
   userId: string,
   campaignId: string,
@@ -552,15 +656,23 @@ async function enrichReviewQueueItems(
   campaignId: string,
   changeSets: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>[],
 ): Promise<ReviewQueueItem[]> {
-  const targetIds = Array.from(
-    new Set(
-      changeSets.flatMap((changeSet) =>
-        changeSet.operations
-          .map((operation) => operation.targetId)
-          .filter((targetId): targetId is string => Boolean(targetId)),
-      ),
-    ),
-  );
+  // Entity ids to resolve: every ENTITY-target op, plus the endpoints named by a
+  // CREATE_RELATIONSHIP patch so a new edge can be labeled "Source → Target".
+  const entityTargetIds = new Set<string>();
+  for (const changeSet of changeSets) {
+    for (const operation of changeSet.operations) {
+      const patch = operation.patch as ReviewPatch;
+      if (operation.targetType === "ENTITY" && operation.targetId) {
+        entityTargetIds.add(operation.targetId);
+      }
+      if (operation.targetType === "RELATIONSHIP") {
+        const sourceId = readTo(patch, "sourceId");
+        const endpointTargetId = readTo(patch, "targetId");
+        if (typeof sourceId === "string") entityTargetIds.add(sourceId);
+        if (typeof endpointTargetId === "string") entityTargetIds.add(endpointTargetId);
+      }
+    }
+  }
   const eventTargetIds = Array.from(
     new Set(
       changeSets.flatMap((changeSet) =>
@@ -571,9 +683,19 @@ async function enrichReviewQueueItems(
       ),
     ),
   );
-  const targets = targetIds.length
+  const relationshipTargetIds = Array.from(
+    new Set(
+      changeSets.flatMap((changeSet) =>
+        changeSet.operations
+          .filter((operation) => operation.targetType === "RELATIONSHIP")
+          .map((operation) => operation.targetId)
+          .filter((targetId): targetId is string => Boolean(targetId)),
+      ),
+    ),
+  );
+  const targets = entityTargetIds.size
     ? await prisma.entity.findMany({
-        where: { campaignId, id: { in: targetIds } },
+        where: { campaignId, id: { in: [...entityTargetIds] } },
         include: { crawler: true },
       })
     : [];
@@ -585,25 +707,61 @@ async function enrichReviewQueueItems(
       })
     : [];
   const eventById = new Map(eventTargets.map((event) => [event.id, event]));
+  const relationshipTargets = relationshipTargetIds.length
+    ? await prisma.relationship.findMany({
+        where: { campaignId, id: { in: relationshipTargetIds } },
+        select: {
+          id: true,
+          type: true,
+          disposition: true,
+          notes: true,
+          secret: true,
+          locked: true,
+          sourceEntity: { select: { name: true } },
+          targetEntity: { select: { name: true } },
+        },
+      })
+    : [];
+  const relationshipById = new Map(
+    relationshipTargets.map((relationship) => [relationship.id, relationship]),
+  );
 
   return changeSets.map((changeSet) => ({
     ...changeSet,
     operations: changeSet.operations.map((operation) => {
       const patch = operation.patch as ReviewPatch;
       const target =
-        operation.targetId ? targetById.get(operation.targetId) : undefined;
+        operation.targetType === "ENTITY" && operation.targetId
+          ? targetById.get(operation.targetId)
+          : undefined;
       const eventTarget =
         operation.targetType === "EVENT" && operation.targetId
           ? eventById.get(operation.targetId)
           : undefined;
+      const relationshipTarget =
+        operation.targetType === "RELATIONSHIP" && operation.targetId
+          ? relationshipById.get(operation.targetId)
+          : undefined;
+      const relationshipLabel =
+        operation.targetType === "RELATIONSHIP"
+          ? relationshipEdgeLabel(relationshipTarget, patch, targetById)
+          : null;
       const targetEntityType =
         target?.type ??
         (eventTarget ? "EVENT" : null) ??
+        relationshipTarget?.type ??
+        (operation.targetType === "RELATIONSHIP"
+          ? stringFromReviewValue(readTo(patch, "type"))
+          : null) ??
         stringFromReviewValue(readTo(patch, "type"));
       const fields = patchFields(patch).filter((field) => field !== "_baseVersion");
       const currentValues: Record<string, unknown> = {};
       for (const field of fields) {
-        const current = target ? currentEntityValue(target, field) : undefined;
+        const current = target
+          ? currentEntityValue(target, field)
+          : relationshipTarget
+            ? currentRelationshipValue(relationshipTarget, field)
+            : undefined;
         if (current !== undefined) currentValues[field] = current;
       }
 
@@ -612,16 +770,62 @@ async function enrichReviewQueueItems(
         targetLabel:
           target?.name ??
           eventTarget?.title ??
+          relationshipLabel ??
           stringFromReviewValue(readTo(patch, "name")) ??
           operation.targetId ??
           null,
         targetEntityType,
-        targetLocked: Boolean(target?.locked),
+        targetLocked: Boolean(target?.locked) || Boolean(relationshipTarget?.locked),
         lockedFields: target?.lockedFields ?? [],
         currentValues,
       };
     }),
   }));
+}
+
+// "Source → Target" label for a relationship op. UPDATE/DELETE resolve from the
+// live edge; CREATE resolves endpoint names from the patch (falling back to the
+// edge type if the endpoints aren't loaded).
+function relationshipEdgeLabel(
+  relationship:
+    | { sourceEntity: { name: string }; targetEntity: { name: string } }
+    | undefined,
+  patch: ReviewPatch,
+  targetById: Map<string, { name: string }>,
+) {
+  if (relationship) {
+    return `${relationship.sourceEntity.name} → ${relationship.targetEntity.name}`;
+  }
+  const sourceId = readTo(patch, "sourceId");
+  const targetId = readTo(patch, "targetId");
+  const sourceName =
+    typeof sourceId === "string" ? targetById.get(sourceId)?.name : undefined;
+  const targetName =
+    typeof targetId === "string" ? targetById.get(targetId)?.name : undefined;
+  if (sourceName && targetName) return `${sourceName} → ${targetName}`;
+  return stringFromReviewValue(readTo(patch, "type"));
+}
+
+function currentRelationshipValue(
+  relationship: {
+    type: RelationshipType;
+    disposition: number | null;
+    notes: string | null;
+    secret: boolean;
+  },
+  field: string,
+): unknown {
+  switch (field) {
+    case "type":
+      return relationship.type;
+    case "disposition":
+      return relationship.disposition;
+    case "notes":
+      return relationship.notes;
+    case "secret":
+      return relationship.secret;
+  }
+  return undefined;
 }
 
 function stringFromReviewValue(value: JsonValue | undefined) {
@@ -697,10 +901,12 @@ export async function setChangeOperationDecision(
     const operation = changeSet.operations.find((op) => op.id === operationId);
     if (!operation) throw new ServiceError("Change operation not found.");
     const entityOperation = operation.targetType === "ENTITY" && isEntityReviewOp(operation.op);
+    const relationshipOperation =
+      operation.targetType === "RELATIONSHIP" && isRelationshipReviewOp(operation.op);
     const eventOperation =
       (operation.targetType === "EVENT" || operation.targetType === "EVENT_CAUSALITY") &&
       isEventReviewOp(operation.op);
-    if (!entityOperation && !eventOperation) {
+    if (!entityOperation && !relationshipOperation && !eventOperation) {
       throw new ServiceError("Unsupported operation target.");
     }
     if (input.decision === OpDecision.EDITED) {
@@ -724,16 +930,27 @@ export async function setChangeOperationDecision(
     const flags =
       input.decision === OpDecision.REJECTED || eventOperation
         ? { blockedByLock: false, isStale: false }
-        : await evaluateEntityOperationFlags(
-            tx,
-            {
-              op: operation.op as EntityReviewOperationInput["op"],
-              targetId: operation.targetId ?? undefined,
-              patch: patchForFlags,
-            },
-            campaignId,
-            baseVersionsObject(changeSet.baseVersions),
-          );
+        : relationshipOperation
+          ? await evaluateRelationshipOperationFlags(
+              tx,
+              {
+                op: operation.op,
+                targetId: operation.targetId ?? undefined,
+                patch: patchForFlags,
+              },
+              campaignId,
+              baseVersionsObject(changeSet.baseVersions),
+            )
+          : await evaluateEntityOperationFlags(
+              tx,
+              {
+                op: operation.op as EntityReviewOperationInput["op"],
+                targetId: operation.targetId ?? undefined,
+                patch: patchForFlags,
+              },
+              campaignId,
+              baseVersionsObject(changeSet.baseVersions),
+            );
 
     const updated = await tx.changeOperation.update({
       where: { id: operation.id },
@@ -861,6 +1078,9 @@ async function applyReviewOperation(
 ) {
   if (operation.targetType === "ENTITY" && isEntityReviewOp(operation.op)) {
     return applyEntityOperation(tx, changeSet, operation, patchOverride);
+  }
+  if (operation.targetType === "RELATIONSHIP" && isRelationshipReviewOp(operation.op)) {
+    return applyRelationshipOperation(tx, changeSet, operation, patchOverride);
   }
   if (
     (operation.targetType === "EVENT" || operation.targetType === "EVENT_CAUSALITY") &&
@@ -1011,6 +1231,26 @@ async function refreshPendingOperationFlags(
             where: { id: operation.id },
             data: flags,
           });
+          continue;
+        }
+        if (
+          operation.targetType === "RELATIONSHIP" &&
+          isRelationshipReviewOp(operation.op)
+        ) {
+          const flags = await evaluateRelationshipFlagsForRefresh(
+            tx,
+            {
+              op: operation.op,
+              targetId: operation.targetId ?? undefined,
+              patch: effectiveOperationPatch(operation),
+            },
+            campaignId,
+            baseVersions,
+          );
+          await tx.changeOperation.update({
+            where: { id: operation.id },
+            data: flags,
+          });
         }
       }
     }
@@ -1027,6 +1267,29 @@ async function evaluatePendingOperationFlagsForRefresh(
     return await evaluateEntityOperationFlags(tx, operation, campaignId, baseVersions);
   } catch (error) {
     if (error instanceof ServiceError && error.message === "Entity not found.") {
+      return { blockedByLock: false, isStale: true };
+    }
+    throw error;
+  }
+}
+
+async function evaluateRelationshipFlagsForRefresh(
+  tx: Prisma.TransactionClient,
+  operation: { op: OpKind; targetId?: string; patch: ReviewPatch },
+  campaignId: string,
+  baseVersions: Record<string, number>,
+) {
+  try {
+    return await evaluateRelationshipOperationFlags(
+      tx,
+      operation,
+      campaignId,
+      baseVersions,
+    );
+  } catch (error) {
+    if (error instanceof ServiceError && error.message === "Relationship not found.") {
+      // The edge was archived/removed under the proposal — hold it as stale
+      // rather than throwing while refreshing the queue.
       return { blockedByLock: false, isStale: true };
     }
     throw error;
@@ -1792,7 +2055,13 @@ async function applyRelationshipOperation(
       );
     case OpKind.DELETE_RELATIONSHIP:
       if (!operation.targetId) throw new ServiceError("Missing relationship target.");
-      return applyDeleteRelationship(tx, changeSet, operation.id, operation.targetId);
+      return applyDeleteRelationship(
+        tx,
+        changeSet,
+        operation.id,
+        operation.targetId,
+        patch,
+      );
     default:
       throw new ServiceError("Unsupported relationship operation.");
   }
@@ -1935,6 +2204,7 @@ async function applyDeleteRelationship(
   changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
   operationId: string,
   relationshipId: string,
+  patch: ReviewPatch,
 ) {
   const relationship = await tx.relationship.findFirst({
     where: {
@@ -1942,9 +2212,24 @@ async function applyDeleteRelationship(
       campaignId: changeSet.campaignId,
       status: { not: CanonStatus.ARCHIVED },
     },
-    select: { id: true, locked: true },
+    select: { id: true, locked: true, version: true },
   });
   if (!relationship) throw new ServiceError("Relationship not found.");
+
+  // Re-check staleness in-transaction, the same way applyUpdateRelationship
+  // does — the pre-flight flag refresh runs in a separate transaction, so an
+  // edge edited in that window must hold the delete rather than archive the
+  // newer edge.
+  const expectedVersion = readTo(patch, "_baseVersion");
+  if (typeof expectedVersion === "number" && expectedVersion !== relationship.version) {
+    await tx.changeOperation.update({
+      where: { id: operationId },
+      data: { isStale: true },
+    });
+    throw new ServiceError(
+      "This relationship changed since you opened it. Reload and try again.",
+    );
+  }
 
   if (relationship.locked) {
     await tx.changeOperation.update({
