@@ -20,6 +20,7 @@ import {
   setChangeOperationDecision,
   setEntityLock,
   supersedeChangeSet,
+  type ReviewPatch,
 } from "@/server/services/review";
 
 function makeUser(email: string) {
@@ -222,6 +223,22 @@ describe("event effects", () => {
     ]);
   });
 
+  it("previews repeated effects against the prior effect's result", async () => {
+    const { owner, campaign, carl, event } = await setup("sequential-preview@test.com");
+    await declareEffect(owner.id, campaign.id, event.id, [
+      { kind: "ADJUST_STAT", targetEntityId: carl.id, stat: "gold", delta: 5 },
+      { kind: "ADJUST_STAT", targetEntityId: carl.id, stat: "gold", delta: 5 },
+    ]);
+
+    await applyEventEffects(owner.id, campaign.id, event.id);
+    const queue = await listPendingChangeSetsForUser(owner.id, campaign.id);
+
+    expect(queue[0].operations[0].effectPreviews).toEqual([
+      expect.objectContaining({ before: 100, after: 105 }),
+      expect.objectContaining({ before: 105, after: 110 }),
+    ]);
+  });
+
   it("ignores malformed stored effect rows when submitting valid effects for review", async () => {
     const { owner, campaign, carl, event } = await setup("malformed-effects@test.com");
     await declareEffect(owner.id, campaign.id, event.id, [
@@ -299,7 +316,7 @@ describe("event effects", () => {
     const result = await applyEventEffects(owner.id, campaign.id, event.id);
     const queue = await listPendingChangeSetsForUser(owner.id, campaign.id);
     const proposedEffects = (queue[0].operations[0].patch as {
-      effects: { to: Record<string, unknown>[] };
+      effects: { to: Prisma.JsonObject[] };
     }).effects.to;
     await setChangeOperationDecision(
       owner.id,
@@ -326,6 +343,80 @@ describe("event effects", () => {
       delta: 50,
       reviewStatus: "APPLIED",
     });
+  });
+
+  it("rejects effects omitted from an edited proposal after applying the remainder", async () => {
+    const { owner, campaign, carl, event } = await setup("remove-edited-effect@test.com");
+    await declareEffect(owner.id, campaign.id, event.id, [
+      { kind: "ADJUST_STAT", targetEntityId: carl.id, stat: "gold", delta: 50 },
+      { kind: "ADJUST_STAT", targetEntityId: carl.id, stat: "level", delta: 1 },
+    ]);
+
+    const result = await applyEventEffects(owner.id, campaign.id, event.id);
+    const queue = await listPendingChangeSetsForUser(owner.id, campaign.id);
+    const proposedEffects = (queue[0].operations[0].patch as {
+      effects: { to: Prisma.JsonObject[] };
+    }).effects.to;
+    const removedId = proposedEffects[1].id;
+    const retainedEffect = proposedEffects[0] as unknown as NonNullable<
+      ReviewPatch[string]["to"]
+    >;
+    await setChangeOperationDecision(
+      owner.id,
+      campaign.id,
+      result.changeSetId,
+      result.operationId,
+      {
+        decision: "EDITED",
+        editedPatch: { effects: { to: [retainedEffect] } },
+      },
+    );
+
+    await approveAcceptedChangeSet(owner.id, campaign.id, result.changeSetId);
+
+    await expect(
+      prisma.crawler.findUniqueOrThrow({ where: { id: carl.id } }),
+    ).resolves.toMatchObject({ gold: 150, level: 3 });
+    const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    expect(timeline[0].effects.find((effect) => effect.id === removedId)).toMatchObject({
+      applied: false,
+      reviewStatus: "REJECTED",
+      pendingChangeSetId: null,
+      pendingOperationId: null,
+    });
+  });
+
+  it("rejects edited effect additions with unknown ids", async () => {
+    const { owner, campaign, carl, event } = await setup("add-edited-effect@test.com");
+    await declareEffect(owner.id, campaign.id, event.id, [
+      { kind: "ADJUST_STAT", targetEntityId: carl.id, stat: "gold", delta: 50 },
+    ]);
+
+    const result = await applyEventEffects(owner.id, campaign.id, event.id);
+    await expect(
+      setChangeOperationDecision(
+        owner.id,
+        campaign.id,
+        result.changeSetId,
+        result.operationId,
+        {
+          decision: "EDITED",
+          editedPatch: {
+            effects: {
+              to: [
+                {
+                  id: "unsupported-addition",
+                  kind: "ADJUST_STAT",
+                  targetEntityId: carl.id,
+                  stat: "gold",
+                  delta: 5,
+                },
+              ],
+            },
+          },
+        },
+      ),
+    ).rejects.toThrow(/unknown effect/i);
   });
 
   it("surfaces locked effect targets as blocked before approval", async () => {

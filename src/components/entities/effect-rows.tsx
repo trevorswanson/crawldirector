@@ -55,9 +55,11 @@ function emptyRow(): EffectRowValue {
 export function EffectRows({
   candidates,
   initial,
+  allowAdd = true,
 }: {
   candidates: EntityCandidate[];
   initial?: EffectRowValue[];
+  allowAdd?: boolean;
 }) {
   const [rows, setRows] = useState(
     (initial ?? []).map((row, index) => ({ key: index, ...row })),
@@ -87,15 +89,17 @@ export function EffectRows({
         <span className="font-mono text-[9.5px] uppercase tracking-[.08em] text-[var(--ink-faint)]">
           Effects
         </span>
-        <button
-          type="button"
-          onClick={addRow}
-          disabled={rows.length >= 20 || candidates.length === 0}
-          className="inline-flex items-center gap-[6px] border border-[var(--line)] px-[8px] py-[5px] font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:text-[var(--ink-dim)] disabled:opacity-50"
-        >
-          <Plus aria-hidden size={11} />
-          Add effect
-        </button>
+        {allowAdd && (
+          <button
+            type="button"
+            onClick={addRow}
+            disabled={rows.length >= 20 || candidates.length === 0}
+            className="inline-flex items-center gap-[6px] border border-[var(--line)] px-[8px] py-[5px] font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:text-[var(--ink-dim)] disabled:opacity-50"
+          >
+            <Plus aria-hidden size={11} />
+            Add effect
+          </button>
+        )}
       </div>
       {candidates.length === 0 && (
         <p className="text-[10.5px] text-[var(--ink-faint)]">

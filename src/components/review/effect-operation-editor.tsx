@@ -142,19 +142,6 @@ export function EffectOperationEditor({
             ))
           )}
         </div>
-        {!rejected && !readOnly && effects.length === 0 && (
-          <div className="border-t border-[var(--line)] px-3 py-3">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => setEditing(true)}
-            >
-              <Pencil aria-hidden size={13} />
-              Add effect
-            </Button>
-          </div>
-        )}
       </div>
     );
   }
@@ -163,7 +150,7 @@ export function EffectOperationEditor({
   return (
     <form action={action}>
       <div className="border-t border-[var(--line)] px-3 py-3">
-        <EffectRows candidates={candidates} initial={initial} />
+        <EffectRows candidates={candidates} initial={initial} allowAdd={false} />
       </div>
       <div className="flex gap-2 border-t border-[var(--line)] px-3 py-3">
         <Button type="submit" size="sm" variant="outline">

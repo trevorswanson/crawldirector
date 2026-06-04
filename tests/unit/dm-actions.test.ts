@@ -691,9 +691,9 @@ describe("review queue actions", () => {
     expect(setChangeOperationFieldDecision).toHaveBeenCalledTimes(4);
   });
 
-  it("saves edited effect rows as an EDITED effects patch", async () => {
+  it("saves edited existing effect rows as an EDITED effects patch", async () => {
     const fd = new FormData();
-    fd.set("effectCount", "2");
+    fd.set("effectCount", "1");
     // Row 0: an ADJUST_STAT keeping its stable id.
     fd.set("effectId_0", "fx-1");
     fd.set("effectKind_0", "ADJUST_STAT");
@@ -701,11 +701,6 @@ describe("review queue actions", () => {
     fd.set("effectStat_0", "gold");
     fd.set("effectDelta_0", "750");
     fd.set("effectNote_0", "Boss loot, bumped");
-    // Row 1: a SET_ALIVE (dead) without an id (newly declared in the editor).
-    fd.set("effectKind_1", "SET_ALIVE");
-    fd.set("effectTarget_1", "crawler-2");
-    fd.set("effectValue_1", "dead");
-
     await editEventEffectsOperationAction("c1", "cs1", "op1", fd);
 
     expect(setChangeOperationDecision).toHaveBeenCalledWith(
@@ -726,18 +721,24 @@ describe("review queue actions", () => {
                 delta: 750,
                 note: "Boss loot, bumped",
               },
-              {
-                kind: "SET_ALIVE",
-                targetEntityId: "crawler-2",
-                value: false,
-                note: "",
-              },
             ],
           },
         },
       },
     );
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+  });
+
+  it("ignores unsupported new effect rows without stable ids", async () => {
+    const fd = new FormData();
+    fd.set("effectCount", "1");
+    fd.set("effectKind_0", "SET_ALIVE");
+    fd.set("effectTarget_0", "crawler-2");
+    fd.set("effectValue_0", "dead");
+
+    await editEventEffectsOperationAction("c1", "cs1", "op1", fd);
+
+    expect(setChangeOperationDecision).not.toHaveBeenCalled();
   });
 
   it("ignores effect edits with no valid rows", async () => {

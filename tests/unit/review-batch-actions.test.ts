@@ -9,6 +9,7 @@ import {
   approveChangeSetRun,
   createPendingEntityChangeSet,
   rejectChangeSetRun,
+  setChangeOperationFieldDecision,
   setEntityLock,
 } from "@/server/services/review";
 
@@ -136,6 +137,64 @@ describe("review service - batch run actions", () => {
     await expect(
       prisma.changeSet.findUniqueOrThrow({ where: { id: blocked.id } }),
     ).resolves.toMatchObject({ status: "PENDING" });
+  });
+
+  it("preserves rejected fields while approving the rest of a generator run", async () => {
+    const { dmId, campaignId } = await seed();
+    const entityId = await createEntity(dmId, campaignId, "Partially reviewed NPC");
+    const runId = "generator-run-partial-fields";
+    const baseVersion = await versionOf(entityId);
+    const changeSet = await createPendingEntityChangeSet(dmId, campaignId, {
+      source: "AI",
+      runId,
+      title: "AI partial update",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: entityId,
+          patch: {
+            _baseVersion: { to: baseVersion },
+            summary: { from: "", to: "Explicitly rejected summary" },
+            description: { from: "", to: "Bulk-approved description" },
+          },
+        },
+      ],
+    });
+    const operation = await prisma.changeOperation.findFirstOrThrow({
+      where: { changeSetId: changeSet.id },
+    });
+
+    await setChangeOperationFieldDecision(
+      dmId,
+      campaignId,
+      changeSet.id,
+      operation.id,
+      { field: "summary", decision: "REJECTED" },
+    );
+    await setEntityLock(dmId, campaignId, entityId, { lockedFields: ["summary"] });
+
+    await expect(approveChangeSetRun(dmId, campaignId, runId)).resolves.toMatchObject({
+      approvedIds: [changeSet.id],
+      heldIds: [],
+    });
+    await expect(
+      prisma.entity.findUniqueOrThrow({ where: { id: entityId } }),
+    ).resolves.toMatchObject({
+      summary: null,
+      description: "Bulk-approved description",
+    });
+    await expect(
+      prisma.changeOperation.findUniqueOrThrow({ where: { id: operation.id } }),
+    ).resolves.toMatchObject({
+      decision: "EDITED",
+      fieldDecisions: {
+        summary: "REJECTED",
+        description: "ACCEPTED",
+      },
+      editedPatch: {
+        description: { from: "", to: "Bulk-approved description" },
+      },
+    });
   });
 
   it("rejects every pending change set in a run without touching canon", async () => {

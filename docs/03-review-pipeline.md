@@ -84,6 +84,9 @@ an input only when the DM chooses **Edit**. Each field decision persists
 independently, so accepting or editing one row leaves untouched rows `PENDING`.
 An `EDITED` operation patch stores the accepted field subset that approval
 applies; the separate field-decision map preserves the UI/review history.
+Run-level **accept all non-conflicting** accepts fields that are still pending
+but must preserve explicit field rejections and saved edits rather than
+promoting the original operation patch wholesale.
 
 ### Provenance
 
@@ -141,12 +144,13 @@ Default flow:
    `APPLY_EVENT_EFFECTS` operation that targets the event and shows the resolved
    entity patch in the queue (for example, `Crawler.gold: 20 -> 70`).
 3. The Review Queue owns approve/edit/reject/supersede. Editing the queued
-   operation should let the DM fix the target, effect kind, stat, or value before
-   approval.
+   operation should let the DM fix or remove a declared effect before approval.
+   Adding brand-new effects belongs to the event edit/declaration flow, not an
+   existing apply-effects proposal.
 4. Approval applies the resolved patch atomically, marks the event effect rows as
-   applied, records the applying Change Set id on those rows, and attaches every
-   target as an `AFFECTED` participant so affected entities show the event in
-   their timelines.
+   applied, marks effect rows omitted by an edited proposal as rejected, records
+   the applying Change Set id on applied rows, and attaches every target as an
+   `AFFECTED` participant so affected entities show the event in their timelines.
 5. Rejection or supersede must not mutate the target entity. The UI must also
    avoid leaving a rejected effect looking like a still-actionable unapplied
    effect; either remove it from the active effect list or mark it with an

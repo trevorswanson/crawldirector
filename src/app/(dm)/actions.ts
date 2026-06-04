@@ -446,7 +446,11 @@ export async function editEventEffectsOperationAction(
   const user = await requireUser();
   const rows = parseEffectRows(formData);
   const parsed = z.array(eventEffectSchema).max(20).safeParse(rows ?? []);
-  if (!parsed.success || parsed.data.length === 0) return;
+  if (
+    !parsed.success ||
+    parsed.data.length === 0 ||
+    parsed.data.some((effect) => !effect.id)
+  ) return;
 
   const editedPatch: ReviewPatch = {
     effects: { to: parsed.data as ReviewPatch[string]["to"] },

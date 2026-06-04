@@ -65,6 +65,7 @@ describe("EffectOperationEditor", () => {
 
     // Editor revealed: seeded rows with resolved targets + stable ids.
     expect(screen.getByRole("button", { name: "Save effects" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Add effect" })).toBeNull();
     expect(screen.getByDisplayValue("500")).toBeDefined();
     expect(screen.getByDisplayValue("Mark dead")).toBeDefined();
     expect(
@@ -131,7 +132,7 @@ describe("EffectOperationEditor", () => {
     expect(screen.queryByRole("button", { name: "Add effect" })).toBeNull();
   });
 
-  it("opens an empty effect editor from Add effect and can cancel", () => {
+  it("does not offer unsupported additions for an empty effect proposal", () => {
     render(
       <EffectOperationEditor
         action={noop}
@@ -141,10 +142,9 @@ describe("EffectOperationEditor", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Add effect" }));
-    expect(screen.getByRole("button", { name: "Save effects" })).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByText("No effects in this proposal.")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Add effect" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save effects" })).toBeNull();
   });
 
   it("hides per-row Edit controls in read-only history", () => {

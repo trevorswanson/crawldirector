@@ -76,6 +76,11 @@ relationships/events are reviewable + lockable.
 - [x] Added a migration plus focused service/action/page/component regressions for
       independent pending fields, individual event-title approval, row-local
       Save/Discard, and resolved effect previews.
+- [x] Review hardening follow-up: run-level **Accept all non-conflicting** now
+      preserves explicit field rejections and saved edits; effect proposals
+      reject omitted rows after applying the retained subset, disallow unsupported
+      additions, and calculate repeated same-stat previews sequentially so the
+      displayed values match approval.
 
 ### Done — slice 13: read-first per-field Review Queue + Done/reopen state (2026-06-04)
 
