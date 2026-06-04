@@ -57,6 +57,35 @@ in the general search bar.
 membership, log events with participants, and traverse cause→effect chains;
 relationships/events are reviewable + lockable.
 
+### Done — slice 15: derived event order + intra-floor rank/drag (ADR 0004 slice 1) (2026-06-04)
+
+- [x] **Stopped the `ORDERKEY` leak** into the Review Queue: `createEvent` /
+      `updateEvent` no longer put `orderKey` in the reviewable patch. Order is
+      now **derived server-side** from the event's in-game-time anchor (the
+      floor) in the review apply path (`applyCreateEvent` / `applyUpdateEvent`),
+      so a derived sort key is never presented to the DM as editable canon.
+- [x] **Added an intra-floor `rank`** (`Event.rank`, a fractional index —
+      lexicographically-sortable string, `src/lib/rank.ts`, a self-contained port
+      of the `fractional-indexing` algorithm). The timeline sorts by
+      `(orderKey desc, rank desc, createdAt desc)`; new events append above their
+      floor (newest-first), and a floor move re-derives `orderKey` + a fresh rank.
+- [x] **Intra-floor drag** on the campaign timeline page: events are draggable
+      with a grip handle and "drag to reorder within a floor" hint; dropping
+      computes the dragged event's new neighbours (pure `computeReorderNeighbors`)
+      and calls `reorderEvent` (a mechanical, audited, review-bypassing `rank`
+      update like `setEventLock`). Cross-floor drops are no-ops/rejected.
+- [x] **Migration** `20260604210000_m3_event_rank`: additive `rank TEXT COLLATE
+      "C"` column (bytewise ordering — the rank alphabet spans both letter cases)
+      + per-`(campaign, floor)` backfill spacing existing rows by their current
+      order, and a `(campaignId, orderKey, rank)` index replacing the coarse one.
+- [x] Tests: `rank` fractional-index unit suite; service tests for derived
+      `orderKey`/`rank`, reorder (incl. cross-floor reject + DM-only), floor-move
+      re-rank; `reorderEventAction` + drag-interaction/neighbour component tests.
+      Verified end-to-end in-app (drag persisted a `REORDER` audit entry).
+- [ ] **Deferred to ADR 0004 slices 2–3:** the typed `timeRef` anchor + generated
+      phrasing + derived rank; causality-consistency warnings / "order from
+      causality."
+
 ### Done — slice 14: independent field decisions + resolved effect previews (2026-06-04)
 
 - [x] Fixed per-field review persistence by adding `ChangeOperation.fieldDecisions`.

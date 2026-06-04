@@ -59,6 +59,7 @@ function event(overrides: Partial<EntityEvent> = {}): EntityEvent {
     summary: "They beat the boss.",
     time: { floor: 9, label: "Day 3" },
     orderKey: 9,
+    rank: "a0",
     secret: false,
     locked: false,
     source: "DM",

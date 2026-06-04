@@ -347,8 +347,12 @@ model Relationship {
 // Floor-9 battle. Reviewable + lockable like any canon; writes route through the
 // review service, which records provenance. Soft-archived, never hard-deleted.
 // In-game time is a flexible structure ({ floor?, dayInFloor?, absoluteDay?,
-// label? }) plus an integer `orderKey` the timeline sorts by — DCC time is
-// irregular, so we never force calendar dates (docs/01-domain-model.md).
+// label? }) — DCC time is irregular, so we never force calendar dates
+// (docs/01-domain-model.md). Order is mechanical and derived, never authored: a
+// coarse `orderKey` (the floor) for cheap DB sorting, plus a fractional `rank`
+// (a lexicographically-sortable string, see src/lib/rank.ts) that gives a
+// stable, DM-controllable order *within* a floor. The timeline sorts by
+// `(orderKey, rank)`; neither is a reviewable field (ADR 0004).
 model Event {
   id          String       @id @default(cuid())
   campaignId  String
@@ -357,6 +361,7 @@ model Event {
   description String?
   inGameTime  Json         @default("{}")
   orderKey    Int          @default(0)
+  rank        String       @default("a0")
   // Structured deltas this event can apply to entity state on approval
   // (docs/01-domain-model.md). Each entry:
   //   { id, kind: "ADJUST_STAT"|"SET_STAT"|"SET_ALIVE", targetEntityId,
@@ -383,7 +388,7 @@ model Event {
   updatedAt DateTime @updatedAt
 
   @@index([campaignId, status])
-  @@index([campaignId, orderKey])
+  @@index([campaignId, orderKey, rank])
 }
 
 // Typed link between an Event and an Entity (any-to-any: any entity can hold any

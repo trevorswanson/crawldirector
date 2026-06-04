@@ -52,7 +52,14 @@ producers. Pending `APPLY_EVENT_EFFECTS` proposals now render a **structured
 effect-row editor** in the Review Queue (kind/target/stat/value pickers reusing
 the timeline's `EffectRows`) instead of a raw JSON patch — a DM corrects effects
 and saves an `EDITED` decision the existing approval path reconciles by effect
-id. Still to come in M3: time-bounded membership and knowledge/reveal grants.
+id. Event **order is now derived, not authored** (ADR 0004 slice 1): `orderKey`
+(the floor) is computed server-side and stripped from the reviewable patch — no
+more `ORDERKEY` leak in the queue — and a fractional intra-floor `rank`
+(`src/lib/rank.ts`) gives stable within-floor ordering the DM sets by **dragging**
+events on the campaign timeline (a mechanical, audited, review-bypassing update).
+Still to come in M3: time-bounded membership and knowledge/reveal grants, plus
+ADR 0004 slices 2–3 (typed `timeRef` anchor + generated phrasing; causality
+ordering checks).
 **M3.5 (tagging)** is
 underway: the service layer (campaign tag list, tag filtering, tag-aware search)
 plus the UI — a tag-selection input with campaign autocomplete on the entity

@@ -290,10 +290,18 @@ if the entity did not act in or witness the original scene.
 ## Time model
 
 DCC time is irregular (per-floor timers, "days since collapse", broadcast
-schedules). Model in-game time as a flexible structure:
-`{ floor?, dayInFloor?, absoluteDay?, label? }` plus an ordering key, rather than
-forcing real calendar dates. DMs can sort the timeline by the ordering key and
-annotate with human-readable labels.
+schedules). Model in-game time as a flexible structure rather than forcing real
+calendar dates, and keep the sort key derived (the DM never types it).
+
+The model separates three concerns — **order** (mechanical sort key, never
+user-facing), **anchor** (a structured `timeRef`: a `basis` such as `COLLAPSE` /
+`FLOOR_START` / `FLOOR_COLLAPSE` / `EVENT` / `UNSCHEDULED`, plus an `offset` and
+`unit`), and **label** (narrative phrasing, generated from the anchor with an
+optional human override). Floor is the macro-clock; an intra-floor `rank`
+(fractional index, drag-to-reorder) gives real within-floor ordering, and the
+causality DAG provides a coherence check. See
+[`adr/0004-event-time-model-and-ordering.md`](./adr/0004-event-time-model-and-ordering.md)
+for the full decision and migration plan.
 
 ## Scale-control tactics
 

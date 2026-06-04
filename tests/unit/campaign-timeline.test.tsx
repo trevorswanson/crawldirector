@@ -13,16 +13,24 @@ const {
   createCampaignEventAction,
   updateCampaignEventAction,
   applyCampaignEventEffectsAction,
+  reorderEventAction,
+  routerRefresh,
 } = vi.hoisted(() => ({
   createCampaignEventAction: vi.fn(),
   updateCampaignEventAction: vi.fn(),
   applyCampaignEventEffectsAction: vi.fn(),
+  reorderEventAction: vi.fn(),
+  routerRefresh: vi.fn(),
 }));
 
 vi.mock("@/app/(dm)/actions", () => ({
   createCampaignEventAction,
   updateCampaignEventAction,
   applyCampaignEventEffectsAction,
+  reorderEventAction,
+}));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: routerRefresh }),
 }));
 vi.mock("next/link", () => ({
   default: ({ href, children, className }: {
@@ -36,7 +44,10 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-import { CampaignTimeline } from "@/components/timeline/campaign-timeline";
+import {
+  CampaignTimeline,
+  computeReorderNeighbors,
+} from "@/components/timeline/campaign-timeline";
 import type { CampaignTimelineEvent } from "@/server/services/events";
 
 const candidates = [
@@ -51,6 +62,7 @@ const events: CampaignTimelineEvent[] = [
     summary: "Carl and Donut survive.",
     time: { floor: 9, label: "Day 3" },
     orderKey: 9,
+    rank: "a0",
     secret: false,
     locked: false,
     source: "DM",
@@ -63,6 +75,38 @@ const events: CampaignTimelineEvent[] = [
     effects: [],
   },
 ];
+
+function makeEvent(
+  id: string,
+  title: string,
+  orderKey: number,
+  rank: string,
+): CampaignTimelineEvent {
+  return {
+    id,
+    title,
+    summary: null,
+    time: { floor: orderKey || null, label: null },
+    orderKey,
+    rank,
+    secret: false,
+    locked: false,
+    source: "DM",
+    participants: [],
+    causedBy: [],
+    causes: [],
+    effects: [],
+  };
+}
+
+// Three floor-9 events in displayed (rank-descending) order: Alpha, Bravo, Charlie.
+function floor9Trio(): CampaignTimelineEvent[] {
+  return [
+    makeEvent("ev-a", "Alpha", 9, "a2"),
+    makeEvent("ev-b", "Bravo", 9, "a1"),
+    makeEvent("ev-c", "Charlie", 9, "a0"),
+  ];
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -96,6 +140,7 @@ describe("CampaignTimeline", () => {
             summary: null,
             time: { floor: null, label: null },
             orderKey: 0,
+            rank: "a0",
             secret: true,
             locked: true,
             source: "AI",
@@ -354,5 +399,131 @@ describe("CampaignTimeline", () => {
         .disabled,
     ).toBe(true);
     expect(screen.getAllByLabelText("Participant role")).toHaveLength(1);
+  });
+
+  it("reorders an event within its floor by drag and refreshes", async () => {
+    reorderEventAction.mockResolvedValue(undefined);
+    const floorEvents = floor9Trio();
+    render(
+      <CampaignTimeline campaignId="c1" events={floorEvents} candidates={candidates} />,
+    );
+
+    expect(screen.getByText(/Drag events to reorder/)).toBeDefined();
+
+    // Drag the top event (ev-a) onto the bottom event (ev-c): it moves below it.
+    const top = screen.getByText("Alpha").closest("article") as HTMLElement;
+    const bottom = screen.getByText("Charlie").closest("article") as HTMLElement;
+    fireEvent.dragStart(top);
+    fireEvent.dragOver(bottom);
+    fireEvent.drop(bottom);
+
+    await waitFor(() => {
+      expect(reorderEventAction).toHaveBeenCalledWith("c1", "ev-a", {
+        aboveId: "ev-c",
+        belowId: null,
+      });
+    });
+    await waitFor(() => expect(routerRefresh).toHaveBeenCalled());
+  });
+
+  it("surfaces a reorder error and does not refresh", async () => {
+    reorderEventAction.mockResolvedValue({ error: "This event is locked." });
+    render(
+      <CampaignTimeline campaignId="c1" events={floor9Trio()} candidates={candidates} />,
+    );
+
+    const top = screen.getByText("Alpha").closest("article") as HTMLElement;
+    const middle = screen.getByText("Bravo").closest("article") as HTMLElement;
+    fireEvent.dragStart(top);
+    fireEvent.dragOver(middle);
+    fireEvent.drop(middle);
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain("locked");
+    });
+    expect(routerRefresh).not.toHaveBeenCalled();
+  });
+
+  it("tracks and clears the drop affordance on drag over, leave, and end", () => {
+    render(
+      <CampaignTimeline campaignId="c1" events={floor9Trio()} candidates={candidates} />,
+    );
+    const top = screen.getByText("Alpha").closest("article") as HTMLElement;
+    const bottom = screen.getByText("Charlie").closest("article") as HTMLElement;
+
+    fireEvent.dragStart(top);
+    fireEvent.dragOver(bottom);
+    fireEvent.dragLeave(bottom);
+    fireEvent.dragEnd(top);
+
+    // No action runs from hovering alone.
+    expect(reorderEventAction).not.toHaveBeenCalled();
+    // After drag end the grip handles are back (dragging state cleared).
+    expect(top.getAttribute("draggable")).toBe("true");
+  });
+
+  it("ignores a drop onto an event on another floor", () => {
+    reorderEventAction.mockResolvedValue(undefined);
+    const mixed: CampaignTimelineEvent[] = [
+      makeEvent("ev-a", "Alpha", 9, "a2"),
+      makeEvent("ev-x", "Xenon", 2, "a0"),
+    ];
+    render(<CampaignTimeline campaignId="c1" events={mixed} candidates={candidates} />);
+
+    const floor9 = screen.getByText("Alpha").closest("article") as HTMLElement;
+    const floor2 = screen.getByText("Xenon").closest("article") as HTMLElement;
+    fireEvent.dragStart(floor9);
+    fireEvent.drop(floor2);
+
+    expect(reorderEventAction).not.toHaveBeenCalled();
+  });
+});
+
+describe("computeReorderNeighbors", () => {
+  const list = [
+    { id: "a", orderKey: 9 },
+    { id: "b", orderKey: 9 },
+    { id: "c", orderKey: 9 },
+    { id: "x", orderKey: 2 },
+  ];
+
+  it("returns null for a self drop", () => {
+    expect(computeReorderNeighbors(list, "a", "a")).toBeNull();
+  });
+
+  it("returns null across floors", () => {
+    expect(computeReorderNeighbors(list, "a", "x")).toBeNull();
+  });
+
+  it("returns null for an unknown id", () => {
+    expect(computeReorderNeighbors(list, "missing", "a")).toBeNull();
+  });
+
+  it("moving down past the last drops below it", () => {
+    expect(computeReorderNeighbors(list, "a", "c")).toEqual({
+      aboveId: "c",
+      belowId: null,
+    });
+  });
+
+  it("moving down one slot lands between the target and its next", () => {
+    expect(computeReorderNeighbors(list, "a", "b")).toEqual({
+      aboveId: "b",
+      belowId: "c",
+    });
+  });
+
+  it("moving up past the first drops above it", () => {
+    expect(computeReorderNeighbors(list, "c", "a")).toEqual({
+      aboveId: null,
+      belowId: "a",
+    });
+  });
+
+  it("moving up one slot lands between the target and its previous", () => {
+    expect(computeReorderNeighbors(list, "c", "b")).toEqual({
+      aboveId: "a",
+      belowId: "b",
+    });
   });
 });

@@ -12,6 +12,7 @@ import {
   Visibility,
 } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
+import { generateRankBetween } from "@/lib/rank";
 import { prisma } from "@/server/db";
 
 type JsonPrimitive = string | number | boolean | null;
@@ -865,7 +866,6 @@ async function enrichReviewQueueItems(
           title: true,
           summary: true,
           inGameTime: true,
-          orderKey: true,
           secret: true,
           participants: { select: { entityId: true, role: true } },
         },
@@ -961,7 +961,6 @@ function currentEventValue(
     title: string;
     summary: string | null;
     inGameTime: Prisma.JsonValue;
-    orderKey: number | null;
     secret: boolean;
     participants: { entityId: string; role: EventParticipantRole }[];
   },
@@ -974,8 +973,6 @@ function currentEventValue(
       return event.summary;
     case "inGameTime":
       return event.inGameTime;
-    case "orderKey":
-      return event.orderKey;
     case "secret":
       return event.secret;
     case "participants":
@@ -3098,6 +3095,34 @@ function buildEffectPreviews(
   return previews;
 }
 
+// ADR 0004: order is derived, never authored. `orderKey` is the event's floor
+// (the coarse macro-clock) read straight from its in-game-time anchor; absent a
+// floor it is 0 (unscheduled events sort last). The patch never carries it.
+function orderKeyFromInGameTime(value: JsonValue | undefined): number {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const floor = (value as { [key: string]: JsonValue }).floor;
+    if (typeof floor === "number") return floor;
+  }
+  return 0;
+}
+
+// The next fractional `rank` for a new (or floor-moved) event: appended above
+// its floor's current events so a freshly logged event reads first within its
+// floor, matching the timeline's newest-first ordering. A drag later slots an
+// event between neighbours (see reorderEvent in events.ts).
+async function nextRankForFloor(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  orderKey: number,
+): Promise<string> {
+  const last = await tx.event.findFirst({
+    where: { campaignId, orderKey, status: { not: CanonStatus.ARCHIVED } },
+    orderBy: { rank: "desc" },
+    select: { rank: true },
+  });
+  return generateRankBetween(last?.rank ?? null, null);
+}
+
 async function applyEventOperation(
   tx: Prisma.TransactionClient,
   changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
@@ -3188,6 +3213,7 @@ async function applyCreateEvent(
     }
   }
 
+  const orderKey = orderKeyFromInGameTime(readTo(patch, "inGameTime"));
   const event = await tx.event.create({
     data: {
       campaignId: changeSet.campaignId,
@@ -3195,7 +3221,8 @@ async function applyCreateEvent(
       summary: nullableString(readTo(patch, "summary")),
       description: nullableString(readTo(patch, "description")),
       inGameTime: jsonObject(readTo(patch, "inGameTime")),
-      orderKey: numberWithDefault(readTo(patch, "orderKey"), 0),
+      orderKey,
+      rank: await nextRankForFloor(tx, changeSet.campaignId, orderKey),
       effects: serializeEventEffects(effects),
       secret: booleanWithDefault(readTo(patch, "secret"), false),
       source: changeSet.source,
@@ -3237,7 +3264,7 @@ async function applyUpdateEvent(
       campaignId: changeSet.campaignId,
       status: { not: CanonStatus.ARCHIVED },
     },
-    select: { id: true, locked: true, version: true, effects: true },
+    select: { id: true, locked: true, version: true, effects: true, orderKey: true },
   });
   if (!event) throw new ServiceError("Event not found.");
 
@@ -3278,8 +3305,18 @@ async function applyUpdateEvent(
   }
   if ("summary" in patch) data.summary = nullableString(readTo(patch, "summary"));
   if ("description" in patch) data.description = nullableString(readTo(patch, "description"));
-  if ("inGameTime" in patch) data.inGameTime = jsonObject(readTo(patch, "inGameTime"));
-  if ("orderKey" in patch) data.orderKey = numberWithDefault(readTo(patch, "orderKey"), 0);
+  if ("inGameTime" in patch) {
+    data.inGameTime = jsonObject(readTo(patch, "inGameTime"));
+    // Order is re-derived from the anchor, never taken from the patch. When the
+    // floor changes the event moves clocks, so it also gets a fresh rank at the
+    // top of its new floor; within the same floor its rank (and any manual drag
+    // order) is preserved.
+    const nextOrderKey = orderKeyFromInGameTime(readTo(patch, "inGameTime"));
+    if (nextOrderKey !== event.orderKey) {
+      data.orderKey = nextOrderKey;
+      data.rank = await nextRankForFloor(tx, changeSet.campaignId, nextOrderKey);
+    }
+  }
   if ("secret" in patch) data.secret = booleanWithDefault(readTo(patch, "secret"), false);
 
   let nextEffects = parseEventEffects(event.effects as JsonValue);

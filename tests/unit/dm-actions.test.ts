@@ -26,6 +26,7 @@ const {
   updateEvent,
   archiveEvent,
   setEventLock,
+  reorderEvent,
   linkEventCause,
   archiveEventCausality,
   applyEventEffects,
@@ -58,6 +59,7 @@ const {
   updateEvent: vi.fn(),
   archiveEvent: vi.fn(),
   setEventLock: vi.fn(),
+  reorderEvent: vi.fn(),
   linkEventCause: vi.fn(),
   archiveEventCausality: vi.fn(),
   applyEventEffects: vi.fn(),
@@ -102,6 +104,7 @@ vi.mock("@/server/services/events", () => ({
   updateEvent,
   archiveEvent,
   setEventLock,
+  reorderEvent,
   linkEventCause,
   archiveEventCausality,
   applyEventEffects,
@@ -138,6 +141,7 @@ import {
   updateCampaignEventAction,
   createCampaignEventAction,
   archiveEventAction,
+  reorderEventAction,
   toggleEventLockAction,
   linkEventCauseAction,
   archiveEventCausalityAction,
@@ -1495,6 +1499,43 @@ describe("archiveEventAction", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e3");
+  });
+});
+
+describe("reorderEventAction", () => {
+  it("reorders the event and revalidates participant timelines + the timeline", async () => {
+    reorderEvent.mockResolvedValue({ id: "ev1", participantIds: ["e1", "e2"] });
+
+    const result = await reorderEventAction("c1", "ev1", {
+      aboveId: "ev2",
+      belowId: null,
+    });
+
+    expect(result).toBeUndefined();
+    expect(reorderEvent).toHaveBeenCalledWith("u1", "c1", "ev1", {
+      aboveId: "ev2",
+      belowId: null,
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+  });
+
+  it("returns the service error message and does not revalidate", async () => {
+    reorderEvent.mockRejectedValue(new ServiceError("Only within their floor."));
+
+    const result = await reorderEventAction("c1", "ev1", { aboveId: "ev9" });
+
+    expect(result).toEqual({ error: "Only within their floor." });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("returns a generic error for an unexpected failure", async () => {
+    reorderEvent.mockRejectedValue(new Error("boom"));
+
+    const result = await reorderEventAction("c1", "ev1", {});
+
+    expect(result).toEqual({ error: "Could not reorder the event. Please try again." });
   });
 });
 

@@ -13,6 +13,7 @@ import {
   linkEventCause,
   listCampaignTimeline,
   listEventsForEntity,
+  reorderEvent,
   setEventLock,
   updateEvent,
 } from "@/server/services/events";
@@ -1282,6 +1283,175 @@ describe("updateEvent", () => {
         title: "Event",
         secret: false,
       }),
+    ).rejects.toBeInstanceOf(ServiceError);
+  });
+});
+
+describe("event order (orderKey + rank)", () => {
+  it("derives orderKey from the floor and never carries it in the patch", async () => {
+    const owner = await makeUser("order-derive@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Floor 7 scene",
+      floor: 7,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    const row = await prisma.event.findUnique({ where: { id: event.id } });
+    expect(row?.orderKey).toBe(7);
+    expect(row?.rank).toBeTruthy();
+
+    // The reviewable patch the change set stored must not contain `orderKey` —
+    // order is derived, not editable canon (ADR 0004).
+    const operation = await prisma.changeOperation.findFirst({
+      where: { op: OpKind.CREATE_EVENT, targetId: event.id },
+    });
+    expect(operation).not.toBeNull();
+    expect(Object.keys(operation?.patch as object)).not.toContain("orderKey");
+  });
+
+  it("gives events on a floor distinct ranks, newest first", async () => {
+    const owner = await makeUser("order-rank@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    const first = await createEvent(owner.id, campaign.id, {
+      title: "First",
+      floor: 9,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const second = await createEvent(owner.id, campaign.id, {
+      title: "Second",
+      floor: 9,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    const rows = await prisma.event.findMany({
+      where: { id: { in: [first.id, second.id] } },
+      select: { id: true, rank: true },
+    });
+    const rankById = new Map(rows.map((row) => [row.id, row.rank]));
+    expect(rankById.get(first.id)).not.toBe(rankById.get(second.id));
+    // Newer event ranks higher, so it sorts first within the floor.
+    expect(rankById.get(second.id)! > rankById.get(first.id)!).toBe(true);
+
+    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual(["Second", "First"]);
+  });
+
+  it("reorders an event within its floor by dropping it between neighbours", async () => {
+    const owner = await makeUser("reorder@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    const a = await createEvent(owner.id, campaign.id, {
+      title: "A",
+      floor: 5,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await createEvent(owner.id, campaign.id, {
+      title: "B",
+      floor: 5,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const c = await createEvent(owner.id, campaign.id, {
+      title: "C",
+      floor: 5,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    // Newest first → displayed order is C, B, A.
+    let timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual(["C", "B", "A"]);
+
+    // Move C to the bottom: drop it below A (aboveId = A, belowId = null).
+    const result = await reorderEvent(owner.id, campaign.id, c.id, {
+      aboveId: a.id,
+      belowId: null,
+    });
+    expect(result.participantIds).toContain(carl.id);
+
+    timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual(["B", "A", "C"]);
+  });
+
+  it("rejects a cross-floor reorder", async () => {
+    const owner = await makeUser("reorder-cross@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const onFive = await createEvent(owner.id, campaign.id, {
+      title: "Five",
+      floor: 5,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const onNine = await createEvent(owner.id, campaign.id, {
+      title: "Nine",
+      floor: 9,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    await expect(
+      reorderEvent(owner.id, campaign.id, onFive.id, { aboveId: onNine.id }),
+    ).rejects.toBeInstanceOf(ServiceError);
+  });
+
+  it("reassigns orderKey and rank when an edit moves the event to a new floor", async () => {
+    const owner = await makeUser("reorder-move-floor@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    // An existing event on floor 12 so the moved event must rank below it.
+    await createEvent(owner.id, campaign.id, {
+      title: "Resident",
+      floor: 12,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Mover",
+      floor: 3,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const before = await prisma.event.findUnique({ where: { id: event.id } });
+
+    await updateEvent(owner.id, campaign.id, event.id, {
+      title: "Mover",
+      floor: 12,
+      secret: false,
+    });
+
+    const after = await prisma.event.findUnique({ where: { id: event.id } });
+    expect(after?.orderKey).toBe(12);
+    expect(after?.rank).not.toBe(before?.rank);
+  });
+
+  it("requires DM access to reorder", async () => {
+    const owner = await makeUser("reorder-owner@test.com");
+    const player = await makeUser("reorder-player@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Scene",
+      floor: 4,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    await expect(
+      reorderEvent(player.id, campaign.id, event.id, { aboveId: null, belowId: null }),
     ).rejects.toBeInstanceOf(ServiceError);
   });
 });

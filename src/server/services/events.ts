@@ -8,6 +8,7 @@ import {
   Visibility,
 } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
+import { generateRankBetween } from "@/lib/rank";
 import {
   createEventSchema,
   updateEventSchema,
@@ -131,6 +132,9 @@ export type EntityEvent = {
   summary: string | null;
   time: EventTimeInfo;
   orderKey: number;
+  // Intra-floor fractional sort key (ADR 0004). Exposed so the timeline can
+  // compute drag neighbours; it is mechanical, never shown as a value.
+  rank: string;
   secret: boolean;
   locked: boolean;
   source: ChangeSource;
@@ -161,6 +165,9 @@ export type CampaignTimelineEvent = {
   summary: string | null;
   time: EventTimeInfo;
   orderKey: number;
+  // Intra-floor fractional sort key (ADR 0004) — used to compute drag
+  // neighbours on the timeline; mechanical, never shown as a value.
+  rank: string;
   secret: boolean;
   locked: boolean;
   source: ChangeSource;
@@ -190,9 +197,10 @@ function isPlayerVisible(entity: {
   );
 }
 
-// Build the flexible in-game time JSON ({ floor?, label? }) the Event stores,
-// plus the integer order key the timeline sorts by (DCC time is irregular, so
-// floor is the natural coarse ordering — see docs/01-domain-model.md).
+// Build the flexible in-game time JSON ({ floor?, label? }) the Event stores.
+// The mechanical order key (the floor) and intra-floor rank are derived from
+// this anchor server-side in the review apply path, never authored here —
+// DCC time is irregular, so floor is the natural coarse clock (ADR 0004).
 function buildInGameTime(input: { floor?: number; timeLabel?: string }) {
   const time: { floor?: number; label?: string } = {};
   if (typeof input.floor === "number") time.floor = input.floor;
@@ -252,11 +260,12 @@ export async function createEvent(
   }
 
   const inGameTime = buildInGameTime(parsed);
+  // No `orderKey`: order is derived server-side from the in-game-time anchor at
+  // apply time, never carried in the reviewable patch (ADR 0004).
   const patch: ReviewPatch = {
     title: { to: parsed.title },
     summary: { to: nullIfEmpty(parsed.summary) },
     inGameTime: { to: inGameTime },
-    orderKey: { to: typeof parsed.floor === "number" ? parsed.floor : 0 },
     secret: { to: parsed.secret },
     participants: {
       to: parsed.participants.map((participant) => ({
@@ -310,12 +319,12 @@ export async function updateEvent(
   }
 
   const inGameTime = buildInGameTime(parsed);
+  // No `orderKey`: order is re-derived from the anchor at apply time (ADR 0004).
   const patch: ReviewPatch = {
     _baseVersion: { to: existing.version },
     title: { to: parsed.title },
     summary: { to: nullIfEmpty(parsed.summary) },
     inGameTime: { to: inGameTime },
-    orderKey: { to: typeof parsed.floor === "number" ? parsed.floor : 0 },
     secret: { to: parsed.secret },
   };
   if (parsed.participants) {
@@ -389,13 +398,14 @@ export async function listEventsForEntity(
       ...(isPlayer ? { secret: false } : {}),
       participants: { some: { entityId } },
     },
-    orderBy: [{ orderKey: "desc" }, { createdAt: "desc" }],
+    orderBy: [{ orderKey: "desc" }, { rank: "desc" }, { createdAt: "desc" }],
     select: {
       id: true,
       title: true,
       summary: true,
       inGameTime: true,
       orderKey: true,
+      rank: true,
       secret: true,
       locked: true,
       source: true,
@@ -471,6 +481,7 @@ export async function listEventsForEntity(
       summary: event.summary,
       time: readTimeInfo(event.inGameTime),
       orderKey: event.orderKey,
+      rank: event.rank,
       secret: event.secret,
       locked: event.locked,
       source: event.source,
@@ -517,13 +528,14 @@ export async function listCampaignTimeline(
       status: { not: CanonStatus.ARCHIVED },
       ...(isPlayer ? { secret: false } : {}),
     },
-    orderBy: [{ orderKey: "desc" }, { createdAt: "desc" }],
+    orderBy: [{ orderKey: "desc" }, { rank: "desc" }, { createdAt: "desc" }],
     select: {
       id: true,
       title: true,
       summary: true,
       inGameTime: true,
       orderKey: true,
+      rank: true,
       secret: true,
       locked: true,
       source: true,
@@ -594,6 +606,7 @@ export async function listCampaignTimeline(
       summary: event.summary,
       time: readTimeInfo(event.inGameTime),
       orderKey: event.orderKey,
+      rank: event.rank,
       secret: event.secret,
       locked: event.locked,
       source: event.source,
@@ -683,6 +696,92 @@ export async function setEventLock(
       locked: updated.locked,
       participantIds: updated.participants.map((participant) => participant.entityId),
     };
+  });
+}
+
+/**
+ * Reorder an event within its floor by dropping it between two neighbours.
+ * Order is mechanical, not canon (ADR 0004), so this updates the fractional
+ * `rank` directly — audited, version-untouched, bypassing the review pipeline,
+ * the same shape as `setEventLock`. Intra-floor only: each neighbour must share
+ * the moved event's floor (`orderKey`); a cross-floor move is rejected. Pass the
+ * ids of the events shown immediately above/below the drop slot (the displayed
+ * order is rank-descending, so `above` has the higher rank); pass `null` for an
+ * end of the list. Returns the participant ids whose timelines need
+ * revalidation. DM/co-DM only.
+ */
+export async function reorderEvent(
+  userId: string,
+  campaignId: string,
+  eventId: string,
+  neighbors: { aboveId?: string | null; belowId?: string | null },
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  return prisma.$transaction(async (tx) => {
+    const event = await tx.event.findFirst({
+      where: { id: eventId, campaignId, status: { not: CanonStatus.ARCHIVED } },
+      select: {
+        id: true,
+        orderKey: true,
+        rank: true,
+        participants: { select: { entityId: true } },
+      },
+    });
+    if (!event) throw new ServiceError("Event not found.");
+
+    const loadNeighborRank = async (
+      neighborId: string | null | undefined,
+    ): Promise<string | null> => {
+      if (!neighborId) return null;
+      if (neighborId === eventId) {
+        throw new ServiceError("An event cannot be reordered next to itself.");
+      }
+      const neighbor = await tx.event.findFirst({
+        where: { id: neighborId, campaignId, status: { not: CanonStatus.ARCHIVED } },
+        select: { rank: true, orderKey: true },
+      });
+      if (!neighbor) throw new ServiceError("Neighbouring event not found.");
+      if (neighbor.orderKey !== event.orderKey) {
+        throw new ServiceError("Events can only be reordered within their floor.");
+      }
+      return neighbor.rank;
+    };
+
+    // Displayed rank-descending: the event above the slot has the higher rank
+    // and the event below the lower one, so the new rank slots between them.
+    const aboveRank = await loadNeighborRank(neighbors.aboveId);
+    const belowRank = await loadNeighborRank(neighbors.belowId);
+
+    let nextRank: string;
+    try {
+      nextRank = generateRankBetween(belowRank, aboveRank);
+    } catch {
+      throw new ServiceError("Could not place the event between those neighbours.");
+    }
+
+    const participantIds = event.participants.map((participant) => participant.entityId);
+    if (nextRank === event.rank) {
+      return { id: event.id, participantIds };
+    }
+
+    await tx.event.update({ where: { id: eventId }, data: { rank: nextRank } });
+    await tx.auditLog.create({
+      data: {
+        campaignId,
+        actorUserId: userId,
+        action: "REORDER",
+        targetType: "EVENT",
+        targetId: eventId,
+        detail: {
+          rank: nextRank,
+          previousRank: event.rank,
+          orderKey: event.orderKey,
+        },
+      },
+    });
+
+    return { id: event.id, participantIds };
   });
 }
 

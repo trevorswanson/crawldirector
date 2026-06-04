@@ -35,6 +35,7 @@ import {
   archiveEventCausality,
   createEvent,
   linkEventCause,
+  reorderEvent,
   setEventLock,
   updateEvent,
 } from "@/server/services/events";
@@ -858,6 +859,31 @@ export async function createCampaignEventAction(
   for (const participant of parsed.data.participants) {
     revalidatePath(`/campaigns/${campaignId}/entities/${participant.entityId}`);
   }
+  return undefined;
+}
+
+// Reorder an event within its floor (intra-floor drag on the timeline). Order is
+// mechanical, not canon (ADR 0004), so this bypasses the review pipeline. The
+// client passes the ids of the events shown immediately above/below the drop
+// slot (null at an end of the list).
+export async function reorderEventAction(
+  campaignId: string,
+  eventId: string,
+  neighbors: { aboveId?: string | null; belowId?: string | null },
+): Promise<EventActionState> {
+  const user = await requireUser();
+  let result: { participantIds: string[] };
+  try {
+    result = await reorderEvent(user.id, campaignId, eventId, neighbors);
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    return { error: "Could not reorder the event. Please try again." };
+  }
+
+  for (const id of result.participantIds) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${id}`);
+  }
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
   return undefined;
 }
 
