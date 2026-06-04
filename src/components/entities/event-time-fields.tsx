@@ -55,20 +55,7 @@ export function EventTimeFields({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap gap-2">
-        <select
-          name="basis"
-          aria-label="Time basis"
-          value={basis}
-          onChange={(event) => setBasis(event.target.value as TimeBasisValue)}
-          className={`${inputClass} font-mono text-[11px]`}
-        >
-          {timeBasisValues.map((value) => (
-            <option key={value} value={value}>
-              {basisLabels[value]}
-            </option>
-          ))}
-        </select>
+      <div className="flex flex-wrap items-center gap-2">
         <input
           name="floor"
           type="number"
@@ -79,6 +66,7 @@ export function EventTimeFields({
           placeholder="Floor"
           className={`${inputClass} w-[80px]`}
         />
+        <span className="text-[var(--ink-faint)] select-none" aria-hidden>·</span>
         <input
           name="offset"
           type="number"
@@ -98,6 +86,19 @@ export function EventTimeFields({
           {timeUnitValues.map((value) => (
             <option key={value} value={value}>
               {value.toLowerCase()}
+            </option>
+          ))}
+        </select>
+        <select
+          name="basis"
+          aria-label="Time basis"
+          value={basis}
+          onChange={(event) => setBasis(event.target.value as TimeBasisValue)}
+          className={`${inputClass} font-mono text-[11px]`}
+        >
+          {timeBasisValues.map((value) => (
+            <option key={value} value={value}>
+              {basisLabels[value]}
             </option>
           ))}
         </select>
