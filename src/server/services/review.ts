@@ -661,8 +661,19 @@ export async function applyAutoApprovedEventChangeSet(
         title: input.title,
         summary: input.summary,
         actorUserId: userId,
-        operations: {
-          create: input.operations.map((operation) => ({
+      },
+    });
+
+    // Some event operations depend on an earlier operation in the same change
+    // set (for example UPDATE_EVENT declares effects before APPLY_EVENT_EFFECTS
+    // applies them). Create and retain rows sequentially so application order is
+    // the caller's declared order, not an unordered relation result.
+    const operations: Prisma.ChangeOperationGetPayload<object>[] = [];
+    for (const operation of input.operations) {
+      operations.push(
+        await tx.changeOperation.create({
+          data: {
+            changeSetId: changeSet.id,
             op: operation.op,
             targetType:
               operation.op === OpKind.CREATE_EVENT_CAUSALITY ||
@@ -671,15 +682,18 @@ export async function applyAutoApprovedEventChangeSet(
                 : "EVENT",
             targetId: operation.targetId,
             patch: operation.patch as Prisma.InputJsonValue,
-          })),
-        },
-      },
-      include: { operations: true },
-    });
-
+          },
+        }),
+      );
+    }
+    const changeSetWithOperations = { ...changeSet, operations };
     const appliedIds: string[] = [];
-    for (const operation of changeSet.operations) {
-      const targetId = await applyEventOperation(tx, changeSet, operation);
+    for (const operation of operations) {
+      const targetId = await applyEventOperation(
+        tx,
+        changeSetWithOperations,
+        operation,
+      );
       appliedIds.push(targetId);
       await tx.changeOperation.update({
         where: { id: operation.id },

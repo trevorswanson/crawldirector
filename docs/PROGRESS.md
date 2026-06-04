@@ -81,6 +81,9 @@ relationships/events are reviewable + lockable.
       reject omitted rows after applying the retained subset, disallow unsupported
       additions, and calculate repeated same-stat previews sequentially so the
       displayed values match approval.
+- [x] Auto-approved event change sets now create and apply dependent operations
+      in their declared order, so an `UPDATE_EVENT` that declares effects always
+      completes before its following `APPLY_EVENT_EFFECTS` operation.
 
 ### Done — slice 13: read-first per-field Review Queue + Done/reopen state (2026-06-04)
 

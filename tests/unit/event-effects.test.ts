@@ -585,6 +585,20 @@ describe("event effects", () => {
 
     const crawler = await prisma.crawler.findUnique({ where: { id: donut.id } });
     expect(crawler?.gold).toBe(60);
+    const autoApplySet = await prisma.changeSet.findFirstOrThrow({
+      where: { campaignId: campaign.id, title: "Edit event" },
+      orderBy: { createdAt: "desc" },
+      include: { operations: true },
+    });
+    expect(autoApplySet.operations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ op: "UPDATE_EVENT", decision: "ACCEPTED" }),
+        expect.objectContaining({
+          op: "APPLY_EVENT_EFFECTS",
+          decision: "ACCEPTED",
+        }),
+      ]),
+    );
 
     const donutTimeline = await listEventsForEntity(owner.id, campaign.id, donut.id);
     expect(donutTimeline.map((item) => item.id)).toContain(event.id);
