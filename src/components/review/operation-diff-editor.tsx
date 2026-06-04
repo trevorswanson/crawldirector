@@ -434,7 +434,7 @@ function EntityReviewInput({
 
 // A short human hint for each basis, so the picker reads in plain language.
 const basisLabels: Record<TimeBasisValue, string> = {
-  COLLAPSE: "Days since collapse",
+  COLLAPSE: "Since collapse",
   FLOOR_START: "After floor opened",
   FLOOR_COLLAPSE: "Before floor falls",
   EVENT: "Before/after an event",
