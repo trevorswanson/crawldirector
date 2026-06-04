@@ -15,6 +15,7 @@ import {
   createGenericEntitySchema,
   createRelationshipSchema,
   changeOperationDecisionSchema,
+  eventEffectSchema,
   eventParticipantRoleValues,
   lockFieldSchema,
   reviewEditValueKindSchema,
@@ -394,6 +395,34 @@ export async function editChangeOperationPatchAction(
   const editedPatch = parseReviewEditedPatch(formData);
   if (!editedPatch) return;
 
+  await setChangeOperationDecision(user.id, campaignId, changeSetId, operationId, {
+    decision: "EDITED",
+    editedPatch,
+  });
+  revalidatePath(`/campaigns/${campaignId}/review`);
+}
+
+// Save a structured edit to a pending APPLY_EVENT_EFFECTS operation from the
+// Review Queue's effect-row editor. Reuses the shared `parseEffectRows` form
+// reader + `eventEffectSchema` (coercing delta/value/alive), then stores the
+// normalized effects as an EDITED decision's `editedPatch.effects.to` — the
+// same shape `applyApplyEventEffects` reconciles by effect `id` on approval.
+// Invalid rows (e.g. a missing delta) are a silent no-op, matching the generic
+// patch editor.
+export async function editEventEffectsOperationAction(
+  campaignId: string,
+  changeSetId: string,
+  operationId: string,
+  formData: FormData,
+): Promise<void> {
+  const user = await requireUser();
+  const rows = parseEffectRows(formData);
+  const parsed = z.array(eventEffectSchema).max(20).safeParse(rows ?? []);
+  if (!parsed.success || parsed.data.length === 0) return;
+
+  const editedPatch: ReviewPatch = {
+    effects: { to: parsed.data as ReviewPatch[string]["to"] },
+  };
   await setChangeOperationDecision(user.id, campaignId, changeSetId, operationId, {
     decision: "EDITED",
     editedPatch,

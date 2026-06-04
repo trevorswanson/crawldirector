@@ -57,6 +57,46 @@ in the general search bar.
 membership, log events with participants, and traverse cause→effect chains;
 relationships/events are reviewable + lockable.
 
+### Done — slice 12: structured effect-row editor in the Review Queue (2026-06-04)
+
+- [x] Replaced the Review Queue's raw JSON patch textarea for
+      `APPLY_EVENT_EFFECTS` operations with a structured **effect-row editor**.
+      Each reviewed effect now renders as a row with kind (Adjust/Set stat ·
+      Set alive) + crawler target typeahead + stat + delta/value (or alive/dead)
+      + note pickers — the same `EffectRows` primitive the timeline log forms use
+      — instead of a hand-edited JSON blob. A DM can correct target/stat/value
+      before approval without touching JSON.
+- [x] Added the `EffectOperationEditor` client component
+      (`src/components/review/effect-operation-editor.tsx`): seeds rows from the
+      operation's `effects` patch (preferring a prior `editedPatch`), resolves
+      each effect's target id to a crawler name, and falls back to the raw id for
+      an unresolved (e.g. archived) target so the original target is never
+      silently dropped. The Review Queue page (`/campaigns/[id]/review`) branches
+      on `APPLY_EVENT_EFFECTS` to render it, fetching the campaign's crawler
+      candidates **only** when a pending proposal actually applies effects.
+- [x] Added `editEventEffectsOperationAction`: reuses the shared
+      `parseEffectRows` form reader + `eventEffectSchema` (coercing
+      delta/value/alive), then saves the normalized effects as an `EDITED`
+      decision's `editedPatch.effects.to` — the exact shape
+      `applyApplyEventEffects` already reconciles by effect `id` on approval, so
+      no service/schema change was needed. Effect `id`s are preserved through the
+      editor so the edited patch matches the stored rows. Invalid rows (e.g. a
+      zero delta) are a silent no-op, matching the generic patch editor.
+- [x] Added coverage: page tests render the structured editor for an effect op
+      (resolved target, kind/stat/delta, stable ids, no JSON textarea) and assert
+      the crawler lookup is gated on effect-op presence; a focused
+      `effect-operation-editor.test.tsx` covers seeding, target resolution, the
+      unresolved-target fallback, and the rejected-dim branch; action tests cover
+      the EDITED effects round-trip (id preservation + SET_ALIVE coercion) and the
+      invalid-row no-op. lint, typecheck, build, and the full coverage gate are
+      green (statements 95.0%, above the floor).
+- [x] **Verified in-browser** against the seeded Demo Campaign: a pending
+      `APPLY_EVENT_EFFECTS` proposal renders the structured editor (no JSON);
+      editing Carl's Gold delta 500 → 750 and clicking **Save effects** persisted
+      an `EDITED` decision; approving it applied the **edited** value (Carl's gold
+      500 → 1250), confirming the editor → `editedPatch` → approval chain end to
+      end.
+
 ### Done — slice 11: pending relationship proposals through the Review Queue (2026-06-04)
 
 - [x] Made relationships fully **reviewable**, not just auto-approved. Added
@@ -386,12 +426,12 @@ relationships/events are reviewable + lockable.
 - Event effects v1 is in place for crawler-targeted effects (`ADJUST_STAT`,
       `SET_STAT`, `SET_ALIVE`). The normal UI path submits unapplied effects to
       the Review Queue; approval applies atomically and rejection/supersede marks
-      the effect rows reviewed. Remaining refinements: render a dedicated
-      effect-row editor in `/review` instead of the current JSON patch editor,
+      the effect rows reviewed. The dedicated `/review` effect-row editor shipped
+      in slice 12 (replacing the JSON patch editor). Remaining refinements:
       deep-link timeline pending badges to the proposal, and design compensating
       change sets for undo/revert of already-applied effects.
-- Next slices: knowledge/reveal grants for fog of war; time-bounded membership;
-      a dedicated Review Queue effect-row editor. (Pending (AI/import)
+- Next slices: knowledge/reveal grants for fog of war; time-bounded membership.
+      (The dedicated Review Queue effect-row editor shipped in slice 12. Pending (AI/import)
       relationship proposals route through the Review Queue as of slice 11, and
       events already carry a pending path — `createPendingEventChangeSet` plus the
       `EVENT` approval dispatch — so relationships/events are now both fully

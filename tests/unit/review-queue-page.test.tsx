@@ -6,10 +6,12 @@ const {
   requireUser,
   getCampaignForUser,
   listPendingChangeSetsForUser,
+  listEntitiesForUser,
   notFound,
   approveChangeSetAction,
   approveChangeSetRunAction,
   editChangeOperationPatchAction,
+  editEventEffectsOperationAction,
   rejectChangeSetAction,
   rejectChangeSetRunAction,
   setChangeOperationDecisionAction,
@@ -18,12 +20,14 @@ const {
   requireUser: vi.fn(),
   getCampaignForUser: vi.fn(),
   listPendingChangeSetsForUser: vi.fn(),
+  listEntitiesForUser: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
   approveChangeSetAction: vi.fn(),
   approveChangeSetRunAction: vi.fn(),
   editChangeOperationPatchAction: vi.fn(),
+  editEventEffectsOperationAction: vi.fn(),
   rejectChangeSetAction: vi.fn(),
   rejectChangeSetRunAction: vi.fn(),
   setChangeOperationDecisionAction: vi.fn(),
@@ -33,10 +37,12 @@ const {
 vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/campaigns", () => ({ getCampaignForUser }));
 vi.mock("@/server/services/review", () => ({ listPendingChangeSetsForUser }));
+vi.mock("@/server/services/entities", () => ({ listEntitiesForUser }));
 vi.mock("@/app/(dm)/actions", () => ({
   approveChangeSetAction,
   approveChangeSetRunAction,
   editChangeOperationPatchAction,
+  editEventEffectsOperationAction,
   rejectChangeSetAction,
   rejectChangeSetRunAction,
   setChangeOperationDecisionAction,
@@ -62,6 +68,7 @@ beforeEach(() => {
     _count: { members: 1, entities: 0 },
   });
   listPendingChangeSetsForUser.mockResolvedValue([]);
+  listEntitiesForUser.mockResolvedValue({ entities: [] });
 });
 
 afterEach(cleanup);
@@ -165,6 +172,147 @@ describe("ReviewQueuePage", () => {
     expect(screen.getByRole("button", { name: "Approve 0 accepted" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Reject set" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Supersede" })).toBeDefined();
+  });
+
+  it("renders the structured effect-row editor for APPLY_EVENT_EFFECTS ops", async () => {
+    listEntitiesForUser.mockResolvedValue({
+      entities: [
+        { id: "crawler-1", name: "Carl", type: "CRAWLER" },
+        { id: "npc-1", name: "Princess Donut", type: "NPC" },
+      ],
+    });
+    listPendingChangeSetsForUser.mockResolvedValue([
+      {
+        id: "cs-fx",
+        campaignId: "c1",
+        source: "DM",
+        title: "Apply event effects",
+        summary: null,
+        status: "PENDING",
+        actorUserId: "u1",
+        providerId: null,
+        model: null,
+        promptId: null,
+        promptVersion: null,
+        runId: null,
+        baseVersions: {},
+        reviewedById: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        operations: [
+          {
+            id: "op-fx",
+            changeSetId: "cs-fx",
+            op: "APPLY_EVENT_EFFECTS",
+            targetType: "EVENT",
+            targetId: "event-1",
+            targetLabel: "Floor 9 boss falls",
+            targetEntityType: "EVENT",
+            targetLocked: false,
+            lockedFields: [],
+            currentValues: {},
+            patch: {
+              effects: {
+                to: [
+                  {
+                    id: "fx-1",
+                    kind: "ADJUST_STAT",
+                    targetEntityId: "crawler-1",
+                    stat: "gold",
+                    delta: 500,
+                    note: "Boss loot",
+                    applied: false,
+                    reviewStatus: "PENDING",
+                    pendingChangeSetId: "cs-fx",
+                    pendingOperationId: "op-fx",
+                  },
+                ],
+              },
+            },
+            editedPatch: null,
+            decision: "PENDING",
+            blockedByLock: false,
+            isStale: false,
+          },
+        ],
+      },
+    ]);
+
+    const view = render(
+      await ReviewQueuePage({ params: Promise.resolve({ id: "c1" }) }),
+    );
+
+    // The campaign's crawlers are fetched only because an effect op is pending.
+    expect(listEntitiesForUser).toHaveBeenCalledWith("u1", "c1");
+    // Structured editor — not the generic JSON patch textarea.
+    expect(screen.getByRole("button", { name: "Save effects" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Save edits" })).toBeNull();
+    expect(
+      view.container.querySelector('textarea[name="value:effects"]'),
+    ).toBeNull();
+    // Seeded row: resolved target name, kind, stat, delta, and the stable id.
+    expect(screen.getByText("Carl")).toBeDefined();
+    expect(screen.getByDisplayValue("Adjust stat")).toBeDefined();
+    expect(screen.getByDisplayValue("Gold")).toBeDefined();
+    expect(screen.getByDisplayValue("500")).toBeDefined();
+    expect(
+      view.container.querySelector<HTMLInputElement>('input[name="effectId_0"]')
+        ?.value,
+    ).toBe("fx-1");
+    expect(
+      view.container.querySelector<HTMLInputElement>('input[name="effectTarget_0"]')
+        ?.value,
+    ).toBe("crawler-1");
+  });
+
+  it("skips the crawler lookup when no effect op is pending", async () => {
+    listPendingChangeSetsForUser.mockResolvedValue([
+      {
+        id: "cs-ent",
+        campaignId: "c1",
+        source: "AI",
+        title: "Create entity",
+        summary: null,
+        status: "PENDING",
+        actorUserId: "u1",
+        providerId: null,
+        model: null,
+        promptId: null,
+        promptVersion: null,
+        runId: null,
+        baseVersions: {},
+        reviewedById: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        operations: [
+          {
+            id: "op-ent",
+            changeSetId: "cs-ent",
+            op: "CREATE_ENTITY",
+            targetType: "ENTITY",
+            targetId: null,
+            targetLabel: "Grull",
+            targetEntityType: "MOB_TYPE",
+            targetLocked: false,
+            lockedFields: [],
+            currentValues: {},
+            patch: { name: { to: "Grull" } },
+            editedPatch: null,
+            decision: "PENDING",
+            blockedByLock: false,
+            isStale: false,
+          },
+        ],
+      },
+    ]);
+
+    await ReviewQueuePage({ params: Promise.resolve({ id: "c1" }) });
+
+    expect(listEntitiesForUser).not.toHaveBeenCalled();
   });
 
   it("renders the mockup queue rail with source filters and selected detail", async () => {

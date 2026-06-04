@@ -48,8 +48,12 @@ are now fully reviewable, not just auto-approved: `createPendingRelationshipChan
 routes any-to-any edge create/update/delete through the Review Queue as `PENDING`
 proposals (lock-/staleness-flagged, with `Source → Target` queue labels), the
 counterpart to the entity and event pending paths — ready for AI/import (M4+)
-producers. Still to come in M3: a dedicated Review Queue effect-row editor,
-time-bounded membership, and knowledge/reveal grants. **M3.5 (tagging)** is
+producers. Pending `APPLY_EVENT_EFFECTS` proposals now render a **structured
+effect-row editor** in the Review Queue (kind/target/stat/value pickers reusing
+the timeline's `EffectRows`) instead of a raw JSON patch — a DM corrects effects
+and saves an `EDITED` decision the existing approval path reconciles by effect
+id. Still to come in M3: time-bounded membership and knowledge/reveal grants.
+**M3.5 (tagging)** is
 underway: the service layer (campaign tag list, tag filtering, tag-aware search)
 plus the UI — a tag-selection input with campaign autocomplete on the entity
 form, a Tags facet in the World Browser sidebar, and clickable tag badges — are

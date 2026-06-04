@@ -114,6 +114,7 @@ import {
   quickCreateEntityAction,
   getCampaignCanonIntegrityAction,
   editChangeOperationPatchAction,
+  editEventEffectsOperationAction,
   rejectChangeSetAction,
   rejectChangeSetRunAction,
   setChangeOperationDecisionAction,
@@ -639,6 +640,79 @@ describe("review queue actions", () => {
     await editChangeOperationPatchAction("c1", "cs1", "op1", emptyNumber);
     await editChangeOperationPatchAction("c1", "cs1", "op1", badJson);
     await editChangeOperationPatchAction("c1", "cs1", "op1", badKind);
+
+    expect(setChangeOperationDecision).not.toHaveBeenCalled();
+  });
+
+  it("saves edited effect rows as an EDITED effects patch", async () => {
+    const fd = new FormData();
+    fd.set("effectCount", "2");
+    // Row 0: an ADJUST_STAT keeping its stable id.
+    fd.set("effectId_0", "fx-1");
+    fd.set("effectKind_0", "ADJUST_STAT");
+    fd.set("effectTarget_0", "crawler-1");
+    fd.set("effectStat_0", "gold");
+    fd.set("effectDelta_0", "750");
+    fd.set("effectNote_0", "Boss loot, bumped");
+    // Row 1: a SET_ALIVE (dead) without an id (newly declared in the editor).
+    fd.set("effectKind_1", "SET_ALIVE");
+    fd.set("effectTarget_1", "crawler-2");
+    fd.set("effectValue_1", "dead");
+
+    await editEventEffectsOperationAction("c1", "cs1", "op1", fd);
+
+    expect(setChangeOperationDecision).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      "cs1",
+      "op1",
+      {
+        decision: "EDITED",
+        editedPatch: {
+          effects: {
+            to: [
+              {
+                id: "fx-1",
+                kind: "ADJUST_STAT",
+                targetEntityId: "crawler-1",
+                stat: "gold",
+                delta: 750,
+                note: "Boss loot, bumped",
+              },
+              {
+                kind: "SET_ALIVE",
+                targetEntityId: "crawler-2",
+                value: false,
+                note: "",
+              },
+            ],
+          },
+        },
+      },
+    );
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+  });
+
+  it("ignores effect edits with no valid rows", async () => {
+    // No effectCount at all -> parseEffectRows returns undefined.
+    await editEventEffectsOperationAction("c1", "cs1", "op1", new FormData());
+
+    // A targetless row (trailing empty) yields zero effects.
+    const emptyRow = new FormData();
+    emptyRow.set("effectCount", "1");
+    emptyRow.set("effectKind_0", "ADJUST_STAT");
+    emptyRow.set("effectStat_0", "gold");
+    emptyRow.set("effectDelta_0", "10");
+    await editEventEffectsOperationAction("c1", "cs1", "op1", emptyRow);
+
+    // An ADJUST_STAT with a zero delta fails schema validation.
+    const zeroDelta = new FormData();
+    zeroDelta.set("effectCount", "1");
+    zeroDelta.set("effectKind_0", "ADJUST_STAT");
+    zeroDelta.set("effectTarget_0", "crawler-1");
+    zeroDelta.set("effectStat_0", "gold");
+    zeroDelta.set("effectDelta_0", "0");
+    await editEventEffectsOperationAction("c1", "cs1", "op1", zeroDelta);
 
     expect(setChangeOperationDecision).not.toHaveBeenCalled();
   });

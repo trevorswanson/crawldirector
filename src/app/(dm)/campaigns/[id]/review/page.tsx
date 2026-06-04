@@ -14,11 +14,17 @@ import {
   approveChangeSetAction,
   approveChangeSetRunAction,
   editChangeOperationPatchAction,
+  editEventEffectsOperationAction,
   rejectChangeSetAction,
   rejectChangeSetRunAction,
   setChangeOperationDecisionAction,
   supersedeChangeSetAction,
 } from "@/app/(dm)/actions";
+import type { EntityCandidate } from "@/components/entities/entity-typeahead";
+import {
+  EffectOperationEditor,
+  type ReviewEffectSeed,
+} from "@/components/review/effect-operation-editor";
 import { Button } from "@/components/ui/button";
 import { HudTag } from "@/components/ui/hud-tag";
 import { Input } from "@/components/ui/input";
@@ -28,13 +34,17 @@ import { StatusPill } from "@/components/ui/status-pill";
 import { Textarea } from "@/components/ui/textarea";
 import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
+import { listEntitiesForUser } from "@/server/services/entities";
 import {
   listPendingChangeSetsForUser,
   type ReviewPatch,
   type ReviewQueueItem,
   type ReviewQueueOperation,
 } from "@/server/services/review";
+import { eventEffectStatValues, type EventEffectStat } from "@/lib/validation";
 import { cn } from "@/lib/utils";
+
+const effectStatSet = new Set<string>(eventEffectStatValues);
 
 const SOURCE_FILTERS = ["ALL", "AI", "PLAYER", "IMPORT"] as const;
 type SourceFilter = (typeof SOURCE_FILTERS)[number];
@@ -66,6 +76,16 @@ export default async function ReviewQueuePage({
   if (!campaign) notFound();
 
   const changeSets = await listPendingChangeSetsForUser(user.id, id);
+  // Only the structured effect-row editor needs the campaign's crawlers; skip
+  // the query entirely when no pending proposal applies event effects.
+  const hasEffectOps = changeSets.some((changeSet) =>
+    changeSet.operations.some((operation) => operation.op === "APPLY_EVENT_EFFECTS"),
+  );
+  const crawlerCandidates: EntityCandidate[] = hasEffectOps
+    ? (await listEntitiesForUser(user.id, id)).entities
+        .filter((entity) => entity.type === "CRAWLER")
+        .map((entity) => ({ id: entity.id, name: entity.name, type: entity.type }))
+    : [];
   const activeSource = sourceFilter(query.source);
   const filteredChangeSets = changeSets.filter((changeSet) =>
     sourceMatches(changeSet.source, activeSource),
@@ -225,6 +245,7 @@ export default async function ReviewQueuePage({
           <ReviewDetail
             campaignId={id}
             changeSet={selected}
+            crawlerCandidates={crawlerCandidates}
             run={selected.runId ? runGroups.find((run) => run.runId === selected.runId) : undefined}
           />
         ) : (
@@ -240,10 +261,12 @@ export default async function ReviewQueuePage({
 function ReviewDetail({
   campaignId,
   changeSet,
+  crawlerCandidates,
   run,
 }: {
   campaignId: string;
   changeSet: ReviewQueueItem;
+  crawlerCandidates: EntityCandidate[];
   run?: PendingRunGroup;
 }) {
   const status = reviewStatus(changeSet);
@@ -351,6 +374,7 @@ function ReviewDetail({
             key={operation.id}
             campaignId={campaignId}
             changeSetId={changeSet.id}
+            crawlerCandidates={crawlerCandidates}
             operation={operation}
           />
         ))}
@@ -362,14 +386,17 @@ function ReviewDetail({
 function OperationBlock({
   campaignId,
   changeSetId,
+  crawlerCandidates,
   operation,
 }: {
   campaignId: string;
   changeSetId: string;
+  crawlerCandidates: EntityCandidate[];
   operation: ReviewQueueOperation;
 }) {
   const rejected = operation.decision === "REJECTED";
   const accepted = operation.decision === "ACCEPTED" || operation.decision === "EDITED";
+  const isEffectOp = operation.op === "APPLY_EVENT_EFFECTS";
 
   return (
     <div
@@ -447,18 +474,35 @@ function OperationBlock({
         </div>
       </div>
 
-      <EditableDiffForm
-        action={editChangeOperationPatchAction.bind(
-          null,
-          campaignId,
-          changeSetId,
-          operation.id,
-        )}
-        editedPatch={operation.editedPatch as ReviewPatch | null}
-        operation={operation}
-        patch={operation.patch as ReviewPatch}
-        rejected={rejected}
-      />
+      {isEffectOp ? (
+        <EffectOperationEditor
+          action={editEventEffectsOperationAction.bind(
+            null,
+            campaignId,
+            changeSetId,
+            operation.id,
+          )}
+          candidates={crawlerCandidates}
+          effects={readEffectSeeds(
+            operation.patch as ReviewPatch,
+            operation.editedPatch as ReviewPatch | null,
+          )}
+          rejected={rejected}
+        />
+      ) : (
+        <EditableDiffForm
+          action={editChangeOperationPatchAction.bind(
+            null,
+            campaignId,
+            changeSetId,
+            operation.id,
+          )}
+          editedPatch={operation.editedPatch as ReviewPatch | null}
+          operation={operation}
+          patch={operation.patch as ReviewPatch}
+          rejected={rejected}
+        />
+      )}
       {operation.isStale && <ThreeWay operation={operation} />}
     </div>
   );
@@ -689,6 +733,48 @@ function ReviewValueInput({
       type={kind === "number" ? "number" : "text"}
     />
   );
+}
+
+// Read the effect array off an APPLY_EVENT_EFFECTS operation's patch (preferring
+// a prior EDITED patch) into serializable seeds for the effect-row editor.
+// Bookkeeping fields (review pointers, applied flags) are intentionally dropped —
+// the editor only touches the user-editable shape; approval re-reconciles by id.
+function readEffectSeeds(
+  patch: ReviewPatch,
+  editedPatch: ReviewPatch | null,
+): ReviewEffectSeed[] {
+  const raw =
+    editedPatch && "effects" in editedPatch
+      ? editedPatch.effects?.to
+      : patch.effects?.to;
+  if (!Array.isArray(raw)) return [];
+
+  const seeds: ReviewEffectSeed[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const record = item as Record<string, unknown>;
+    const kind = record.kind;
+    if (kind !== "ADJUST_STAT" && kind !== "SET_STAT" && kind !== "SET_ALIVE") {
+      continue;
+    }
+    if (typeof record.targetEntityId !== "string") continue;
+
+    seeds.push({
+      id: typeof record.id === "string" ? record.id : "",
+      kind,
+      targetEntityId: record.targetEntityId,
+      stat:
+        typeof record.stat === "string" && effectStatSet.has(record.stat)
+          ? (record.stat as EventEffectStat)
+          : null,
+      delta: typeof record.delta === "number" ? record.delta : null,
+      valueNumber:
+        typeof record.valueNumber === "number" ? record.valueNumber : null,
+      value: typeof record.value === "boolean" ? record.value : null,
+      note: typeof record.note === "string" ? record.note : null,
+    });
+  }
+  return seeds;
 }
 
 function FieldKey({ children }: { children: React.ReactNode }) {
