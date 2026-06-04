@@ -57,6 +57,31 @@ in the general search bar.
 membership, log events with participants, and traverse cause→effect chains;
 relationships/events are reviewable + lockable.
 
+### Done — slice 13: read-first per-field Review Queue + Done/reopen state (2026-06-04)
+
+- [x] Reworked normal Review Queue operations to match the milestone mockup's
+      read-first diff contract: every field shows `-` current / `+` proposed
+      values by default, with per-field **Accept**, **Reject**, and **Edit**
+      controls. Inputs are now opt-in and appear only for the field being edited;
+      saving persists the accepted field subset as the operation's existing
+      `EDITED` patch.
+- [x] Made `APPLY_EVENT_EFFECTS` follow the same rule: effect rows render as
+      compact read-only summaries by default, each row has its own **Edit**
+      affordance, and the shared `EffectRows` editor is revealed only after a DM
+      chooses to edit. Completed proposals render both normal diffs and effect
+      summaries as read-only history.
+- [x] Added the mockup-aligned post-decision **Done** state after approving or
+      rejecting a proposal. Rejected/superseded proposals can safely be reopened
+      into `PENDING`; reopening restores held event-effect rows and preserves
+      prior edited patches. Approved/partially-applied proposals can be reopened
+      for read-only inspection, but cannot be made pending again because that
+      would risk applying the same canon mutation twice; changing approved canon
+      still requires a new compensating proposal.
+- [x] Added focused component/page/action/service coverage for field decisions,
+      opt-in editors, per-row effect editing, accepted-field counts, Done
+      redirects, read-only approved history, rejected proposal reopening,
+      preserved edited patches, and event-effect pending-state restoration.
+
 ### Done — slice 12: structured effect-row editor in the Review Queue (2026-06-04)
 
 - [x] Replaced the Review Queue's raw JSON patch textarea for

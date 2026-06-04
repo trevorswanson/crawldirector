@@ -34,6 +34,13 @@ snapshot** — and individual field changes within them) moves through:
 - **SUPERSEDED** — a pending proposal invalidated because canon changed under it,
   or a newer proposal replaced it.
 
+The Review Queue shows a post-decision **Done** state instead of making a
+proposal disappear immediately. Rejected and superseded proposals can be
+reopened into `PENDING` because they never changed canon. Approved and partially
+applied proposals can be reopened for read-only inspection, but returning them
+to `PENDING` would risk applying the same mutation twice; revising approved
+canon requires a new compensating proposal.
+
 ### The Change Set / Proposal
 
 A **Change Set** is the unit of review. It bundles one or more **Change

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import {
   EffectOperationEditor,
@@ -17,7 +17,7 @@ const noop = () => {};
 afterEach(cleanup);
 
 describe("EffectOperationEditor", () => {
-  it("seeds rows from effects and resolves target names", () => {
+  it("shows a read-only summary by default and reveals the editor on Edit", () => {
     const effects: ReviewEffectSeed[] = [
       {
         id: "fx-1",
@@ -50,11 +50,18 @@ describe("EffectOperationEditor", () => {
       />,
     );
 
+    // Read-first: described effects, no live editor yet.
+    expect(screen.getByText("Gold +500")).toBeDefined();
+    expect(screen.getByText("— Loot")).toBeDefined();
+    expect(screen.getByText("Marked dead")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Save effects" })).toBeNull();
+    expect(container.querySelector('input[name="effectId_0"]')).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit effect 1" }));
+
+    // Editor revealed: seeded rows with resolved targets + stable ids.
     expect(screen.getByRole("button", { name: "Save effects" })).toBeDefined();
-    expect(screen.getByText("Carl")).toBeDefined();
-    expect(screen.getByText("Princess Donut")).toBeDefined();
     expect(screen.getByDisplayValue("500")).toBeDefined();
-    // SET_ALIVE row exposes the alive/dead select, defaulted to "dead".
     expect(screen.getByDisplayValue("Mark dead")).toBeDefined();
     expect(
       container.querySelector<HTMLInputElement>('input[name="effectId_0"]')?.value,
@@ -88,8 +95,13 @@ describe("EffectOperationEditor", () => {
       />,
     );
 
-    // The unresolved target still submits the original id and shows it as a label.
+    // Summary shows the raw id when unresolved.
     expect(screen.getByText("archived-crawler")).toBeDefined();
+    expect(screen.getByText("HP = 40")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit effect 1" }));
+
+    // The editor still submits the original id rather than dropping the target.
     expect(
       container.querySelector<HTMLInputElement>('input[name="effectTarget_0"]')
         ?.value,
@@ -97,7 +109,7 @@ describe("EffectOperationEditor", () => {
     expect(screen.getByDisplayValue("40")).toBeDefined();
   });
 
-  it("dims the editor when the operation is rejected", () => {
+  it("dims the summary and hides Edit when the operation is rejected", () => {
     const { container } = render(
       <EffectOperationEditor
         action={noop}
@@ -107,8 +119,51 @@ describe("EffectOperationEditor", () => {
       />,
     );
 
-    expect(container.querySelector("form")?.className).toContain("opacity-45");
-    // No seeded rows, but the editor still offers to add one.
-    expect(screen.getByRole("button", { name: "Add effect" })).toBeDefined();
+    expect(container.querySelector(".opacity-45")).not.toBeNull();
+    expect(screen.getByText("No effects in this proposal.")).toBeDefined();
+    // A rejected op offers no Edit affordance.
+    expect(screen.queryByRole("button", { name: "Add effect" })).toBeNull();
+  });
+
+  it("opens an empty effect editor from Add effect and can cancel", () => {
+    render(
+      <EffectOperationEditor
+        action={noop}
+        candidates={[]}
+        effects={[]}
+        rejected={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add effect" }));
+    expect(screen.getByRole("button", { name: "Save effects" })).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByText("No effects in this proposal.")).toBeDefined();
+  });
+
+  it("hides per-row Edit controls in read-only history", () => {
+    render(
+      <EffectOperationEditor
+        action={noop}
+        candidates={[]}
+        effects={[
+          {
+            id: "fx-1",
+            kind: "ADJUST_STAT",
+            targetEntityId: "crawler-1",
+            stat: "gold",
+            delta: 50,
+            valueNumber: null,
+            value: null,
+            note: null,
+          },
+        ]}
+        rejected={false}
+        readOnly
+      />,
+    );
+
+    expect(screen.getByText("Gold +50")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Edit effect 1" })).toBeNull();
   });
 });

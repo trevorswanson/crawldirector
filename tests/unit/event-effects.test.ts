@@ -16,6 +16,7 @@ import {
   approveChangeSet,
   listPendingChangeSetsForUser,
   rejectChangeSet,
+  reopenChangeSet,
   setChangeOperationDecision,
   setEntityLock,
   supersedeChangeSet,
@@ -401,6 +402,26 @@ describe("event effects", () => {
     await expect(applyEventEffects(owner.id, campaign.id, event.id)).rejects.toThrow(
       /no effects left/i,
     );
+  });
+
+  it("restores rejected effect rows when their proposal is reopened", async () => {
+    const { owner, campaign, carl, event } = await setup("reopen-effects@test.com");
+    await declareEffect(owner.id, campaign.id, event.id, [
+      { kind: "ADJUST_STAT", targetEntityId: carl.id, stat: "gold", delta: 500 },
+    ]);
+
+    const result = await applyEventEffects(owner.id, campaign.id, event.id);
+    await rejectChangeSet(owner.id, campaign.id, result.changeSetId);
+    await reopenChangeSet(owner.id, campaign.id, result.changeSetId);
+
+    const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    expect(timeline[0].effects[0]).toMatchObject({
+      applied: false,
+      reviewStatus: "PENDING",
+      pendingChangeSetId: result.changeSetId,
+    });
+    const pending = await listPendingChangeSetsForUser(owner.id, campaign.id);
+    expect(pending.map((changeSet) => changeSet.id)).toContain(result.changeSetId);
   });
 
   it("marks superseded effect proposals as reviewed without mutating canon", async () => {

@@ -17,8 +17,10 @@ import {
   approveChangeSet,
   createPendingEntityChangeSet,
   getEntityProvenance,
+  getReviewChangeSetForUser,
   listPendingChangeSetsForUser,
   rejectChangeSet,
+  reopenChangeSet,
   setChangeOperationDecision,
 } from "@/server/services/review";
 
@@ -475,6 +477,75 @@ describe("review service — rejectChangeSet (single)", () => {
     await expect(
       rejectChangeSet(player.id, campaignId, set.id),
     ).rejects.toThrow(ServiceError);
+  });
+});
+
+describe("review service — reopenChangeSet", () => {
+  it("reopens a rejected proposal and preserves its edited field selection", async () => {
+    const { dmId, campaignId } = await seed();
+    const entityId = await createEntity(dmId, campaignId, "Reconsidered");
+    const baseVersion = await versionOf(entityId);
+    const set = await createPendingEntityChangeSet(dmId, campaignId, {
+      source: "AI",
+      title: "Reopen me",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: entityId,
+          patch: {
+            _baseVersion: { to: baseVersion },
+            summary: { to: "AI summary" },
+            description: { to: "AI description" },
+          },
+        },
+      ],
+    });
+    const operation = await prisma.changeOperation.findFirstOrThrow({
+      where: { changeSetId: set.id },
+    });
+    await setChangeOperationDecision(dmId, campaignId, set.id, operation.id, {
+      decision: "EDITED",
+      editedPatch: { summary: { to: "DM summary" } },
+    });
+    await rejectChangeSet(dmId, campaignId, set.id);
+
+    await reopenChangeSet(dmId, campaignId, set.id);
+
+    const reopened = await getReviewChangeSetForUser(dmId, campaignId, set.id);
+    expect(reopened).toMatchObject({ status: "PENDING", reviewedById: null });
+    expect(reopened?.operations[0]).toMatchObject({
+      decision: "EDITED",
+      editedPatch: { summary: { to: "DM summary" } },
+    });
+    await approveChangeSet(dmId, campaignId, set.id);
+    await expect(
+      prisma.entity.findUniqueOrThrow({ where: { id: entityId } }),
+    ).resolves.toMatchObject({
+      summary: "DM summary",
+      description: "Original description",
+    });
+  });
+
+  it("refuses to make approved canon pending again", async () => {
+    const { dmId, campaignId } = await seed();
+    const entityId = await createEntity(dmId, campaignId, "Approved");
+    const baseVersion = await versionOf(entityId);
+    const set = await createPendingEntityChangeSet(dmId, campaignId, {
+      source: "AI",
+      title: "Approved proposal",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: entityId,
+          patch: { _baseVersion: { to: baseVersion }, summary: { to: "Applied" } },
+        },
+      ],
+    });
+    await approveChangeSet(dmId, campaignId, set.id);
+
+    await expect(reopenChangeSet(dmId, campaignId, set.id)).rejects.toThrow(
+      /can't be reopened/i,
+    );
   });
 });
 

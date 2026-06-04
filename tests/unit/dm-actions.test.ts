@@ -13,6 +13,7 @@ const {
   approveChangeSetRun,
   rejectChangeSet,
   rejectChangeSetRun,
+  reopenChangeSet,
   setChangeOperationDecision,
   supersedeChangeSet,
   setEntityLock,
@@ -43,6 +44,7 @@ const {
   approveChangeSetRun: vi.fn(),
   rejectChangeSet: vi.fn(),
   rejectChangeSetRun: vi.fn(),
+  reopenChangeSet: vi.fn(),
   setChangeOperationDecision: vi.fn(),
   supersedeChangeSet: vi.fn(),
   setEntityLock: vi.fn(),
@@ -81,6 +83,7 @@ vi.mock("@/server/services/review", () => ({
   approveChangeSetRun,
   rejectChangeSet,
   rejectChangeSetRun,
+  reopenChangeSet,
   setChangeOperationDecision,
   supersedeChangeSet,
   setEntityLock,
@@ -117,6 +120,7 @@ import {
   editEventEffectsOperationAction,
   rejectChangeSetAction,
   rejectChangeSetRunAction,
+  reopenChangeSetAction,
   setChangeOperationDecisionAction,
   supersedeChangeSetAction,
   toggleEntityFieldLockAction,
@@ -501,11 +505,14 @@ describe("archiveEntityAction", () => {
 
 describe("review queue actions", () => {
   it("approves a change set and revalidates campaign surfaces", async () => {
-    await approveChangeSetAction("c1", "cs1");
+    await expect(approveChangeSetAction("c1", "cs1")).rejects.toThrow(
+      "NEXT_REDIRECT",
+    );
 
     expect(approveChangeSet).toHaveBeenCalledWith("u1", "c1", "cs1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+    expect(redirect).toHaveBeenCalledWith("/campaigns/c1/review?done=cs1");
   });
 
   it("approves a generator run and revalidates campaign surfaces", async () => {
@@ -517,10 +524,23 @@ describe("review queue actions", () => {
   });
 
   it("rejects a change set and revalidates the queue", async () => {
-    await rejectChangeSetAction("c1", "cs1");
+    await expect(rejectChangeSetAction("c1", "cs1")).rejects.toThrow(
+      "NEXT_REDIRECT",
+    );
 
     expect(rejectChangeSet).toHaveBeenCalledWith("u1", "c1", "cs1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+    expect(redirect).toHaveBeenCalledWith("/campaigns/c1/review?done=cs1");
+  });
+
+  it("reopens a rejected change set and redirects to it", async () => {
+    await expect(reopenChangeSetAction("c1", "cs1")).rejects.toThrow(
+      "NEXT_REDIRECT",
+    );
+
+    expect(reopenChangeSet).toHaveBeenCalledWith("u1", "c1", "cs1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+    expect(redirect).toHaveBeenCalledWith("/campaigns/c1/review?selected=cs1");
   });
 
   it("rejects a generator run and revalidates the queue", async () => {

@@ -652,6 +652,20 @@ export async function listPendingChangeSetsForUser(
   return enrichReviewQueueItems(campaignId, changeSets);
 }
 
+export async function getReviewChangeSetForUser(
+  userId: string,
+  campaignId: string,
+  changeSetId: string,
+): Promise<ReviewQueueItem | null> {
+  await assertCampaignDm(userId, campaignId);
+  const changeSet = await prisma.changeSet.findFirst({
+    where: { id: changeSetId, campaignId },
+    include: { operations: { orderBy: { id: "asc" } } },
+  });
+  if (!changeSet) return null;
+  return (await enrichReviewQueueItems(campaignId, [changeSet]))[0] ?? null;
+}
+
 async function enrichReviewQueueItems(
   campaignId: string,
   changeSets: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>[],
@@ -1527,6 +1541,143 @@ export async function supersedeChangeSet(
     });
 
     return { id: changeSetId };
+  });
+}
+
+// Inverse of markEventEffectReviewState: restore the effect rows a REJECTED/
+// SUPERSEDED proposal had claimed back to PENDING review (re-pointing them at
+// this change set/operation) so a reopened proposal is actionable again.
+async function restoreEventEffectPendingState(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operations: Prisma.ChangeOperationGetPayload<object>[],
+) {
+  for (const operation of operations) {
+    if (operation.op !== OpKind.APPLY_EVENT_EFFECTS || operation.targetType !== "EVENT") {
+      continue;
+    }
+    if (!operation.targetId) continue;
+    const event = await tx.event.findFirst({
+      where: { id: operation.targetId, campaignId: changeSet.campaignId },
+      select: { id: true, effects: true },
+    });
+    if (!event) continue;
+    const reviewedIds = new Set(
+      parseEventEffects(readTo(operation.patch as ReviewPatch, "effects")).map(
+        (effect) => effect.id,
+      ),
+    );
+    const effects = parseEventEffects(event.effects as JsonValue);
+    let changed = false;
+    for (const effect of effects) {
+      if (effect.applied || !reviewedIds.has(effect.id)) continue;
+      if (effect.reviewStatus !== "REJECTED" && effect.reviewStatus !== "SUPERSEDED") {
+        continue;
+      }
+      effect.pendingChangeSetId = changeSet.id;
+      effect.pendingOperationId = operation.id;
+      effect.reviewStatus = "PENDING";
+      changed = true;
+    }
+    if (changed) {
+      await tx.event.update({
+        where: { id: event.id },
+        data: { effects: serializeEventEffects(effects) },
+        select: { id: true },
+      });
+    }
+  }
+}
+
+/**
+ * Re-open a REJECTED or SUPERSEDED proposal back to PENDING so the DM can
+ * reconsider it. Only safe for proposals that never touched canon — an APPROVED
+ * (or PARTIALLY_APPLIED) set already wrote canon, and reverting that needs a
+ * compensating change set (the deferred undo feature), so reopening it is
+ * refused. Rejected operations restore edited patches (or return to PENDING),
+ * superseded operation decisions stay intact, held effect rows return to
+ * pending review, and a REOPEN audit row is written. DM-only.
+ */
+export async function reopenChangeSet(
+  userId: string,
+  campaignId: string,
+  changeSetId: string,
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  return prisma.$transaction(async (tx) => {
+    const changeSet = await tx.changeSet.findFirst({
+      where: { id: changeSetId, campaignId },
+      include: { operations: true },
+    });
+    if (!changeSet) throw new ServiceError("Change set not found.");
+    if (changeSet.status === ChangeSetStatus.PENDING) return { id: changeSetId };
+    if (
+      changeSet.status !== ChangeSetStatus.REJECTED &&
+      changeSet.status !== ChangeSetStatus.SUPERSEDED
+    ) {
+      throw new ServiceError(
+        "Approved canon can't be reopened — create a new proposal to revise it.",
+      );
+    }
+
+    await restoreEventEffectPendingState(tx, changeSet, changeSet.operations);
+    if (changeSet.status === ChangeSetStatus.REJECTED) {
+      for (const operation of changeSet.operations) {
+        await tx.changeOperation.update({
+          where: { id: operation.id },
+          data: {
+            decision: operation.editedPatch ? OpDecision.EDITED : OpDecision.PENDING,
+          },
+        });
+      }
+    }
+    await tx.changeSet.update({
+      where: { id: changeSetId },
+      data: {
+        status: ChangeSetStatus.PENDING,
+        reviewedById: null,
+        reviewedAt: null,
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        campaignId,
+        actorUserId: userId,
+        action: "REOPEN",
+        targetType: "CHANGE_SET",
+        targetId: changeSetId,
+        detail: { from: changeSet.status },
+      },
+    });
+
+    return { id: changeSetId };
+  });
+}
+
+export type ReviewChangeSetSummary = {
+  id: string;
+  title: string;
+  source: ChangeSource;
+  status: ChangeSetStatus;
+};
+
+// Minimal fetch for the Review Queue's post-decision "done" panel: a single
+// change set in any status (so the page can show "Committed to canon" / "Run
+// rejected" after it has left the pending list). DM-only; null when not found.
+export async function getReviewChangeSetSummary(
+  userId: string,
+  campaignId: string,
+  changeSetId: string,
+): Promise<ReviewChangeSetSummary | null> {
+  await assertCampaignDm(userId, campaignId);
+  return prisma.changeSet.findFirst({
+    where: {
+      id: changeSetId,
+      campaignId,
+      status: { not: ChangeSetStatus.PENDING },
+    },
+    select: { id: true, title: true, source: true, status: true },
   });
 }
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { Save } from "lucide-react";
+import { useState } from "react";
+import { Pencil, Save } from "lucide-react";
 
 import {
   EffectRows,
@@ -8,6 +9,7 @@ import {
 } from "@/components/entities/effect-rows";
 import type { EntityCandidate } from "@/components/entities/entity-typeahead";
 import { Button } from "@/components/ui/button";
+import { effectStatLabels } from "@/lib/event-effects";
 import type { EventEffectKind, EventEffectStat } from "@/lib/validation";
 
 // Serializable seed for one reviewed effect, read off the operation's patch
@@ -53,31 +55,108 @@ function toRow(
  * EDITED decision via `editEventEffectsOperationAction`. `candidates` are the
  * campaign's crawler entities (the only valid effect targets).
  */
+// Compact, target-prefixed description of one effect for the read-only summary,
+// e.g. "Gold +500", "HP = 40", "Marked dead".
+function describeSeed(seed: ReviewEffectSeed): string {
+  if (seed.kind === "SET_ALIVE") return seed.value ? "Revived (alive)" : "Marked dead";
+  const label = seed.stat ? effectStatLabels[seed.stat] : "Stat";
+  if (seed.kind === "SET_STAT") return `${label} = ${seed.valueNumber ?? "?"}`;
+  const delta = seed.delta ?? 0;
+  return `${label} ${delta >= 0 ? "+" : ""}${delta}`;
+}
+
 export function EffectOperationEditor({
   action,
   candidates,
   effects,
   rejected,
+  readOnly = false,
 }: {
   action: (formData: FormData) => void | Promise<void>;
   candidates: EntityCandidate[];
   effects: ReviewEffectSeed[];
   rejected: boolean;
+  readOnly?: boolean;
 }) {
+  const [editing, setEditing] = useState(false);
   const candidatesById = new Map(
     candidates.map((candidate) => [candidate.id, candidate]),
   );
-  const initial = effects.map((seed) => toRow(seed, candidatesById));
 
+  if (!editing) {
+    return (
+      <div className={rejected ? "opacity-45" : undefined}>
+        <div className="divide-y divide-[var(--line)] border-t border-[var(--line)]">
+          {effects.length === 0 ? (
+            <p className="px-3 py-[9px] text-[12.5px] text-[var(--ink-faint)]">
+              No effects in this proposal.
+            </p>
+          ) : (
+            effects.map((seed, index) => (
+              <div
+                key={seed.id || index}
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-3 px-3 py-[9px] text-[12.5px] leading-[1.5]"
+              >
+                <div className="min-w-0">
+                  <span className="font-semibold text-[var(--ink)]">
+                    {candidatesById.get(seed.targetEntityId)?.name ?? seed.targetEntityId}
+                  </span>
+                  <span className="mx-[7px] text-[var(--add)]">{describeSeed(seed)}</span>
+                  {seed.note && (
+                    <span className="text-[var(--ink-faint)]">— {seed.note}</span>
+                  )}
+                </div>
+                {!rejected && !readOnly && (
+                  <Button
+                    aria-label={`Edit effect ${index + 1}`}
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setEditing(true)}
+                  >
+                    <Pencil aria-hidden size={12} />
+                    Edit
+                  </Button>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+        {!rejected && !readOnly && effects.length === 0 && (
+          <div className="border-t border-[var(--line)] px-3 py-3">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setEditing(true)}
+            >
+              <Pencil aria-hidden size={13} />
+              Add effect
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const initial = effects.map((seed) => toRow(seed, candidatesById));
   return (
-    <form action={action} className={rejected ? "opacity-45" : undefined}>
+    <form action={action}>
       <div className="border-t border-[var(--line)] px-3 py-3">
         <EffectRows candidates={candidates} initial={initial} />
       </div>
-      <div className="border-t border-[var(--line)] px-3 py-3">
+      <div className="flex gap-2 border-t border-[var(--line)] px-3 py-3">
         <Button type="submit" size="sm" variant="outline">
           <Save aria-hidden size={14} />
           Save effects
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={() => setEditing(false)}
+        >
+          Cancel
         </Button>
       </div>
     </form>

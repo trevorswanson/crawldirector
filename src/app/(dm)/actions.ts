@@ -50,6 +50,7 @@ import {
   approveChangeSetRun,
   rejectChangeSet,
   rejectChangeSetRun,
+  reopenChangeSet,
   setChangeOperationDecision,
   setEntityLock,
   supersedeChangeSet,
@@ -357,6 +358,7 @@ export async function approveChangeSetAction(
   await approveChangeSet(user.id, campaignId, changeSetId);
   revalidatePath(`/campaigns/${campaignId}`);
   revalidatePath(`/campaigns/${campaignId}/review`);
+  redirect(`/campaigns/${campaignId}/review?done=${changeSetId}`);
 }
 
 export async function approveChangeSetRunAction(
@@ -437,6 +439,17 @@ export async function rejectChangeSetAction(
   const user = await requireUser();
   await rejectChangeSet(user.id, campaignId, changeSetId);
   revalidatePath(`/campaigns/${campaignId}/review`);
+  redirect(`/campaigns/${campaignId}/review?done=${changeSetId}`);
+}
+
+export async function reopenChangeSetAction(
+  campaignId: string,
+  changeSetId: string,
+): Promise<void> {
+  const user = await requireUser();
+  await reopenChangeSet(user.id, campaignId, changeSetId);
+  revalidatePath(`/campaigns/${campaignId}/review`);
+  redirect(`/campaigns/${campaignId}/review?selected=${changeSetId}`);
 }
 
 export async function rejectChangeSetRunAction(

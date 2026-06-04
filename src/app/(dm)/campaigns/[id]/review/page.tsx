@@ -4,7 +4,6 @@ import {
   Archive,
   Check,
   Lock,
-  Save,
   Sparkles,
   TriangleAlert,
   X,
@@ -17,6 +16,7 @@ import {
   editEventEffectsOperationAction,
   rejectChangeSetAction,
   rejectChangeSetRunAction,
+  reopenChangeSetAction,
   setChangeOperationDecisionAction,
   supersedeChangeSetAction,
 } from "@/app/(dm)/actions";
@@ -25,23 +25,33 @@ import {
   EffectOperationEditor,
   type ReviewEffectSeed,
 } from "@/components/review/effect-operation-editor";
+import {
+  OperationDiffEditor,
+  type ReviewFieldInit,
+} from "@/components/review/operation-diff-editor";
 import { Button } from "@/components/ui/button";
 import { HudTag } from "@/components/ui/hud-tag";
-import { Input } from "@/components/ui/input";
 import { Kicker } from "@/components/ui/kicker";
 import { SourceBadge } from "@/components/ui/source-badge";
 import { StatusPill } from "@/components/ui/status-pill";
-import { Textarea } from "@/components/ui/textarea";
 import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
 import { listEntitiesForUser } from "@/server/services/entities";
 import {
+  getReviewChangeSetForUser,
+  getReviewChangeSetSummary,
   listPendingChangeSetsForUser,
+  type ReviewChangeSetSummary,
   type ReviewPatch,
   type ReviewQueueItem,
   type ReviewQueueOperation,
 } from "@/server/services/review";
 import { eventEffectStatValues, type EventEffectStat } from "@/lib/validation";
+import {
+  formatInputValue,
+  formatReviewValue,
+  reviewInputKind,
+} from "@/lib/review";
 import { cn } from "@/lib/utils";
 
 const effectStatSet = new Set<string>(eventEffectStatValues);
@@ -66,7 +76,12 @@ export default async function ReviewQueuePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ selected?: string; source?: string }>;
+  searchParams?: Promise<{
+    selected?: string;
+    source?: string;
+    done?: string;
+    reopened?: string;
+  }>;
 }) {
   const { id } = await params;
   const query = (await searchParams) ?? {};
@@ -75,10 +90,24 @@ export default async function ReviewQueuePage({
 
   if (!campaign) notFound();
 
+  // After a decision the proposal leaves the pending list; `?done=` lets us still
+  // show the mockup's "Committed to canon" / "Run rejected" confirmation panel.
+  const doneSummary = query.done
+    ? await getReviewChangeSetSummary(user.id, id, query.done)
+    : null;
+  const reopenedCandidate = query.reopened
+    ? await getReviewChangeSetForUser(user.id, id, query.reopened)
+    : null;
+  const reopenedChangeSet =
+    reopenedCandidate?.status === "PENDING" ? null : reopenedCandidate;
+
   const changeSets = await listPendingChangeSetsForUser(user.id, id);
   // Only the structured effect-row editor needs the campaign's crawlers; skip
   // the query entirely when no pending proposal applies event effects.
-  const hasEffectOps = changeSets.some((changeSet) =>
+  const hasEffectOps = [
+    ...changeSets,
+    ...(reopenedChangeSet ? [reopenedChangeSet] : []),
+  ].some((changeSet) =>
     changeSet.operations.some((operation) => operation.op === "APPLY_EVENT_EFFECTS"),
   );
   const crawlerCandidates: EntityCandidate[] = hasEffectOps
@@ -91,6 +120,7 @@ export default async function ReviewQueuePage({
     sourceMatches(changeSet.source, activeSource),
   );
   const selected =
+    reopenedChangeSet ??
     filteredChangeSets.find((changeSet) => changeSet.id === query.selected) ??
     filteredChangeSets[0] ??
     null;
@@ -107,19 +137,23 @@ export default async function ReviewQueuePage({
     return qs ? `/campaigns/${id}/review?${qs}` : `/campaigns/${id}/review`;
   };
 
-  if (changeSets.length === 0) {
+  if (changeSets.length === 0 && !doneSummary && !reopenedChangeSet) {
     return (
       <div className="grid h-full place-items-center bg-[var(--bg)] px-6">
-        <div className="panel bracket max-w-xl p-6">
-          <Kicker noLead>Review Queue</Kicker>
-          <h1 className="mt-3 font-display text-[22px] font-semibold">
-            No pending proposals
-          </h1>
-          <p className="mt-2 text-sm leading-6 text-[var(--ink-dim)]">
-            Direct DM edits are auto-approved with provenance. AI, import, and
-            player-suggestion proposals will appear here.
-          </p>
-        </div>
+        {doneSummary ? (
+          <DoneState campaignId={id} summary={doneSummary} />
+        ) : (
+          <div className="panel bracket max-w-xl p-6">
+            <Kicker noLead>Review Queue</Kicker>
+            <h1 className="mt-3 font-display text-[22px] font-semibold">
+              No pending proposals
+            </h1>
+            <p className="mt-2 text-sm leading-6 text-[var(--ink-dim)]">
+              Direct DM edits are auto-approved with provenance. AI, import, and
+              player-suggestion proposals will appear here.
+            </p>
+          </div>
+        )}
       </div>
     );
   }
@@ -241,12 +275,15 @@ export default async function ReviewQueuePage({
             )}
           </div>
         </div>
-        {selected ? (
+        {doneSummary ? (
+          <DoneState campaignId={id} summary={doneSummary} />
+        ) : selected ? (
           <ReviewDetail
             campaignId={id}
             changeSet={selected}
             crawlerCandidates={crawlerCandidates}
             run={selected.runId ? runGroups.find((run) => run.runId === selected.runId) : undefined}
+            readOnly={Boolean(reopenedChangeSet)}
           />
         ) : (
           <div className="grid h-full place-items-center px-6 text-sm text-[var(--ink-faint)]">
@@ -258,16 +295,72 @@ export default async function ReviewQueuePage({
   );
 }
 
+// Mockup's post-decision panel. Rejected/superseded proposals can safely return
+// to PENDING; approved/partially-applied proposals reopen as read-only history
+// because making them pending again could apply the same canon mutation twice.
+function DoneState({
+  campaignId,
+  summary,
+}: {
+  campaignId: string;
+  summary: ReviewChangeSetSummary;
+}) {
+  const committed =
+    summary.status === "APPROVED" || summary.status === "PARTIALLY_APPLIED";
+  const reopenable =
+    summary.status === "REJECTED" || summary.status === "SUPERSEDED";
+
+  return (
+    <div className="grid h-full place-items-center px-6 text-center text-[var(--ink-faint)]">
+      <div className="max-w-sm">
+        <div className={committed ? "text-[var(--ok)]" : "text-[var(--no)]"}>
+          {committed ? (
+            <Check aria-hidden className="mx-auto" size={40} />
+          ) : (
+            <X aria-hidden className="mx-auto" size={40} />
+          )}
+        </div>
+        <div className="mt-3 font-display text-[18px] text-[var(--ink)]">
+          {committed ? "Committed to canon" : "Proposal rejected"}
+        </div>
+        <p className="mx-auto mt-[6px] max-w-[360px] text-[12.5px] leading-[1.5]">
+          {committed
+            ? "Accepted operations applied atomically. Provenance written and retained."
+            : "Retained for history — never hard-deleted. You can reopen it to reconsider."}
+        </p>
+        <div className="mt-4 flex items-center justify-center gap-2">
+          {reopenable ? (
+            <form action={reopenChangeSetAction.bind(null, campaignId, summary.id)}>
+              <Button type="submit" variant="outline">
+                Reopen
+              </Button>
+            </form>
+          ) : (
+            <Link href={`/campaigns/${campaignId}/review?reopened=${summary.id}`}>
+              <Button variant="outline">Reopen</Button>
+            </Link>
+          )}
+          <Link href={`/campaigns/${campaignId}/review`}>
+            <Button variant="ghost">Back to queue</Button>
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ReviewDetail({
   campaignId,
   changeSet,
   crawlerCandidates,
   run,
+  readOnly = false,
 }: {
   campaignId: string;
   changeSet: ReviewQueueItem;
   crawlerCandidates: EntityCandidate[];
   run?: PendingRunGroup;
+  readOnly?: boolean;
 }) {
   const status = reviewStatus(changeSet);
   const acceptedCount = acceptedFieldCount(changeSet);
@@ -320,45 +413,56 @@ function ReviewDetail({
         </div>
 
         <div className="mt-[14px] flex flex-wrap items-center gap-2">
-          <form action={approveChangeSetAction.bind(null, campaignId, changeSet.id)}>
-            <Button type="submit" variant="ok">
-              <Check aria-hidden size={14} />
-              Approve {acceptedCount} accepted
-            </Button>
-          </form>
-          <Button disabled title="Planned with relationship/event locks" variant="primary">
-            <Lock aria-hidden size={14} />
-            Approve &amp; lock · Planned
-          </Button>
-          {changeSet.runId && (
-            <form action={approveChangeSetRunAction.bind(null, campaignId, changeSet.runId)}>
-              <Button type="submit" variant="outline">
-                Accept all non-conflicting
-              </Button>
-            </form>
-          )}
-          {stale && (
-            <form action={supersedeChangeSetAction.bind(null, campaignId, changeSet.id)}>
-              <Button type="submit" variant="outline">
-                <Archive aria-hidden size={14} />
-                Supersede
-              </Button>
-            </form>
-          )}
-          {changeSet.runId ? (
-            <form action={rejectChangeSetRunAction.bind(null, campaignId, changeSet.runId)}>
-              <Button type="submit" variant="destructive">
-                <X aria-hidden size={14} />
-                Reject run
-              </Button>
-            </form>
+          {readOnly ? (
+            <>
+              <HudTag>Done · read-only history</HudTag>
+              <Link href={`/campaigns/${campaignId}/review`}>
+                <Button variant="ghost">Back to queue</Button>
+              </Link>
+            </>
           ) : (
-            <form action={rejectChangeSetAction.bind(null, campaignId, changeSet.id)}>
-              <Button type="submit" variant="destructive">
-                <X aria-hidden size={14} />
-                Reject set
+            <>
+              <form action={approveChangeSetAction.bind(null, campaignId, changeSet.id)}>
+                <Button type="submit" variant="ok">
+                  <Check aria-hidden size={14} />
+                  Approve {acceptedCount} accepted
+                </Button>
+              </form>
+              <Button disabled title="Planned with relationship/event locks" variant="primary">
+                <Lock aria-hidden size={14} />
+                Approve &amp; lock · Planned
               </Button>
-            </form>
+              {changeSet.runId && (
+                <form action={approveChangeSetRunAction.bind(null, campaignId, changeSet.runId)}>
+                  <Button type="submit" variant="outline">
+                    Accept all non-conflicting
+                  </Button>
+                </form>
+              )}
+              {stale && (
+                <form action={supersedeChangeSetAction.bind(null, campaignId, changeSet.id)}>
+                  <Button type="submit" variant="outline">
+                    <Archive aria-hidden size={14} />
+                    Supersede
+                  </Button>
+                </form>
+              )}
+              {changeSet.runId ? (
+                <form action={rejectChangeSetRunAction.bind(null, campaignId, changeSet.runId)}>
+                  <Button type="submit" variant="destructive">
+                    <X aria-hidden size={14} />
+                    Reject run
+                  </Button>
+                </form>
+              ) : (
+                <form action={rejectChangeSetAction.bind(null, campaignId, changeSet.id)}>
+                  <Button type="submit" variant="destructive">
+                    <X aria-hidden size={14} />
+                    Reject set
+                  </Button>
+                </form>
+              )}
+            </>
           )}
           <span className="ml-auto font-mono text-[11px] text-[var(--ink-faint)]">
             {changeSet.operations.length} operation
@@ -376,6 +480,7 @@ function ReviewDetail({
             changeSetId={changeSet.id}
             crawlerCandidates={crawlerCandidates}
             operation={operation}
+            readOnly={readOnly}
           />
         ))}
       </div>
@@ -388,11 +493,13 @@ function OperationBlock({
   changeSetId,
   crawlerCandidates,
   operation,
+  readOnly,
 }: {
   campaignId: string;
   changeSetId: string;
   crawlerCandidates: EntityCandidate[];
   operation: ReviewQueueOperation;
+  readOnly: boolean;
 }) {
   const rejected = operation.decision === "REJECTED";
   const accepted = operation.decision === "ACCEPTED" || operation.decision === "EDITED";
@@ -433,7 +540,7 @@ function OperationBlock({
             />
           )}
         </div>
-        <div className="flex shrink-0 gap-[6px]">
+        {!readOnly && <div className="flex shrink-0 gap-[6px]">
           <form
             action={setChangeOperationDecisionAction.bind(
               null,
@@ -471,11 +578,12 @@ function OperationBlock({
               Reject op
             </Button>
           </form>
-        </div>
+        </div>}
       </div>
 
       {isEffectOp ? (
         <EffectOperationEditor
+          key={operationEditorKey(operation)}
           action={editEventEffectsOperationAction.bind(
             null,
             campaignId,
@@ -488,19 +596,20 @@ function OperationBlock({
             operation.editedPatch as ReviewPatch | null,
           )}
           rejected={rejected}
+          readOnly={readOnly}
         />
       ) : (
-        <EditableDiffForm
+        <OperationDiffEditor
+          key={operationEditorKey(operation)}
           action={editChangeOperationPatchAction.bind(
             null,
             campaignId,
             changeSetId,
             operation.id,
           )}
-          editedPatch={operation.editedPatch as ReviewPatch | null}
-          operation={operation}
-          patch={operation.patch as ReviewPatch}
-          rejected={rejected}
+          fields={buildFieldInits(operation)}
+          opRejected={rejected}
+          readOnly={readOnly}
         />
       )}
       {operation.isStale && <ThreeWay operation={operation} />}
@@ -508,111 +617,37 @@ function OperationBlock({
   );
 }
 
-function EditableDiffForm({
-  action,
-  editedPatch,
-  operation,
-  patch,
-  rejected,
-}: {
-  action: (formData: FormData) => void | Promise<void>;
-  editedPatch: ReviewPatch | null;
-  operation: ReviewQueueOperation;
-  patch: ReviewPatch;
-  rejected: boolean;
-}) {
-  const entries = Object.entries(patch).filter(([field]) => field !== "_baseVersion");
-  return (
-    <form action={action}>
-      {entries.map(([field, value]) => {
-        const editedValue = editedPatch?.[field]?.to;
-        const hasEditedField = Boolean(editedPatch && field in editedPatch);
-        const inputValue = hasEditedField ? editedValue : value.to;
-        const kind = reviewInputKind(inputValue);
-        const blocked = fieldBlocked(operation, field);
-        const stale = fieldStale(operation, field, value.from);
+function operationEditorKey(operation: ReviewQueueOperation) {
+  return `${operation.id}:${operation.decision}:${JSON.stringify(operation.editedPatch)}`;
+}
 
-        return (
-          <div
-            key={field}
-            className={cn(
-              "grid grid-cols-[92px_minmax(0,1fr)_auto] items-start gap-3 border-t border-[var(--line)] px-3 py-[9px]",
-              blocked && "bg-[color-mix(in_srgb,var(--sys)_7%,transparent)]",
-              rejected && "opacity-45",
-            )}
-          >
-            <FieldKey>{field}</FieldKey>
-            <div className="min-w-0 text-[12.5px] leading-[1.5]">
-              {value.from !== undefined && (
-                <div className="mb-[3px] break-words text-[var(--del)] line-through opacity-80">
-                  <span className="mono mr-[6px] text-[10px] opacity-70">-</span>
-                  {formatReviewValue(value.from)}
-                </div>
-              )}
-              <div className="break-words text-[var(--add)]">
-                <span className="mono mr-[6px] text-[10px] opacity-70">+</span>
-                <span
-                  className={cn(
-                    blocked ? "text-[var(--ink-faint)]" : "text-[var(--ink)]",
-                    rejected && "line-through",
-                  )}
-                >
-                  {formatReviewValue(value.to)}
-                </span>
-              </div>
-              {blocked && (
-                <div className="mt-[5px] inline-flex items-center gap-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--sys)]">
-                  <Lock aria-hidden size={11} />
-                  BLOCKED BY LOCK — UNLOCK TARGET TO APPLY
-                </div>
-              )}
-              {stale && !blocked && (
-                <div className="mt-[5px] inline-flex items-center gap-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--hot)]">
-                  <TriangleAlert aria-hidden size={11} />
-                  CANON CHANGED UNDER THIS — RESOLVE BELOW
-                </div>
-              )}
-              <div className="mt-2 max-w-xl">
-                <input type="hidden" name="field" value={field} />
-                <input type="hidden" name={`kind:${field}`} value={kind} />
-                <ReviewValueInput field={field} kind={kind} value={inputValue} />
-              </div>
-            </div>
-            {!blocked ? (
-              <div className="flex gap-1">
-                <label
-                  className={cn(
-                    "grid size-[26px] place-items-center border",
-                    !editedPatch || hasEditedField
-                      ? "border-[var(--ok)] bg-[color-mix(in_srgb,var(--ok)_18%,transparent)] text-[var(--ok)]"
-                      : "border-[var(--line-strong)] text-[var(--ink-faint)]",
-                  )}
-                  title="Apply field"
-                >
-                  <input
-                    aria-label={`Apply ${field}`}
-                    className="sr-only"
-                    defaultChecked={!editedPatch || hasEditedField}
-                    name={`apply:${field}`}
-                    type="checkbox"
-                  />
-                  <Check aria-hidden size={13} />
-                </label>
-              </div>
-            ) : (
-              <div className="w-[26px]" />
-            )}
-          </div>
-        );
-      })}
-      <div className="border-t border-[var(--line)] px-3 py-3">
-        <Button type="submit" size="sm" variant="outline">
-          <Save aria-hidden size={14} />
-          Save edits
-        </Button>
-      </div>
-    </form>
-  );
+// Pre-compute each diff field's display text + initial Accept/Edit state for the
+// read-first client editor. Initial accept state mirrors the persisted decision:
+// no editedPatch → all fields accepted (approve-all default); an editedPatch →
+// only its fields are accepted (the rest were rejected). Previously edited fields
+// surface their edited value as the proposed (`+`) value.
+function buildFieldInits(operation: ReviewQueueOperation): ReviewFieldInit[] {
+  const patch = operation.patch as ReviewPatch;
+  const editedPatch = operation.editedPatch as ReviewPatch | null;
+  const entries = Object.entries(patch).filter(([field]) => field !== "_baseVersion");
+
+  return entries.map(([field, value]) => {
+    const hasEditedField = Boolean(editedPatch && field in editedPatch);
+    const proposed = hasEditedField ? editedPatch![field]?.to : value.to;
+    const kind = reviewInputKind(proposed);
+
+    return {
+      field,
+      fromText: value.from !== undefined ? formatReviewValue(value.from) : null,
+      toText: formatReviewValue(proposed),
+      kind,
+      blocked: fieldBlocked(operation, field),
+      stale: fieldStale(operation, field, value.from),
+      accepted: editedPatch ? hasEditedField : true,
+      editing: false,
+      draft: formatInputValue(proposed, kind),
+    };
+  });
 }
 
 function ThreeWay({ operation }: { operation: ReviewQueueOperation }) {
@@ -682,59 +717,6 @@ function ConflictChoice({
   );
 }
 
-function ReviewValueInput({
-  field,
-  kind,
-  value,
-}: {
-  field: string;
-  kind: ReviewInputKind;
-  value: unknown;
-}) {
-  const name = `value:${field}`;
-  if (kind === "boolean") {
-    return (
-      <select
-        className="h-8 w-full border border-[var(--line-strong)] bg-[var(--bg)] px-2 font-mono text-[11px] text-[var(--ink)] focus-visible:border-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ring)]"
-        defaultValue={value === false ? "false" : "true"}
-        name={name}
-      >
-        <option value="true">true</option>
-        <option value="false">false</option>
-      </select>
-    );
-  }
-
-  if (kind === "json") {
-    return (
-      <Textarea
-        className="min-h-16 font-mono text-[11px]"
-        defaultValue={JSON.stringify(value, null, 2)}
-        name={name}
-      />
-    );
-  }
-
-  if (kind === "string" && String(value ?? "").length > 80) {
-    return (
-      <Textarea
-        className="min-h-16 text-xs"
-        defaultValue={formatInputValue(value, kind)}
-        name={name}
-      />
-    );
-  }
-
-  return (
-    <Input
-      className="h-8 font-mono text-[11px]"
-      defaultValue={formatInputValue(value, kind)}
-      name={name}
-      type={kind === "number" ? "number" : "text"}
-    />
-  );
-}
-
 // Read the effect array off an APPLY_EVENT_EFFECTS operation's patch (preferring
 // a prior EDITED patch) into serializable seeds for the effect-row editor.
 // Bookkeeping fields (review pointers, applied flags) are intentionally dropped —
@@ -775,14 +757,6 @@ function readEffectSeeds(
     });
   }
   return seeds;
-}
-
-function FieldKey({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="font-mono text-[10.5px] uppercase tracking-[.08em] text-[var(--ink-faint)]">
-      {children}
-    </div>
-  );
 }
 
 function shortRunId(runId: string) {
@@ -841,7 +815,16 @@ function acceptedFieldCount(changeSet: ReviewQueueItem) {
   return changeSet.operations.reduce((count, operation) => {
     if (operation.decision === "REJECTED") return count;
     const patch = operation.patch as ReviewPatch;
-    if (operation.decision === "ACCEPTED" || operation.decision === "EDITED") {
+    if (operation.decision === "EDITED") {
+      const editedPatch = operation.editedPatch as ReviewPatch | null;
+      return (
+        count +
+        Object.keys(editedPatch ?? {}).filter(
+          (field) => field !== "_baseVersion" && !fieldBlocked(operation, field),
+        ).length
+      );
+    }
+    if (operation.decision === "ACCEPTED" || operation.decision === "PENDING") {
       return (
         count +
         Object.keys(patch).filter(
@@ -908,27 +891,4 @@ function formatRelativeTime(date: Date) {
   if (diffMs < hour) return `${Math.max(1, Math.floor(diffMs / minute))}m ago`;
   if (diffMs < day) return `${Math.floor(diffMs / hour)}h ago`;
   return `${Math.floor(diffMs / day)}d ago`;
-}
-
-function formatReviewValue(value: unknown) {
-  if (value === undefined || value === null || value === "") return "Empty";
-  if (Array.isArray(value)) return value.join(", ") || "Empty";
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
-}
-
-type ReviewInputKind = "array" | "boolean" | "json" | "number" | "string";
-
-function reviewInputKind(value: unknown): ReviewInputKind {
-  if (Array.isArray(value)) return "array";
-  if (typeof value === "boolean") return "boolean";
-  if (typeof value === "number") return "number";
-  if (value && typeof value === "object") return "json";
-  return "string";
-}
-
-function formatInputValue(value: unknown, kind: ReviewInputKind) {
-  if (kind === "array" && Array.isArray(value)) return value.join(", ");
-  if (value === undefined || value === null) return "";
-  return String(value);
 }

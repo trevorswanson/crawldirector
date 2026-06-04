@@ -6,6 +6,8 @@ const {
   requireUser,
   getCampaignForUser,
   listPendingChangeSetsForUser,
+  getReviewChangeSetForUser,
+  getReviewChangeSetSummary,
   listEntitiesForUser,
   notFound,
   approveChangeSetAction,
@@ -14,12 +16,15 @@ const {
   editEventEffectsOperationAction,
   rejectChangeSetAction,
   rejectChangeSetRunAction,
+  reopenChangeSetAction,
   setChangeOperationDecisionAction,
   supersedeChangeSetAction,
 } = vi.hoisted(() => ({
   requireUser: vi.fn(),
   getCampaignForUser: vi.fn(),
   listPendingChangeSetsForUser: vi.fn(),
+  getReviewChangeSetForUser: vi.fn(),
+  getReviewChangeSetSummary: vi.fn(),
   listEntitiesForUser: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
@@ -30,13 +35,18 @@ const {
   editEventEffectsOperationAction: vi.fn(),
   rejectChangeSetAction: vi.fn(),
   rejectChangeSetRunAction: vi.fn(),
+  reopenChangeSetAction: vi.fn(),
   setChangeOperationDecisionAction: vi.fn(),
   supersedeChangeSetAction: vi.fn(),
 }));
 
 vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/campaigns", () => ({ getCampaignForUser }));
-vi.mock("@/server/services/review", () => ({ listPendingChangeSetsForUser }));
+vi.mock("@/server/services/review", () => ({
+  listPendingChangeSetsForUser,
+  getReviewChangeSetForUser,
+  getReviewChangeSetSummary,
+}));
 vi.mock("@/server/services/entities", () => ({ listEntitiesForUser }));
 vi.mock("@/app/(dm)/actions", () => ({
   approveChangeSetAction,
@@ -45,6 +55,7 @@ vi.mock("@/app/(dm)/actions", () => ({
   editEventEffectsOperationAction,
   rejectChangeSetAction,
   rejectChangeSetRunAction,
+  reopenChangeSetAction,
   setChangeOperationDecisionAction,
   supersedeChangeSetAction,
 }));
@@ -68,6 +79,8 @@ beforeEach(() => {
     _count: { members: 1, entities: 0 },
   });
   listPendingChangeSetsForUser.mockResolvedValue([]);
+  getReviewChangeSetForUser.mockResolvedValue(null);
+  getReviewChangeSetSummary.mockResolvedValue(null);
   listEntitiesForUser.mockResolvedValue({ entities: [] });
 });
 
@@ -140,7 +153,7 @@ describe("ReviewQueuePage", () => {
       },
     ]);
 
-    const view = render(await ReviewQueuePage({ params: Promise.resolve({ id: "c1" }) }));
+    render(await ReviewQueuePage({ params: Promise.resolve({ id: "c1" }) }));
 
     expect(
       screen.getByRole("heading", { name: "Propose Zev update" }),
@@ -156,20 +169,20 @@ describe("ReviewQueuePage", () => {
     expect(screen.getByText("summary")).toBeDefined();
     expect(screen.getAllByText("Old").length).toBeGreaterThan(0);
     expect(screen.getAllByText("New").length).toBeGreaterThan(0);
-    expect(screen.getByRole("checkbox", { name: "Apply summary" })).toBeDefined();
-    expect(screen.getByDisplayValue("New")).toBeDefined();
-    expect(screen.getByDisplayValue("admin")).toBeDefined();
-    expect(screen.getByDisplayValue(/very long edited proposal value/)).toBeDefined();
+    // Read-first diff: proposed values render as text (no always-on inputs), with
+    // per-field Accept / Reject / Edit controls.
+    expect(screen.getByText("admin")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Accept summary" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Reject summary" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Edit summary" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Save field edits" })).toBeDefined();
+    // The locked field is display-only — no per-field controls.
     expect(
-      view.container.querySelector<HTMLTextAreaElement>('textarea[name="value:data"]')
-        ?.value,
-    ).toContain('"threat": "high"');
-    expect(screen.getByDisplayValue("7")).toBeDefined();
-    expect(screen.getByDisplayValue("false")).toBeDefined();
-    expect(screen.getByRole("button", { name: "Save edits" })).toBeDefined();
+      screen.queryByRole("button", { name: "Accept crawler.level" }),
+    ).toBeNull();
     expect(screen.getByRole("button", { name: "Accept all" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Reject op" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "Approve 0 accepted" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Approve 5 accepted" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Reject set" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Supersede" })).toBeDefined();
   });
@@ -216,6 +229,10 @@ describe("ReviewQueuePage", () => {
             patch: {
               effects: {
                 to: [
+                  null,
+                  [],
+                  { kind: "NOPE", targetEntityId: "crawler-1" },
+                  { kind: "SET_STAT" },
                   {
                     id: "fx-1",
                     kind: "ADJUST_STAT",
@@ -236,6 +253,23 @@ describe("ReviewQueuePage", () => {
             blockedByLock: false,
             isStale: false,
           },
+          {
+            id: "op-fx-empty",
+            changeSetId: "cs-fx",
+            op: "APPLY_EVENT_EFFECTS",
+            targetType: "EVENT",
+            targetId: "event-2",
+            targetLabel: "Malformed effects",
+            targetEntityType: "EVENT",
+            targetLocked: false,
+            lockedFields: [],
+            currentValues: {},
+            patch: { effects: { to: "not-an-array" } },
+            editedPatch: null,
+            decision: "PENDING",
+            blockedByLock: false,
+            isStale: false,
+          },
         ],
       },
     ]);
@@ -246,25 +280,18 @@ describe("ReviewQueuePage", () => {
 
     // The campaign's crawlers are fetched only because an effect op is pending.
     expect(listEntitiesForUser).toHaveBeenCalledWith("u1", "c1");
-    // Structured editor — not the generic JSON patch textarea.
-    expect(screen.getByRole("button", { name: "Save effects" })).toBeDefined();
-    expect(screen.queryByRole("button", { name: "Save edits" })).toBeNull();
+    // Read-first effect op: a summary + an Edit affordance, not the live editor.
+    expect(screen.getByRole("button", { name: "Edit effect 1" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Save effects" })).toBeNull();
     expect(
       view.container.querySelector('textarea[name="value:effects"]'),
     ).toBeNull();
-    // Seeded row: resolved target name, kind, stat, delta, and the stable id.
+    expect(view.container.querySelector('input[name="effectId_0"]')).toBeNull();
+    // Summary row: resolved target name, described effect, and note.
     expect(screen.getByText("Carl")).toBeDefined();
-    expect(screen.getByDisplayValue("Adjust stat")).toBeDefined();
-    expect(screen.getByDisplayValue("Gold")).toBeDefined();
-    expect(screen.getByDisplayValue("500")).toBeDefined();
-    expect(
-      view.container.querySelector<HTMLInputElement>('input[name="effectId_0"]')
-        ?.value,
-    ).toBe("fx-1");
-    expect(
-      view.container.querySelector<HTMLInputElement>('input[name="effectTarget_0"]')
-        ?.value,
-    ).toBe("crawler-1");
+    expect(screen.getByText("Gold +500")).toBeDefined();
+    expect(screen.getByText("— Boss loot")).toBeDefined();
+    expect(screen.getByText("No effects in this proposal.")).toBeDefined();
   });
 
   it("skips the crawler lookup when no effect op is pending", async () => {
@@ -658,15 +685,17 @@ describe("ReviewQueuePage", () => {
     render(await ReviewQueuePage({ params: Promise.resolve({ id: "c1" }) }));
 
     expect(screen.getByText("EDITED")).toBeDefined();
+    // editedPatch carries only `summary`, so `name` initializes rejected and
+    // `summary` accepted (showing the edited value as the proposed read-only line).
     expect(
-      (screen.getByRole("checkbox", { name: "Apply name" }) as HTMLInputElement)
-        .checked,
-    ).toBe(false);
+      screen.getByRole("button", { name: "Reject name" }).getAttribute("aria-pressed"),
+    ).toBe("true");
     expect(
-      (screen.getByRole("checkbox", { name: "Apply summary" }) as HTMLInputElement)
-        .checked,
-    ).toBe(true);
-    expect(screen.getByDisplayValue("DM summary")).toBeDefined();
+      screen
+        .getByRole("button", { name: "Accept summary" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(screen.getByText("DM summary")).toBeDefined();
 
     // An EDITED op is already accepted-for-approval, so its accept button is
     // disabled to avoid resetting the decision and discarding the edited patch.
@@ -674,6 +703,100 @@ describe("ReviewQueuePage", () => {
       name: "Edited",
     }) as HTMLButtonElement;
     expect(acceptButton.disabled).toBe(true);
+  });
+
+  it("shows the committed done state after an approval", async () => {
+    getReviewChangeSetSummary.mockResolvedValue({
+      id: "cs9",
+      title: "Approved set",
+      source: "AI",
+      status: "APPROVED",
+    });
+
+    render(
+      await ReviewQueuePage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({ done: "cs9" }),
+      }),
+    );
+
+    expect(getReviewChangeSetSummary).toHaveBeenCalledWith("u1", "c1", "cs9");
+    expect(screen.getByText("Committed to canon")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Reopen" })).toBeDefined();
+  });
+
+  it("shows the rejected done state with a reopen control", async () => {
+    getReviewChangeSetSummary.mockResolvedValue({
+      id: "cs9",
+      title: "Rejected set",
+      source: "AI",
+      status: "REJECTED",
+    });
+
+    render(
+      await ReviewQueuePage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({ done: "cs9" }),
+      }),
+    );
+
+    expect(screen.getByText("Proposal rejected")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Reopen" })).toBeDefined();
+  });
+
+  it("reopens an approved proposal as read-only history", async () => {
+    getReviewChangeSetForUser.mockResolvedValue({
+      id: "cs9",
+      campaignId: "c1",
+      source: "AI",
+      title: "Approved set",
+      summary: null,
+      status: "APPROVED",
+      actorUserId: "u1",
+      providerId: null,
+      model: null,
+      promptId: null,
+      promptVersion: null,
+      runId: null,
+      baseVersions: {},
+      reviewedById: "u1",
+      reviewedAt: new Date(),
+      reviewNotes: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      operations: [
+        {
+          id: "op9",
+          changeSetId: "cs9",
+          op: "UPDATE_ENTITY",
+          targetType: "ENTITY",
+          targetId: "entity-9",
+          targetLabel: "Zev",
+          targetEntityType: "NPC",
+          targetLocked: false,
+          lockedFields: [],
+          currentValues: { summary: "Approved summary" },
+          patch: { summary: { from: "Old", to: "Approved summary" } },
+          editedPatch: null,
+          decision: "ACCEPTED",
+          blockedByLock: false,
+          isStale: false,
+        },
+      ],
+    });
+
+    render(
+      await ReviewQueuePage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({ reopened: "cs9" }),
+      }),
+    );
+
+    expect(getReviewChangeSetForUser).toHaveBeenCalledWith("u1", "c1", "cs9");
+    expect(screen.getByText("Done · read-only history")).toBeDefined();
+    expect(screen.getByText("Approved summary")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Accept summary" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Accept all" })).toBeNull();
   });
 
   it("calls notFound when the campaign is unavailable", async () => {
