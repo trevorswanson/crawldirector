@@ -122,7 +122,7 @@ describe("event service", () => {
     expect(row?.status).toBe(CanonStatus.CANON);
     expect(row?.title).toBe("Floor 9 boss fight");
     expect(row?.orderKey).toBe(9);
-    expect(row?.inGameTime).toEqual({ floor: 9, label: "Day 3" });
+    expect(row?.inGameTime).toEqual({ basis: "FLOOR_START", floor: 9, label: "Day 3" });
     expect(row?.source).toBe("DM");
     expect(row?.participants).toHaveLength(2);
 
@@ -136,7 +136,12 @@ describe("event service", () => {
     const carlTimeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
     expect(carlTimeline).toHaveLength(1);
     expect(carlTimeline[0].role).toBe("ACTOR");
-    expect(carlTimeline[0].time).toEqual({ floor: 9, label: "Day 3" });
+    expect(carlTimeline[0].time).toMatchObject({
+      basis: "FLOOR_START",
+      floor: 9,
+      label: "Day 3",
+      phrase: "Day 3",
+    });
     expect(carlTimeline[0].others).toHaveLength(1);
     expect(carlTimeline[0].others[0].name).toBe("Donut");
 
@@ -183,7 +188,12 @@ describe("event service", () => {
     });
 
     const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
-    expect(timeline[0].time).toEqual({ floor: null, label: null });
+    expect(timeline[0].time).toMatchObject({
+      basis: "UNSCHEDULED",
+      floor: null,
+      label: null,
+      phrase: null,
+    });
   });
 
   it("lists the campaign-wide timeline with visible participants", async () => {
@@ -215,7 +225,7 @@ describe("event service", () => {
       "Later boss fight",
       "Early stunt",
     ]);
-    expect(timeline[0].time).toEqual({ floor: 9, label: "Day 3" });
+    expect(timeline[0].time).toMatchObject({ floor: 9, label: "Day 3", phrase: "Day 3" });
     expect(timeline[0].participants.map((p) => `${p.name}:${p.role}`)).toEqual([
       "Carl:ACTOR",
       "Donut:TARGET",
@@ -1452,6 +1462,183 @@ describe("event order (orderKey + rank)", () => {
 
     await expect(
       reorderEvent(player.id, campaign.id, event.id, { aboveId: null, belowId: null }),
+    ).rejects.toBeInstanceOf(ServiceError);
+  });
+});
+
+describe("typed timeRef (ADR 0004 slice 2)", () => {
+  it("persists the typed basis/offset/unit and generates the phrase", async () => {
+    const owner = await makeUser("timeref-basic@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Air throttled",
+      basis: "FLOOR_COLLAPSE",
+      floor: 9,
+      offset: 12,
+      unit: "HOUR",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    const row = await prisma.event.findUnique({ where: { id: event.id } });
+    expect(row?.orderKey).toBe(9);
+    expect(row?.inGameTime).toEqual({
+      basis: "FLOOR_COLLAPSE",
+      floor: 9,
+      offset: 12,
+      unit: "HOUR",
+    });
+
+    const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    expect(timeline[0].time).toMatchObject({
+      basis: "FLOOR_COLLAPSE",
+      offset: 12,
+      unit: "HOUR",
+      phrase: "12 hours before Floor 9 falls",
+    });
+  });
+
+  it("derives intra-floor rank from FLOOR_START offsets, later-in-fiction first", async () => {
+    const owner = await makeUser("timeref-derive-start@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    // Logged out of order; the offset (not the log order) decides placement.
+    for (const [title, offset] of [
+      ["Day 1", 1],
+      ["Day 5", 5],
+      ["Day 3", 3],
+    ] as const) {
+      await createEvent(owner.id, campaign.id, {
+        title,
+        basis: "FLOOR_START",
+        floor: 9,
+        offset,
+        unit: "DAY",
+        secret: false,
+        participants: [{ entityId: carl.id, role: "ACTOR" }],
+      });
+    }
+
+    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual(["Day 5", "Day 3", "Day 1"]);
+  });
+
+  it("derives FLOOR_COLLAPSE rank so less time remaining sorts later", async () => {
+    const owner = await makeUser("timeref-derive-collapse@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    await createEvent(owner.id, campaign.id, {
+      title: "10h before",
+      basis: "FLOOR_COLLAPSE",
+      floor: 9,
+      offset: 10,
+      unit: "HOUR",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await createEvent(owner.id, campaign.id, {
+      title: "2h before",
+      basis: "FLOOR_COLLAPSE",
+      floor: 9,
+      offset: 2,
+      unit: "HOUR",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    // 2h-before is closer to collapse (later in fiction) so it sorts on top.
+    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual(["2h before", "10h before"]);
+  });
+
+  it("re-derives the rank when an edit changes the offset within a floor", async () => {
+    const owner = await makeUser("timeref-reedit@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    const early = await createEvent(owner.id, campaign.id, {
+      title: "Early",
+      basis: "FLOOR_START",
+      floor: 9,
+      offset: 1,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await createEvent(owner.id, campaign.id, {
+      title: "Mid",
+      basis: "FLOOR_START",
+      floor: 9,
+      offset: 5,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    // Push Early past Mid by bumping its offset; the derived rank should follow.
+    await updateEvent(owner.id, campaign.id, early.id, {
+      title: "Early",
+      basis: "FLOOR_START",
+      floor: 9,
+      offset: 9,
+      unit: "DAY",
+      secret: false,
+    });
+
+    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual(["Early", "Mid"]);
+  });
+
+  it("resolves the anchor title for EVENT-basis phrasing and validates the anchor", async () => {
+    const owner = await makeUser("timeref-anchor@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    const stunt = await createEvent(owner.id, campaign.id, {
+      title: "Carl's stunt",
+      floor: 3,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const fallout = await createEvent(owner.id, campaign.id, {
+      title: "Fallout",
+      basis: "EVENT",
+      anchorEventId: stunt.id,
+      offset: -2,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    const falloutRow = timeline.find((event) => event.id === fallout.id);
+    expect(falloutRow?.time).toMatchObject({
+      basis: "EVENT",
+      anchorEventId: stunt.id,
+      phrase: "2 days before Carl's stunt",
+    });
+
+    // A dangling anchor is rejected; an event can't anchor to itself.
+    await expect(
+      createEvent(owner.id, campaign.id, {
+        title: "Bad anchor",
+        basis: "EVENT",
+        anchorEventId: "does-not-exist",
+        secret: false,
+        participants: [{ entityId: carl.id, role: "ACTOR" }],
+      }),
+    ).rejects.toBeInstanceOf(ServiceError);
+    await expect(
+      updateEvent(owner.id, campaign.id, stunt.id, {
+        title: "Carl's stunt",
+        basis: "EVENT",
+        anchorEventId: stunt.id,
+        secret: false,
+      }),
     ).rejects.toBeInstanceOf(ServiceError);
   });
 });

@@ -21,6 +21,7 @@ import {
   type EffectRowValue,
 } from "@/components/entities/effect-rows";
 import { EventEffectsSection } from "@/components/entities/event-effects-section";
+import { EventTimeFields } from "@/components/entities/event-time-fields";
 import {
   ParticipantRows,
   type ParticipantRowValue,
@@ -39,9 +40,8 @@ type ParticipantDraft = {
 };
 
 function formatTime(time: CampaignTimelineEvent["time"]) {
-  if (time.label) return time.label;
-  if (time.floor != null) return `Floor ${time.floor}`;
-  return "Unplaced";
+  // Generated phrase from the typed timeRef (ADR 0004); falls back when blank.
+  return time.phrase ?? "Unplaced";
 }
 
 // Resolve the neighbours a dragged event would land between, given the displayed
@@ -79,10 +79,12 @@ export function computeReorderNeighbors(
 function NewEventForm({
   campaignId,
   candidates,
+  anchorCandidates,
   onClose,
 }: {
   campaignId: string;
   candidates: EntityCandidate[];
+  anchorCandidates: { id: string; title: string }[];
   onClose: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -137,22 +139,7 @@ function NewEventForm({
         placeholder="Summary (optional)"
         className="border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2 text-[12.5px] text-[var(--ink)]"
       />
-      <div className="grid gap-2 sm:grid-cols-[100px_minmax(0,1fr)]">
-        <input
-          name="floor"
-          type="number"
-          min={1}
-          max={18}
-          placeholder="Floor"
-          className="border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2 text-[12px] text-[var(--ink)]"
-        />
-        <input
-          name="timeLabel"
-          maxLength={120}
-          placeholder="Time label (e.g. Day 3)"
-          className="border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2 text-[12px] text-[var(--ink)]"
-        />
-      </div>
+      <EventTimeFields anchorCandidates={anchorCandidates} />
 
       <input type="hidden" name="participantCount" value={rows.length} />
       <div className="flex flex-col gap-2">
@@ -255,6 +242,7 @@ function EditEventForm({
   event,
   candidates,
   crawlerCandidates,
+  anchorCandidates,
   resolveName,
   onClose,
 }: {
@@ -262,6 +250,7 @@ function EditEventForm({
   event: CampaignTimelineEvent;
   candidates: EntityCandidate[];
   crawlerCandidates: EntityCandidate[];
+  anchorCandidates: { id: string; title: string }[];
   resolveName: (targetId: string) => string;
   onClose: () => void;
 }) {
@@ -335,26 +324,11 @@ function EditEventForm({
         placeholder="Summary (optional)"
         className="border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2 text-[12.5px] text-[var(--ink)]"
       />
-      <div className="grid gap-2 sm:grid-cols-[100px_minmax(0,1fr)]">
-        <input
-          name="floor"
-          type="number"
-          min={1}
-          max={18}
-          defaultValue={event.time.floor ?? ""}
-          aria-label="Floor"
-          placeholder="Floor"
-          className="border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2 text-[12px] text-[var(--ink)]"
-        />
-        <input
-          name="timeLabel"
-          maxLength={120}
-          defaultValue={event.time.label ?? ""}
-          aria-label="Time label"
-          placeholder="Time label (e.g. Day 3)"
-          className="border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2 text-[12px] text-[var(--ink)]"
-        />
-      </div>
+      <EventTimeFields
+        initial={event.time}
+        anchorCandidates={anchorCandidates}
+        excludeEventId={event.id}
+      />
 
       <ParticipantRows candidates={candidates} initial={initialParticipants} />
       <EffectRows candidates={crawlerCandidates} initial={initialEffects} />
@@ -430,6 +404,11 @@ export function CampaignTimeline({
   );
   const resolveName = (targetId: string) =>
     nameById.get(targetId) ?? "Unknown crawler";
+  // EVENT-basis anchors pick from the campaign's other logged events.
+  const anchorCandidates = events.map((event) => ({
+    id: event.id,
+    title: event.title,
+  }));
 
   return (
     <div className="h-full overflow-y-auto">
@@ -459,6 +438,7 @@ export function CampaignTimeline({
           <NewEventForm
             campaignId={campaignId}
             candidates={candidates}
+            anchorCandidates={anchorCandidates}
             onClose={() => setOpen(false)}
           />
         )}
@@ -575,6 +555,7 @@ export function CampaignTimeline({
                       event={event}
                       candidates={candidates}
                       crawlerCandidates={crawlerCandidates}
+                      anchorCandidates={anchorCandidates}
                       resolveName={resolveName}
                       onClose={() => setEditingId(null)}
                     />

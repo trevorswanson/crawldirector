@@ -52,12 +52,25 @@ const candidates: TimelineCandidate[] = [
   { id: "e2", name: "Donut", type: "CRAWLER" },
 ];
 
+function timeInfo(over: Partial<EntityEvent["time"]> = {}): EntityEvent["time"] {
+  return {
+    basis: "UNSCHEDULED",
+    floor: null,
+    offset: null,
+    unit: null,
+    anchorEventId: null,
+    label: null,
+    phrase: null,
+    ...over,
+  };
+}
+
 function event(overrides: Partial<EntityEvent> = {}): EntityEvent {
   return {
     id: "ev1",
     title: "Floor 9 boss fight",
     summary: "They beat the boss.",
-    time: { floor: 9, label: "Day 3" },
+    time: timeInfo({ basis: "FLOOR_START", floor: 9, label: "Day 3", phrase: "Day 3" }),
     orderKey: 9,
     rank: "a0",
     secret: false,
@@ -112,7 +125,7 @@ describe("TimelinePanel", () => {
             title: "Secret pact",
             summary: null,
             secret: true,
-            time: { floor: null, label: null },
+            time: timeInfo(),
             others: [],
           }),
         ]}
@@ -516,7 +529,7 @@ describe("TimelinePanel", () => {
         entityId="e1"
         entityName="Carl"
         entityType="CRAWLER"
-        events={[event({ time: { floor: 4, label: null } })]}
+        events={[event({ time: timeInfo({ basis: "FLOOR_START", floor: 4, phrase: "Floor 4" }) })]}
         candidates={candidates}
       />,
     );

@@ -58,6 +58,7 @@ import {
   formatReviewValue,
   reviewInputKind,
 } from "@/lib/review";
+import { phraseTimeRef, readTimeRef } from "@/lib/time-ref";
 import { cn } from "@/lib/utils";
 
 const effectStatSet = new Set<string>(eventEffectStatValues);
@@ -716,11 +717,15 @@ function reviewStructuredField(
     };
   }
   if (field === "inGameTime" && value && typeof value === "object" && !Array.isArray(value)) {
-    const time = value as Record<string, unknown>;
+    const ref = readTimeRef(value);
     return {
       kind: "inGameTime",
-      floor: typeof time.floor === "number" ? time.floor : null,
-      label: typeof time.label === "string" ? time.label : "",
+      basis: ref.basis,
+      floor: ref.floor ?? null,
+      offset: ref.offset ?? null,
+      unit: ref.unit ?? null,
+      anchorEventId: ref.anchorEventId ?? null,
+      label: ref.label ?? "",
     };
   }
   if (field === "participants" && Array.isArray(value)) {
@@ -757,12 +762,16 @@ function structuredReviewText(
   if (!structured) return formatReviewValue(fallback);
   if (structured.kind === "entity") return structured.value?.name ?? "No entity selected";
   if (structured.kind === "inGameTime") {
-    return [
-      structured.floor != null ? `Floor ${structured.floor}` : null,
-      structured.label || null,
-    ]
-      .filter(Boolean)
-      .join(" · ") || "Unscheduled";
+    return (
+      phraseTimeRef({
+        basis: structured.basis,
+        floor: structured.floor ?? undefined,
+        offset: structured.offset ?? undefined,
+        unit: structured.unit ?? undefined,
+        anchorEventId: structured.anchorEventId ?? undefined,
+        label: structured.label || undefined,
+      }) ?? "Unscheduled"
+    );
   }
   return (
     structured.value

@@ -233,16 +233,24 @@ describe("OperationDiffEditor", () => {
     expect(edits.at(-1)?.data.get("value")).toBe("entity-donut");
   });
 
-  it("edits in-game time as a floor and text label", () => {
+  it("edits in-game time as a basis, floor, offset, and label override", () => {
     const { edits } = renderWithCapture([
       field({
         field: "inGameTime",
         kind: "json",
-        toText: "Floor 9 · Air supply throttled",
-        draft: JSON.stringify({ floor: 9, label: "Air supply throttled" }),
+        toText: "Air supply throttled",
+        draft: JSON.stringify({
+          basis: "FLOOR_START",
+          floor: 9,
+          label: "Air supply throttled",
+        }),
         structured: {
           kind: "inGameTime",
+          basis: "FLOOR_START",
           floor: 9,
+          offset: null,
+          unit: null,
+          anchorEventId: null,
           label: "Air supply throttled",
         },
       }),
@@ -250,13 +258,20 @@ describe("OperationDiffEditor", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Edit inGameTime" }));
     fireEvent.change(screen.getByLabelText("In-game floor"), { target: { value: "10" } });
+    fireEvent.change(screen.getByLabelText("Time offset"), { target: { value: "3" } });
     fireEvent.change(screen.getByLabelText("In-game time label"), {
       target: { value: "After the collapse" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save inGameTime" }));
 
     expect(edits.at(-1)?.data.get("value")).toBe(
-      JSON.stringify({ floor: 10, label: "After the collapse" }),
+      JSON.stringify({
+        basis: "FLOOR_START",
+        floor: 10,
+        offset: 3,
+        unit: "DAY",
+        label: "After the collapse",
+      }),
     );
   });
 

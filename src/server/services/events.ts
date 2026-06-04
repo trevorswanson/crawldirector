@@ -10,6 +10,14 @@ import {
 import { ServiceError } from "@/lib/errors";
 import { generateRankBetween } from "@/lib/rank";
 import {
+  buildTimeRef,
+  phraseTimeRef,
+  readTimeRef,
+  type TimeBasis,
+  type TimeRefInput,
+  type TimeUnit,
+} from "@/lib/time-ref";
+import {
   createEventSchema,
   updateEventSchema,
   type CreateEventInput,
@@ -43,7 +51,18 @@ function nullIfEmpty(value: string | undefined) {
   return value && value.length > 0 ? value : null;
 }
 
-export type EventTimeInfo = { floor: number | null; label: string | null };
+// The projected in-fiction time for an event (ADR 0004 slice 2). `phrase` is the
+// generated display string (or the DM's `label` override); the structured
+// fields seed the event form's basis/offset/unit pickers and anchor selector.
+export type EventTimeInfo = {
+  basis: TimeBasis;
+  floor: number | null;
+  offset: number | null;
+  unit: TimeUnit | null;
+  anchorEventId: string | null;
+  label: string | null;
+  phrase: string | null;
+};
 
 export type EventCausalitySummary = { id: string; title: string; linkId: string };
 
@@ -197,27 +216,92 @@ function isPlayerVisible(entity: {
   );
 }
 
-// Build the flexible in-game time JSON ({ floor?, label? }) the Event stores.
-// The mechanical order key (the floor) and intra-floor rank are derived from
-// this anchor server-side in the review apply path, never authored here —
-// DCC time is irregular, so floor is the natural coarse clock (ADR 0004).
-function buildInGameTime(input: { floor?: number; timeLabel?: string }) {
-  const time: { floor?: number; label?: string } = {};
-  if (typeof input.floor === "number") time.floor = input.floor;
-  const label = nullIfEmpty(input.timeLabel);
-  if (label) time.label = label;
-  return time;
+// Build the typed in-game time JSON (a `TimeRef`) the Event stores (ADR 0004
+// slice 2). The mechanical order key (the floor) and intra-floor rank are
+// derived from this anchor server-side in the review apply path, never authored
+// here — DCC time is irregular, so floor is the natural coarse clock.
+function buildInGameTime(input: {
+  basis?: TimeBasis;
+  floor?: number;
+  offset?: number;
+  unit?: TimeUnit;
+  anchorEventId?: string;
+  timeLabel?: string;
+}) {
+  const refInput: TimeRefInput = {
+    basis: input.basis,
+    floor: input.floor,
+    offset: input.offset,
+    unit: input.unit,
+    anchorEventId: input.anchorEventId,
+    label: input.timeLabel,
+  };
+  return buildTimeRef(refInput);
 }
 
-function readTimeInfo(value: unknown): EventTimeInfo {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { floor: null, label: null };
-  }
-  const record = value as Record<string, unknown>;
+// Project a stored in-game time into `EventTimeInfo` for display. `anchorTitles`
+// resolves an EVENT-basis anchor id to its title so the generated phrase can name
+// the referenced event ("after Carl's stunt"); it is optional (an unresolved
+// anchor falls back to a generic phrase).
+function readTimeInfo(
+  value: unknown,
+  anchorTitles?: Map<string, string>,
+): EventTimeInfo {
+  const ref = readTimeRef(value);
+  const anchorTitle = ref.anchorEventId
+    ? anchorTitles?.get(ref.anchorEventId) ?? null
+    : null;
   return {
-    floor: typeof record.floor === "number" ? record.floor : null,
-    label: typeof record.label === "string" ? record.label : null,
+    basis: ref.basis,
+    floor: ref.floor ?? null,
+    offset: ref.offset ?? null,
+    unit: ref.unit ?? null,
+    anchorEventId: ref.anchorEventId ?? null,
+    label: ref.label ?? null,
+    phrase: phraseTimeRef(ref, { anchorTitle }),
   };
+}
+
+// Titles for every EVENT-basis anchor referenced by a fetched event set, so the
+// generated phrasing can name the anchor. One extra query keeps the timeline
+// queries flat; anchors outside the visible set still resolve by id.
+async function loadAnchorTitles(
+  campaignId: string,
+  events: { inGameTime: unknown }[],
+): Promise<Map<string, string>> {
+  const anchorIds = new Set<string>();
+  for (const event of events) {
+    const ref = readTimeRef(event.inGameTime);
+    if (ref.basis === "EVENT" && ref.anchorEventId) anchorIds.add(ref.anchorEventId);
+  }
+  if (anchorIds.size === 0) return new Map();
+  const rows = await prisma.event.findMany({
+    where: { campaignId, id: { in: [...anchorIds] } },
+    select: { id: true, title: true },
+  });
+  return new Map(rows.map((row) => [row.id, row.title]));
+}
+
+// Validate an EVENT-basis anchor: it must reference a live event in this
+// campaign and never the event being edited (an event can't anchor to itself).
+async function assertValidTimeAnchor(
+  campaignId: string,
+  inGameTime: ReturnType<typeof buildTimeRef>,
+  selfEventId?: string,
+) {
+  if (inGameTime.basis !== "EVENT" || !inGameTime.anchorEventId) return;
+  if (inGameTime.anchorEventId === selfEventId) {
+    throw new ServiceError("An event cannot be anchored to itself.");
+  }
+  const anchor = await prisma.event.findFirst({
+    where: {
+      id: inGameTime.anchorEventId,
+      campaignId,
+      status: { not: CanonStatus.ARCHIVED },
+    },
+    select: { id: true },
+  });
+  if (!anchor) throw new ServiceError("Anchor event not found.");
 }
 
 function isPlayerVisibleEvent(
@@ -260,6 +344,7 @@ export async function createEvent(
   }
 
   const inGameTime = buildInGameTime(parsed);
+  await assertValidTimeAnchor(campaignId, inGameTime);
   // No `orderKey`: order is derived server-side from the in-game-time anchor at
   // apply time, never carried in the reviewable patch (ADR 0004).
   const patch: ReviewPatch = {
@@ -319,6 +404,7 @@ export async function updateEvent(
   }
 
   const inGameTime = buildInGameTime(parsed);
+  await assertValidTimeAnchor(campaignId, inGameTime, eventId);
   // No `orderKey`: order is re-derived from the anchor at apply time (ADR 0004).
   const patch: ReviewPatch = {
     _baseVersion: { to: existing.version },
@@ -458,6 +544,7 @@ export async function listEventsForEntity(
     },
   });
 
+  const anchorTitles = await loadAnchorTitles(campaignId, events);
   const timeline: EntityEvent[] = [];
   for (const event of events) {
     const selfParticipations = event.participants.filter(
@@ -479,7 +566,7 @@ export async function listEventsForEntity(
       id: event.id,
       title: event.title,
       summary: event.summary,
-      time: readTimeInfo(event.inGameTime),
+      time: readTimeInfo(event.inGameTime, anchorTitles),
       orderKey: event.orderKey,
       rank: event.rank,
       secret: event.secret,
@@ -588,6 +675,7 @@ export async function listCampaignTimeline(
     },
   });
 
+  const anchorTitles = await loadAnchorTitles(campaignId, events);
   const timeline: CampaignTimelineEvent[] = [];
   for (const event of events) {
     const participants = event.participants
@@ -604,7 +692,7 @@ export async function listCampaignTimeline(
       id: event.id,
       title: event.title,
       summary: event.summary,
-      time: readTimeInfo(event.inGameTime),
+      time: readTimeInfo(event.inGameTime, anchorTitles),
       orderKey: event.orderKey,
       rank: event.rank,
       secret: event.secret,

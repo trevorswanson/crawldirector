@@ -1,6 +1,6 @@
 # ADR 0004 — Event time model: derived ordering, intra-floor rank, and structured time references
 
-- **Status:** accepted (slice 1 delivered 2026-06-04; slices 2–3 pending)
+- **Status:** accepted (slices 1–2 delivered 2026-06-04; slice 3 pending)
 - **Date:** 2026-06-04
 - **Milestone:** M3 (events, timeline, causality)
 

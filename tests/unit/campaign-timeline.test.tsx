@@ -55,12 +55,27 @@ const candidates = [
   { id: "e2", name: "Donut", type: "CRAWLER" },
 ];
 
+function timeInfo(
+  over: Partial<CampaignTimelineEvent["time"]> = {},
+): CampaignTimelineEvent["time"] {
+  return {
+    basis: "UNSCHEDULED",
+    floor: null,
+    offset: null,
+    unit: null,
+    anchorEventId: null,
+    label: null,
+    phrase: null,
+    ...over,
+  };
+}
+
 const events: CampaignTimelineEvent[] = [
   {
     id: "ev1",
     title: "Boss fight",
     summary: "Carl and Donut survive.",
-    time: { floor: 9, label: "Day 3" },
+    time: timeInfo({ basis: "FLOOR_START", floor: 9, label: "Day 3", phrase: "Day 3" }),
     orderKey: 9,
     rank: "a0",
     secret: false,
@@ -86,7 +101,9 @@ function makeEvent(
     id,
     title,
     summary: null,
-    time: { floor: orderKey || null, label: null },
+    time: orderKey
+      ? timeInfo({ basis: "FLOOR_START", floor: orderKey, phrase: `Floor ${orderKey}` })
+      : timeInfo(),
     orderKey,
     rank,
     secret: false,
@@ -138,7 +155,7 @@ describe("CampaignTimeline", () => {
             id: "ev-secret",
             title: "Secret locked scene",
             summary: null,
-            time: { floor: null, label: null },
+            time: timeInfo(),
             orderKey: 0,
             rank: "a0",
             secret: true,

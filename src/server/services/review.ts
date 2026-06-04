@@ -13,6 +13,7 @@ import {
 } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { generateRankBetween } from "@/lib/rank";
+import { floorRelativeSortKey, readTimeRef } from "@/lib/time-ref";
 import { prisma } from "@/server/db";
 
 type JsonPrimitive = string | number | boolean | null;
@@ -3114,13 +3115,103 @@ async function nextRankForFloor(
   tx: Prisma.TransactionClient,
   campaignId: string,
   orderKey: number,
+  excludeEventId?: string,
 ): Promise<string> {
   const last = await tx.event.findFirst({
-    where: { campaignId, orderKey, status: { not: CanonStatus.ARCHIVED } },
+    where: {
+      campaignId,
+      orderKey,
+      status: { not: CanonStatus.ARCHIVED },
+      ...(excludeEventId ? { id: { not: excludeEventId } } : {}),
+    },
     orderBy: { rank: "desc" },
     select: { rank: true },
   });
   return generateRankBetween(last?.rank ?? null, null);
+}
+
+// Derive an event's intra-floor `rank` from its time anchor when the basis is
+// floor-relative (ADR 0004 slice 2). The new event is positioned among its
+// floor siblings that share the same floor-relative basis by their offset, so a
+// concrete time yields a deterministic order without a manual drag. Siblings of
+// a different basis (or with no concrete offset) are ignored — mixing the two
+// floor axes needs floor-duration data we don't model — and float at their
+// manual rank. Falls back to `nextRankForFloor` (append on top) when there is no
+// comparable sibling or the existing ranks can't bracket the new position.
+async function deriveRankForFloor(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  orderKey: number,
+  sortKey: { basis: "FLOOR_START" | "FLOOR_COLLAPSE"; position: number },
+  excludeEventId?: string,
+): Promise<string> {
+  const siblings = await tx.event.findMany({
+    where: {
+      campaignId,
+      orderKey,
+      status: { not: CanonStatus.ARCHIVED },
+      ...(excludeEventId ? { id: { not: excludeEventId } } : {}),
+    },
+    select: { rank: true, inGameTime: true },
+  });
+
+  // Comparable siblings: same floor-relative basis, with a concrete position.
+  const comparable: { rank: string; position: number }[] = [];
+  for (const sibling of siblings) {
+    const key = floorRelativeSortKey(readTimeRef(sibling.inGameTime));
+    if (key && key.basis === sortKey.basis) {
+      comparable.push({ rank: sibling.rank, position: key.position });
+    }
+  }
+  if (comparable.length === 0) {
+    return nextRankForFloor(tx, campaignId, orderKey, excludeEventId);
+  }
+
+  // Higher position sorts later in fiction => higher rank (the timeline shows
+  // later-first). Bracket the new position between the closest sibling above
+  // (smallest position strictly greater) and below (largest position ≤ ours).
+  let above: { rank: string; position: number } | null = null;
+  let below: { rank: string; position: number } | null = null;
+  for (const candidate of comparable) {
+    if (candidate.position > sortKey.position) {
+      // Tightest sibling above us: smallest position, then lowest rank.
+      if (
+        !above ||
+        candidate.position < above.position ||
+        (candidate.position === above.position && candidate.rank < above.rank)
+      ) {
+        above = candidate;
+      }
+    } else if (
+      // Tightest sibling at/below us: largest position, then highest rank.
+      !below ||
+      candidate.position > below.position ||
+      (candidate.position === below.position && candidate.rank > below.rank)
+    ) {
+      below = candidate;
+    }
+  }
+
+  try {
+    return generateRankBetween(below?.rank ?? null, above?.rank ?? null);
+  } catch {
+    return nextRankForFloor(tx, campaignId, orderKey, excludeEventId);
+  }
+}
+
+// Resolve a freshly applied event's `rank`: derived from the anchor when the
+// time is floor-relative + concrete, otherwise appended on top for manual order.
+async function rankForEvent(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  orderKey: number,
+  inGameTime: JsonValue | undefined,
+  excludeEventId?: string,
+): Promise<string> {
+  const sortKey = floorRelativeSortKey(readTimeRef(inGameTime));
+  return sortKey
+    ? deriveRankForFloor(tx, campaignId, orderKey, sortKey, excludeEventId)
+    : nextRankForFloor(tx, campaignId, orderKey, excludeEventId);
 }
 
 async function applyEventOperation(
@@ -3213,16 +3304,17 @@ async function applyCreateEvent(
     }
   }
 
-  const orderKey = orderKeyFromInGameTime(readTo(patch, "inGameTime"));
+  const inGameTime = readTo(patch, "inGameTime");
+  const orderKey = orderKeyFromInGameTime(inGameTime);
   const event = await tx.event.create({
     data: {
       campaignId: changeSet.campaignId,
       title,
       summary: nullableString(readTo(patch, "summary")),
       description: nullableString(readTo(patch, "description")),
-      inGameTime: jsonObject(readTo(patch, "inGameTime")),
+      inGameTime: jsonObject(inGameTime),
       orderKey,
-      rank: await nextRankForFloor(tx, changeSet.campaignId, orderKey),
+      rank: await rankForEvent(tx, changeSet.campaignId, orderKey, inGameTime),
       effects: serializeEventEffects(effects),
       secret: booleanWithDefault(readTo(patch, "secret"), false),
       source: changeSet.source,
@@ -3306,15 +3398,32 @@ async function applyUpdateEvent(
   if ("summary" in patch) data.summary = nullableString(readTo(patch, "summary"));
   if ("description" in patch) data.description = nullableString(readTo(patch, "description"));
   if ("inGameTime" in patch) {
-    data.inGameTime = jsonObject(readTo(patch, "inGameTime"));
-    // Order is re-derived from the anchor, never taken from the patch. When the
-    // floor changes the event moves clocks, so it also gets a fresh rank at the
-    // top of its new floor; within the same floor its rank (and any manual drag
-    // order) is preserved.
-    const nextOrderKey = orderKeyFromInGameTime(readTo(patch, "inGameTime"));
+    const inGameTime = readTo(patch, "inGameTime");
+    data.inGameTime = jsonObject(inGameTime);
+    // Order is re-derived from the anchor, never taken from the patch (ADR 0004).
+    // A floor change moves clocks, so the event is re-placed in its new floor.
+    // Within a floor, a concrete floor-relative anchor re-derives the rank from
+    // its offset; a non-concrete (UNSCHEDULED / label-only) edit preserves the
+    // event's existing manual drag order.
+    const nextOrderKey = orderKeyFromInGameTime(inGameTime);
+    const sortKey = floorRelativeSortKey(readTimeRef(inGameTime));
     if (nextOrderKey !== event.orderKey) {
       data.orderKey = nextOrderKey;
-      data.rank = await nextRankForFloor(tx, changeSet.campaignId, nextOrderKey);
+      data.rank = await rankForEvent(
+        tx,
+        changeSet.campaignId,
+        nextOrderKey,
+        inGameTime,
+        eventId,
+      );
+    } else if (sortKey) {
+      data.rank = await deriveRankForFloor(
+        tx,
+        changeSet.campaignId,
+        nextOrderKey,
+        sortKey,
+        eventId,
+      );
     }
   }
   if ("secret" in patch) data.secret = booleanWithDefault(readTo(patch, "secret"), false);

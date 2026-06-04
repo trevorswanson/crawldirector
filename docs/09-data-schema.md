@@ -216,11 +216,17 @@ model Event {
   title       String
   summary     String?
   description String?
-  inGameTime  Json     @default("{}")   // { floor?, dayInFloor?, absoluteDay?, label? }
+  // Typed timeRef (ADR 0004 slice 2, src/lib/time-ref.ts):
+  //   { basis, floor?, offset?, unit?, anchorEventId?, label? }
+  // basis ∈ COLLAPSE|FLOOR_START|FLOOR_COLLAPSE|EVENT|ABSOLUTE_DAY|UNSCHEDULED.
+  // The display phrase is generated from the structure; label is an optional
+  // one-off override.
+  inGameTime  Json     @default("{}")
   // Order is mechanical and derived, never authored (ADR 0004): orderKey is the
   // floor (coarse macro-clock), rank is a fractional index (lexicographically
   // sortable string, COLLATE "C") giving stable DM-controllable order *within* a
-  // floor via drag. The timeline sorts by (orderKey, rank); neither is a
+  // floor. rank is derived from a concrete floor-relative offset, or set by drag
+  // for unscheduled events. The timeline sorts by (orderKey, rank); neither is a
   // reviewable change-set field.
   orderKey    Int      @default(0)
   rank        String   @default("a0")
