@@ -34,6 +34,13 @@ snapshot** — and individual field changes within them) moves through:
 - **SUPERSEDED** — a pending proposal invalidated because canon changed under it,
   or a newer proposal replaced it.
 
+The Review Queue shows a post-decision **Done** state instead of making a
+proposal disappear immediately. Rejected and superseded proposals can be
+reopened into `PENDING` because they never changed canon. Approved and partially
+applied proposals can be reopened for read-only inspection, but returning them
+to `PENDING` would risk applying the same mutation twice; revising approved
+canon requires a new compensating proposal.
+
 ### The Change Set / Proposal
 
 A **Change Set** is the unit of review. It bundles one or more **Change
@@ -62,6 +69,7 @@ ChangeOperation {
     | APPLY_EVENT_EFFECTS
   targetType, targetId?           // null targetId => create
   patch: { field -> { from?, to } }   // field-level diff
+  fieldDecisions: { field -> ACCEPTED | REJECTED }   // absent => PENDING
   decision: PENDING | ACCEPTED | EDITED | REJECTED   // per-operation
   editedPatch?                    // DM's edited version of the proposed change
 }
@@ -69,8 +77,16 @@ ChangeOperation {
 
 **Field-level granularity is essential.** A DM must be able to accept an AI
 proposal's new `description` but reject its change to `level`, or edit the
-proposed value before accepting. Decisions are recorded per operation (and the
-UI may expose per-field accept/reject within an operation's patch).
+proposed value before accepting. Review fields begin `PENDING`; nothing is
+implicitly accepted just because the proposal was opened. The read-first UI
+shows the diff by default, exposes per-field accept/reject controls, and reveals
+an input only when the DM chooses **Edit**. Each field decision persists
+independently, so accepting or editing one row leaves untouched rows `PENDING`.
+An `EDITED` operation patch stores the accepted field subset that approval
+applies; the separate field-decision map preserves the UI/review history.
+Run-level **accept all non-conflicting** accepts fields that are still pending
+but must preserve explicit field rejections and saved edits rather than
+promoting the original operation patch wholesale.
 
 ### Provenance
 
@@ -128,12 +144,13 @@ Default flow:
    `APPLY_EVENT_EFFECTS` operation that targets the event and shows the resolved
    entity patch in the queue (for example, `Crawler.gold: 20 -> 70`).
 3. The Review Queue owns approve/edit/reject/supersede. Editing the queued
-   operation should let the DM fix the target, effect kind, stat, or value before
-   approval.
+   operation should let the DM fix or remove a declared effect before approval.
+   Adding brand-new effects belongs to the event edit/declaration flow, not an
+   existing apply-effects proposal.
 4. Approval applies the resolved patch atomically, marks the event effect rows as
-   applied, records the applying Change Set id on those rows, and attaches every
-   target as an `AFFECTED` participant so affected entities show the event in
-   their timelines.
+   applied, marks effect rows omitted by an edited proposal as rejected, records
+   the applying Change Set id on applied rows, and attaches every target as an
+   `AFFECTED` participant so affected entities show the event in their timelines.
 5. Rejection or supersede must not mutate the target entity. The UI must also
    avoid leaving a rejected effect looking like a still-actionable unapplied
    effect; either remove it from the active effect list or mark it with an
@@ -154,10 +171,12 @@ application path. The distinction is:
    is sent as read-only context), calls the provider, and parses output into a
    Change Set with `source: AI` and full origin provenance.
 3. The Change Set lands as **PENDING** in the review queue. Nothing is canon yet.
-4. DM opens the review view: sees a **diff** (new entities highlighted, field
-   changes shown as from→to), can **accept / edit / reject per operation/field**,
-   add review notes, then **approve** (commit accepted ops to canon),
-   **reject**, or **save edits and re-review**.
+4. DM opens the review view: sees a read-only **diff** (new entities highlighted,
+   field changes shown as from→to) whose fields remain **pending** until the DM
+   chooses **accept**, **reject**, or **edit** per operation/field. Edit reveals
+   the relevant structured control (for example an entity picker, event
+   participant rows, or floor + time label). The DM can then **approve** (commit
+   accepted ops to canon), **reject**, or **save edits and re-review**.
 5. Approved operations apply atomically; provenance is written; optionally
    "approve & lock."
 

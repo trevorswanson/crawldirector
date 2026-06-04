@@ -52,6 +52,21 @@ export type ChangeOperationDecisionInput =
   | { decision: "PENDING" | "ACCEPTED" | "REJECTED"; editedPatch?: never }
   | { decision: "EDITED"; editedPatch: ReviewPatch };
 
+export type ReviewFieldDecision = "ACCEPTED" | "REJECTED";
+
+export type ChangeOperationFieldDecisionInput = {
+  field: string;
+  decision: ReviewFieldDecision | "PENDING";
+  editedValue?: ReviewPatch[string];
+};
+
+export type ReviewEffectPreview = {
+  id: string;
+  targetEntityId: string;
+  before: number | boolean | null;
+  after: number | boolean | null;
+};
+
 export type ReviewQueueOperation =
   Prisma.ChangeOperationGetPayload<object> & {
     targetLabel: string | null;
@@ -59,6 +74,7 @@ export type ReviewQueueOperation =
     targetLocked: boolean;
     lockedFields: string[];
     currentValues: Record<string, unknown>;
+    effectPreviews: ReviewEffectPreview[];
   };
 
 export type ReviewQueueItem = Omit<
@@ -151,14 +167,72 @@ function patchFields(patch: ReviewPatch) {
   return Object.keys(patch).filter((field) => field !== "campaignId");
 }
 
+function reviewablePatchFields(patch: ReviewPatch) {
+  return patchFields(patch).filter((field) => field !== "_baseVersion");
+}
+
+function readFieldDecisions(value: Prisma.JsonValue): Record<string, ReviewFieldDecision> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const decisions: Record<string, ReviewFieldDecision> = {};
+  for (const [field, decision] of Object.entries(value)) {
+    if (decision === "ACCEPTED" || decision === "REJECTED") {
+      decisions[field] = decision;
+    }
+  }
+  return decisions;
+}
+
+function operationFieldDecisions(
+  operation: Pick<
+    Prisma.ChangeOperationGetPayload<object>,
+    "decision" | "editedPatch" | "fieldDecisions" | "patch"
+  >,
+) {
+  const persisted = readFieldDecisions(operation.fieldDecisions);
+  if (Object.keys(persisted).length > 0) return persisted;
+
+  const fields = reviewablePatchFields(operation.patch as ReviewPatch);
+  if (operation.decision === OpDecision.ACCEPTED) {
+    return Object.fromEntries(fields.map((field) => [field, "ACCEPTED"])) as Record<
+      string,
+      ReviewFieldDecision
+    >;
+  }
+  if (operation.decision === OpDecision.REJECTED) {
+    return Object.fromEntries(fields.map((field) => [field, "REJECTED"])) as Record<
+      string,
+      ReviewFieldDecision
+    >;
+  }
+  if (operation.decision === OpDecision.EDITED && operation.editedPatch) {
+    const accepted = new Set(reviewablePatchFields(operation.editedPatch as ReviewPatch));
+    return Object.fromEntries(
+      fields.map((field) => [field, accepted.has(field) ? "ACCEPTED" : "REJECTED"]),
+    ) as Record<string, ReviewFieldDecision>;
+  }
+  return {};
+}
+
 function effectiveOperationPatch(
   operation: Pick<
     Prisma.ChangeOperationGetPayload<object>,
-    "decision" | "editedPatch" | "patch"
+    "decision" | "editedPatch" | "fieldDecisions" | "patch"
   >,
 ) {
   if (operation.decision !== OpDecision.EDITED) {
-    return operation.patch as ReviewPatch;
+    const originalPatch = operation.patch as ReviewPatch;
+    if (operation.decision !== OpDecision.PENDING) return originalPatch;
+    const rejectedFields = new Set(
+      Object.entries(readFieldDecisions(operation.fieldDecisions))
+        .filter(([, decision]) => decision === "REJECTED")
+        .map(([field]) => field),
+    );
+    if (rejectedFields.size === 0) return originalPatch;
+    return Object.fromEntries(
+      Object.entries(originalPatch).filter(
+        ([field]) => field === "_baseVersion" || !rejectedFields.has(field),
+      ),
+    ) as ReviewPatch;
   }
   const originalPatch = operation.patch as ReviewPatch;
   const editedPatch = operation.editedPatch as ReviewPatch | null;
@@ -168,6 +242,46 @@ function effectiveOperationPatch(
       ? { _baseVersion: originalPatch._baseVersion }
       : {}),
     ...editedPatch,
+  };
+}
+
+function bulkApprovedOperationData(
+  operation: Prisma.ChangeOperationGetPayload<object>,
+) {
+  const originalPatch = operation.patch as ReviewPatch;
+  const fields = reviewablePatchFields(originalPatch);
+  const existingDecisions = operationFieldDecisions(operation);
+  const rejectedFields = new Set(
+    fields.filter((field) => existingDecisions[field] === "REJECTED"),
+  );
+  if (rejectedFields.size === 0 && operation.decision !== OpDecision.EDITED) {
+    return {
+      decision: OpDecision.ACCEPTED,
+      editedPatch: Prisma.DbNull,
+      fieldDecisions:
+        Object.keys(existingDecisions).length > 0
+          ? (Object.fromEntries(
+              fields.map((field) => [field, "ACCEPTED"]),
+            ) as Prisma.InputJsonValue)
+          : undefined,
+    };
+  }
+
+  const priorEdits = operation.editedPatch as ReviewPatch | null;
+  const acceptedPatch: ReviewPatch = {};
+  for (const field of fields) {
+    if (rejectedFields.has(field)) continue;
+    acceptedPatch[field] = priorEdits?.[field] ?? originalPatch[field];
+  }
+  return {
+    decision: OpDecision.EDITED,
+    editedPatch: acceptedPatch as Prisma.InputJsonValue,
+    fieldDecisions: Object.fromEntries(
+      fields.map((field) => [
+        field,
+        rejectedFields.has(field) ? "REJECTED" : "ACCEPTED",
+      ]),
+    ) as Prisma.InputJsonValue,
   };
 }
 
@@ -547,8 +661,19 @@ export async function applyAutoApprovedEventChangeSet(
         title: input.title,
         summary: input.summary,
         actorUserId: userId,
-        operations: {
-          create: input.operations.map((operation) => ({
+      },
+    });
+
+    // Some event operations depend on an earlier operation in the same change
+    // set (for example UPDATE_EVENT declares effects before APPLY_EVENT_EFFECTS
+    // applies them). Create and retain rows sequentially so application order is
+    // the caller's declared order, not an unordered relation result.
+    const operations: Prisma.ChangeOperationGetPayload<object>[] = [];
+    for (const operation of input.operations) {
+      operations.push(
+        await tx.changeOperation.create({
+          data: {
+            changeSetId: changeSet.id,
             op: operation.op,
             targetType:
               operation.op === OpKind.CREATE_EVENT_CAUSALITY ||
@@ -557,15 +682,18 @@ export async function applyAutoApprovedEventChangeSet(
                 : "EVENT",
             targetId: operation.targetId,
             patch: operation.patch as Prisma.InputJsonValue,
-          })),
-        },
-      },
-      include: { operations: true },
-    });
-
+          },
+        }),
+      );
+    }
+    const changeSetWithOperations = { ...changeSet, operations };
     const appliedIds: string[] = [];
-    for (const operation of changeSet.operations) {
-      const targetId = await applyEventOperation(tx, changeSet, operation);
+    for (const operation of operations) {
+      const targetId = await applyEventOperation(
+        tx,
+        changeSetWithOperations,
+        operation,
+      );
       appliedIds.push(targetId);
       await tx.changeOperation.update({
         where: { id: operation.id },
@@ -652,6 +780,20 @@ export async function listPendingChangeSetsForUser(
   return enrichReviewQueueItems(campaignId, changeSets);
 }
 
+export async function getReviewChangeSetForUser(
+  userId: string,
+  campaignId: string,
+  changeSetId: string,
+): Promise<ReviewQueueItem | null> {
+  await assertCampaignDm(userId, campaignId);
+  const changeSet = await prisma.changeSet.findFirst({
+    where: { id: changeSetId, campaignId },
+    include: { operations: { orderBy: { id: "asc" } } },
+  });
+  if (!changeSet) return null;
+  return (await enrichReviewQueueItems(campaignId, [changeSet]))[0] ?? null;
+}
+
 async function enrichReviewQueueItems(
   campaignId: string,
   changeSets: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>[],
@@ -661,7 +803,7 @@ async function enrichReviewQueueItems(
   const entityTargetIds = new Set<string>();
   for (const changeSet of changeSets) {
     for (const operation of changeSet.operations) {
-      const patch = operation.patch as ReviewPatch;
+      const patch = effectiveOperationPatch(operation);
       if (operation.targetType === "ENTITY" && operation.targetId) {
         entityTargetIds.add(operation.targetId);
       }
@@ -670,6 +812,21 @@ async function enrichReviewQueueItems(
         const endpointTargetId = readTo(patch, "targetId");
         if (typeof sourceId === "string") entityTargetIds.add(sourceId);
         if (typeof endpointTargetId === "string") entityTargetIds.add(endpointTargetId);
+      }
+      const participants = readTo(patch, "participants");
+      if (Array.isArray(participants)) {
+        for (const participant of participants) {
+          if (!participant || typeof participant !== "object" || Array.isArray(participant)) {
+            continue;
+          }
+          const entityId = (participant as Record<string, unknown>).entityId;
+          if (typeof entityId === "string") entityTargetIds.add(entityId);
+        }
+      }
+      if (operation.op === OpKind.APPLY_EVENT_EFFECTS) {
+        for (const effect of parseEventEffects(readTo(patch, "effects"))) {
+          entityTargetIds.add(effect.targetEntityId);
+        }
       }
     }
   }
@@ -703,7 +860,15 @@ async function enrichReviewQueueItems(
   const eventTargets = eventTargetIds.length
     ? await prisma.event.findMany({
         where: { campaignId, id: { in: eventTargetIds } },
-        select: { id: true, title: true },
+        select: {
+          id: true,
+          title: true,
+          summary: true,
+          inGameTime: true,
+          orderKey: true,
+          secret: true,
+          participants: { select: { entityId: true, role: true } },
+        },
       })
     : [];
   const eventById = new Map(eventTargets.map((event) => [event.id, event]));
@@ -749,6 +914,7 @@ async function enrichReviewQueueItems(
       const targetEntityType =
         target?.type ??
         (eventTarget ? "EVENT" : null) ??
+        (operation.targetType === "EVENT" ? "EVENT" : null) ??
         relationshipTarget?.type ??
         (operation.targetType === "RELATIONSHIP"
           ? stringFromReviewValue(readTo(patch, "type"))
@@ -761,6 +927,8 @@ async function enrichReviewQueueItems(
           ? currentEntityValue(target, field)
           : relationshipTarget
             ? currentRelationshipValue(relationshipTarget, field)
+            : eventTarget
+              ? currentEventValue(eventTarget, field)
             : undefined;
         if (current !== undefined) currentValues[field] = current;
       }
@@ -772,15 +940,51 @@ async function enrichReviewQueueItems(
           eventTarget?.title ??
           relationshipLabel ??
           stringFromReviewValue(readTo(patch, "name")) ??
+          stringFromReviewValue(readTo(patch, "title")) ??
           operation.targetId ??
           null,
         targetEntityType,
         targetLocked: Boolean(target?.locked) || Boolean(relationshipTarget?.locked),
         lockedFields: target?.lockedFields ?? [],
         currentValues,
+        effectPreviews:
+          operation.op === OpKind.APPLY_EVENT_EFFECTS
+            ? buildEffectPreviews(effectiveOperationPatch(operation), targetById)
+            : [],
       };
     }),
   }));
+}
+
+function currentEventValue(
+  event: {
+    title: string;
+    summary: string | null;
+    inGameTime: Prisma.JsonValue;
+    orderKey: number | null;
+    secret: boolean;
+    participants: { entityId: string; role: EventParticipantRole }[];
+  },
+  field: string,
+): unknown {
+  switch (field) {
+    case "title":
+      return event.title;
+    case "summary":
+      return event.summary;
+    case "inGameTime":
+      return event.inGameTime;
+    case "orderKey":
+      return event.orderKey;
+    case "secret":
+      return event.secret;
+    case "participants":
+      return event.participants.map((participant) => ({
+        entityId: participant.entityId,
+        role: participant.role,
+      }));
+  }
+  return undefined;
 }
 
 // "Source → Target" label for a relationship op. UPDATE/DELETE resolve from the
@@ -919,6 +1123,21 @@ export async function setChangeOperationDecision(
       if (unknownField) {
         throw new ServiceError(`Edited operation includes unknown field "${unknownField}".`);
       }
+      if (operation.op === OpKind.APPLY_EVENT_EFFECTS) {
+        const originalEffectIds = new Set(
+          parseEventEffects(readTo(operation.patch as ReviewPatch, "effects")).map(
+            (effect) => effect.id,
+          ),
+        );
+        const unknownEffect = parseEventEffects(
+          readTo(input.editedPatch, "effects"),
+        ).find((effect) => !originalEffectIds.has(effect.id));
+        if (unknownEffect) {
+          throw new ServiceError(
+            `Edited effect operation includes unknown effect "${unknownEffect.id}".`,
+          );
+        }
+      }
     }
 
     const editedPatch =
@@ -957,6 +1176,7 @@ export async function setChangeOperationDecision(
       data: {
         decision: input.decision,
         editedPatch,
+        fieldDecisions: {},
         ...flags,
       },
     });
@@ -983,6 +1203,122 @@ export async function setChangeOperationDecision(
   });
 }
 
+export async function setChangeOperationFieldDecision(
+  userId: string,
+  campaignId: string,
+  changeSetId: string,
+  operationId: string,
+  input: ChangeOperationFieldDecisionInput,
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  return prisma.$transaction(async (tx) => {
+    const changeSet = await tx.changeSet.findFirst({
+      where: { id: changeSetId, campaignId, status: ChangeSetStatus.PENDING },
+      include: { operations: true },
+    });
+    if (!changeSet) throw new ServiceError("Change set not found.");
+
+    const operation = changeSet.operations.find((candidate) => candidate.id === operationId);
+    if (!operation) throw new ServiceError("Change operation not found.");
+    const originalPatch = operation.patch as ReviewPatch;
+    const fields = reviewablePatchFields(originalPatch);
+    if (!fields.includes(input.field)) {
+      throw new ServiceError(`Change operation has no reviewable field "${input.field}".`);
+    }
+
+    const fieldDecisions = operationFieldDecisions(operation);
+    if (input.decision === "PENDING") delete fieldDecisions[input.field];
+    else fieldDecisions[input.field] = input.decision;
+    const priorEdits = operation.editedPatch as ReviewPatch | null;
+    const editedPatch: ReviewPatch = {};
+    for (const field of fields) {
+      if (fieldDecisions[field] !== "ACCEPTED") continue;
+      editedPatch[field] =
+        field === input.field && input.editedValue
+          ? input.editedValue
+          : priorEdits?.[field] ?? originalPatch[field];
+    }
+
+    const acceptedFields = fields.filter((field) => fieldDecisions[field] === "ACCEPTED");
+    const allRejected =
+      fields.length > 0 &&
+      fields.every((field) => fieldDecisions[field] === "REJECTED");
+    const decision = acceptedFields.length > 0
+      ? OpDecision.EDITED
+      : allRejected
+        ? OpDecision.REJECTED
+        : OpDecision.PENDING;
+    const entityOperation =
+      operation.targetType === "ENTITY" && isEntityReviewOp(operation.op);
+    const relationshipOperation =
+      operation.targetType === "RELATIONSHIP" && isRelationshipReviewOp(operation.op);
+    const eventOperation =
+      (operation.targetType === "EVENT" || operation.targetType === "EVENT_CAUSALITY") &&
+      isEventReviewOp(operation.op);
+    if (!entityOperation && !relationshipOperation && !eventOperation) {
+      throw new ServiceError("Unsupported operation target.");
+    }
+    const flags =
+      decision === OpDecision.REJECTED ||
+      decision === OpDecision.PENDING ||
+      eventOperation
+        ? { blockedByLock: false, isStale: false }
+        : relationshipOperation
+          ? await evaluateRelationshipOperationFlags(
+              tx,
+              {
+                op: operation.op,
+                targetId: operation.targetId ?? undefined,
+                patch: editedPatch,
+              },
+              campaignId,
+              baseVersionsObject(changeSet.baseVersions),
+            )
+          : await evaluateEntityOperationFlags(
+              tx,
+              {
+                op: operation.op as EntityReviewOperationInput["op"],
+                targetId: operation.targetId ?? undefined,
+                patch: editedPatch,
+              },
+              campaignId,
+              baseVersionsObject(changeSet.baseVersions),
+            );
+
+    const updated = await tx.changeOperation.update({
+      where: { id: operation.id },
+      data: {
+        decision,
+        editedPatch:
+          acceptedFields.length > 0
+            ? (editedPatch as Prisma.InputJsonValue)
+            : Prisma.DbNull,
+        fieldDecisions: fieldDecisions as Prisma.InputJsonValue,
+        ...flags,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        campaignId,
+        actorUserId: userId,
+        action: "SET_FIELD_DECISION",
+        targetType: "CHANGE_OPERATION",
+        targetId: operation.id,
+        detail: {
+          changeSetId,
+          field: input.field,
+          decision: input.decision,
+          edited: Boolean(input.editedValue),
+        },
+      },
+    });
+
+    return updated;
+  });
+}
+
 export async function approveChangeSet(
   userId: string,
   campaignId: string,
@@ -998,8 +1334,13 @@ export async function approveChangeSet(
     });
     if (!changeSet) throw new ServiceError("Change set not found.");
     const applicableOperations = changeSet.operations.filter(
-      (operation) => operation.decision !== OpDecision.REJECTED,
+      (operation) =>
+        operation.decision === OpDecision.ACCEPTED ||
+        operation.decision === OpDecision.EDITED,
     );
+    if (applicableOperations.length === 0) {
+      throw new ServiceError("Accept at least one operation before approval.");
+    }
     if (applicableOperations.some((operation) => operation.blockedByLock)) {
       throw new ServiceError("One or more operations are blocked by locks.");
     }
@@ -1029,7 +1370,7 @@ export async function approveChangeSet(
     }
 
     const rejectedOperations = changeSet.operations.filter(
-      (operation) => operation.decision === OpDecision.REJECTED,
+      (operation) => !applicableOperations.some((applied) => applied.id === operation.id),
     );
     if (rejectedOperations.length > 0) {
       await markEventEffectReviewState(
@@ -1142,6 +1483,18 @@ export async function approveChangeSetRun(
     }
 
     try {
+      for (const operation of changeSet.operations) {
+        if (
+          operation.decision !== OpDecision.PENDING &&
+          operation.decision !== OpDecision.EDITED
+        ) {
+          continue;
+        }
+        await prisma.changeOperation.update({
+          where: { id: operation.id },
+          data: bulkApprovedOperationData(operation),
+        });
+      }
       await approveChangeSet(userId, campaignId, changeSet.id);
       approvedIds.push(changeSet.id);
     } catch (error) {
@@ -1527,6 +1880,143 @@ export async function supersedeChangeSet(
     });
 
     return { id: changeSetId };
+  });
+}
+
+// Inverse of markEventEffectReviewState: restore the effect rows a REJECTED/
+// SUPERSEDED proposal had claimed back to PENDING review (re-pointing them at
+// this change set/operation) so a reopened proposal is actionable again.
+async function restoreEventEffectPendingState(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operations: Prisma.ChangeOperationGetPayload<object>[],
+) {
+  for (const operation of operations) {
+    if (operation.op !== OpKind.APPLY_EVENT_EFFECTS || operation.targetType !== "EVENT") {
+      continue;
+    }
+    if (!operation.targetId) continue;
+    const event = await tx.event.findFirst({
+      where: { id: operation.targetId, campaignId: changeSet.campaignId },
+      select: { id: true, effects: true },
+    });
+    if (!event) continue;
+    const reviewedIds = new Set(
+      parseEventEffects(readTo(operation.patch as ReviewPatch, "effects")).map(
+        (effect) => effect.id,
+      ),
+    );
+    const effects = parseEventEffects(event.effects as JsonValue);
+    let changed = false;
+    for (const effect of effects) {
+      if (effect.applied || !reviewedIds.has(effect.id)) continue;
+      if (effect.reviewStatus !== "REJECTED" && effect.reviewStatus !== "SUPERSEDED") {
+        continue;
+      }
+      effect.pendingChangeSetId = changeSet.id;
+      effect.pendingOperationId = operation.id;
+      effect.reviewStatus = "PENDING";
+      changed = true;
+    }
+    if (changed) {
+      await tx.event.update({
+        where: { id: event.id },
+        data: { effects: serializeEventEffects(effects) },
+        select: { id: true },
+      });
+    }
+  }
+}
+
+/**
+ * Re-open a REJECTED or SUPERSEDED proposal back to PENDING so the DM can
+ * reconsider it. Only safe for proposals that never touched canon — an APPROVED
+ * (or PARTIALLY_APPLIED) set already wrote canon, and reverting that needs a
+ * compensating change set (the deferred undo feature), so reopening it is
+ * refused. Rejected operations restore edited patches (or return to PENDING),
+ * superseded operation decisions stay intact, held effect rows return to
+ * pending review, and a REOPEN audit row is written. DM-only.
+ */
+export async function reopenChangeSet(
+  userId: string,
+  campaignId: string,
+  changeSetId: string,
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  return prisma.$transaction(async (tx) => {
+    const changeSet = await tx.changeSet.findFirst({
+      where: { id: changeSetId, campaignId },
+      include: { operations: true },
+    });
+    if (!changeSet) throw new ServiceError("Change set not found.");
+    if (changeSet.status === ChangeSetStatus.PENDING) return { id: changeSetId };
+    if (
+      changeSet.status !== ChangeSetStatus.REJECTED &&
+      changeSet.status !== ChangeSetStatus.SUPERSEDED
+    ) {
+      throw new ServiceError(
+        "Approved canon can't be reopened — create a new proposal to revise it.",
+      );
+    }
+
+    await restoreEventEffectPendingState(tx, changeSet, changeSet.operations);
+    if (changeSet.status === ChangeSetStatus.REJECTED) {
+      for (const operation of changeSet.operations) {
+        await tx.changeOperation.update({
+          where: { id: operation.id },
+          data: {
+            decision: operation.editedPatch ? OpDecision.EDITED : OpDecision.PENDING,
+          },
+        });
+      }
+    }
+    await tx.changeSet.update({
+      where: { id: changeSetId },
+      data: {
+        status: ChangeSetStatus.PENDING,
+        reviewedById: null,
+        reviewedAt: null,
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        campaignId,
+        actorUserId: userId,
+        action: "REOPEN",
+        targetType: "CHANGE_SET",
+        targetId: changeSetId,
+        detail: { from: changeSet.status },
+      },
+    });
+
+    return { id: changeSetId };
+  });
+}
+
+export type ReviewChangeSetSummary = {
+  id: string;
+  title: string;
+  source: ChangeSource;
+  status: ChangeSetStatus;
+};
+
+// Minimal fetch for the Review Queue's post-decision "done" panel: a single
+// change set in any status (so the page can show "Committed to canon" / "Run
+// rejected" after it has left the pending list). DM-only; null when not found.
+export async function getReviewChangeSetSummary(
+  userId: string,
+  campaignId: string,
+  changeSetId: string,
+): Promise<ReviewChangeSetSummary | null> {
+  await assertCampaignDm(userId, campaignId);
+  return prisma.changeSet.findFirst({
+    where: {
+      id: changeSetId,
+      campaignId,
+      status: { not: ChangeSetStatus.PENDING },
+    },
+    select: { id: true, title: true, source: true, status: true },
   });
 }
 
@@ -2532,6 +3022,82 @@ function effectEntityPatch(
   return { [`crawler.${stat}`]: { from: current, to: next } };
 }
 
+function buildEffectPreviews(
+  patch: ReviewPatch,
+  targetById: ReadonlyMap<
+    string,
+    {
+      crawler: {
+        gold: number;
+        hp: number | null;
+        mp: number | null;
+        level: number;
+        killCount: number;
+        currentFloor: number | null;
+        isAlive: boolean;
+      } | null;
+    }
+  >,
+): ReviewEffectPreview[] {
+  const previews: ReviewEffectPreview[] = [];
+  const stateByTarget = new Map<
+    string,
+    {
+      gold: number;
+      hp: number | null;
+      mp: number | null;
+      level: number;
+      killCount: number;
+      currentFloor: number | null;
+      isAlive: boolean;
+    }
+  >();
+  for (const effect of parseEventEffects(readTo(patch, "effects"))) {
+    const crawler = targetById.get(effect.targetEntityId)?.crawler;
+    if (!crawler) continue;
+    const state = stateByTarget.get(effect.targetEntityId) ?? { ...crawler };
+    stateByTarget.set(effect.targetEntityId, state);
+    if (effect.kind === "SET_ALIVE") {
+      if (typeof effect.value !== "boolean") continue;
+      previews.push({
+        id: effect.id,
+        targetEntityId: effect.targetEntityId,
+        before: state.isAlive,
+        after: effect.value,
+      });
+      state.isAlive = effect.value;
+      continue;
+    }
+    if (!effect.stat) continue;
+    const values = state as unknown as Record<string, number | null>;
+    const before = values[effect.stat];
+    if (before === undefined) continue;
+    const floor = eventEffectStatFloors[effect.stat] ?? 0;
+    if (effect.kind === "SET_STAT") {
+      if (typeof effect.valueNumber !== "number") continue;
+      const after = Math.max(floor, effect.valueNumber);
+      previews.push({
+        id: effect.id,
+        targetEntityId: effect.targetEntityId,
+        before,
+        after,
+      });
+      values[effect.stat] = after;
+      continue;
+    }
+    if (typeof before !== "number" || typeof effect.delta !== "number") continue;
+    const after = Math.max(floor, before + effect.delta);
+    previews.push({
+      id: effect.id,
+      targetEntityId: effect.targetEntityId,
+      before,
+      after,
+    });
+    values[effect.stat] = after;
+  }
+  return previews;
+}
+
 async function applyEventOperation(
   tx: Prisma.TransactionClient,
   changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
@@ -2829,6 +3395,20 @@ async function applyApplyEventEffects(
   }
   const reviewedById = new Map(reviewedEffects.map((effect) => [effect.id, effect]));
   const reviewedIds = new Set(reviewedEffects.map((effect) => effect.id));
+  if (patchCarriesEffects) {
+    for (const effect of effects) {
+      if (
+        effect.applied ||
+        reviewedIds.has(effect.id) ||
+        !effectBelongsToOperation(effect, changeSet.id, operationId)
+      ) {
+        continue;
+      }
+      effect.pendingChangeSetId = null;
+      effect.pendingOperationId = null;
+      effect.reviewStatus = "REJECTED";
+    }
+  }
   const pending = effects.filter((effect) => {
     if (effect.applied) return false;
     if (reviewedIds.size > 0) {

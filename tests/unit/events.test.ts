@@ -26,6 +26,18 @@ function makeUser(email: string) {
   return prisma.user.create({ data: { email } });
 }
 
+async function approveAcceptedChangeSet(
+  userId: string,
+  campaignId: string,
+  changeSetId: string,
+) {
+  await prisma.changeOperation.updateMany({
+    where: { changeSetId, decision: "PENDING" },
+    data: { decision: "ACCEPTED" },
+  });
+  return approveChangeSet(userId, campaignId, changeSetId);
+}
+
 async function makeEntity(
   userId: string,
   campaignId: string,
@@ -1177,7 +1189,7 @@ describe("updateEvent", () => {
       ],
     });
     const applyResult = await applyEventEffects(owner.id, campaign.id, event.id);
-    await approveChangeSet(owner.id, campaign.id, applyResult.changeSetId);
+    await approveAcceptedChangeSet(owner.id, campaign.id, applyResult.changeSetId);
 
     await updateEvent(owner.id, campaign.id, event.id, {
       title: "Loot consequence renamed",

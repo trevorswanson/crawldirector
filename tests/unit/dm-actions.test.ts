@@ -13,7 +13,9 @@ const {
   approveChangeSetRun,
   rejectChangeSet,
   rejectChangeSetRun,
+  reopenChangeSet,
   setChangeOperationDecision,
+  setChangeOperationFieldDecision,
   supersedeChangeSet,
   setEntityLock,
   createRelationship,
@@ -43,7 +45,9 @@ const {
   approveChangeSetRun: vi.fn(),
   rejectChangeSet: vi.fn(),
   rejectChangeSetRun: vi.fn(),
+  reopenChangeSet: vi.fn(),
   setChangeOperationDecision: vi.fn(),
+  setChangeOperationFieldDecision: vi.fn(),
   supersedeChangeSet: vi.fn(),
   setEntityLock: vi.fn(),
   createRelationship: vi.fn(),
@@ -81,7 +85,9 @@ vi.mock("@/server/services/review", () => ({
   approveChangeSetRun,
   rejectChangeSet,
   rejectChangeSetRun,
+  reopenChangeSet,
   setChangeOperationDecision,
+  setChangeOperationFieldDecision,
   supersedeChangeSet,
   setEntityLock,
 }));
@@ -113,10 +119,13 @@ import {
   createGenericEntityAction,
   quickCreateEntityAction,
   getCampaignCanonIntegrityAction,
-  editChangeOperationPatchAction,
+  editChangeOperationFieldAction,
+  editEventEffectsOperationAction,
   rejectChangeSetAction,
   rejectChangeSetRunAction,
+  reopenChangeSetAction,
   setChangeOperationDecisionAction,
+  setChangeOperationFieldDecisionAction,
   supersedeChangeSetAction,
   toggleEntityFieldLockAction,
   toggleEntityLockAction,
@@ -500,11 +509,14 @@ describe("archiveEntityAction", () => {
 
 describe("review queue actions", () => {
   it("approves a change set and revalidates campaign surfaces", async () => {
-    await approveChangeSetAction("c1", "cs1");
+    await expect(approveChangeSetAction("c1", "cs1")).rejects.toThrow(
+      "NEXT_REDIRECT",
+    );
 
     expect(approveChangeSet).toHaveBeenCalledWith("u1", "c1", "cs1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+    expect(redirect).toHaveBeenCalledWith("/campaigns/c1/review?done=cs1");
   });
 
   it("approves a generator run and revalidates campaign surfaces", async () => {
@@ -516,10 +528,23 @@ describe("review queue actions", () => {
   });
 
   it("rejects a change set and revalidates the queue", async () => {
-    await rejectChangeSetAction("c1", "cs1");
+    await expect(rejectChangeSetAction("c1", "cs1")).rejects.toThrow(
+      "NEXT_REDIRECT",
+    );
 
     expect(rejectChangeSet).toHaveBeenCalledWith("u1", "c1", "cs1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+    expect(redirect).toHaveBeenCalledWith("/campaigns/c1/review?done=cs1");
+  });
+
+  it("reopens a rejected change set and redirects to it", async () => {
+    await expect(reopenChangeSetAction("c1", "cs1")).rejects.toThrow(
+      "NEXT_REDIRECT",
+    );
+
+    expect(reopenChangeSet).toHaveBeenCalledWith("u1", "c1", "cs1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+    expect(redirect).toHaveBeenCalledWith("/campaigns/c1/review?selected=cs1");
   });
 
   it("rejects a generator run and revalidates the queue", async () => {
@@ -557,33 +582,126 @@ describe("review queue actions", () => {
     expect(setChangeOperationDecision).not.toHaveBeenCalled();
   });
 
-  it("saves an edited operation patch and revalidates the queue", async () => {
-    const fd = new FormData();
-    fd.append("field", "summary");
-    fd.set("apply:summary", "on");
-    fd.set("kind:summary", "string");
-    fd.set("value:summary", "DM-edited summary");
-    fd.append("field", "tags");
-    fd.set("apply:tags", "on");
-    fd.set("kind:tags", "array");
-    fd.set("value:tags", "admin, crawler");
-    fd.append("field", "crawler.level");
-    fd.set("apply:crawler.level", "on");
-    fd.set("kind:crawler.level", "number");
-    fd.set("value:crawler.level", "12");
-    fd.append("field", "crawler.isAlive");
-    fd.set("apply:crawler.isAlive", "on");
-    fd.set("kind:crawler.isAlive", "boolean");
-    fd.set("value:crawler.isAlive", "false");
-    fd.append("field", "customFields");
-    fd.set("apply:customFields", "on");
-    fd.set("kind:customFields", "json");
-    fd.set("value:customFields", "{\"threat\":\"high\"}");
-    fd.append("field", "description");
-    fd.set("kind:description", "string");
-    fd.set("value:description", "unchecked value");
+  it("sets one field decision and revalidates the queue", async () => {
+    await setChangeOperationFieldDecisionAction(
+      "c1",
+      "cs1",
+      "op1",
+      "summary",
+      "ACCEPTED",
+    );
 
-    await editChangeOperationPatchAction("c1", "cs1", "op1", fd);
+    expect(setChangeOperationFieldDecision).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      "cs1",
+      "op1",
+      {
+        field: "summary",
+        decision: "ACCEPTED",
+      },
+    );
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+  });
+
+  it("ignores invalid field decisions", async () => {
+    await setChangeOperationFieldDecisionAction("c1", "cs1", "op1", "", "ACCEPTED");
+    await setChangeOperationFieldDecisionAction("c1", "cs1", "op1", "summary", "NOPE");
+
+    expect(setChangeOperationFieldDecision).not.toHaveBeenCalled();
+  });
+
+  it("saves one edited field and revalidates the queue", async () => {
+    const fd = form({ kind: "string", value: "DM-edited summary" });
+
+    await editChangeOperationFieldAction("c1", "cs1", "op1", "summary", fd);
+
+    expect(setChangeOperationFieldDecision).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      "cs1",
+      "op1",
+      {
+        field: "summary",
+        decision: "ACCEPTED",
+        editedValue: { to: "DM-edited summary" },
+      },
+    );
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+  });
+
+  it("parses typed field edits and ignores invalid edits", async () => {
+    await editChangeOperationFieldAction(
+      "c1",
+      "cs1",
+      "op1",
+      "tags",
+      form({ kind: "array", value: "admin, crawler" }),
+    );
+    await editChangeOperationFieldAction(
+      "c1",
+      "cs1",
+      "op1",
+      "crawler.level",
+      form({ kind: "number", value: "12" }),
+    );
+    await editChangeOperationFieldAction(
+      "c1",
+      "cs1",
+      "op1",
+      "crawler.isAlive",
+      form({ kind: "boolean", value: "false" }),
+    );
+    await editChangeOperationFieldAction(
+      "c1",
+      "cs1",
+      "op1",
+      "customFields",
+      form({ kind: "json", value: "{\"threat\":\"high\"}" }),
+    );
+    await editChangeOperationFieldAction(
+      "c1",
+      "cs1",
+      "op1",
+      "crawler.level",
+      form({ kind: "number", value: "not a number" }),
+    );
+    await editChangeOperationFieldAction(
+      "c1",
+      "cs1",
+      "op1",
+      "customFields",
+      form({ kind: "json", value: "{not json}" }),
+    );
+    await editChangeOperationFieldAction(
+      "c1",
+      "cs1",
+      "op1",
+      "",
+      form({ kind: "string", value: "ignored" }),
+    );
+    await editChangeOperationFieldAction(
+      "c1",
+      "cs1",
+      "op1",
+      "summary",
+      form({ value: "ignored" }),
+    );
+
+    expect(setChangeOperationFieldDecision).toHaveBeenCalledTimes(4);
+  });
+
+  it("saves edited existing effect rows as an EDITED effects patch", async () => {
+    const fd = new FormData();
+    fd.set("effectCount", "1");
+    // Row 0: an ADJUST_STAT keeping its stable id.
+    fd.set("effectId_0", "fx-1");
+    fd.set("effectKind_0", "ADJUST_STAT");
+    fd.set("effectTarget_0", "crawler-1");
+    fd.set("effectStat_0", "gold");
+    fd.set("effectDelta_0", "750");
+    fd.set("effectNote_0", "Boss loot, bumped");
+    await editEventEffectsOperationAction("c1", "cs1", "op1", fd);
 
     expect(setChangeOperationDecision).toHaveBeenCalledWith(
       "u1",
@@ -593,52 +711,56 @@ describe("review queue actions", () => {
       {
         decision: "EDITED",
         editedPatch: {
-          summary: { to: "DM-edited summary" },
-          tags: { to: ["admin", "crawler"] },
-          "crawler.level": { to: 12 },
-          "crawler.isAlive": { to: false },
-          customFields: { to: { threat: "high" } },
+          effects: {
+            to: [
+              {
+                id: "fx-1",
+                kind: "ADJUST_STAT",
+                targetEntityId: "crawler-1",
+                stat: "gold",
+                delta: 750,
+                note: "Boss loot, bumped",
+              },
+            ],
+          },
         },
       },
     );
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
   });
 
-  it("ignores invalid edited operation patch submissions", async () => {
-    const noneSelected = new FormData();
-    noneSelected.append("field", "summary");
-    noneSelected.set("kind:summary", "string");
-    noneSelected.set("value:summary", "DM-edited summary");
+  it("ignores unsupported new effect rows without stable ids", async () => {
+    const fd = new FormData();
+    fd.set("effectCount", "1");
+    fd.set("effectKind_0", "SET_ALIVE");
+    fd.set("effectTarget_0", "crawler-2");
+    fd.set("effectValue_0", "dead");
 
-    const badNumber = new FormData();
-    badNumber.append("field", "crawler.level");
-    badNumber.set("apply:crawler.level", "on");
-    badNumber.set("kind:crawler.level", "number");
-    badNumber.set("value:crawler.level", "not a number");
+    await editEventEffectsOperationAction("c1", "cs1", "op1", fd);
 
-    const emptyNumber = new FormData();
-    emptyNumber.append("field", "crawler.level");
-    emptyNumber.set("apply:crawler.level", "on");
-    emptyNumber.set("kind:crawler.level", "number");
-    emptyNumber.set("value:crawler.level", "  ");
+    expect(setChangeOperationDecision).not.toHaveBeenCalled();
+  });
 
-    const badJson = new FormData();
-    badJson.append("field", "customFields");
-    badJson.set("apply:customFields", "on");
-    badJson.set("kind:customFields", "json");
-    badJson.set("value:customFields", "{not json}");
+  it("ignores effect edits with no valid rows", async () => {
+    // No effectCount at all -> parseEffectRows returns undefined.
+    await editEventEffectsOperationAction("c1", "cs1", "op1", new FormData());
 
-    const badKind = new FormData();
-    badKind.append("field", "summary");
-    badKind.set("apply:summary", "on");
-    badKind.set("kind:summary", "not-a-kind");
-    badKind.set("value:summary", "whatever");
+    // A targetless row (trailing empty) yields zero effects.
+    const emptyRow = new FormData();
+    emptyRow.set("effectCount", "1");
+    emptyRow.set("effectKind_0", "ADJUST_STAT");
+    emptyRow.set("effectStat_0", "gold");
+    emptyRow.set("effectDelta_0", "10");
+    await editEventEffectsOperationAction("c1", "cs1", "op1", emptyRow);
 
-    await editChangeOperationPatchAction("c1", "cs1", "op1", noneSelected);
-    await editChangeOperationPatchAction("c1", "cs1", "op1", badNumber);
-    await editChangeOperationPatchAction("c1", "cs1", "op1", emptyNumber);
-    await editChangeOperationPatchAction("c1", "cs1", "op1", badJson);
-    await editChangeOperationPatchAction("c1", "cs1", "op1", badKind);
+    // An ADJUST_STAT with a zero delta fails schema validation.
+    const zeroDelta = new FormData();
+    zeroDelta.set("effectCount", "1");
+    zeroDelta.set("effectKind_0", "ADJUST_STAT");
+    zeroDelta.set("effectTarget_0", "crawler-1");
+    zeroDelta.set("effectStat_0", "gold");
+    zeroDelta.set("effectDelta_0", "0");
+    await editEventEffectsOperationAction("c1", "cs1", "op1", zeroDelta);
 
     expect(setChangeOperationDecision).not.toHaveBeenCalled();
   });

@@ -29,6 +29,18 @@ function makeUser(email: string) {
   return prisma.user.create({ data: { email } });
 }
 
+async function approveAcceptedChangeSet(
+  userId: string,
+  campaignId: string,
+  changeSetId: string,
+) {
+  await prisma.changeOperation.updateMany({
+    where: { changeSetId, decision: "PENDING" },
+    data: { decision: "ACCEPTED" },
+  });
+  return approveChangeSet(userId, campaignId, changeSetId);
+}
+
 beforeEach(async () => {
   await prisma.crawler.deleteMany();
   await prisma.entity.deleteMany();
@@ -483,7 +495,7 @@ describe("entity service", () => {
     await expect(listPendingChangeSetsForUser(owner.id, campaign.id)).resolves
       .toHaveLength(1);
 
-    const result = await approveChangeSet(owner.id, campaign.id, proposal.id);
+    const result = await approveAcceptedChangeSet(owner.id, campaign.id, proposal.id);
     expect(result.targetIds).toHaveLength(1);
     await expect(
       prisma.entity.findUniqueOrThrow({ where: { id: result.targetIds[0] } }),
@@ -545,7 +557,7 @@ describe("entity service", () => {
       { decision: "REJECTED" },
     );
 
-    await approveChangeSet(owner.id, campaign.id, proposal.id);
+    await approveAcceptedChangeSet(owner.id, campaign.id, proposal.id);
 
     await expect(
       prisma.entity.findUniqueOrThrow({ where: { id: zev.id } }),
@@ -611,7 +623,7 @@ describe("entity service", () => {
       prisma.changeOperation.findUniqueOrThrow({ where: { id: operation.id } }),
     ).resolves.toMatchObject({ decision: "EDITED", blockedByLock: false });
 
-    await approveChangeSet(owner.id, campaign.id, proposal.id);
+    await approveAcceptedChangeSet(owner.id, campaign.id, proposal.id);
 
     await expect(
       prisma.entity.findUniqueOrThrow({ where: { id: entity.id } }),
@@ -669,7 +681,7 @@ describe("entity service", () => {
       }),
     ).resolves.toMatchObject({ blockedByLock: true });
     await expect(
-      approveChangeSet(owner.id, campaign.id, proposal.id),
+      approveAcceptedChangeSet(owner.id, campaign.id, proposal.id),
     ).rejects.toThrow("blocked by locks");
   });
 
@@ -707,7 +719,7 @@ describe("entity service", () => {
     });
 
     await expect(
-      approveChangeSet(owner.id, campaign.id, proposal.id),
+      approveAcceptedChangeSet(owner.id, campaign.id, proposal.id),
     ).rejects.toThrow("stale");
     await expect(
       prisma.entity.findUniqueOrThrow({ where: { id: entity.id } }),
@@ -748,7 +760,7 @@ describe("entity service", () => {
     });
 
     await expect(
-      approveChangeSet(owner.id, campaign.id, proposal.id),
+      approveAcceptedChangeSet(owner.id, campaign.id, proposal.id),
     ).rejects.toThrow("stale");
     await expect(
       prisma.changeOperation.findFirstOrThrow({
