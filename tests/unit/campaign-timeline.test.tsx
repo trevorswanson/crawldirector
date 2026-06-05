@@ -226,6 +226,49 @@ describe("CampaignTimeline", () => {
     expect(screen.getByText("Later scene")).toBeDefined();
   });
 
+  it("flags causal links whose effect is placed before its cause", () => {
+    // Cause on Floor 3, effect on Floor 1 ⇒ the effect precedes its cause.
+    renderTimeline({
+      events: [
+        {
+          ...makeEvent("ev-cause", "The decree", 3, "a0"),
+          causes: [{ id: "ev-effect", title: "The fallout", linkId: "lk1" }],
+        },
+        {
+          ...makeEvent("ev-effect", "The fallout", 1, "a0"),
+          causedBy: [{ id: "ev-cause", title: "The decree", linkId: "lk1" }],
+        },
+      ],
+    });
+
+    // Inline markers appear on both ends of the link (cause's Causes thread and
+    // effect's Caused-by thread), plus the header summary counts the one link.
+    expect(
+      screen.getAllByLabelText("Out of order: this effect is placed before its cause").length,
+    ).toBe(2);
+    expect(screen.getByText("1 out of order")).toBeDefined();
+  });
+
+  it("does not flag a causal link whose cause precedes its effect", () => {
+    renderTimeline({
+      events: [
+        {
+          ...makeEvent("ev-cause", "The decree", 1, "a0"),
+          causes: [{ id: "ev-effect", title: "The fallout", linkId: "lk1" }],
+        },
+        {
+          ...makeEvent("ev-effect", "The fallout", 3, "a0"),
+          causedBy: [{ id: "ev-cause", title: "The decree", linkId: "lk1" }],
+        },
+      ],
+    });
+
+    expect(
+      screen.queryByLabelText("Out of order: this effect is placed before its cause"),
+    ).toBeNull();
+    expect(screen.queryByText("1 out of order")).toBeNull();
+  });
+
   it("submits a multi-participant event", async () => {
     createCampaignEventAction.mockResolvedValue(undefined);
     renderTimeline({ events: [] });

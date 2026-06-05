@@ -1,9 +1,10 @@
 "use client";
 
-import { useActionState, useEffect, useState, useTransition } from "react";
+import { useActionState, useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  AlertTriangle,
   Check,
   GripVertical,
   Lock,
@@ -48,6 +49,7 @@ import { HudTag } from "@/components/ui/hud-tag";
 import { Kicker } from "@/components/ui/kicker";
 import { SourceBadge } from "@/components/ui/source-badge";
 import { TypeDot } from "@/components/ui/type-dot";
+import { findCausalityWarnings } from "@/lib/causality";
 import { provenanceMeta } from "@/lib/entities";
 import { describeEffect } from "@/lib/event-effects";
 import { floorRelativeSortKey } from "@/lib/time-ref";
@@ -597,6 +599,7 @@ function Thread({
   items,
   campaignId,
   canEdit,
+  warnings,
   onFocusEvent,
   onRemove,
 }: {
@@ -604,6 +607,8 @@ function Thread({
   items: { id: string; title: string; linkId: string }[];
   campaignId: string;
   canEdit: boolean;
+  // Causality `linkId`s flagged as inconsistent (effect ordered before cause).
+  warnings?: Set<string>;
   onFocusEvent: (eventId: string) => void;
   onRemove: (linkId: string) => void;
 }) {
@@ -620,6 +625,14 @@ function Thread({
       <div className="flex flex-wrap items-center gap-x-[10px] gap-y-[4px]">
         {items.map((item) => (
           <span key={item.linkId} className="inline-flex items-center gap-[4px]">
+            {warnings?.has(item.linkId) && (
+              <AlertTriangle
+                aria-label="Out of order: this effect is placed before its cause"
+                size={11}
+                className="shrink-0"
+                style={{ color: "var(--hot)" }}
+              />
+            )}
             <button
               type="button"
               onClick={() => onFocusEvent(item.id)}
@@ -812,6 +825,16 @@ export function CampaignTimeline({
   const liveEvents = removedEventId
     ? events.filter((event) => event.id !== removedEventId)
     : events;
+
+  // Causality-consistency warnings (ADR 0004 slice 3): causal links whose effect
+  // is ordered earlier in fiction than its own cause. Computed over the live set
+  // so it stays accurate after a local remove/drag; the just-removed link (held
+  // for undo) is dropped so it stops warning. Non-blocking — surfaced inline.
+  const causalityWarnings = useMemo(() => {
+    const set = findCausalityWarnings(liveEvents);
+    if (removedCausalityId) set.delete(removedCausalityId);
+    return set;
+  }, [liveEvents, removedCausalityId]);
   const shownEvents =
     filter === "ALL"
       ? liveEvents
@@ -1070,6 +1093,7 @@ export function CampaignTimeline({
                   items={event.causedBy}
                   campaignId={campaignId}
                   canEdit={false}
+                  warnings={causalityWarnings}
                   onFocusEvent={focusEvent}
                   onRemove={setRemovedCausalityId}
                 />
@@ -1080,6 +1104,7 @@ export function CampaignTimeline({
                   items={event.causes}
                   campaignId={campaignId}
                   canEdit={false}
+                  warnings={causalityWarnings}
                   onFocusEvent={focusEvent}
                   onRemove={setRemovedCausalityId}
                 />
@@ -1268,6 +1293,16 @@ export function CampaignTimeline({
               <HudTag>
                 {shownEvents.length} / {events.length} shown
               </HudTag>
+              {causalityWarnings.size > 0 && (
+                <span
+                  title="Causal links where an effect is placed before its cause on the timeline. Re-anchor or drag the events to resolve."
+                  className="inline-flex items-center gap-[6px] border px-[9px] py-[5px] font-mono text-[10px] uppercase tracking-[.08em]"
+                  style={{ borderColor: "var(--hot)", color: "var(--hot)" }}
+                >
+                  <AlertTriangle aria-hidden size={12} />
+                  {causalityWarnings.size} out of order
+                </span>
+              )}
               {canEdit && !open && (
                 <button
                   type="button"
