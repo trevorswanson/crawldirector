@@ -4,6 +4,56 @@ Running checklist of milestones/tasks, newest first. See
 [`11-roadmap.md`](./11-roadmap.md) for the full plan and
 [`12-working-sessions.md`](./12-working-sessions.md) for how to pick up work.
 
+## M3 — Knowledge / reveal grants (fog-of-war foundation) ✅ (2026-06-05)
+
+**Goal:** the M3 roadmap's "knowledge/reveal foundations for fog of war" — a DM
+can reveal a specific canon entity to one actor entity (NPC/crawler/party/faction)
+**without** making it campaign-wide player-visible. This is the substrate the M7
+player "known world" projection and M11 agent fog-of-war build on. See
+[`09-data-schema.md`](./09-data-schema.md) and [`06-entity-agents.md`](./06-entity-agents.md).
+
+- [x] **Schema:** `KnowledgeGrant` model + `KnowledgeTargetType`
+      (ENTITY/ENTITY_FIELD/RELATIONSHIP/EVENT/FACT) and `KnowledgeRecipientType`
+      (ENTITY/MEMBERSHIP) enums, per the data-schema doc, plus a `Campaign`
+      back-relation (cascade) and migration `20260605204706_m3_knowledge_grants`.
+      `targetId`/`recipientId` are polymorphic (keyed by their `*Type`), so they're
+      not FK columns. Revoke is **soft** (`revokedAt`) so reveal history is kept; a
+      grant is "active" when not revoked and not expired.
+- [x] **Service** (`src/server/services/knowledge.ts`): reveals/revokes are
+      deliberate, audited DM actions (`AuditLog` `REVEAL`/`REVOKE`) — **not** content
+      change sets — exactly like locks. `grantEntityKnowledge` (validates both
+      endpoints are live canon, rejects self-grants, idempotent on an identical
+      active grant), `revokeKnowledge` (soft, audited), and the active-only,
+      DM-facing projections `listKnowledgeOfEntity` ("known to") /
+      `listKnowledgeHeldByEntity` ("knows about"), which resolve counterpart entities
+      and drop archived/expired ones. This slice wires ENTITY→ENTITY grants; the
+      schema already supports the richer target/recipient kinds for M7/M11.
+- [x] **UI:** a DM-facing **Knowledge** panel
+      (`src/components/entities/knowledge-panel.tsx`) in the entity detail right rail
+      with two sections — **Known to** (actors told about this entity) and **Knows
+      about** (canon this entity has been told) — each with an entity-typeahead
+      reveal form (+ optional notes) and per-row revoke. Already-granted entities are
+      filtered out of the picker. Actions `grantEntityKnownToAction` /
+      `grantEntityKnowsAboutAction` / `revokeKnowledgeAction` revalidate both
+      endpoints' pages.
+- [x] **Tests:** DB-backed service suite (grant + REVEAL audit + both-direction
+      projection, idempotent re-grant, self-grant/blank-id/non-canon rejection,
+      player+non-member denial, soft-revoke + REVOKE audit + active-list drop,
+      missing/double-revoke rejection, expired + archived-counterpart exclusion);
+      action coverage (both grant directions, validation/ServiceError/generic
+      fallbacks, revoke revalidation); `KnowledgePanel` component coverage (sections,
+      grant submit both directions, revoke, error surfacing, picker de-dupe, empty
+      states); and an entity-page render assertion. lint + typecheck clean; full
+      coverage gate green (statements 95.11%).
+- [x] **Verified in-browser** against the reseeded Demo Campaign: the panel renders
+      on Carl's page; revealing Carl to Mordecai persisted a `KnowledgeGrant`
+      (ENTITY→ENTITY) + a `REVEAL` audit row, and the panel re-rendered "Known to · 1
+      — Mordecai" after revalidation.
+- [ ] **Follow-ups:** richer reveal targets (field/relationship/event/FACT) and
+      MEMBERSHIP recipients; the player "known world" read projection (M7); agent
+      fog-of-war context (M11); an undo affordance + reveal source-event linking
+      (the `sourceEventId` column is in place for session-mode reveals, M8).
+
 ## M3 — DM undo + closed Review Queue history ✅ (2026-06-05)
 
 - [x] Added audited restore operations for every current DM soft-delete surface:

@@ -10,6 +10,8 @@ const {
   listCampaignTags,
   listConnectionsForEntity,
   listEventsForEntity,
+  listKnowledgeOfEntity,
+  listKnowledgeHeldByEntity,
   getEntityProvenance,
   notFound,
 } = vi.hoisted(() => ({
@@ -20,6 +22,8 @@ const {
   listCampaignTags: vi.fn(),
   listConnectionsForEntity: vi.fn(),
   listEventsForEntity: vi.fn(),
+  listKnowledgeOfEntity: vi.fn(),
+  listKnowledgeHeldByEntity: vi.fn(),
   getEntityProvenance: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
@@ -36,6 +40,23 @@ vi.mock("@/server/services/entities", () => ({
 vi.mock("@/server/services/relationships", () => ({ listConnectionsForEntity }));
 vi.mock("@/server/services/events", () => ({ listEventsForEntity }));
 vi.mock("@/server/services/review", () => ({ getEntityProvenance }));
+vi.mock("@/server/services/knowledge", () => ({
+  listKnowledgeOfEntity,
+  listKnowledgeHeldByEntity,
+}));
+vi.mock("@/components/entities/knowledge-panel", () => ({
+  KnowledgePanel: ({
+    knownTo,
+    knowsAbout,
+  }: {
+    knownTo: unknown[];
+    knowsAbout: unknown[];
+  }) => (
+    <div>
+      Knowledge panel ({knownTo.length}/{knowsAbout.length})
+    </div>
+  ),
+}));
 vi.mock("@/components/entities/connections-panel", () => ({
   ConnectionsPanel: ({
     connections,
@@ -122,6 +143,8 @@ beforeEach(() => {
   listCampaignTags.mockResolvedValue([]);
   listConnectionsForEntity.mockResolvedValue([]);
   listEventsForEntity.mockResolvedValue([]);
+  listKnowledgeOfEntity.mockResolvedValue([]);
+  listKnowledgeHeldByEntity.mockResolvedValue([]);
 });
 
 afterEach(cleanup);
@@ -209,6 +232,16 @@ describe("EntityPage", () => {
     expect(screen.getByText("Connections panel (0/1)")).toBeDefined();
     expect(screen.getByText("Timeline panel (0/1)")).toBeDefined();
     expect(screen.queryAllByText(/Planned · M3/).length).toBe(0);
+  });
+
+  it("renders the knowledge panel with the entity's reveal grants", async () => {
+    getEntityForUser.mockResolvedValue(crawler());
+    listKnowledgeOfEntity.mockResolvedValue([{ id: "k1" }]);
+    listKnowledgeHeldByEntity.mockResolvedValue([{ id: "k2" }, { id: "k3" }]);
+
+    await renderPage();
+
+    expect(screen.getByText("Knowledge panel (1/2)")).toBeDefined();
   });
 
   it("renders entity tags as links that filter the World Browser", async () => {

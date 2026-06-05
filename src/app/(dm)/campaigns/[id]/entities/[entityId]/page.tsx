@@ -15,6 +15,7 @@ import {
   type TimelineCandidate,
 } from "@/components/entities/timeline-panel";
 import { RosterPanel } from "@/components/entities/roster-panel";
+import { KnowledgePanel } from "@/components/entities/knowledge-panel";
 import {
   ArchiveEntityForm,
   EditEntityForm,
@@ -41,6 +42,10 @@ import {
 import { listConnectionsForEntity } from "@/server/services/relationships";
 import { listEventsForEntity } from "@/server/services/events";
 import { getGroupRoster, isGroupEntityType } from "@/server/services/groups";
+import {
+  listKnowledgeHeldByEntity,
+  listKnowledgeOfEntity,
+} from "@/server/services/knowledge";
 import { getEntityProvenance } from "@/server/services/review";
 
 export default async function EntityPage({
@@ -63,17 +68,27 @@ export default async function EntityPage({
   if (!campaign || !entity) notFound();
 
   const isGroup = isGroupEntityType(entity.type);
-  const [provenance, connections, events, candidateList, roster, campaignTags] =
-    await Promise.all([
-      getEntityProvenance(user.id, id, entityId),
-      listConnectionsForEntity(user.id, id, entityId),
-      listEventsForEntity(user.id, id, entityId),
-      listEntitiesForUser(user.id, id),
-      isGroup ? getGroupRoster(user.id, id, entityId) : Promise.resolve(null),
-      // Only the edit form consumes the campaign tag list (autocomplete); the
-      // read view's tag badges use entity.tags. Skip the scan in read mode.
-      editing ? listCampaignTags(user.id, id) : Promise.resolve<string[]>([]),
-    ]);
+  const [
+    provenance,
+    connections,
+    events,
+    candidateList,
+    roster,
+    campaignTags,
+    knownTo,
+    knowsAbout,
+  ] = await Promise.all([
+    getEntityProvenance(user.id, id, entityId),
+    listConnectionsForEntity(user.id, id, entityId),
+    listEventsForEntity(user.id, id, entityId),
+    listEntitiesForUser(user.id, id),
+    isGroup ? getGroupRoster(user.id, id, entityId) : Promise.resolve(null),
+    // Only the edit form consumes the campaign tag list (autocomplete); the
+    // read view's tag badges use entity.tags. Skip the scan in read mode.
+    editing ? listCampaignTags(user.id, id) : Promise.resolve<string[]>([]),
+    listKnowledgeOfEntity(user.id, id, entityId),
+    listKnowledgeHeldByEntity(user.id, id, entityId),
+  ]);
   const candidates: ConnectionCandidate[] = candidateList.entities
     .filter((candidate) => candidate.id !== entityId)
     .map((candidate) => ({
@@ -451,6 +466,18 @@ export default async function EntityPage({
             entityId={entityId}
             sourceType={entity.type}
             connections={connections}
+            candidates={candidates}
+          />
+        </div>
+
+        {/* knowledge — private reveals / fog of war (M3) */}
+        <div className="border-b border-[var(--line)] px-[18px] py-4">
+          <KnowledgePanel
+            campaignId={id}
+            entityId={entityId}
+            entityName={entity.name}
+            knownTo={knownTo}
+            knowsAbout={knowsAbout}
             candidates={candidates}
           />
         </div>

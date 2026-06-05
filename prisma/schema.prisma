@@ -149,6 +149,25 @@ enum RelationshipType {
   SAVED
 }
 
+// ───────────── Knowledge / reveals (fog of war) ─────────────
+// Canon visibility is not only global. A DM can reveal a specific entity (and,
+// later, a field/relationship/event/fact) to one actor entity (NPC, crawler,
+// party, faction) or player membership without sharing it campaign-wide. These
+// grants power both the player "known world" projection (M7) and in-character
+// agent context (M11). See docs/09-data-schema.md and docs/06-entity-agents.md.
+enum KnowledgeTargetType {
+  ENTITY
+  ENTITY_FIELD
+  RELATIONSHIP
+  EVENT
+  FACT
+}
+
+enum KnowledgeRecipientType {
+  ENTITY
+  MEMBERSHIP
+}
+
 // ───────────── Identity & Auth.js adapter ─────────────
 model User {
   id            String    @id @default(cuid())
@@ -237,6 +256,7 @@ model Campaign {
   changeSets       ChangeSet[]
   provenance       Provenance[]
   auditLogs        AuditLog[]
+  knowledgeGrants  KnowledgeGrant[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -547,4 +567,34 @@ model AuditLog {
 
   @@index([campaignId, createdAt])
   @@index([targetType, targetId])
+}
+
+// A private knowledge grant: actor/recipient "knows" a target (entity/field/etc.)
+// without it being campaign-wide visible. Reveals/revokes are deliberate, audited
+// DM actions (AuditLog REVEAL/REVOKE) — not content change sets — like locks.
+// `targetId`/`recipientId` are polymorphic (an Entity id, Relationship id,
+// Membership id, …) keyed by their *Type, so they are not FK columns. Revoke is
+// soft (revokedAt set) so the reveal history is preserved. A grant is "active"
+// when revokedAt is null and it has not expired.
+model KnowledgeGrant {
+  id            String                 @id @default(cuid())
+  campaignId    String
+  targetType    KnowledgeTargetType
+  targetId      String // Entity.id, Relationship.id, Event.id, … (per targetType)
+  field         String? // for ENTITY_FIELD / field-level reveals
+  factKey       String? // optional stable key for derived/ad-hoc FACT reveals
+  recipientType KnowledgeRecipientType
+  recipientId   String // Entity.id (actor) or Membership.id (per recipientType)
+  sourceEventId String? // optional event/session context that revealed it
+  revealedById  String
+  revealedAt    DateTime               @default(now())
+  expiresAt     DateTime?
+  notes         String?
+  revokedAt     DateTime?
+  revokedById   String?
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, recipientType, recipientId])
+  @@index([campaignId, targetType, targetId])
 }

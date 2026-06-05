@@ -17,6 +17,7 @@ import {
   changeOperationDecisionSchema,
   eventEffectSchema,
   eventParticipantRoleValues,
+  grantKnowledgeSchema,
   lockFieldSchema,
   reviewEditValueKindSchema,
   updateEntitySchema,
@@ -50,6 +51,10 @@ import {
   restoreEntity,
   updateEntity,
 } from "@/server/services/entities";
+import {
+  grantEntityKnowledge,
+  revokeKnowledge,
+} from "@/server/services/knowledge";
 import {
   approveChangeSet,
   approveChangeSetRun,
@@ -650,6 +655,83 @@ export async function toggleRelationshipLockAction(
     !locked,
   );
   const endpointIds = new Set([entityId, result.sourceId, result.targetId]);
+  for (const endpointId of endpointIds) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${endpointId}`);
+  }
+}
+
+export type KnowledgeActionState = { error?: string } | undefined;
+
+// Reveal the viewed entity to an actor entity ("known to"): the viewed entity is
+// the target, the picked entity is the recipient.
+export async function grantEntityKnownToAction(
+  campaignId: string,
+  entityId: string,
+  _prev: KnowledgeActionState,
+  formData: FormData,
+): Promise<KnowledgeActionState> {
+  const user = await requireUser();
+  const parsed = grantKnowledgeSchema.safeParse({
+    entityId: formData.get("entityId"),
+    notes: formData.get("notes"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  try {
+    await grantEntityKnowledge(user.id, campaignId, {
+      targetEntityId: entityId,
+      recipientEntityId: parsed.data.entityId,
+      notes: parsed.data.notes,
+    });
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    return { error: "Could not record the reveal. Please try again." };
+  }
+  revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
+  revalidatePath(`/campaigns/${campaignId}/entities/${parsed.data.entityId}`);
+  return undefined;
+}
+
+// Record that the viewed entity knows about a canon entity ("knows about"): the
+// viewed entity is the recipient, the picked entity is the target.
+export async function grantEntityKnowsAboutAction(
+  campaignId: string,
+  entityId: string,
+  _prev: KnowledgeActionState,
+  formData: FormData,
+): Promise<KnowledgeActionState> {
+  const user = await requireUser();
+  const parsed = grantKnowledgeSchema.safeParse({
+    entityId: formData.get("entityId"),
+    notes: formData.get("notes"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  try {
+    await grantEntityKnowledge(user.id, campaignId, {
+      targetEntityId: parsed.data.entityId,
+      recipientEntityId: entityId,
+      notes: parsed.data.notes,
+    });
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    return { error: "Could not record the reveal. Please try again." };
+  }
+  revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
+  revalidatePath(`/campaigns/${campaignId}/entities/${parsed.data.entityId}`);
+  return undefined;
+}
+
+export async function revokeKnowledgeAction(
+  campaignId: string,
+  entityId: string,
+  grantId: string,
+): Promise<void> {
+  const user = await requireUser();
+  const result = await revokeKnowledge(user.id, campaignId, grantId);
+  const endpointIds = new Set([entityId, ...result.affectedEntityIds]);
   for (const endpointId of endpointIds) {
     revalidatePath(`/campaigns/${campaignId}/entities/${endpointId}`);
   }
