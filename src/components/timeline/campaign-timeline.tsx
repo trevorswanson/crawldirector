@@ -454,7 +454,7 @@ function EditEventForm({
               dir="in"
               items={event.causedBy}
               campaignId={campaignId}
-              canEdit={true}
+              canEdit={!event.locked}
               onFocusEvent={onFocusEvent}
               onRemove={onRemoveCausality}
             />
@@ -464,12 +464,12 @@ function EditEventForm({
               dir="out"
               items={event.causes}
               campaignId={campaignId}
-              canEdit={true}
+              canEdit={!event.locked}
               onFocusEvent={onFocusEvent}
               onRemove={onRemoveCausality}
             />
           )}
-          {causeCandidates.length > 0 && (
+          {!event.locked && causeCandidates.length > 0 && (
             <CauseLinkForm
               campaignId={campaignId}
               effectId={event.id}
