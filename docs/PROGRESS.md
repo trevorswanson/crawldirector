@@ -4,6 +4,26 @@ Running checklist of milestones/tasks, newest first. See
 [`11-roadmap.md`](./11-roadmap.md) for the full plan and
 [`12-working-sessions.md`](./12-working-sessions.md) for how to pick up work.
 
+## M3 — DM undo + closed Review Queue history ✅ (2026-06-05)
+
+- [x] Added audited restore operations for every current DM soft-delete surface:
+      entities, relationships, events, and event-causality links. Restores route
+      through auto-approved DM change sets, write provenance, bump versions, and
+      refuse to revive relationship/event links whose required endpoints are no
+      longer live canon.
+- [x] Added immediate undo affordances after delete/archive actions: entity
+      archive redirects the World Browser with an `archivedEntity` undo notice;
+      Connections, entity Timeline, and campaign Timeline hide the removed row
+      locally and show an inline **Undo** action backed by the restore service.
+- [x] Added a durable Review Queue **Closed** mode (`?show=closed`) for non-DM
+      queue history. Rejected/superseded proposals remain reopenable; approved
+      and partially-applied proposals render as read-only history. The page also
+      keeps the post-decision Done state reachable when the pending list is empty.
+- [x] Tests: restore service regressions, action revalidation/redirect tests,
+      closed Review Queue service/page tests, and component coverage for undo
+      notices across entity archive, relationship archive, event archive, and
+      causality archive.
+
 ## M3 — Timeline redesign: "the timeline IS the descent" 🚧 (in progress)
 
 **Goal:** rework the Crawl Timeline from a centered changelog into the broadcast

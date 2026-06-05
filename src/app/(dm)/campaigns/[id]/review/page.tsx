@@ -42,6 +42,7 @@ import { listEntitiesForUser } from "@/server/services/entities";
 import {
   getReviewChangeSetForUser,
   getReviewChangeSetSummary,
+  listClosedChangeSetsForUser,
   listPendingChangeSetsForUser,
   type ReviewChangeSetSummary,
   type ReviewPatch,
@@ -88,6 +89,7 @@ export default async function ReviewQueuePage({
     source?: string;
     done?: string;
     reopened?: string;
+    show?: string;
   }>;
 }) {
   const { id } = await params;
@@ -108,7 +110,10 @@ export default async function ReviewQueuePage({
   const reopenedChangeSet =
     reopenedCandidate?.status === "PENDING" ? null : reopenedCandidate;
 
-  const changeSets = await listPendingChangeSetsForUser(user.id, id);
+  const showClosed = query.show === "closed";
+  const changeSets = showClosed
+    ? await listClosedChangeSetsForUser(user.id, id)
+    : await listPendingChangeSetsForUser(user.id, id);
   const reviewedChangeSets = [
     ...changeSets,
     ...(reopenedChangeSet ? [reopenedChangeSet] : []),
@@ -143,13 +148,14 @@ export default async function ReviewQueuePage({
     filteredChangeSets.find((changeSet) => changeSet.id === query.selected) ??
     filteredChangeSets[0] ??
     null;
-  const runGroups = groupPendingRuns(changeSets);
+  const runGroups = showClosed ? [] : groupPendingRuns(changeSets);
 
   const hrefWith = (overrides: { selected?: string; source?: SourceFilter }) => {
     const next = new URLSearchParams();
     const source = overrides.source ?? activeSource;
     const selectedId =
       "selected" in overrides ? overrides.selected : selected?.id;
+    if (showClosed) next.set("show", "closed");
     if (source !== "ALL") next.set("source", source);
     if (selectedId) next.set("selected", selectedId);
     const qs = next.toString();
@@ -159,20 +165,25 @@ export default async function ReviewQueuePage({
   if (changeSets.length === 0 && !doneSummary && !reopenedChangeSet) {
     return (
       <div className="grid h-full place-items-center bg-[var(--bg)] px-6">
-        {doneSummary ? (
-          <DoneState campaignId={id} summary={doneSummary} />
-        ) : (
-          <div className="panel bracket max-w-xl p-6">
-            <Kicker noLead>Review Queue</Kicker>
-            <h1 className="mt-3 font-display text-[22px] font-semibold">
-              No pending proposals
-            </h1>
-            <p className="mt-2 text-sm leading-6 text-[var(--ink-dim)]">
-              Direct DM edits are auto-approved with provenance. AI, import, and
-              player-suggestion proposals will appear here.
-            </p>
+        <div className="panel bracket max-w-xl p-6">
+          <Kicker noLead>Review Queue</Kicker>
+          <div className="mt-3 flex gap-2">
+            <Link href={`/campaigns/${id}/review`}>
+              <Button variant={showClosed ? "ghost" : "outline"}>Pending</Button>
+            </Link>
+            <Link href={`/campaigns/${id}/review?show=closed`}>
+              <Button variant={showClosed ? "outline" : "ghost"}>Closed</Button>
+            </Link>
           </div>
-        )}
+          <h1 className="mt-3 font-display text-[22px] font-semibold">
+            {showClosed ? "No closed proposals" : "No pending proposals"}
+          </h1>
+          <p className="mt-2 text-sm leading-6 text-[var(--ink-dim)]">
+            {showClosed
+              ? "Approved, rejected, and superseded queue proposals will appear here."
+              : "Direct DM edits are auto-approved with provenance. AI, import, and player-suggestion proposals will appear here."}
+          </p>
+        </div>
       </div>
     );
   }
@@ -182,8 +193,18 @@ export default async function ReviewQueuePage({
       <aside className="hidden min-h-0 flex-col border-r border-[var(--line)] bg-[var(--bg-1)] lg:flex">
         <div className="border-b border-[var(--line)] px-4 py-[13px]">
           <Kicker noLead className="mb-[10px]">
-            Review Queue · {changeSets.length} sets
+            {showClosed
+              ? `Review Queue · Closed · ${changeSets.length} sets`
+              : `Review Queue · ${changeSets.length} sets`}
           </Kicker>
+          <div className="mb-3 flex gap-2">
+            <Link href={`/campaigns/${id}/review`}>
+              <Button variant={showClosed ? "ghost" : "outline"}>Pending</Button>
+            </Link>
+            <Link href={`/campaigns/${id}/review?show=closed`}>
+              <Button variant={showClosed ? "outline" : "ghost"}>Closed</Button>
+            </Link>
+          </div>
           <div className="flex flex-wrap gap-[5px]">
             {SOURCE_FILTERS.map((source) => (
               <Link
@@ -205,7 +226,7 @@ export default async function ReviewQueuePage({
         <div className="min-h-0 flex-1 overflow-y-auto">
           {filteredChangeSets.length === 0 ? (
             <div className="px-4 py-6 text-sm text-[var(--ink-faint)]">
-              No pending {activeSource.toLowerCase()} proposals.
+              No {showClosed ? "closed" : "pending"} {activeSource.toLowerCase()} proposals.
             </div>
           ) : (
             filteredChangeSets.map((changeSet) => {
@@ -246,8 +267,18 @@ export default async function ReviewQueuePage({
       <main className="flex min-h-0 min-w-0 flex-col">
         <div className="border-b border-[var(--line)] bg-[var(--bg-1)] px-4 py-3 lg:hidden">
           <Kicker noLead className="mb-[10px]">
-            Review Queue · {changeSets.length} sets
+            {showClosed
+              ? `Review Queue · Closed · ${changeSets.length} sets`
+              : `Review Queue · ${changeSets.length} sets`}
           </Kicker>
+          <div className="mb-3 flex gap-2">
+            <Link href={`/campaigns/${id}/review`}>
+              <Button variant={showClosed ? "ghost" : "outline"}>Pending</Button>
+            </Link>
+            <Link href={`/campaigns/${id}/review?show=closed`}>
+              <Button variant={showClosed ? "outline" : "ghost"}>Closed</Button>
+            </Link>
+          </div>
           <div className="mb-3 flex flex-wrap gap-[5px]">
             {SOURCE_FILTERS.map((source) => (
               <Link
@@ -267,7 +298,7 @@ export default async function ReviewQueuePage({
           <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
             {filteredChangeSets.length === 0 ? (
               <div className="min-w-full text-sm text-[var(--ink-faint)]">
-                No pending {activeSource.toLowerCase()} proposals.
+                No {showClosed ? "closed" : "pending"} {activeSource.toLowerCase()} proposals.
               </div>
             ) : (
               filteredChangeSets.map((changeSet) => {
@@ -303,7 +334,8 @@ export default async function ReviewQueuePage({
             crawlerCandidates={crawlerCandidates}
             entityCandidates={entityCandidates}
             run={selected.runId ? runGroups.find((run) => run.runId === selected.runId) : undefined}
-            readOnly={Boolean(reopenedChangeSet)}
+            readOnly={showClosed || Boolean(reopenedChangeSet)}
+            backHref={`/campaigns/${id}/review${showClosed ? "?show=closed" : ""}`}
           />
         ) : (
           <div className="grid h-full place-items-center px-6 text-sm text-[var(--ink-faint)]">
@@ -376,6 +408,7 @@ function ReviewDetail({
   entityCandidates,
   run,
   readOnly = false,
+  backHref,
 }: {
   campaignId: string;
   changeSet: ReviewQueueItem;
@@ -383,10 +416,13 @@ function ReviewDetail({
   entityCandidates: EntityCandidate[];
   run?: PendingRunGroup;
   readOnly?: boolean;
+  backHref?: string;
 }) {
   const status = reviewStatus(changeSet);
   const acceptedCount = acceptedFieldCount(changeSet);
   const stale = changeSet.operations.some((operation) => operation.isStale);
+  const reopenable =
+    changeSet.status === "REJECTED" || changeSet.status === "SUPERSEDED";
 
   return (
     <>
@@ -438,7 +474,14 @@ function ReviewDetail({
           {readOnly ? (
             <>
               <HudTag>Done · read-only history</HudTag>
-              <Link href={`/campaigns/${campaignId}/review`}>
+              {reopenable && (
+                <form action={reopenChangeSetAction.bind(null, campaignId, changeSet.id)}>
+                  <Button type="submit" variant="outline">
+                    Reopen
+                  </Button>
+                </form>
+              )}
+              <Link href={backHref ?? `/campaigns/${campaignId}/review`}>
                 <Button variant="ghost">Back to queue</Button>
               </Link>
             </>

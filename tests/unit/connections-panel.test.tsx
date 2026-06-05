@@ -12,11 +12,13 @@ const {
   createRelationshipAction,
   updateRelationshipAction,
   archiveRelationshipAction,
+  restoreRelationshipAction,
   toggleRelationshipLockAction,
 } = vi.hoisted(() => ({
   createRelationshipAction: vi.fn(),
   updateRelationshipAction: vi.fn(),
   archiveRelationshipAction: vi.fn(),
+  restoreRelationshipAction: vi.fn(),
   toggleRelationshipLockAction: vi.fn(),
 }));
 
@@ -24,6 +26,7 @@ vi.mock("@/app/(dm)/actions", () => ({
   createRelationshipAction,
   updateRelationshipAction,
   archiveRelationshipAction,
+  restoreRelationshipAction,
   toggleRelationshipLockAction,
 }));
 vi.mock("next/link", () => ({
@@ -151,6 +154,34 @@ describe("ConnectionsPanel", () => {
       "lucide-lock",
     );
     expect(screen.queryByRole("button", { name: "Remove connection" })).toBeNull();
+  });
+
+  it("shows an undo affordance after removing a connection", async () => {
+    archiveRelationshipAction.mockResolvedValue(undefined);
+    restoreRelationshipAction.mockResolvedValue(undefined);
+    render(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="e1"
+        sourceType="CRAWLER"
+        connections={[connection()]}
+        candidates={candidates}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove connection" }));
+    await waitFor(() =>
+      expect(archiveRelationshipAction).toHaveBeenCalledWith("c1", "e1", "r1"),
+    );
+
+    expect(screen.getByText("Connection removed.")).toBeDefined();
+    expect(screen.queryByText("Donut")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() =>
+      expect(restoreRelationshipAction).toHaveBeenCalledWith("c1", "e1", "r1"),
+    );
+    expect(screen.queryByText("Connection removed.")).toBeNull();
   });
 
   it("edits a connection: prefilled form, submits, and closes on success", async () => {

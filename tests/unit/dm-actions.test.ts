@@ -10,6 +10,7 @@ const {
   getEntityForUser,
   updateEntity,
   archiveEntity,
+  restoreEntity,
   approveChangeSet,
   approveChangeSetRun,
   rejectChangeSet,
@@ -21,15 +22,18 @@ const {
   setEntityLock,
   createRelationship,
   archiveRelationship,
+  restoreRelationship,
   updateRelationship,
   setRelationshipLock,
   createEvent,
   updateEvent,
   archiveEvent,
+  restoreEvent,
   setEventLock,
   reorderEvent,
   linkEventCause,
   archiveEventCausality,
+  restoreEventCausality,
   applyEventEffects,
   signOut,
   redirect,
@@ -44,6 +48,7 @@ const {
   getEntityForUser: vi.fn(),
   updateEntity: vi.fn(),
   archiveEntity: vi.fn(),
+  restoreEntity: vi.fn(),
   approveChangeSet: vi.fn(),
   approveChangeSetRun: vi.fn(),
   rejectChangeSet: vi.fn(),
@@ -56,14 +61,17 @@ const {
   createRelationship: vi.fn(),
   updateRelationship: vi.fn(),
   archiveRelationship: vi.fn(),
+  restoreRelationship: vi.fn(),
   setRelationshipLock: vi.fn(),
   createEvent: vi.fn(),
   updateEvent: vi.fn(),
   archiveEvent: vi.fn(),
+  restoreEvent: vi.fn(),
   setEventLock: vi.fn(),
   reorderEvent: vi.fn(),
   linkEventCause: vi.fn(),
   archiveEventCausality: vi.fn(),
+  restoreEventCausality: vi.fn(),
   applyEventEffects: vi.fn(),
   signOut: vi.fn(),
   redirect: vi.fn(() => {
@@ -80,6 +88,7 @@ vi.mock("@/server/services/campaigns", () => ({
 }));
 vi.mock("@/server/services/entities", () => ({
   archiveEntity,
+  restoreEntity,
   createCrawler,
   createGenericEntity,
   getEntityForUser,
@@ -100,16 +109,19 @@ vi.mock("@/server/services/relationships", () => ({
   createRelationship,
   updateRelationship,
   archiveRelationship,
+  restoreRelationship,
   setRelationshipLock,
 }));
 vi.mock("@/server/services/events", () => ({
   createEvent,
   updateEvent,
   archiveEvent,
+  restoreEvent,
   setEventLock,
   reorderEvent,
   linkEventCause,
   archiveEventCausality,
+  restoreEventCausality,
   applyEventEffects,
 }));
 vi.mock("@/server/auth", () => ({ signOut }));
@@ -118,6 +130,7 @@ vi.mock("next/cache", () => ({ revalidatePath }));
 
 import {
   archiveEntityAction,
+  restoreEntityAction,
   approveChangeSetAction,
   approveChangeSetRunAction,
   createCampaignAction,
@@ -138,16 +151,19 @@ import {
   createRelationshipAction,
   updateRelationshipAction,
   archiveRelationshipAction,
+  restoreRelationshipAction,
   toggleRelationshipLockAction,
   createEventAction,
   updateEventAction,
   updateCampaignEventAction,
   createCampaignEventAction,
   archiveEventAction,
+  restoreEventAction,
   reorderEventAction,
   toggleEventLockAction,
   linkEventCauseAction,
   archiveEventCausalityAction,
+  restoreEventCausalityAction,
   applyEventEffectsAction,
   applyCampaignEventEffectsAction,
   signOutAction,
@@ -155,8 +171,10 @@ import {
   setCampaignCurrentFloorAction,
   setCampaignEventLockAction,
   archiveCampaignEventAction,
+  restoreCampaignEventAction,
   linkCampaignEventCauseAction,
   archiveCampaignEventCausalityAction,
+  restoreCampaignEventCausalityAction,
 } from "@/app/(dm)/actions";
 
 import { ServiceError } from "@/lib/errors";
@@ -515,7 +533,20 @@ describe("archiveEntityAction", () => {
 
     expect(archiveEntity).toHaveBeenCalledWith("u1", "c1", "e1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1");
-    expect(redirect).toHaveBeenCalledWith("/campaigns/c1");
+    expect(redirect).toHaveBeenCalledWith("/campaigns/c1?archivedEntity=e1");
+  });
+});
+
+describe("restoreEntityAction", () => {
+  it("restores and redirects back to the entity page", async () => {
+    await expect(restoreEntityAction("c1", "e1")).rejects.toThrow(
+      "NEXT_REDIRECT",
+    );
+
+    expect(restoreEntity).toHaveBeenCalledWith("u1", "c1", "e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(redirect).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
   });
 });
 
@@ -982,6 +1013,15 @@ describe("archiveRelationshipAction", () => {
     await archiveRelationshipAction("c1", "e1", "r1");
 
     expect(archiveRelationship).toHaveBeenCalledWith("u1", "c1", "r1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+  });
+});
+
+describe("restoreRelationshipAction", () => {
+  it("restores the edge and revalidates the source entity page", async () => {
+    await restoreRelationshipAction("c1", "e1", "r1");
+
+    expect(restoreRelationship).toHaveBeenCalledWith("u1", "c1", "r1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
   });
 });
@@ -1510,6 +1550,19 @@ describe("archiveEventAction", () => {
   });
 });
 
+describe("restoreEventAction", () => {
+  it("restores the event and revalidates affected participant timelines", async () => {
+    restoreEvent.mockResolvedValue({ id: "ev1", participantIds: ["e1", "e2"] });
+
+    await restoreEventAction("c1", "e1", "ev1");
+
+    expect(restoreEvent).toHaveBeenCalledWith("u1", "c1", "ev1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+  });
+});
+
 describe("reorderEventAction", () => {
   it("reorders the event and revalidates participant timelines + the timeline", async () => {
     reorderEvent.mockResolvedValue({ id: "ev1", participantIds: ["e1", "e2"] });
@@ -1615,6 +1668,21 @@ describe("archiveEventCausalityAction", () => {
   });
 });
 
+describe("restoreEventCausalityAction", () => {
+  it("restores a causality link and revalidates the current entity page", async () => {
+    restoreEventCausality.mockResolvedValue({
+      id: "ec1",
+      affectedEventIds: ["cause1", "effect1"],
+    });
+
+    await restoreEventCausalityAction("c1", "entity1", "ec1");
+
+    expect(restoreEventCausality).toHaveBeenCalledWith("u1", "c1", "ec1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/entity1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+  });
+});
+
 describe("setCampaignCurrentFloorAction", () => {
   it("sets the campaign current floor and revalidates the timeline page", async () => {
     setCampaignCurrentFloor.mockResolvedValue({ currentFloorId: "f1", floorNumber: 1 });
@@ -1671,6 +1739,22 @@ describe("archiveCampaignEventAction", () => {
     await archiveCampaignEventAction("c1", "ev1");
 
     expect(archiveEvent).toHaveBeenCalledWith("u1", "c1", "ev1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+  });
+});
+
+describe("restoreCampaignEventAction", () => {
+  it("restores event and revalidates affected participants + timeline page", async () => {
+    restoreEvent.mockResolvedValue({
+      id: "ev1",
+      participantIds: ["e1", "e2"],
+    });
+
+    await restoreCampaignEventAction("c1", "ev1");
+
+    expect(restoreEvent).toHaveBeenCalledWith("u1", "c1", "ev1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
@@ -1745,6 +1829,20 @@ describe("archiveCampaignEventCausalityAction", () => {
     await archiveCampaignEventCausalityAction("c1", "ec1");
 
     expect(archiveEventCausality).toHaveBeenCalledWith("u1", "c1", "ec1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+  });
+});
+
+describe("restoreCampaignEventCausalityAction", () => {
+  it("restores campaign event causality and revalidates timeline page", async () => {
+    restoreEventCausality.mockResolvedValue({
+      id: "ec1",
+      affectedEventIds: ["cause1", "effect1"],
+    });
+
+    await restoreCampaignEventCausalityAction("c1", "ec1");
+
+    expect(restoreEventCausality).toHaveBeenCalledWith("u1", "c1", "ec1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
   });
 });

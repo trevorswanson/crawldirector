@@ -18,6 +18,8 @@ import {
   listCampaignTimeline,
   listEventsForEntity,
   reorderEvent,
+  restoreEvent,
+  restoreEventCausality,
   setEventLock,
   updateEvent,
 } from "@/server/services/events";
@@ -352,6 +354,33 @@ describe("event service", () => {
     expect(result.participantIds).toEqual([carl.id]);
     const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
     expect(timeline).toHaveLength(0);
+  });
+
+  it("restores an archived event through an audited change set", async () => {
+    const owner = await makeUser("restore-event@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "A thing happened",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    await archiveEvent(owner.id, campaign.id, event.id);
+    const result = await restoreEvent(owner.id, campaign.id, event.id);
+
+    expect(result.participantIds).toEqual([carl.id]);
+    const row = await prisma.event.findUnique({ where: { id: event.id } });
+    expect(row?.status).toBe(CanonStatus.CANON);
+    const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    expect(timeline.map((item) => item.id)).toContain(event.id);
+    const provenance = await prisma.provenance.findMany({
+      where: { eventId: event.id },
+      orderBy: { createdAt: "asc" },
+      include: { changeSet: { select: { title: true } } },
+    });
+    expect(provenance.at(-1)?.changeSet.title).toBe("Restore event");
+    expect(provenance.at(-1)?.source).toBe("DM");
   });
 
   it("rejects archiving a missing event", async () => {
@@ -731,6 +760,44 @@ describe("event service", () => {
     const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
     expect(timeline.flatMap((event) => event.causes)).toEqual([]);
     expect(timeline.flatMap((event) => event.causedBy)).toEqual([]);
+  });
+
+  it("restores an archived causality link through an audited change set", async () => {
+    const owner = await makeUser("restore-cause@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const cause = await createEvent(owner.id, campaign.id, {
+      title: "Cause",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const effect = await createEvent(owner.id, campaign.id, {
+      title: "Effect",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "AFFECTED" }],
+    });
+    const link = await linkEventCause(owner.id, campaign.id, {
+      causeId: cause.id,
+      effectId: effect.id,
+    });
+
+    await archiveEventCausality(owner.id, campaign.id, link.id);
+    const result = await restoreEventCausality(owner.id, campaign.id, link.id);
+
+    expect(result.affectedEventIds.sort()).toEqual([cause.id, effect.id].sort());
+    const row = await prisma.eventCausality.findUnique({ where: { id: link.id } });
+    expect(row?.status).toBe(CanonStatus.CANON);
+    const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    expect(timeline.flatMap((event) => event.causes).map((item) => item.linkId)).toContain(
+      link.id,
+    );
+    const provenance = await prisma.provenance.findMany({
+      where: { eventCausalityId: link.id },
+      orderBy: { createdAt: "asc" },
+      include: { changeSet: { select: { title: true } } },
+    });
+    expect(provenance.at(-1)?.changeSet.title).toBe("Restore event causality");
+    expect(provenance.at(-1)?.source).toBe("DM");
   });
 
   it("projects causality summaries on the campaign timeline", async () => {

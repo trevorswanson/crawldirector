@@ -26,6 +26,7 @@ import {
 import {
   archiveRelationship,
   createRelationship,
+  restoreRelationship,
   setRelationshipLock,
   updateRelationship,
 } from "@/server/services/relationships";
@@ -36,6 +37,8 @@ import {
   createEvent,
   linkEventCause,
   reorderEvent,
+  restoreEvent,
+  restoreEventCausality,
   setEventLock,
   updateEvent,
 } from "@/server/services/events";
@@ -44,6 +47,7 @@ import {
   createCrawler,
   createGenericEntity,
   getEntityForUser,
+  restoreEntity,
   updateEntity,
 } from "@/server/services/entities";
 import {
@@ -355,7 +359,18 @@ export async function archiveEntityAction(
   const user = await requireUser();
   await archiveEntity(user.id, campaignId, entityId);
   revalidatePath(`/campaigns/${campaignId}`);
-  redirect(`/campaigns/${campaignId}`);
+  redirect(`/campaigns/${campaignId}?archivedEntity=${entityId}`);
+}
+
+export async function restoreEntityAction(
+  campaignId: string,
+  entityId: string,
+): Promise<void> {
+  const user = await requireUser();
+  await restoreEntity(user.id, campaignId, entityId);
+  revalidatePath(`/campaigns/${campaignId}`);
+  revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
+  redirect(`/campaigns/${campaignId}/entities/${entityId}`);
 }
 
 export async function approveChangeSetAction(
@@ -608,6 +623,16 @@ export async function archiveRelationshipAction(
 ): Promise<void> {
   const user = await requireUser();
   await archiveRelationship(user.id, campaignId, relationshipId);
+  revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
+}
+
+export async function restoreRelationshipAction(
+  campaignId: string,
+  entityId: string,
+  relationshipId: string,
+): Promise<void> {
+  const user = await requireUser();
+  await restoreRelationship(user.id, campaignId, relationshipId);
   revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
 }
 
@@ -938,6 +963,20 @@ export async function archiveEventAction(
   revalidatePath(`/campaigns/${campaignId}/timeline`);
 }
 
+export async function restoreEventAction(
+  campaignId: string,
+  entityId: string,
+  eventId: string,
+): Promise<void> {
+  const user = await requireUser();
+  const result = await restoreEvent(user.id, campaignId, eventId);
+  const participantIds = new Set([...result.participantIds, entityId]);
+  for (const participantId of participantIds) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${participantId}`);
+  }
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
+}
+
 export async function toggleEventLockAction(
   campaignId: string,
   entityId: string,
@@ -1045,6 +1084,17 @@ export async function archiveEventCausalityAction(
   revalidatePath(`/campaigns/${campaignId}/timeline`);
 }
 
+export async function restoreEventCausalityAction(
+  campaignId: string,
+  entityId: string,
+  eventCausalityId: string,
+): Promise<void> {
+  const user = await requireUser();
+  await restoreEventCausality(user.id, campaignId, eventCausalityId);
+  revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
+}
+
 // ── Campaign-timeline variants (no single viewed entity) ──
 // Same services as the entity-viewer actions, but revalidate the timeline plus
 // every affected participant entity page rather than one viewed entity.
@@ -1068,6 +1118,18 @@ export async function archiveCampaignEventAction(
 ): Promise<void> {
   const user = await requireUser();
   const result = await archiveEvent(user.id, campaignId, eventId);
+  for (const participantId of result.participantIds) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${participantId}`);
+  }
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
+}
+
+export async function restoreCampaignEventAction(
+  campaignId: string,
+  eventId: string,
+): Promise<void> {
+  const user = await requireUser();
+  const result = await restoreEvent(user.id, campaignId, eventId);
   for (const participantId of result.participantIds) {
     revalidatePath(`/campaigns/${campaignId}/entities/${participantId}`);
   }
@@ -1101,6 +1163,15 @@ export async function archiveCampaignEventCausalityAction(
 ): Promise<void> {
   const user = await requireUser();
   await archiveEventCausality(user.id, campaignId, eventCausalityId);
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
+}
+
+export async function restoreCampaignEventCausalityAction(
+  campaignId: string,
+  eventCausalityId: string,
+): Promise<void> {
+  const user = await requireUser();
+  await restoreEventCausality(user.id, campaignId, eventCausalityId);
   revalidatePath(`/campaigns/${campaignId}/timeline`);
 }
 

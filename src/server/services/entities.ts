@@ -584,3 +584,30 @@ export async function archiveEntity(
   });
   return { id: entityId };
 }
+
+export async function restoreEntity(
+  userId: string,
+  campaignId: string,
+  entityId: string,
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  const existing = await prisma.entity.findFirst({
+    where: { id: entityId, campaignId, status: CanonStatus.ARCHIVED },
+    select: { id: true, name: true, status: true, version: true },
+  });
+  if (!existing) throw new ServiceError("Archived entity not found.");
+
+  await applyAutoApprovedEntityChangeSet(userId, campaignId, {
+    title: `Restore ${existing.name}`,
+    operations: [{
+      op: OpKind.UPDATE_ENTITY,
+      targetId: entityId,
+      patch: {
+        _baseVersion: { to: existing.version },
+        status: { from: existing.status, to: CanonStatus.CANON },
+      },
+    }],
+  });
+  return { id: entityId };
+}

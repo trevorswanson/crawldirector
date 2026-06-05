@@ -18,8 +18,10 @@ const {
   setCampaignCurrentFloorAction,
   setCampaignEventLockAction,
   archiveCampaignEventAction,
+  restoreCampaignEventAction,
   linkCampaignEventCauseAction,
   archiveCampaignEventCausalityAction,
+  restoreCampaignEventCausalityAction,
   routerRefresh,
 } = vi.hoisted(() => ({
   createCampaignEventAction: vi.fn(),
@@ -29,8 +31,10 @@ const {
   setCampaignCurrentFloorAction: vi.fn(),
   setCampaignEventLockAction: vi.fn(),
   archiveCampaignEventAction: vi.fn(),
+  restoreCampaignEventAction: vi.fn(),
   linkCampaignEventCauseAction: vi.fn(),
   archiveCampaignEventCausalityAction: vi.fn(),
+  restoreCampaignEventCausalityAction: vi.fn(),
   routerRefresh: vi.fn(),
 }));
 
@@ -42,8 +46,10 @@ vi.mock("@/app/(dm)/actions", () => ({
   setCampaignCurrentFloorAction,
   setCampaignEventLockAction,
   archiveCampaignEventAction,
+  restoreCampaignEventAction,
   linkCampaignEventCauseAction,
   archiveCampaignEventCausalityAction,
+  restoreCampaignEventCausalityAction,
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: routerRefresh }),
@@ -603,12 +609,28 @@ describe("CampaignTimeline", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Remove event" }));
     await waitFor(() =>
-      expect(archiveCampaignEventAction).toHaveBeenCalledWith(
-        "c1",
-        "ev1",
-        expect.any(FormData),
-      ),
+      expect(archiveCampaignEventAction).toHaveBeenCalledWith("c1", "ev1"),
     );
+  });
+
+  it("shows an undo affordance after removing an event from the timeline", async () => {
+    archiveCampaignEventAction.mockResolvedValue(undefined);
+    restoreCampaignEventAction.mockResolvedValue(undefined);
+    renderTimeline({ events: [...events] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove event" }));
+    await waitFor(() =>
+      expect(archiveCampaignEventAction).toHaveBeenCalledWith("c1", "ev1"),
+    );
+
+    expect(screen.getByText("Event removed.")).toBeDefined();
+    expect(screen.queryByRole("heading", { name: "DM scene" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() =>
+      expect(restoreCampaignEventAction).toHaveBeenCalledWith("c1", "ev1"),
+    );
+    expect(screen.queryByText("Event removed.")).toBeNull();
   });
 
   it("shows unlock (not remove) for a locked event", () => {
@@ -660,10 +682,34 @@ describe("CampaignTimeline", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit event" }));
     fireEvent.click(screen.getByRole("button", { name: "Remove causality link" }));
     await waitFor(() =>
-      expect(archiveCampaignEventCausalityAction).toHaveBeenCalledWith(
+      expect(archiveCampaignEventCausalityAction).toHaveBeenCalledWith("c1", "link-7"),
+    );
+  });
+
+  it("shows an undo affordance after removing a causality link", async () => {
+    archiveCampaignEventCausalityAction.mockResolvedValue(undefined);
+    restoreCampaignEventCausalityAction.mockResolvedValue(undefined);
+    renderTimeline({
+      events: [
+        {
+          ...events[0],
+          causedBy: [{ id: "cause-ev", title: "Earlier scene", linkId: "link-7" }],
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit event" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove causality link" }));
+    await waitFor(() =>
+      expect(archiveCampaignEventCausalityAction).toHaveBeenCalledWith("c1", "link-7"),
+    );
+
+    expect(screen.getByText("Causality link removed.")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() =>
+      expect(restoreCampaignEventCausalityAction).toHaveBeenCalledWith(
         "c1",
         "link-7",
-        expect.any(FormData),
       ),
     );
   });

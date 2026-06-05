@@ -14,6 +14,7 @@ import {
   createCrawlerAction,
   createGenericEntityAction,
   quickCreateEntityAction,
+  restoreEntityAction,
   updateEntityAction,
   type EntityActionState,
 } from "@/app/(dm)/actions";
@@ -748,6 +749,22 @@ export function ArchiveEntityForm({
       <Button type="submit" variant="outline">
         <Archive aria-hidden size={16} />
         Archive
+      </Button>
+    </form>
+  );
+}
+
+export function RestoreEntityUndoForm({
+  campaignId,
+  entityId,
+}: {
+  campaignId: string;
+  entityId: string;
+}) {
+  return (
+    <form action={restoreEntityAction.bind(null, campaignId, entityId)}>
+      <Button type="submit" variant="outline">
+        Undo
       </Button>
     </form>
   );
