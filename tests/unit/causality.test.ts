@@ -43,6 +43,18 @@ describe("findCausalityWarnings", () => {
     expect(findCausalityWarnings(events).has("l1")).toBe(true);
   });
 
+  it("uses raw (bytewise) rank order across the upper/lowercase boundary, not locale", () => {
+    // Bytewise, "Zz" < "a0" ('Z' 0x5A < 'a' 0x61), so an effect ranked "Zz" is
+    // earlier in fiction than its cause ranked "a0" → inversion. `localeCompare`
+    // would (wrongly) order "a0" first and miss this.
+    expect("a0".localeCompare("Zz")).toBeLessThan(0); // guards the premise
+    const events = [
+      ev("cause", 5, "a0", [{ id: "effect", linkId: "l1" }]),
+      ev("effect", 5, "Zz"),
+    ];
+    expect(findCausalityWarnings(events).has("l1")).toBe(true);
+  });
+
   it("does not warn when cause and effect share the exact position (a tie)", () => {
     const events = [
       ev("a", 5, "m", [{ id: "b", linkId: "l1" }]),

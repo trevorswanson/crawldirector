@@ -25,12 +25,22 @@ export type CausalityCheckEvent = {
 // lexicographically-smaller `rank` is earlier (the timeline sorts rank
 // descending, i.e. later-in-fiction first, so a smaller rank sorts later in the
 // list = earlier in fiction). Mirrors the service's `(orderKey, rank)` ordering.
+//
+// `rank` is compared with **raw** lexicographic operators, not `localeCompare`:
+// the fractional-index alphabet (src/lib/rank.ts) spans both letter cases and is
+// sorted bytewise — the DB column is `TEXT COLLATE "C"` and Prisma orders it that
+// way. Locale collation disagrees across the upper/lowercase boundary (e.g.
+// `"a0".localeCompare("Zz") < 0`, but bytewise `"Zz" < "a0"`), which would miss a
+// real inversion. Raw `<`/`>` on JS strings is UTF-16 code-unit order = bytewise
+// for the ASCII rank alphabet, matching the canonical sort.
 function compareFictionOrder(
   a: { orderKey: number; rank: string },
   b: { orderKey: number; rank: string },
 ): number {
   if (a.orderKey !== b.orderKey) return a.orderKey - b.orderKey;
-  return a.rank.localeCompare(b.rank);
+  if (a.rank < b.rank) return -1;
+  if (a.rank > b.rank) return 1;
+  return 0;
 }
 
 // Return the set of causality `linkId`s whose effect is ordered *strictly before*
