@@ -15,6 +15,8 @@ function entry(overrides: Partial<RosterEntry> = {}): RosterEntry {
   return {
     relationshipId: "r1",
     relationshipType: "MEMBER_OF",
+    sinceDay: null,
+    untilDay: null,
     locked: false,
     secret: false,
     entity: { id: "e1", name: "Carl", type: "NPC" },

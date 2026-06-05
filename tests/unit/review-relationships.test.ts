@@ -277,6 +277,91 @@ describe("pending relationship proposals", () => {
     expect(edge.disposition).toBe(-50);
   });
 
+  it("rejects invalid membership day bounds from pending CREATE_RELATIONSHIP approval", async () => {
+    const { dmId, campaignId, carlId, donutId } = await seed();
+
+    const inverted = await createPendingRelationshipChangeSet(dmId, campaignId, {
+      source: "AI",
+      title: "AI inferred impossible membership",
+      operations: [
+        {
+          op: "CREATE_RELATIONSHIP",
+          patch: {
+            type: { to: "MEMBER_OF" },
+            sourceId: { to: carlId },
+            targetId: { to: donutId },
+            sinceDay: { to: 20 },
+            untilDay: { to: 12 },
+          },
+        },
+      ],
+    });
+
+    await expect(
+      approveAcceptedChangeSet(dmId, campaignId, inverted.id),
+    ).rejects.toThrow(/Since day must be before or equal to until day/i);
+    expect(await prisma.relationship.count()).toBe(0);
+
+    const negative = await createPendingRelationshipChangeSet(dmId, campaignId, {
+      source: "IMPORT",
+      title: "Imported impossible membership",
+      operations: [
+        {
+          op: "CREATE_RELATIONSHIP",
+          patch: {
+            type: { to: "MEMBER_OF" },
+            sourceId: { to: carlId },
+            targetId: { to: donutId },
+            sinceDay: { to: -1 },
+          },
+        },
+      ],
+    });
+
+    await expect(
+      approveAcceptedChangeSet(dmId, campaignId, negative.id),
+    ).rejects.toThrow(/Since day cannot be negative/i);
+    expect(await prisma.relationship.count()).toBe(0);
+  });
+
+  it("rejects invalid membership day bounds from an edited pending relationship proposal", async () => {
+    const { dmId, campaignId, carlId, donutId } = await seed();
+    const set = await createPendingRelationshipChangeSet(dmId, campaignId, {
+      source: "AI",
+      title: "AI inferred connection",
+      operations: [
+        {
+          op: "CREATE_RELATIONSHIP",
+          patch: {
+            type: { to: "MEMBER_OF" },
+            sourceId: { to: carlId },
+            targetId: { to: donutId },
+            sinceDay: { to: 12 },
+            untilDay: { to: 40 },
+          },
+        },
+      ],
+    });
+    const [queued] = await listPendingChangeSetsForUser(dmId, campaignId);
+    const op = queued.operations[0];
+
+    await setChangeOperationDecision(dmId, campaignId, set.id, op.id, {
+      decision: "EDITED",
+      editedPatch: {
+        type: { to: "MEMBER_OF" },
+        sourceId: { to: carlId },
+        targetId: { to: donutId },
+        sinceDay: { to: 30 },
+        untilDay: { to: 10 },
+      },
+    });
+
+    await expect(approveChangeSet(dmId, campaignId, set.id)).rejects.toThrow(
+      /Since day must be before or equal to until day/i,
+    );
+    expect(await prisma.relationship.count()).toBe(0);
+  });
+
   it("does not touch canon when a pending relationship proposal is rejected", async () => {
     const { dmId, campaignId, carlId, donutId } = await seed();
     const set = await createPendingRelationshipChangeSet(dmId, campaignId, {

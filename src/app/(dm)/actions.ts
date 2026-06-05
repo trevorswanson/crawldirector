@@ -571,6 +571,8 @@ export async function createRelationshipAction(
     type: formData.get("type"),
     targetId: formData.get("targetId"),
     disposition: formData.get("disposition"),
+    sinceDay: formData.get("sinceDay"),
+    untilDay: formData.get("untilDay"),
     notes: formData.get("notes"),
     secret: formData.get("secret"),
   });
@@ -601,6 +603,8 @@ export async function updateRelationshipAction(
   const parsed = updateRelationshipSchema.safeParse({
     type: formData.get("type"),
     disposition: formData.get("disposition"),
+    sinceDay: formData.get("sinceDay"),
+    untilDay: formData.get("untilDay"),
     notes: formData.get("notes"),
     secret: formData.get("secret"),
   });

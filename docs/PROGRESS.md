@@ -4,6 +4,37 @@ Running checklist of milestones/tasks, newest first. See
 [`11-roadmap.md`](./11-roadmap.md) for the full plan and
 [`12-working-sessions.md`](./12-working-sessions.md) for how to pick up work.
 
+## M3 — Time-bounded membership ✅ (2026-06-05)
+
+**Goal:** finish the M3 group-hierarchy follow-up: membership edges preserve
+"who was where, when" instead of treating every live edge as current forever.
+
+- [x] **Schema:** added nullable `Relationship.sinceDay` / `untilDay` columns
+      plus an interval-oriented `(campaignId, type, sinceDay, untilDay)` index
+      (migration `20260605233000_m3_membership_bounds`). These fields apply to
+      membership-like edges (`MEMBER_OF`, `PART_OF`, `LEADS`) while staying
+      harmless on ordinary any-to-any relationships.
+- [x] **Pipeline/service:** relationship create/update schemas accept optional
+      crawl-day bounds, reject inverted intervals, and route the fields through
+      the existing review-backed relationship apply path with provenance.
+      Connection projections include the bounds for UI display/editing.
+- [x] **Roster reads:** `getGroupRoster` now rolls up `MEMBER_OF`, `PART_OF`, and
+      `LEADS` edges. By default it shows the current roster (open-ended
+      memberships, excluding ended intervals); callers can request
+      `{ asOfDay }` to reconstruct historical membership for a crawl day.
+      Visibility, secret-edge filtering, archived-edge/member exclusion, cycle
+      protection, and rolled-up member counts still apply.
+- [x] **UI:** the Connections panel displays day bounds on bounded membership
+      edges and exposes **Since day** / **Until day** inputs when adding or
+      editing `MEMBER_OF`, `PART_OF`, or `LEADS` edges.
+- [x] **Tests:** DB-backed relationship coverage for create/edit/projection,
+      roster coverage for historical day filtering and current-roster exclusion
+      of ended intervals, plus Connections/Roster component coverage. Focused
+      suites and typecheck are green.
+- [ ] **Follow-ups:** no M3 membership blocker remains. Future timeline UI can
+      pass an inferred/current day into `getGroupRoster({ asOfDay })` when the DM
+      wants a roster snapshot from a selected event or floor-day band.
+
 ## M3 — Order from causality (ADR 0004 slice 3, part 2) ✅ (2026-06-05)
 
 **Goal:** finish [ADR 0004](./adr/0004-event-time-model-and-ordering.md) slice 3.
@@ -784,7 +815,7 @@ relationships/events are reviewable + lockable.
       in slice 12 (replacing the JSON patch editor). Remaining refinements:
       deep-link timeline pending badges to the proposal, and design compensating
       change sets for undo/revert of already-applied effects.
-- Next slices: knowledge/reveal grants for fog of war; time-bounded membership.
+- Next slices: none for M3's original relationship/event graph scope.
       (The dedicated Review Queue effect-row editor shipped in slice 12. Pending (AI/import)
       relationship proposals route through the Review Queue as of slice 11, and
       events already carry a pending path — `createPendingEventChangeSet` plus the
@@ -801,9 +832,9 @@ relationships/events are reviewable + lockable.
       connections panel applies, and deeper clustering/analytics can be revisited
       with M12 graph analytics.
 - The roster rollup is read-only and surfaces only on group-type entities
-      (PARTY/GUILD/FACTION/ORGANIZATION). Time-bounded membership ("who was where,
-      when") isn't modeled yet — current rollup reflects live edges only; revisit
-      when events can scope membership intervals.
+      (PARTY/GUILD/FACTION/ORGANIZATION). Membership-like edges now carry
+      `sinceDay` / `untilDay`; the default roster is current/open-ended, and the
+      service can reconstruct a historical roster with `{ asOfDay }`.
 - The connections/timeline add forms list current campaign entities as targets;
       at scale this should become a typeahead/search (revisit with M5 search).
 - The entity Timeline panel still logs events with the viewed entity plus one

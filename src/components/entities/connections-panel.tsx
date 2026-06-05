@@ -33,6 +33,22 @@ export type ConnectionCandidate = EntityCandidate;
 
 // Sentinel option value that expands the type picker to the full grouped list.
 const SHOW_ALL_TYPES = "__SHOW_ALL_TYPES__";
+const BOUNDED_MEMBERSHIP_TYPES = new Set<RelationshipTypeValue>([
+  "MEMBER_OF",
+  "PART_OF",
+  "LEADS",
+]);
+
+function isBoundedMembershipType(type: RelationshipTypeValue) {
+  return BOUNDED_MEMBERSHIP_TYPES.has(type);
+}
+
+function formatDayBounds(sinceDay: number | null, untilDay: number | null) {
+  if (sinceDay === null && untilDay === null) return null;
+  if (sinceDay !== null && untilDay !== null) return `Day ${sinceDay} -> ${untilDay}`;
+  if (sinceDay !== null) return `Day ${sinceDay} -> current`;
+  return `Until day ${untilDay}`;
+}
 
 function AddButton({ disabled }: { disabled?: boolean }) {
   const { pending } = useFormStatus();
@@ -160,6 +176,26 @@ function AddConnectionForm({
               Unusual pairing — allowed, just uncommon.
             </p>
           )}
+          {isBoundedMembershipType(type) && (
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                name="sinceDay"
+                type="number"
+                min={0}
+                placeholder="Since day"
+                aria-label="Since day"
+                className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
+              />
+              <input
+                name="untilDay"
+                type="number"
+                min={0}
+                placeholder="Until day"
+                aria-label="Until day"
+                className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
+              />
+            </div>
+          )}
         </>
       )}
 
@@ -225,12 +261,14 @@ function EditConnectionForm({
     () => relationshipPickerOptions(edgeSourceType, edgeTargetType),
     [edgeSourceType, edgeTargetType],
   );
+  const [type, setType] = useState<RelationshipTypeValue>(connection.type);
 
   return (
     <form action={onSubmit} className="mt-[6px] flex flex-col gap-2 border border-[var(--line)] bg-[var(--bg-3)] px-[10px] py-[9px]">
       <select
         name="type"
-        defaultValue={connection.type}
+        value={type}
+        onChange={(e) => setType(e.target.value as RelationshipTypeValue)}
         aria-label="Relationship type"
         className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] font-mono text-[11px] text-[var(--ink)]"
       >
@@ -261,6 +299,28 @@ function EditConnectionForm({
         aria-label="Disposition"
         className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
       />
+      {isBoundedMembershipType(type) && (
+        <div className="grid grid-cols-2 gap-2">
+          <input
+            name="sinceDay"
+            type="number"
+            min={0}
+            defaultValue={connection.sinceDay ?? ""}
+            placeholder="Since day"
+            aria-label="Since day"
+            className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
+          />
+          <input
+            name="untilDay"
+            type="number"
+            min={0}
+            defaultValue={connection.untilDay ?? ""}
+            placeholder="Until day"
+            aria-label="Until day"
+            className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
+          />
+        </div>
+      )}
       <textarea
         name="notes"
         rows={2}
@@ -372,7 +432,9 @@ export function ConnectionsPanel({
       )}
 
       <div className="flex flex-col gap-[6px]">
-        {visibleConnections.map((c) => (
+        {visibleConnections.map((c) => {
+          const dayBounds = formatDayBounds(c.sinceDay, c.untilDay);
+          return (
           <div key={c.id}>
           <div
             className="group flex items-start gap-2 border border-[var(--line)] px-[10px] py-[9px]"
@@ -402,6 +464,11 @@ export function ConnectionsPanel({
                   {c.other.name}
                 </span>
               </div>
+              {dayBounds && (
+                <div className="mt-[5px] font-mono text-[9.5px] uppercase tracking-[.04em] text-[var(--ink-faint)]">
+                  {dayBounds}
+                </div>
+              )}
             </Link>
             {!c.locked && (
               <button
@@ -475,7 +542,8 @@ export function ConnectionsPanel({
             />
           )}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {candidates.length === 0 ? (

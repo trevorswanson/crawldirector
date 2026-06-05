@@ -95,6 +95,58 @@ describe("relationship service", () => {
     expect(fromTarget[0].other.name).toBe("Carl");
   });
 
+  it("persists optional membership day bounds through create and edit", async () => {
+    const owner = await makeUser("owner-membership-bounds@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const crawler = await makeEntity(owner.id, campaign.id, "Carl");
+    const party = await makeEntity(owner.id, campaign.id, "Princess Posse");
+
+    const edge = await createRelationship(owner.id, campaign.id, crawler.id, {
+      type: "MEMBER_OF",
+      targetId: party.id,
+      sinceDay: 12,
+      untilDay: 20,
+      secret: false,
+    });
+
+    let row = await prisma.relationship.findUnique({ where: { id: edge.id } });
+    expect(row?.sinceDay).toBe(12);
+    expect(row?.untilDay).toBe(20);
+
+    await updateRelationship(owner.id, campaign.id, edge.id, {
+      type: "MEMBER_OF",
+      sinceDay: 14,
+      secret: false,
+    });
+
+    row = await prisma.relationship.findUnique({ where: { id: edge.id } });
+    expect(row?.sinceDay).toBe(14);
+    expect(row?.untilDay).toBeNull();
+
+    const connection = await listConnectionsForEntity(owner.id, campaign.id, crawler.id);
+    expect(connection[0]).toMatchObject({
+      sinceDay: 14,
+      untilDay: null,
+    });
+  });
+
+  it("rejects inverted membership day bounds", async () => {
+    const owner = await makeUser("owner-inverted-bounds@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const crawler = await makeEntity(owner.id, campaign.id, "Carl");
+    const party = await makeEntity(owner.id, campaign.id, "Princess Posse");
+
+    await expect(
+      createRelationship(owner.id, campaign.id, crawler.id, {
+        type: "MEMBER_OF",
+        targetId: party.id,
+        sinceDay: 20,
+        untilDay: 12,
+        secret: false,
+      }),
+    ).rejects.toThrow(/Since day must be before or equal to until day/);
+  });
+
   it("hides secret edges and edges to invisible entities from players", async () => {
     const owner = await makeUser("owner2@test.com");
     const player = await makeUser("player@test.com");
@@ -242,6 +294,8 @@ describe("relationship service", () => {
     expect(row?.disposition).toBe(-60);
     expect(row?.notes).toBe("Fell out after Floor 9");
     expect(row?.secret).toBe(true);
+    expect(row?.sinceDay).toBeNull();
+    expect(row?.untilDay).toBeNull();
     // Endpoints are never re-pointed by an edit.
     expect(row?.sourceId).toBe(source.id);
     expect(row?.targetId).toBe(target.id);

@@ -142,6 +142,29 @@ function optionalNumber(value: JsonValue | undefined) {
   return typeof value === "number" ? value : null;
 }
 
+function relationshipDayBound(
+  value: JsonValue | undefined,
+  label: "Since day" | "Until day",
+) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw new ServiceError(`${label} must be a whole number.`);
+  }
+  if (value < 0) {
+    throw new ServiceError(`${label} cannot be negative.`);
+  }
+  return value;
+}
+
+function validateRelationshipDayBounds(
+  sinceDay: number | null,
+  untilDay: number | null,
+) {
+  if (sinceDay !== null && untilDay !== null && sinceDay > untilDay) {
+    throw new ServiceError("Since day must be before or equal to until day.");
+  }
+}
+
 function numberWithDefault(value: JsonValue | undefined, fallback: number) {
   return typeof value === "number" ? value : fallback;
 }
@@ -905,6 +928,8 @@ async function enrichReviewQueueItems(
           id: true,
           type: true,
           disposition: true,
+          sinceDay: true,
+          untilDay: true,
           notes: true,
           secret: true,
           locked: true,
@@ -1037,6 +1062,8 @@ function currentRelationshipValue(
   relationship: {
     type: RelationshipType;
     disposition: number | null;
+    sinceDay: number | null;
+    untilDay: number | null;
     notes: string | null;
     secret: boolean;
   },
@@ -1047,6 +1074,10 @@ function currentRelationshipValue(
       return relationship.type;
     case "disposition":
       return relationship.disposition;
+    case "sinceDay":
+      return relationship.sinceDay;
+    case "untilDay":
+      return relationship.untilDay;
     case "notes":
       return relationship.notes;
     case "secret":
@@ -2636,6 +2667,9 @@ async function applyCreateRelationship(
   }
   await assertCanonEntity(tx, changeSet.campaignId, sourceId);
   await assertCanonEntity(tx, changeSet.campaignId, targetId);
+  const sinceDay = relationshipDayBound(readTo(patch, "sinceDay"), "Since day");
+  const untilDay = relationshipDayBound(readTo(patch, "untilDay"), "Until day");
+  validateRelationshipDayBounds(sinceDay, untilDay);
 
   const relationship = await tx.relationship.create({
     data: {
@@ -2644,6 +2678,8 @@ async function applyCreateRelationship(
       sourceId,
       targetId,
       disposition: optionalNumber(readTo(patch, "disposition")),
+      sinceDay,
+      untilDay,
       notes: nullableString(readTo(patch, "notes")),
       secret: booleanWithDefault(readTo(patch, "secret"), false),
       source: changeSet.source,
@@ -2683,7 +2719,15 @@ async function applyUpdateRelationship(
       campaignId: changeSet.campaignId,
       status: isRestore ? CanonStatus.ARCHIVED : { not: CanonStatus.ARCHIVED },
     },
-    select: { id: true, locked: true, version: true, sourceId: true, targetId: true },
+    select: {
+      id: true,
+      locked: true,
+      version: true,
+      sourceId: true,
+      targetId: true,
+      sinceDay: true,
+      untilDay: true,
+    },
   });
   if (!relationship) throw new ServiceError("Relationship not found.");
 
@@ -2722,6 +2766,15 @@ async function applyUpdateRelationship(
     data.type = type as RelationshipType;
   }
   if ("disposition" in patch) data.disposition = optionalNumber(readTo(patch, "disposition"));
+  const nextSinceDay = "sinceDay" in patch
+    ? relationshipDayBound(readTo(patch, "sinceDay"), "Since day")
+    : relationship.sinceDay;
+  const nextUntilDay = "untilDay" in patch
+    ? relationshipDayBound(readTo(patch, "untilDay"), "Until day")
+    : relationship.untilDay;
+  validateRelationshipDayBounds(nextSinceDay, nextUntilDay);
+  if ("sinceDay" in patch) data.sinceDay = nextSinceDay;
+  if ("untilDay" in patch) data.untilDay = nextUntilDay;
   if ("notes" in patch) data.notes = nullableString(readTo(patch, "notes"));
   if ("secret" in patch) data.secret = booleanWithDefault(readTo(patch, "secret"), false);
 

@@ -8,7 +8,7 @@ import {
 import { prisma } from "@/server/db";
 
 // Entity types that act as groups — i.e. that other entities can be MEMBER_OF /
-// LEADS, and whose detail page shows a rolled-up roster. Any-to-any still holds
+// PART_OF / LEADS, and whose detail page shows a rolled-up roster. Any-to-any still holds
 // at the DB level (docs/01-domain-model.md); this set only decides which entities
 // surface a Roster panel and recurse when rolling up a hierarchy.
 export const GROUP_ENTITY_TYPES: EntityType[] = [
@@ -27,9 +27,11 @@ export function isGroupEntityType(type: string): boolean {
 const MAX_DEPTH = 6;
 
 export type RosterEntry = {
-  /** The MEMBER_OF / LEADS edge connecting this entity to the parent group. */
+  /** The membership edge connecting this entity to the parent group. */
   relationshipId: string;
-  relationshipType: "MEMBER_OF" | "LEADS";
+  relationshipType: "MEMBER_OF" | "PART_OF" | "LEADS";
+  sinceDay: number | null;
+  untilDay: number | null;
   locked: boolean;
   secret: boolean;
   entity: { id: string; name: string; type: string };
@@ -58,6 +60,8 @@ type EdgeEndpoint = {
 type MembershipEdge = {
   id: string;
   type: RelationshipType;
+  sinceDay: number | null;
+  untilDay: number | null;
   locked: boolean;
   secret: boolean;
   sourceEntity: EdgeEndpoint;
@@ -80,6 +84,18 @@ function isPlayerVisible(entity: { status: CanonStatus; visibility: Visibility }
   );
 }
 
+function activeForRosterDay(
+  edge: { sinceDay: number | null; untilDay: number | null },
+  asOfDay: number | undefined,
+) {
+  if (asOfDay === undefined) {
+    return edge.untilDay === null;
+  }
+  if (edge.sinceDay !== null && edge.sinceDay > asOfDay) return false;
+  if (edge.untilDay !== null && edge.untilDay < asOfDay) return false;
+  return true;
+}
+
 /**
  * Roll up the membership hierarchy rooted at a group entity: its leaders (LEADS
  * edges into the group) and members (MEMBER_OF edges into the group). Members
@@ -94,6 +110,7 @@ export async function getGroupRoster(
   userId: string,
   campaignId: string,
   groupId: string,
+  options: { asOfDay?: number } = {},
 ): Promise<GroupRoster | null> {
   const membership = await prisma.membership.findUnique({
     where: { userId_campaignId: { userId, campaignId } },
@@ -115,13 +132,21 @@ export async function getGroupRoster(
     where: {
       campaignId,
       status: { not: CanonStatus.ARCHIVED },
-      type: { in: [RelationshipType.MEMBER_OF, RelationshipType.LEADS] },
+      type: {
+        in: [
+          RelationshipType.MEMBER_OF,
+          RelationshipType.PART_OF,
+          RelationshipType.LEADS,
+        ],
+      },
       ...(isPlayer ? { secret: false } : {}),
     },
     orderBy: { createdAt: "asc" },
     select: {
       id: true,
       type: true,
+      sinceDay: true,
+      untilDay: true,
       locked: true,
       secret: true,
       sourceEntity: { select: endpointSelect },
@@ -136,6 +161,7 @@ export async function getGroupRoster(
   // additionally hide endpoints a player can't see.
   const byTarget = new Map<string, MembershipEdge[]>();
   for (const edge of edges) {
+    if (!activeForRosterDay(edge, options.asOfDay)) continue;
     if (edge.sourceEntity.status === CanonStatus.ARCHIVED) continue;
     if (isPlayer && !isPlayerVisible(edge.sourceEntity)) continue;
     const list = byTarget.get(edge.targetEntity.id) ?? [];
@@ -164,12 +190,18 @@ export async function getGroupRoster(
     for (const edge of incoming) {
       const member = edge.sourceEntity;
       const relationshipType =
-        edge.type === RelationshipType.LEADS ? "LEADS" : "MEMBER_OF";
+        edge.type === RelationshipType.LEADS
+          ? "LEADS"
+          : edge.type === RelationshipType.PART_OF
+            ? "PART_OF"
+            : "MEMBER_OF";
 
       if (relationshipType === "LEADS") {
         leaders.push({
           relationshipId: edge.id,
           relationshipType,
+          sinceDay: edge.sinceDay,
+          untilDay: edge.untilDay,
           locked: edge.locked,
           secret: edge.secret,
           entity: { id: member.id, name: member.name, type: member.type },
@@ -192,6 +224,8 @@ export async function getGroupRoster(
       members.push({
         relationshipId: edge.id,
         relationshipType,
+        sinceDay: edge.sinceDay,
+        untilDay: edge.untilDay,
         locked: edge.locked,
         secret: edge.secret,
         entity: { id: member.id, name: member.name, type: member.type },

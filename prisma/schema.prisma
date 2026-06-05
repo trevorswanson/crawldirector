@@ -348,6 +348,8 @@ model Relationship {
   sourceId    String
   targetId    String
   disposition Int?
+  sinceDay    Int?
+  untilDay    Int?
   attributes  Json             @default("{}")
   notes       String?
   secret      Boolean          @default(false)
@@ -367,6 +369,7 @@ model Relationship {
   @@index([campaignId, sourceId])
   @@index([campaignId, targetId])
   @@index([campaignId, type])
+  @@index([campaignId, type, sinceDay, untilDay])
   @@index([campaignId, status])
 }
 

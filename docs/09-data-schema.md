@@ -198,6 +198,8 @@ model Relationship {
   sourceId    String
   targetId    String
   disposition Int?             // -100..100
+  sinceDay    Int?             // optional crawl-day start for membership-like edges
+  untilDay    Int?             // optional crawl-day end for membership-like edges
   attributes  Json   @default("{}")
   notes       String?
   secret      Boolean @default(false)   // DM-only
@@ -211,6 +213,7 @@ model Relationship {
   @@index([campaignId, sourceId])
   @@index([campaignId, targetId])
   @@index([campaignId, type])
+  @@index([campaignId, type, sinceDay, untilDay])
 }
 
 // ───────────── Events & causality ─────────────
