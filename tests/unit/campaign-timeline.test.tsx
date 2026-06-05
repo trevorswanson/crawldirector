@@ -626,6 +626,8 @@ describe("CampaignTimeline", () => {
       .getByRole("heading", { name: "Alpha" })
       .closest("article")!;
     const q = within(alpha as HTMLElement);
+    // Enter edit mode
+    fireEvent.click(q.getByRole("button", { name: "Edit event" }));
     // Alpha's add-cause picker lists the other floor-9 events.
     fireEvent.change(q.getByRole("combobox", { name: "Cause event" }), {
       target: { value: "ev-b" },
@@ -654,6 +656,8 @@ describe("CampaignTimeline", () => {
       ],
     });
 
+    // Enter edit mode
+    fireEvent.click(screen.getByRole("button", { name: "Edit event" }));
     fireEvent.click(screen.getByRole("button", { name: "Remove causality link" }));
     await waitFor(() =>
       expect(archiveCampaignEventCausalityAction).toHaveBeenCalledWith(
@@ -662,6 +666,36 @@ describe("CampaignTimeline", () => {
         expect.any(FormData),
       ),
     );
+  });
+
+  it("hides causality edit controls when the event is not in edit mode or is locked", () => {
+    renderTimeline({
+      events: [
+        {
+          ...events[0],
+          causedBy: [{ id: "cause-ev", title: "Earlier scene", linkId: "link-7" }],
+          locked: false,
+        },
+        {
+          ...events[0],
+          id: "locked-ev",
+          title: "Locked event",
+          causedBy: [{ id: "cause-ev", title: "Earlier scene", linkId: "link-8" }],
+          locked: true,
+        },
+      ],
+    });
+
+    // 1. By default, not in edit mode: remove buttons and add-cause should not be present
+    expect(screen.queryByRole("button", { name: "Remove causality link" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Cause event" })).toBeNull();
+
+    // 2. Locked event: even if canEdit is true, edit controls are hidden and Edit button is not even visible
+    const lockedArticle = screen.getByRole("heading", { name: "Locked event" }).closest("article")!;
+    const qLocked = within(lockedArticle as HTMLElement);
+    expect(qLocked.queryByRole("button", { name: "Edit event" })).toBeNull();
+    expect(qLocked.queryByRole("button", { name: "Remove causality link" })).toBeNull();
+    expect(qLocked.queryByRole("combobox", { name: "Cause event" })).toBeNull();
   });
 
   it("scrolls to and highlights an event when a causality link is clicked", () => {

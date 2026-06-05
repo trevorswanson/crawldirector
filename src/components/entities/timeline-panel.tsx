@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { ChevronRight, Lock, Pencil, Plus, Trash2, Unlock, X } from "lucide-react";
@@ -145,6 +145,10 @@ function EditEventForm({
   onSubmit,
   onCancel,
   error,
+  campaignId,
+  entityId,
+  causeCandidates,
+  entityEventIds,
 }: {
   event: EntityEvent;
   self: EntityCandidate;
@@ -155,6 +159,10 @@ function EditEventForm({
   onSubmit: (formData: FormData) => Promise<void>;
   onCancel: () => void;
   error: string | null;
+  campaignId: string;
+  entityId: string;
+  causeCandidates: EntityEvent[];
+  entityEventIds: Set<string>;
 }) {
   // Prefill the participant editor with the full current set: a row for every
   // role the viewed entity holds (it can have more than one) followed by the
@@ -185,44 +193,153 @@ function EditEventForm({
       alive: effect.value ? "alive" : "dead",
       note: effect.note ?? "",
     }));
+  const [pending, startTransition] = useTransition();
+
+  const handleSubmit = (formData: FormData) => {
+    startTransition(async () => {
+      await onSubmit(formData);
+    });
+  };
+
   return (
-    <form action={onSubmit} className="flex flex-col gap-2 border border-[var(--line)] bg-[var(--bg-3)] px-[10px] py-[9px]">
-      <input
-        name="title"
-        required
-        maxLength={200}
-        defaultValue={event.title}
-        aria-label="Event title"
-        placeholder="What happened?"
-        className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12.5px] text-[var(--ink)]"
-      />
-      <textarea
-        name="summary"
-        rows={2}
-        maxLength={2000}
-        defaultValue={event.summary ?? ""}
-        aria-label="Event summary"
-        placeholder="Summary (optional)"
-        className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
-      />
-      <EventTimeFields
-        initial={event.time}
-        anchorCandidates={anchorCandidates}
-        excludeEventId={event.id}
-      />
-      <ParticipantRows candidates={candidates} initial={initialParticipants} />
-      <EffectRows candidates={crawlerCandidates} initial={initialEffects} />
-      <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
-        <input type="checkbox" name="secret" value="true" defaultChecked={event.secret} />
-        DM-only (secret)
-      </label>
+    <div className="flex flex-col gap-2 border border-[var(--line)] bg-[var(--bg-3)] px-[10px] py-[9px]">
+      <form id={`edit-event-form-${event.id}`} action={handleSubmit} className="flex flex-col gap-2">
+        <input
+          name="title"
+          required
+          maxLength={200}
+          defaultValue={event.title}
+          aria-label="Event title"
+          placeholder="What happened?"
+          className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12.5px] text-[var(--ink)]"
+        />
+        <textarea
+          name="summary"
+          rows={2}
+          maxLength={2000}
+          defaultValue={event.summary ?? ""}
+          aria-label="Event summary"
+          placeholder="Summary (optional)"
+          className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
+        />
+        <EventTimeFields
+          initial={event.time}
+          anchorCandidates={anchorCandidates}
+          excludeEventId={event.id}
+        />
+        <ParticipantRows candidates={candidates} initial={initialParticipants} />
+        <EffectRows candidates={crawlerCandidates} initial={initialEffects} />
+        <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
+          <input type="checkbox" name="secret" value="true" defaultChecked={event.secret} />
+          DM-only (secret)
+        </label>
+      </form>
+
+      {(event.causedBy.length > 0 || event.causes.length > 0 || causeCandidates.length > 0) && (
+        <div className="mt-2 border-t border-[var(--line)] pt-2 flex flex-col gap-[4px]">
+          {event.causedBy.length > 0 && (
+            <div className="flex flex-wrap items-center gap-x-[8px] gap-y-[3px]">
+              <span className="font-mono text-[8.5px] uppercase tracking-[.06em] text-[var(--ink-faint)]">
+                Caused by
+              </span>
+              {event.causedBy.map((cause) => (
+                <span
+                  key={cause.linkId}
+                  className="inline-flex items-center gap-[4px]"
+                >
+                  <EventLink
+                    campaignId={campaignId}
+                    entityId={entityId}
+                    event={cause}
+                    inEntityTimeline={entityEventIds.has(cause.id)}
+                  />
+                  {!event.locked && (
+                    <form
+                      action={archiveEventCausalityAction.bind(
+                        null,
+                        campaignId,
+                        entityId,
+                        cause.linkId,
+                      )}
+                    >
+                      <button
+                        type="submit"
+                        title="Remove cause link"
+                        className="inline-flex p-[2px] text-[var(--ink-faint)] hover:text-[var(--no)]"
+                      >
+                        <X aria-hidden size={10} />
+                      </button>
+                    </form>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
+          {event.causes.length > 0 && (
+            <div className="flex flex-wrap items-center gap-x-[8px] gap-y-[3px]">
+              <span className="font-mono text-[8.5px] uppercase tracking-[.06em] text-[var(--ink-faint)]">
+                Causes
+              </span>
+              {event.causes.map((effect) => (
+                <span
+                  key={effect.linkId}
+                  className="inline-flex items-center gap-[4px]"
+                >
+                  <EventLink
+                    campaignId={campaignId}
+                    entityId={entityId}
+                    event={effect}
+                    inEntityTimeline={entityEventIds.has(effect.id)}
+                  />
+                  {!event.locked && (
+                    <form
+                      action={archiveEventCausalityAction.bind(
+                        null,
+                        campaignId,
+                        entityId,
+                        effect.linkId,
+                      )}
+                    >
+                      <button
+                        type="submit"
+                        title="Remove cause link"
+                        className="inline-flex p-[2px] text-[var(--ink-faint)] hover:text-[var(--no)]"
+                      >
+                        <X aria-hidden size={10} />
+                      </button>
+                    </form>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
+          {!event.locked && causeCandidates.length > 0 && (
+            <CauseLinkForm
+              campaignId={campaignId}
+              entityId={entityId}
+              effectId={event.id}
+              effectTitle={event.title}
+              candidates={causeCandidates}
+            />
+          )}
+        </div>
+      )}
+
       {error && (
         <p role="alert" className="text-[11px] text-[var(--no)]">
           {error}
         </p>
       )}
       <div className="flex gap-2">
-        <SaveEventButton />
+        <button
+          type="submit"
+          form={`edit-event-form-${event.id}`}
+          disabled={pending}
+          className="inline-flex items-center justify-center gap-[6px] border border-[var(--line-strong)] bg-[var(--bg-3)] px-[10px] py-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-dim)] transition-[filter,color] hover:text-[var(--ink)] hover:brightness-110 disabled:opacity-50"
+        >
+          <Pencil aria-hidden size={12} />
+          {pending ? "Saving..." : "Save event"}
+        </button>
         <button
           type="button"
           onClick={onCancel}
@@ -231,20 +348,7 @@ function EditEventForm({
           Cancel
         </button>
       </div>
-    </form>
-  );
-}
-
-function SaveEventButton() {
-  const { pending } = useFormStatus();
-  return (
-    <button
-      type="submit"
-      disabled={pending}
-      className="inline-flex items-center justify-center gap-[6px] border border-[var(--line-strong)] bg-[var(--bg-3)] px-[10px] py-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-dim)] transition-[filter,color] hover:text-[var(--ink)] hover:brightness-110 disabled:opacity-50"
-    >
-      {pending ? "Saving..." : "Save event"}
-    </button>
+    </div>
   );
 }
 
@@ -410,12 +514,12 @@ export function TimelinePanel({
 
                   {expanded && (
                     <div className="ml-[18px] mt-[8px] flex flex-col gap-[10px] border-l border-[var(--line)] pl-[12px]">
-                      {e.summary && (
+                      {editingId !== e.id && e.summary && (
                         <p className="text-[12px] leading-[1.5] text-[var(--ink-dim)]">
                           {e.summary}
                         </p>
                       )}
-                      {e.others.length > 0 && (
+                      {editingId !== e.id && e.others.length > 0 && (
                         <div className="flex flex-col gap-[5px]">
                           <span className="font-mono text-[8.5px] uppercase tracking-[.08em] text-[var(--ink-faint)]">
                             Participants
@@ -437,7 +541,7 @@ export function TimelinePanel({
                           </div>
                         </div>
                       )}
-                      {(e.causedBy.length > 0 || e.causes.length > 0) && (
+                      {editingId !== e.id && (e.causedBy.length > 0 || e.causes.length > 0) && (
                         <div className="flex flex-col gap-[4px]">
                           {e.causedBy.length > 0 && (
                             <div className="flex flex-wrap items-center gap-x-[8px] gap-y-[3px]">
@@ -455,22 +559,6 @@ export function TimelinePanel({
                                     event={cause}
                                     inEntityTimeline={entityEventIds.has(cause.id)}
                                   />
-                                  <form
-                                    action={archiveEventCausalityAction.bind(
-                                      null,
-                                      campaignId,
-                                      entityId,
-                                      cause.linkId,
-                                    )}
-                                  >
-                                    <button
-                                      type="submit"
-                                      title="Remove cause link"
-                                      className="inline-flex p-[2px] text-[var(--ink-faint)] hover:text-[var(--no)]"
-                                    >
-                                      <X aria-hidden size={10} />
-                                    </button>
-                                  </form>
                                 </span>
                               ))}
                             </div>
@@ -491,36 +579,11 @@ export function TimelinePanel({
                                     event={effect}
                                     inEntityTimeline={entityEventIds.has(effect.id)}
                                   />
-                                  <form
-                                    action={archiveEventCausalityAction.bind(
-                                      null,
-                                      campaignId,
-                                      entityId,
-                                      effect.linkId,
-                                    )}
-                                  >
-                                    <button
-                                      type="submit"
-                                      title="Remove cause link"
-                                      className="inline-flex p-[2px] text-[var(--ink-faint)] hover:text-[var(--no)]"
-                                    >
-                                      <X aria-hidden size={10} />
-                                    </button>
-                                  </form>
                                 </span>
                               ))}
                             </div>
                           )}
                         </div>
-                      )}
-                      {causeCandidates.length > 0 && (
-                        <CauseLinkForm
-                          campaignId={campaignId}
-                          entityId={entityId}
-                          effectId={e.id}
-                          effectTitle={e.title}
-                          candidates={causeCandidates}
-                        />
                       )}
                       <EventEffectsSection
                         effects={e.effects}
@@ -543,6 +606,10 @@ export function TimelinePanel({
                             setEditingId(null);
                           }}
                           error={editError}
+                          campaignId={campaignId}
+                          entityId={entityId}
+                          causeCandidates={causeCandidates}
+                          entityEventIds={entityEventIds}
                         />
                       ) : null}
                       <div className="flex flex-wrap gap-[6px]">
