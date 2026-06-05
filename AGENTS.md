@@ -65,12 +65,20 @@ The human phrasing is now **generated** from the structure (`label` is an option
 override), and a concrete floor-relative offset **derives** the intra-floor `rank`
 automatically (manual drag still wins for unscheduled/label-only events). A shared
 `EventTimeFields` picker drives the timeline forms and the Review Queue editor.
-ADR 0004 slice 3 part 1 is in: the timeline flags **causality-consistency
+**Knowledge/reveal grants** (fog-of-war foundation) are now in: a `KnowledgeGrant`
+model + `knowledge` service let a DM reveal a canon entity to one actor entity
+(NPC/crawler/party/faction) without campaign-wide visibility — deliberate, audited
+`REVEAL`/`REVOKE` actions (not change sets), surfaced as a **Knowledge** panel
+("Known to" / "Knows about") on the entity detail page. This M3 slice wires
+ENTITY→ENTITY grants; the schema already supports field/relationship/event/FACT
+targets + MEMBERSHIP recipients for the M7 player "known world" and M11 agent
+fog-of-war. ADR 0004 slice 3 part 1 is in: the timeline flags **causality-consistency
 warnings** (`src/lib/causality.ts`) — a causal link whose effect is ordered
 earlier in fiction than its cause shows an inline ⚠ + a header "N out of order"
 count, non-blocking. Still to come in M3: time-bounded membership and
 knowledge/reveal grants, plus the rest of ADR 0004 slice 3 ("order from
-causality" — topologically sort unscheduled stretches from the DAG).
+causality" — topologically sort unscheduled stretches from the DAG). Still to come
+in M3: time-bounded membership.
 **M3.5 (tagging)** is
 underway: the service layer (campaign tag list, tag filtering, tag-aware search)
 plus the UI — a tag-selection input with campaign autocomplete on the entity

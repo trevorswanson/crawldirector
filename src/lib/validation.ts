@@ -319,6 +319,16 @@ export const updateRelationshipSchema = z.object({
 });
 export type UpdateRelationshipInput = z.infer<typeof updateRelationshipSchema>;
 
+// Knowledge / reveal grant (fog of war, M3). A grant ties the viewed entity to
+// one other entity — `entityId` is that counterpart (the actor that learns, or
+// the canon that is learned, depending on which direction the action grants).
+// Direction is decided by the action, not the schema, so both share this shape.
+export const grantKnowledgeSchema = z.object({
+  entityId: z.string().trim().min(1, "Pick an entity."),
+  notes: optionalText(500),
+});
+export type GrantKnowledgeInput = z.infer<typeof grantKnowledgeSchema>;
+
 // Event participant roles (docs/01-domain-model.md). Any-to-any, like
 // relationship types — every role is valid for any entity.
 export const eventParticipantRoleValues = [

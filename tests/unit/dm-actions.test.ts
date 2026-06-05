@@ -35,6 +35,8 @@ const {
   archiveEventCausality,
   restoreEventCausality,
   applyEventEffects,
+  grantEntityKnowledge,
+  revokeKnowledge,
   signOut,
   redirect,
   revalidatePath,
@@ -73,6 +75,8 @@ const {
   archiveEventCausality: vi.fn(),
   restoreEventCausality: vi.fn(),
   applyEventEffects: vi.fn(),
+  grantEntityKnowledge: vi.fn(),
+  revokeKnowledge: vi.fn(),
   signOut: vi.fn(),
   redirect: vi.fn(() => {
     throw new Error("NEXT_REDIRECT");
@@ -123,6 +127,10 @@ vi.mock("@/server/services/events", () => ({
   archiveEventCausality,
   restoreEventCausality,
   applyEventEffects,
+}));
+vi.mock("@/server/services/knowledge", () => ({
+  grantEntityKnowledge,
+  revokeKnowledge,
 }));
 vi.mock("@/server/auth", () => ({ signOut }));
 vi.mock("next/navigation", () => ({ redirect }));
@@ -175,6 +183,9 @@ import {
   linkCampaignEventCauseAction,
   archiveCampaignEventCausalityAction,
   restoreCampaignEventCausalityAction,
+  grantEntityKnownToAction,
+  grantEntityKnowsAboutAction,
+  revokeKnowledgeAction,
 } from "@/app/(dm)/actions";
 
 import { ServiceError } from "@/lib/errors";
@@ -1844,5 +1855,89 @@ describe("restoreCampaignEventCausalityAction", () => {
 
     expect(restoreEventCausality).toHaveBeenCalledWith("u1", "c1", "ec1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+  });
+});
+
+describe("grantEntityKnownToAction", () => {
+  it("reveals the viewed entity (target) to the picked recipient and revalidates both", async () => {
+    grantEntityKnowledge.mockResolvedValue({ id: "k1", created: true, affectedEntityIds: [] });
+
+    const result = await grantEntityKnownToAction(
+      "c1",
+      "viewed",
+      undefined,
+      form({ entityId: "actor", notes: "knows it" }),
+    );
+
+    expect(result).toBeUndefined();
+    expect(grantEntityKnowledge).toHaveBeenCalledWith("u1", "c1", {
+      targetEntityId: "viewed",
+      recipientEntityId: "actor",
+      notes: "knows it",
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/viewed");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/actor");
+  });
+
+  it("returns a validation error and skips the service when no entity is picked", async () => {
+    const result = await grantEntityKnownToAction("c1", "viewed", undefined, form({ entityId: "" }));
+    expect(result?.error).toBeTruthy();
+    expect(grantEntityKnowledge).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a ServiceError message and a generic fallback", async () => {
+    grantEntityKnowledge.mockRejectedValueOnce(new ServiceError("nope"));
+    expect(
+      (await grantEntityKnownToAction("c1", "viewed", undefined, form({ entityId: "actor" })))?.error,
+    ).toBe("nope");
+
+    grantEntityKnowledge.mockRejectedValueOnce(new Error("boom"));
+    expect(
+      (await grantEntityKnownToAction("c1", "viewed", undefined, form({ entityId: "actor" })))?.error,
+    ).toBe("Could not record the reveal. Please try again.");
+  });
+});
+
+describe("grantEntityKnowsAboutAction", () => {
+  it("records the viewed entity (recipient) knowing the picked target", async () => {
+    grantEntityKnowledge.mockResolvedValue({ id: "k1", created: true, affectedEntityIds: [] });
+
+    await grantEntityKnowsAboutAction("c1", "viewed", undefined, form({ entityId: "canon" }));
+
+    expect(grantEntityKnowledge).toHaveBeenCalledWith("u1", "c1", {
+      targetEntityId: "canon",
+      recipientEntityId: "viewed",
+      notes: undefined,
+    });
+  });
+
+  it("returns a validation error when no entity is picked", async () => {
+    const result = await grantEntityKnowsAboutAction("c1", "viewed", undefined, form({ entityId: "" }));
+    expect(result?.error).toBeTruthy();
+    expect(grantEntityKnowledge).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a ServiceError and a generic fallback", async () => {
+    grantEntityKnowledge.mockRejectedValueOnce(new ServiceError("locked"));
+    expect(
+      (await grantEntityKnowsAboutAction("c1", "v", undefined, form({ entityId: "x" })))?.error,
+    ).toBe("locked");
+
+    grantEntityKnowledge.mockRejectedValueOnce(new Error("boom"));
+    expect(
+      (await grantEntityKnowsAboutAction("c1", "v", undefined, form({ entityId: "x" })))?.error,
+    ).toBe("Could not record the reveal. Please try again.");
+  });
+});
+
+describe("revokeKnowledgeAction", () => {
+  it("revokes the grant and revalidates the viewed entity plus affected endpoints", async () => {
+    revokeKnowledge.mockResolvedValue({ id: "k1", affectedEntityIds: ["viewed", "actor"] });
+
+    await revokeKnowledgeAction("c1", "viewed", "k1");
+
+    expect(revokeKnowledge).toHaveBeenCalledWith("u1", "c1", "k1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/viewed");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/actor");
   });
 });
