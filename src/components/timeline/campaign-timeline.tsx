@@ -342,6 +342,8 @@ function EditEventForm({
   crawlerCandidates,
   anchorCandidates,
   resolveName,
+  causeCandidates,
+  onFocusEvent,
   onClose,
 }: {
   campaignId: string;
@@ -350,6 +352,8 @@ function EditEventForm({
   crawlerCandidates: EntityCandidate[];
   anchorCandidates: { id: string; title: string }[];
   resolveName: (targetId: string) => string;
+  causeCandidates: { id: string; title: string }[];
+  onFocusEvent: (eventId: string) => void;
   onClose: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -381,55 +385,93 @@ function EditEventForm({
       note: effect.note ?? "",
     }));
 
-  const handleSubmit = async (formData: FormData) => {
+  const [pending, startTransition] = useTransition();
+
+  const handleSubmit = (formData: FormData) => {
     setError(null);
-    const result: EventActionState = await updateCampaignEventAction(
-      campaignId,
-      event.id,
-      undefined,
-      formData,
-    );
-    if (result?.error) {
-      setError(result.error);
-      return;
-    }
-    onClose();
+    startTransition(async () => {
+      const result: EventActionState = await updateCampaignEventAction(
+        campaignId,
+        event.id,
+        undefined,
+        formData,
+      );
+      if (result?.error) {
+        setError(result.error);
+        return;
+      }
+      onClose();
+    });
   };
 
   return (
-    <form action={handleSubmit} className="mt-3 flex flex-col gap-3 border border-[var(--line)] bg-[var(--bg-3)] p-3">
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
-        <input
-          name="title"
-          required
-          maxLength={200}
-          defaultValue={event.title}
-          aria-label="Event title"
-          placeholder="What happened?"
-          className="border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2 text-[13px] text-[var(--ink)]"
+    <div className="mt-3 flex flex-col gap-3 border border-[var(--line)] bg-[var(--bg-3)] p-3">
+      <form id={`edit-event-form-${event.id}`} action={handleSubmit} className="flex flex-col gap-3">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+          <input
+            name="title"
+            required
+            maxLength={200}
+            defaultValue={event.title}
+            aria-label="Event title"
+            placeholder="What happened?"
+            className="border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2 text-[13px] text-[var(--ink)]"
+          />
+          <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
+            <input type="checkbox" name="secret" value="true" defaultChecked={event.secret} />
+            DM-only
+          </label>
+        </div>
+        <textarea
+          name="summary"
+          rows={3}
+          maxLength={2000}
+          defaultValue={event.summary ?? ""}
+          aria-label="Event summary"
+          placeholder="Summary (optional)"
+          className="border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2 text-[12.5px] text-[var(--ink)]"
         />
-        <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
-          <input type="checkbox" name="secret" value="true" defaultChecked={event.secret} />
-          DM-only
-        </label>
-      </div>
-      <textarea
-        name="summary"
-        rows={3}
-        maxLength={2000}
-        defaultValue={event.summary ?? ""}
-        aria-label="Event summary"
-        placeholder="Summary (optional)"
-        className="border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2 text-[12.5px] text-[var(--ink)]"
-      />
-      <EventTimeFields
-        initial={event.time}
-        anchorCandidates={anchorCandidates}
-        excludeEventId={event.id}
-      />
+        <EventTimeFields
+          initial={event.time}
+          anchorCandidates={anchorCandidates}
+          excludeEventId={event.id}
+        />
 
-      <ParticipantRows candidates={candidates} initial={initialParticipants} />
-      <EffectRows candidates={crawlerCandidates} initial={initialEffects} />
+        <ParticipantRows candidates={candidates} initial={initialParticipants} />
+        <EffectRows candidates={crawlerCandidates} initial={initialEffects} />
+      </form>
+
+      {(event.causedBy.length > 0 ||
+        event.causes.length > 0 ||
+        causeCandidates.length > 0) && (
+        <div className="border-t border-[var(--line)] pt-3">
+          {event.causedBy.length > 0 && (
+            <Thread
+              dir="in"
+              items={event.causedBy}
+              campaignId={campaignId}
+              canEdit={true}
+              onFocusEvent={onFocusEvent}
+            />
+          )}
+          {event.causes.length > 0 && (
+            <Thread
+              dir="out"
+              items={event.causes}
+              campaignId={campaignId}
+              canEdit={true}
+              onFocusEvent={onFocusEvent}
+            />
+          )}
+          {causeCandidates.length > 0 && (
+            <CauseLinkForm
+              campaignId={campaignId}
+              effectId={event.id}
+              candidates={causeCandidates}
+            />
+          )}
+        </div>
+      )}
 
       {error && (
         <p role="alert" className="text-[11px] text-[var(--no)]">
@@ -439,10 +481,12 @@ function EditEventForm({
       <div className="flex gap-2">
         <button
           type="submit"
-          className="inline-flex items-center gap-[6px] border border-[var(--line-strong)] bg-[var(--bg-3)] px-[10px] py-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-dim)] hover:text-[var(--ink)]"
+          form={`edit-event-form-${event.id}`}
+          disabled={pending}
+          className="inline-flex items-center gap-[6px] border border-[var(--line-strong)] bg-[var(--bg-3)] px-[10px] py-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-dim)] hover:text-[var(--ink)] disabled:opacity-50"
         >
           <Pencil aria-hidden size={12} />
-          Save event
+          {pending ? "Saving..." : "Save event"}
         </button>
         <button
           type="button"
@@ -453,7 +497,7 @@ function EditEventForm({
           Cancel
         </button>
       </div>
-    </form>
+    </div>
   );
 }
 
@@ -800,6 +844,7 @@ export function CampaignTimeline({
     }) !== null;
     const canDrag =
       canEdit && !event.locked && !orderDerived && editingId !== event.id && !reordering;
+    const showCausalityControls = canEdit && !event.locked && editingId === event.id;
     const canDrop =
       draggingId !== null &&
       draggingId !== event.id &&
@@ -966,17 +1011,19 @@ export function CampaignTimeline({
               crawlerCandidates={crawlerCandidates}
               anchorCandidates={anchorCandidates}
               resolveName={resolveName}
+              causeCandidates={causeCandidates}
+              onFocusEvent={focusEvent}
               onClose={() => setEditingId(null)}
             />
           )}
 
-          {event.summary && (
+          {editingId !== event.id && event.summary && (
             <p className="mt-[6px] max-w-[660px] text-[12.5px] leading-[1.55] text-[var(--ink-dim)]">
               {event.summary}
             </p>
           )}
 
-          {event.participants.length > 0 && (
+          {editingId !== event.id && event.participants.length > 0 && (
             <div className="mt-[11px] flex flex-wrap gap-[6px_7px]">
               {event.participants.map((participant) => (
                 <Link
@@ -994,16 +1041,14 @@ export function CampaignTimeline({
             </div>
           )}
 
-          {(event.causedBy.length > 0 ||
-            event.causes.length > 0 ||
-            (canEdit && causeCandidates.length > 0)) && (
+          {editingId !== event.id && (event.causedBy.length > 0 || event.causes.length > 0) && (
             <div className="mt-[11px] border-t border-[var(--line)] pt-[10px]">
               {event.causedBy.length > 0 && (
                 <Thread
                   dir="in"
                   items={event.causedBy}
                   campaignId={campaignId}
-                  canEdit={canEdit}
+                  canEdit={false}
                   onFocusEvent={focusEvent}
                 />
               )}
@@ -1012,15 +1057,8 @@ export function CampaignTimeline({
                   dir="out"
                   items={event.causes}
                   campaignId={campaignId}
-                  canEdit={canEdit}
+                  canEdit={false}
                   onFocusEvent={focusEvent}
-                />
-              )}
-              {canEdit && causeCandidates.length > 0 && (
-                <CauseLinkForm
-                  campaignId={campaignId}
-                  effectId={event.id}
-                  candidates={causeCandidates}
                 />
               )}
             </div>

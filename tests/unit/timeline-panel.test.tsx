@@ -257,6 +257,57 @@ describe("TimelinePanel", () => {
     expect(screen.queryByRole("button", { name: /Remove event/ })).toBeNull();
   });
 
+  it("gates causality edit controls behind edit mode and locks", () => {
+    render(
+      <TimelinePanel
+        campaignId="c1"
+        entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
+        events={[
+          event({
+            id: "ev1",
+            title: "Sponsor stock drops",
+            causedBy: [{ id: "ev2", title: "Arena stunt", linkId: "ec1" }],
+            locked: false,
+          }),
+          event({
+            id: "ev2",
+            title: "Arena stunt",
+            causes: [{ id: "ev1", title: "Sponsor stock drops", linkId: "ec1" }],
+            locked: true,
+          }),
+          event({
+            id: "ev3",
+            title: "Unlinked event",
+            locked: false,
+          }),
+        ]}
+        candidates={candidates}
+        initialEventId="ev1"
+      />,
+    );
+
+    // 1. Unlocked event ("Sponsor stock drops"):
+    // Under our new rules, cause links are visible but remove buttons and add cause picker are hidden by default
+    expect(screen.getByText("Caused by")).toBeDefined();
+    expect(screen.getByRole("link", { name: "Arena stunt" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Remove cause link" })).toBeNull();
+    expect(screen.queryByLabelText("Cause event for Sponsor stock drops")).toBeNull();
+
+    // Now click Edit event: remove button and add cause picker should appear
+    fireEvent.click(screen.getByRole("button", { name: "Edit event" }));
+    expect(screen.getByRole("button", { name: "Remove cause link" })).toBeDefined();
+    expect(screen.getByLabelText("Cause event for Sponsor stock drops")).toBeDefined();
+
+    // 2. Locked event ("Arena stunt"):
+    // Let's expand it by clicking
+    fireEvent.click(screen.getByRole("button", { name: /Arena stunt/ }));
+    // Controls should be hidden and Edit event button not visible
+    expect(screen.queryByRole("button", { name: "Edit event" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove cause link" })).toBeNull();
+  });
+
   it("edits an event: prefilled form, submits, and closes on success", async () => {
     updateEventAction.mockResolvedValue(undefined);
     render(
