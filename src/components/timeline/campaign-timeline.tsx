@@ -1,16 +1,33 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useActionState, useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { GripVertical, Pencil, Plus, Trash2, X } from "lucide-react";
+import {
+  Check,
+  GripVertical,
+  Lock,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  Unlock,
+  X,
+  Zap,
+} from "lucide-react";
 
 import {
   applyCampaignEventEffectsAction,
+  archiveCampaignEventAction,
+  archiveCampaignEventCausalityAction,
   createCampaignEventAction,
+  linkCampaignEventCauseAction,
   reorderEventAction,
+  setCampaignCurrentFloorAction,
+  setCampaignEventLockAction,
   updateCampaignEventAction,
   type EventActionState,
+  type EventCausalityActionState,
 } from "@/app/(dm)/actions";
 import {
   EntityTypeahead,
@@ -20,18 +37,25 @@ import {
   EffectRows,
   type EffectRowValue,
 } from "@/components/entities/effect-rows";
-import { EventEffectsSection } from "@/components/entities/event-effects-section";
 import { EventTimeFields } from "@/components/entities/event-time-fields";
 import {
   ParticipantRows,
   type ParticipantRowValue,
 } from "@/components/entities/participant-rows";
+import { HudTag } from "@/components/ui/hud-tag";
 import { Kicker } from "@/components/ui/kicker";
 import { LockChip } from "@/components/ui/lock-chip";
 import { SourceBadge } from "@/components/ui/source-badge";
 import { TypeDot } from "@/components/ui/type-dot";
+import { provenanceMeta } from "@/lib/entities";
+import { describeEffect } from "@/lib/event-effects";
+import { floorRelativeSortKey } from "@/lib/time-ref";
 import { eventParticipantRoleValues } from "@/lib/validation";
-import type { CampaignTimelineEvent } from "@/server/services/events";
+import type {
+  CampaignFloorMeta,
+  CampaignTimelineEvent,
+  EventEffectView,
+} from "@/server/services/events";
 
 type ParticipantDraft = {
   key: number;
@@ -76,6 +100,81 @@ export function computeReorderNeighbors(
   return { aboveId: sameFloorId(above), belowId: sameFloorId(below) };
 }
 
+// ── Provenance filter (the rail's "filter by origin", mirrors the Review Queue) ──
+const TIMELINE_FILTERS = ["ALL", "DM", "AI", "PLAYER", "IMPORT"] as const;
+type TimelineFilter = (typeof TIMELINE_FILTERS)[number];
+
+// The model's source is PLAYER_SUGGESTION; the rail shows PLAYER (same aliasing
+// as the Review Queue's sourceLabel).
+function sourceFilterKey(source: string): Exclude<TimelineFilter, "ALL"> {
+  if (source === "PLAYER_SUGGESTION") return "PLAYER";
+  if (source === "AI" || source === "IMPORT") return source;
+  return "DM";
+}
+
+function filterColor(filter: TimelineFilter): string {
+  switch (filter) {
+    case "AI":
+      return "var(--ai)";
+    case "PLAYER":
+      return "var(--player)";
+    case "IMPORT":
+      return "var(--import)";
+    case "DM":
+      return "var(--ink-dim)";
+    default:
+      return "var(--accent)";
+  }
+}
+
+function filterLabel(filter: TimelineFilter): string {
+  if (filter === "PLAYER") return "PLR";
+  if (filter === "IMPORT") return "IMP";
+  return filter;
+}
+
+// The absolute day-since-collapse of an event, when it can be placed on the
+// absolute axis on its own (a COLLAPSE "Day N since collapse" or ABSOLUTE_DAY
+// coordinate). Floor-relative anchors (FLOOR_START / FLOOR_COLLAPSE) can't be
+// converted to absolute days without per-floor start/collapse anchors we don't
+// model yet (ADR 0004), so they don't contribute to inferred ranges — a floor
+// with no absolute-dated events simply shows no range (it fills in as the DM
+// dates more of the crawl). See docs/adr/0005.
+function resolveAbsoluteDay(time: CampaignTimelineEvent["time"]): number | null {
+  if (typeof time.offset !== "number") return null;
+  if (time.basis === "COLLAPSE" || time.basis === "ABSOLUTE_DAY") return time.offset;
+  return null;
+}
+
+function formatDayRange(range: { min: number; max: number }): string {
+  return range.min === range.max
+    ? `Day ${range.min}`
+    : `Day ${range.min} – ${range.max}`;
+}
+
+// An effect rendered as a signed stat diff (broadcast HUD: glanceable deltas).
+function effectDiff(effect: EventEffectView): { text: string; color: string } {
+  if (typeof effect.delta === "number" && effect.delta !== 0) {
+    const sign = effect.delta > 0 ? "+" : "";
+    const value =
+      effect.stat === "gold" ? effect.delta.toLocaleString() : String(effect.delta);
+    return {
+      text: `${sign}${value}`,
+      color: effect.delta > 0 ? "var(--add)" : "var(--del)",
+    };
+  }
+  if (effect.note) return { text: effect.note, color: "var(--ink-dim)" };
+  return { text: describeEffect(effect), color: "var(--ink-dim)" };
+}
+
+function effectStatusLabel(effect: EventEffectView) {
+  if (effect.applied || effect.reviewStatus === "APPLIED") return "applied";
+  if (effect.reviewStatus === "PENDING") return "pending review";
+  if (effect.reviewStatus === "REJECTED") return "rejected";
+  if (effect.reviewStatus === "SUPERSEDED") return "superseded";
+  return "unapplied";
+}
+
 function NewEventForm({
   campaignId,
   candidates,
@@ -118,7 +217,7 @@ function NewEventForm({
   };
 
   return (
-    <form action={handleSubmit} className="flex flex-col gap-3 border-b border-[var(--line)] py-4">
+    <form action={handleSubmit} className="flex flex-col gap-3 border border-[var(--line)] bg-[var(--bg-1)] p-4">
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
         <input
           name="title"
@@ -359,22 +458,252 @@ function EditEventForm({
   );
 }
 
-export function CampaignTimeline({
+// Effects as signed stat diffs + Apply. Same apply/review behaviour as
+// EventEffectsSection (applyCampaignEventEffectsAction routes through the review
+// pipeline) — restyled to the broadcast-HUD diff chips the timeline calls for.
+function TimelineEffects({
+  effects,
+  resolveName,
+  onApply,
+  canEdit,
+}: {
+  effects: EventEffectView[];
+  resolveName: (targetId: string) => string;
+  onApply: () => Promise<EventActionState>;
+  canEdit: boolean;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  if (effects.length === 0) return null;
+  const unapplied = effects.filter(
+    (effect) => !effect.applied && effect.reviewStatus === null,
+  );
+
+  const apply = async () => {
+    setError(null);
+    setPending(true);
+    const result = await onApply();
+    setPending(false);
+    if (result?.error) setError(result.error);
+  };
+
+  return (
+    <div className="mt-3 border-t border-[var(--line)] pt-[10px]">
+      <div className="mb-[7px] flex items-center gap-[7px] font-mono text-[9px] uppercase tracking-[.12em] text-[var(--ink-faint)]">
+        <Zap aria-hidden size={11} style={{ color: "var(--accent)" }} />
+        Effects on canon
+      </div>
+      <div className="flex flex-wrap items-center gap-[7px]">
+        {effects.map((effect) => {
+          const diff = effectDiff(effect);
+          return (
+            <span
+              key={effect.id}
+              title={effectStatusLabel(effect)}
+              className="inline-flex items-center gap-[7px] border border-[var(--line)] bg-[var(--bg-2)] px-[8px] py-[3px] font-mono text-[11px] whitespace-nowrap"
+            >
+              <span className="text-[var(--ink-dim)]">{resolveName(effect.targetId)}</span>
+              {effect.stat && <span className="text-[var(--ink-faint)]">{effect.stat}</span>}
+              <span style={{ color: diff.color, fontWeight: 600 }}>{diff.text}</span>
+              <span
+                className="text-[8.5px] uppercase tracking-[.06em]"
+                style={{ color: effect.applied ? "var(--ok)" : "var(--ink-faint)" }}
+              >
+                {effectStatusLabel(effect)}
+              </span>
+            </span>
+          );
+        })}
+        {canEdit && unapplied.length > 0 && (
+          <button
+            type="button"
+            onClick={apply}
+            disabled={pending}
+            className="inline-flex items-center gap-[6px] border px-[9px] py-[4px] font-mono text-[9.5px] uppercase tracking-[.08em] disabled:opacity-50"
+            style={{
+              color: "var(--ok)",
+              borderColor: "color-mix(in srgb, var(--ok) 45%, transparent)",
+            }}
+          >
+            <Check aria-hidden size={12} />
+            {pending ? "Sending..." : "Apply"}
+          </button>
+        )}
+      </div>
+      {error && (
+        <p role="alert" className="mt-[6px] text-[10.5px] text-[var(--no)]">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Causality thread — the connective tissue between events. Each linked event is
+// a button that scrolls the timeline to (and highlights) that event; when the DM
+// can edit, each link also gets a remove control.
+function Thread({
+  dir,
+  items,
   campaignId,
-  events,
+  canEdit,
+  onFocusEvent,
+}: {
+  dir: "in" | "out";
+  items: { id: string; title: string; linkId: string }[];
+  campaignId: string;
+  canEdit: boolean;
+  onFocusEvent: (eventId: string) => void;
+}) {
+  const inbound = dir === "in";
+  return (
+    <div className="mt-[6px] flex items-start gap-2">
+      <span
+        className="inline-flex shrink-0 items-center gap-[5px] pt-[1px] font-mono text-[9.5px] uppercase tracking-[.1em]"
+        style={{ color: inbound ? "var(--ink-faint)" : "var(--accent)" }}
+      >
+        <span className="text-[13px] leading-none">↳</span>
+        {inbound ? "Caused by" : "Causes"}
+      </span>
+      <div className="flex flex-wrap items-center gap-x-[10px] gap-y-[4px]">
+        {items.map((item) => (
+          <span key={item.linkId} className="inline-flex items-center gap-[4px]">
+            <button
+              type="button"
+              onClick={() => onFocusEvent(item.id)}
+              className="border-b border-dotted border-[var(--line-strong)] text-[12px] text-[var(--ink-dim)] hover:text-[var(--ink)] hover:border-[var(--accent)]"
+            >
+              {item.title}
+            </button>
+            {canEdit && (
+              <form
+                action={archiveCampaignEventCausalityAction.bind(null, campaignId, item.linkId)}
+              >
+                <button
+                  type="submit"
+                  title="Remove causality link"
+                  className="inline-flex p-[2px] text-[var(--ink-faint)] hover:text-[var(--no)]"
+                >
+                  <X aria-hidden size={10} />
+                </button>
+              </form>
+            )}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Add-a-cause form for an event (matches the entity Timeline panel): links a
+// chosen event as a cause of this one through the review pipeline.
+function CauseLinkForm({
+  campaignId,
+  effectId,
   candidates,
 }: {
   campaignId: string;
+  effectId: string;
+  candidates: { id: string; title: string }[];
+}) {
+  const [state, formAction] = useActionState<EventCausalityActionState, FormData>(
+    linkCampaignEventCauseAction.bind(null, campaignId, effectId),
+    undefined,
+  );
+  return (
+    <form action={formAction} className="mt-[8px] flex flex-wrap gap-[6px]">
+      <select
+        name="causeId"
+        aria-label="Cause event"
+        defaultValue=""
+        className="min-w-0 flex-1 border border-[var(--line)] bg-[var(--bg)] px-2 py-[5px] text-[11px] text-[var(--ink-dim)]"
+      >
+        <option value="">Link a cause...</option>
+        {candidates.map((candidate) => (
+          <option key={candidate.id} value={candidate.id}>
+            {candidate.title}
+          </option>
+        ))}
+      </select>
+      <button
+        type="submit"
+        className="border border-[var(--line)] px-[8px] py-[5px] font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:text-[var(--ink-dim)]"
+      >
+        Add cause
+      </button>
+      {state?.error && (
+        <p role="alert" className="basis-full text-[10.5px] text-[var(--no)]">
+          {state.error}
+        </p>
+      )}
+    </form>
+  );
+}
+
+export function CampaignTimeline({
+  campaignId,
+  events,
+  floors,
+  candidates,
+  canEdit,
+  initialEventId,
+}: {
+  campaignId: string;
   events: CampaignTimelineEvent[];
+  floors: CampaignFloorMeta;
   candidates: EntityCandidate[];
+  canEdit: boolean;
+  // Deep-link target (e.g. from a causality link on another page): scroll to and
+  // highlight this event on mount.
+  initialEventId?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [reorderError, setReorderError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<TimelineFilter>("ALL");
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [reordering, startReorder] = useTransition();
+  const [, startFloorChange] = useTransition();
   const router = useRouter();
+
+  // Scroll to + briefly highlight an event; clears any provenance filter that
+  // would hide it so causality navigation always lands.
+  const scrollToEvent = (eventId: string) => {
+    document
+      .getElementById(`event-${eventId}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+  const focusEvent = (eventId: string) => {
+    if (!events.some((event) => event.id === eventId)) return;
+    setFilter("ALL");
+    setHighlightedId(eventId);
+    scrollToEvent(eventId);
+  };
+
+  // Honor a deep-link target on mount / when it changes. The extra timed scroll
+  // re-runs after the floor bands have laid out, since on first paint the target
+  // node's position is still shifting as content above it renders.
+  useEffect(() => {
+    if (!initialEventId) return;
+    // Deep-link landing genuinely needs to set filter/highlight from a prop on
+    // mount; this is the documented "sync to an external param" effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    focusEvent(initialEventId);
+    const t = setTimeout(() => scrollToEvent(initialEventId), 150);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialEventId]);
+
+  // Fade the highlight out a couple seconds after it lands (managed by React so
+  // it survives re-renders rather than a raw event-handler timer).
+  useEffect(() => {
+    if (!highlightedId) return;
+    const timer = setTimeout(() => setHighlightedId(null), 2200);
+    return () => clearTimeout(timer);
+  }, [highlightedId]);
 
   const draggingEvent = events.find((event) => event.id === draggingId) ?? null;
 
@@ -410,205 +739,621 @@ export function CampaignTimeline({
     title: event.title,
   }));
 
-  return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex max-w-[980px] flex-col gap-5 px-6 py-6">
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--line)] pb-4">
-          <div>
-            <Kicker dim noLead className="mb-2">
-              Timeline
-            </Kicker>
-            <h1 className="font-display text-[30px] font-bold leading-tight">
-              Crawl Timeline
-            </h1>
+  // Inferred absolute day-range per floor, from every event that can be placed
+  // on the absolute axis (computed over the full set, not the filtered view).
+  const dayRangeByFloor = new Map<number, { min: number; max: number }>();
+  for (const event of events) {
+    const day = resolveAbsoluteDay(event.time);
+    if (day === null) continue;
+    const current = dayRangeByFloor.get(event.orderKey);
+    if (!current) dayRangeByFloor.set(event.orderKey, { min: day, max: day });
+    else {
+      current.min = Math.min(current.min, day);
+      current.max = Math.max(current.max, day);
+    }
+  }
+
+  const shownEvents =
+    filter === "ALL"
+      ? events
+      : events.filter((event) => sourceFilterKey(event.source) === filter);
+
+  // Group the shown events by floor (orderKey). `events` arrive sorted
+  // (orderKey desc, rank desc), so each floor's events are already in display
+  // order and floor numbers come out newest-first.
+  const floorOrder: number[] = [];
+  const eventsByFloor = new Map<number, CampaignTimelineEvent[]>();
+  for (const event of shownEvents) {
+    const list = eventsByFloor.get(event.orderKey);
+    if (list) {
+      list.push(event);
+    } else {
+      eventsByFloor.set(event.orderKey, [event]);
+      floorOrder.push(event.orderKey);
+    }
+  }
+
+  const jumpToFloor = (n: number) => {
+    document
+      .getElementById(`floor-${n}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const handleFloorChange = (floorEntityId: string) => {
+    startFloorChange(async () => {
+      await setCampaignCurrentFloorAction(campaignId, floorEntityId || null);
+      router.refresh();
+    });
+  };
+
+  const ladderMax = floors.ladder.length;
+
+  const renderEvent = (event: CampaignTimelineEvent) => {
+    // Events whose intra-floor order the system can infer (a floor-relative
+    // anchor with a concrete offset, ADR 0004) are sorted automatically, so
+    // manual drag-reorder is disabled — drag is only the mechanism when the
+    // order isn't derived (unscheduled, or a bare floor with no offset).
+    const orderDerived = floorRelativeSortKey({
+      basis: event.time.basis,
+      floor: event.time.floor ?? undefined,
+      offset: event.time.offset ?? undefined,
+      unit: event.time.unit ?? undefined,
+    }) !== null;
+    const canDrag =
+      canEdit && !event.locked && !orderDerived && editingId !== event.id && !reordering;
+    const canDrop =
+      draggingId !== null &&
+      draggingId !== event.id &&
+      draggingEvent?.orderKey === event.orderKey;
+    const live = event.id === floors.liveEventId;
+    const highlighted = highlightedId === event.id;
+    const nodeColor = provenanceMeta(event.source).color;
+    // Events selectable as a new cause of this one: any other event not already
+    // linked to it in either direction.
+    const linkedIds = new Set([
+      event.id,
+      ...event.causedBy.map((cause) => cause.id),
+      ...event.causes.map((effect) => effect.id),
+    ]);
+    const causeCandidates = events
+      .filter((candidate) => !linkedIds.has(candidate.id))
+      .map((candidate) => ({ id: candidate.id, title: candidate.title }));
+
+    return (
+      <article
+        key={event.id}
+        id={`event-${event.id}`}
+        data-event-id={event.id}
+        draggable={canDrag}
+        onDragStart={() => setDraggingId(event.id)}
+        onDragEnd={() => {
+          setDraggingId(null);
+          setDropTargetId(null);
+        }}
+        onDragOver={(domEvent) => {
+          if (!canDrop) return;
+          domEvent.preventDefault();
+          setDropTargetId(event.id);
+        }}
+        onDragLeave={() =>
+          setDropTargetId((current) => (current === event.id ? null : current))
+        }
+        onDrop={(domEvent) => {
+          domEvent.preventDefault();
+          handleDrop(event.id);
+        }}
+        className={[
+          "relative pb-[22px] pl-10 transition-opacity",
+          draggingId === event.id ? "opacity-40" : "",
+          canDrop && dropTargetId === event.id
+            ? "before:absolute before:left-[6px] before:top-[-4px] before:h-px before:w-[calc(100%-6px)] before:bg-[var(--accent)]"
+            : "",
+        ].join(" ")}
+      >
+        {/* spine node, coloured by provenance */}
+        <span
+          aria-hidden
+          className="absolute left-[7px] top-[4px] h-[13px] w-[13px] rounded-full"
+          style={{
+            background: "var(--bg)",
+            border: `2px solid ${nodeColor}`,
+            boxShadow: live
+              ? "0 0 0 4px color-mix(in srgb, var(--hot) 22%, transparent)"
+              : "none",
+          }}
+        >
+          {event.secret && (
+            <span
+              className="absolute rounded-full"
+              style={{ inset: 2, border: "1px solid var(--bg-1)" }}
+            />
+          )}
+        </span>
+
+        <div
+          className="panel bracket px-[15px] pb-[13px] pt-3 transition-shadow"
+          style={{
+            background: live
+              ? "color-mix(in srgb, var(--hot) 4%, var(--bg-1))"
+              : "var(--bg-1)",
+            boxShadow: highlighted
+              ? "0 0 0 1px var(--accent), 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent)"
+              : undefined,
+          }}
+        >
+          {/* meta row */}
+          <div className="mb-2 flex flex-wrap items-center gap-[9px]">
+            {canDrag && (
+              <GripVertical
+                aria-hidden
+                size={13}
+                className="cursor-grab text-[var(--ink-faint)]"
+              />
+            )}
+            {live && (
+              <span className="inline-flex items-center gap-[6px] font-mono text-[9.5px] uppercase tracking-[.14em] text-[var(--hot)]">
+                <span className="live-dot" />
+                Now
+              </span>
+            )}
+            <span className="font-mono text-[10.5px] tracking-[.04em] text-[var(--ink-dim)]">
+              {formatTime(event.time)}
+            </span>
+            <SourceBadge source={event.source} small />
+            {event.secret && (
+              <span
+                className="font-mono text-[8.5px] uppercase tracking-[.08em]"
+                style={{ color: "var(--hot)" }}
+              >
+                DM-only
+              </span>
+            )}
+            {event.locked && <LockChip locked />}
+            <span className="font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)]">
+              {event.participants.length} participants
+            </span>
+            {canEdit && (
+              <div className="ml-auto flex shrink-0 items-center gap-[6px]">
+                {!event.locked && editingId !== event.id && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingId(event.id)}
+                    aria-label="Edit event"
+                    className="inline-flex items-center gap-[6px] border border-[var(--line)] px-[8px] py-[5px] font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                  >
+                    <Pencil aria-hidden size={11} />
+                    Edit
+                  </button>
+                )}
+                <form action={setCampaignEventLockAction.bind(null, campaignId, event.id, event.locked)}>
+                  <button
+                    type="submit"
+                    aria-label={event.locked ? "Unlock event" : "Lock event"}
+                    title={event.locked ? "Unlock event" : "Lock event"}
+                    className="inline-flex items-center border border-[var(--line)] px-[7px] py-[5px] text-[var(--ink-faint)] hover:border-[var(--sys)] hover:text-[var(--sys)]"
+                  >
+                    {event.locked ? <Unlock aria-hidden size={11} /> : <Lock aria-hidden size={11} />}
+                  </button>
+                </form>
+                {!event.locked && (
+                  <form action={archiveCampaignEventAction.bind(null, campaignId, event.id)}>
+                    <button
+                      type="submit"
+                      aria-label="Remove event"
+                      title="Remove event"
+                      className="inline-flex items-center border border-[var(--line)] px-[7px] py-[5px] text-[var(--ink-faint)] hover:border-[var(--no)] hover:text-[var(--no)]"
+                    >
+                      <Trash2 aria-hidden size={11} />
+                    </button>
+                  </form>
+                )}
+              </div>
+            )}
           </div>
-          {!open && (
-            <button
-              type="button"
-              onClick={() => setOpen(true)}
-              className="inline-flex items-center gap-[6px] border border-[var(--line-strong)] bg-[var(--bg-3)] px-[10px] py-[6px] font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-dim)] hover:text-[var(--ink)]"
-            >
-              <Plus aria-hidden size={12} />
-              Log event
-            </button>
+
+          <h3 className="font-display text-[16.5px] font-semibold leading-[1.25] text-[var(--ink)]">
+            {event.title}
+          </h3>
+
+          {editingId === event.id && (
+            <EditEventForm
+              campaignId={campaignId}
+              event={event}
+              candidates={candidates}
+              crawlerCandidates={crawlerCandidates}
+              anchorCandidates={anchorCandidates}
+              resolveName={resolveName}
+              onClose={() => setEditingId(null)}
+            />
+          )}
+
+          {event.summary && (
+            <p className="mt-[6px] max-w-[660px] text-[12.5px] leading-[1.55] text-[var(--ink-dim)]">
+              {event.summary}
+            </p>
+          )}
+
+          {event.participants.length > 0 && (
+            <div className="mt-[11px] flex flex-wrap gap-[6px_7px]">
+              {event.participants.map((participant) => (
+                <Link
+                  key={`${event.id}-${participant.id}-${participant.role}`}
+                  href={`/campaigns/${campaignId}/entities/${participant.id}?event=${event.id}`}
+                  className="inline-flex items-center gap-[6px] border border-[var(--line)] bg-[var(--bg-2)] px-[7px] py-[3px] text-[11.5px] text-[var(--ink-dim)] hover:border-[var(--line-strong)]"
+                >
+                  <TypeDot type={participant.type} size={7} />
+                  <span className="text-[var(--ink)]">{participant.name}</span>
+                  <span className="font-mono text-[8.5px] uppercase tracking-[.08em] text-[var(--ink-faint)]">
+                    {participant.role}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          )}
+
+          {(event.causedBy.length > 0 ||
+            event.causes.length > 0 ||
+            (canEdit && causeCandidates.length > 0)) && (
+            <div className="mt-[11px] border-t border-[var(--line)] pt-[10px]">
+              {event.causedBy.length > 0 && (
+                <Thread
+                  dir="in"
+                  items={event.causedBy}
+                  campaignId={campaignId}
+                  canEdit={canEdit}
+                  onFocusEvent={focusEvent}
+                />
+              )}
+              {event.causes.length > 0 && (
+                <Thread
+                  dir="out"
+                  items={event.causes}
+                  campaignId={campaignId}
+                  canEdit={canEdit}
+                  onFocusEvent={focusEvent}
+                />
+              )}
+              {canEdit && causeCandidates.length > 0 && (
+                <CauseLinkForm
+                  campaignId={campaignId}
+                  effectId={event.id}
+                  candidates={causeCandidates}
+                />
+              )}
+            </div>
+          )}
+
+          {event.effects.length > 0 && (
+            <TimelineEffects
+              effects={event.effects}
+              resolveName={resolveName}
+              canEdit={canEdit}
+              onApply={() => applyCampaignEventEffectsAction(campaignId, event.id)}
+            />
           )}
         </div>
+      </article>
+    );
+  };
 
-        {open && (
-          <NewEventForm
-            campaignId={campaignId}
-            candidates={candidates}
-            anchorCandidates={anchorCandidates}
-            onClose={() => setOpen(false)}
-          />
-        )}
-
-        {reorderError && (
-          <p role="alert" className="text-[11px] text-[var(--no)]">
-            {reorderError}
-          </p>
-        )}
-
-        {events.length > 1 && (
-          <p className="font-mono text-[9.5px] uppercase tracking-[.08em] text-[var(--ink-faint)]">
-            Drag events to reorder them within a floor.
-          </p>
-        )}
-
-        {events.length === 0 ? (
-          <div className="grid min-h-[280px] place-items-center border border-dashed border-[var(--line)] text-center text-[var(--ink-faint)]">
-            <p className="text-sm">
-              No events logged yet. Use Log event to start the campaign timeline.
-            </p>
+  return (
+    <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden bg-[var(--bg)] lg:grid-cols-[264px_minmax(0,1fr)]">
+      {/* ── The descent rail ── */}
+      <aside className="hidden min-h-0 flex-col border-r border-[var(--line)] bg-[var(--bg-1)] lg:flex">
+        <div className="border-b border-[var(--line)] px-4 py-[14px]">
+          <Kicker className="mb-[9px]">The Descent</Kicker>
+          <div className="font-mono text-[10px] text-[var(--ink-faint)]">
+            {events.length} {events.length === 1 ? "event" : "events"} logged
           </div>
-        ) : (
-          <div className="relative pl-[28px]">
-            <div className="absolute bottom-2 left-[7px] top-2 w-px bg-[var(--line-strong)]" />
-            <div className="flex flex-col gap-5">
-              {events.map((event) => {
-                const canDrag =
-                  !event.locked && editingId !== event.id && !reordering;
-                const canDrop =
-                  draggingId !== null &&
-                  draggingId !== event.id &&
-                  draggingEvent?.orderKey === event.orderKey;
-                return (
-                <article
-                  key={event.id}
-                  data-event-id={event.id}
-                  draggable={canDrag}
-                  onDragStart={() => setDraggingId(event.id)}
-                  onDragEnd={() => {
-                    setDraggingId(null);
-                    setDropTargetId(null);
-                  }}
-                  onDragOver={(domEvent) => {
-                    if (!canDrop) return;
-                    domEvent.preventDefault();
-                    setDropTargetId(event.id);
-                  }}
-                  onDragLeave={() =>
-                    setDropTargetId((current) =>
-                      current === event.id ? null : current,
-                    )
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-[10px_10px_16px]">
+          <div className="px-[6px] pb-2 pt-1 font-mono text-[9px] uppercase tracking-[.18em] text-[var(--ink-faint)]">
+            Floors 01 — {String(ladderMax).padStart(2, "0")}
+          </div>
+          <div className="relative">
+            <div
+              aria-hidden
+              className="absolute bottom-2 left-[17px] top-2 w-px bg-[var(--line)]"
+            />
+            {floors.ladder.map((floor) => {
+              const accent = floor.current;
+              const dotColor = accent
+                ? "var(--accent)"
+                : floor.logged
+                  ? "var(--ink-dim)"
+                  : floor.reached
+                    ? "var(--ink-faint)"
+                    : "var(--line-strong)";
+              return (
+                <button
+                  key={floor.number}
+                  type="button"
+                  onClick={() => floor.logged && jumpToFloor(floor.number)}
+                  title={
+                    floor.name
+                      ? `Floor ${floor.number} — ${floor.name}`
+                      : `Floor ${floor.number}${floor.reached ? "" : " · not yet reached"}`
                   }
-                  onDrop={(domEvent) => {
-                    domEvent.preventDefault();
-                    handleDrop(event.id);
+                  className="relative grid w-full grid-cols-[24px_1fr_auto] items-center gap-[9px] px-2 py-[6px] text-left"
+                  style={{
+                    background: accent ? "var(--bg-3)" : "transparent",
+                    borderLeft: `2px solid ${accent ? "var(--accent)" : "transparent"}`,
+                    opacity: floor.reached ? 1 : 0.4,
                   }}
-                  className={[
-                    "relative transition-opacity",
-                    draggingId === event.id ? "opacity-40" : "",
-                    canDrop && dropTargetId === event.id
-                      ? "before:absolute before:-left-[20px] before:-top-[10px] before:h-px before:w-[calc(100%+20px)] before:bg-[var(--accent)]"
-                      : "",
-                  ].join(" ")}
                 >
-                  <span
-                    aria-hidden
-                    className="absolute left-[-27px] top-[5px] h-[13px] w-[13px] rounded-full border-2 border-[var(--accent)] bg-[var(--bg)]"
-                  />
-                  <div className="flex flex-wrap items-center gap-[8px]">
-                    {canDrag && (
-                      <GripVertical
-                        aria-hidden
-                        size={13}
-                        className="cursor-grab text-[var(--ink-faint)]"
-                      />
-                    )}
-                    <span className="font-mono text-[10px] tracking-[.04em] text-[var(--ink-faint)]">
-                      {formatTime(event.time)}
+                  <span className="grid place-items-center">
+                    <span
+                      className="z-[1] h-[9px] w-[9px] rounded-full"
+                      style={{ background: "var(--bg-1)", border: `2px solid ${dotColor}` }}
+                    />
+                  </span>
+                  <span className="min-w-0">
+                    <span
+                      className="font-mono text-[11px]"
+                      style={{
+                        color: accent
+                          ? "var(--accent)"
+                          : floor.reached
+                            ? "var(--ink-dim)"
+                            : "var(--ink-faint)",
+                      }}
+                    >
+                      F{String(floor.number).padStart(2, "0")}
                     </span>
-                    <SourceBadge source={event.source} small />
-                    {event.secret && (
+                    {floor.name && (
                       <span
-                        className="font-mono text-[8.5px] uppercase tracking-[.08em]"
-                        style={{ color: "var(--hot)" }}
+                        className="ml-2 truncate text-[11.5px]"
+                        style={{ color: accent ? "var(--ink)" : "var(--ink-dim)" }}
                       >
-                        secret
+                        {floor.name}
                       </span>
                     )}
-                    {event.locked && <LockChip locked />}
-                    <span className="font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)]">
-                      {event.participants.length} participants
+                  </span>
+                  {floor.logged ? (
+                    <span className="font-mono text-[10px] text-[var(--ink-faint)]">
+                      {floor.count}
                     </span>
-                  </div>
-                  <div className="mt-[5px] flex items-start justify-between gap-3">
-                    <h2 className="text-[17px] font-semibold text-[var(--ink)]">
-                      {event.title}
-                    </h2>
-                    {!event.locked && editingId !== event.id && (
-                      <button
-                        type="button"
-                        onClick={() => setEditingId(event.id)}
-                        aria-label="Edit event"
-                        className="inline-flex shrink-0 items-center gap-[6px] border border-[var(--line)] px-[8px] py-[5px] font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                      >
-                        <Pencil aria-hidden size={11} />
-                        Edit
-                      </button>
-                    )}
-                  </div>
-                  {editingId === event.id && (
-                    <EditEventForm
-                      campaignId={campaignId}
-                      event={event}
-                      candidates={candidates}
-                      crawlerCandidates={crawlerCandidates}
-                      anchorCandidates={anchorCandidates}
-                      resolveName={resolveName}
-                      onClose={() => setEditingId(null)}
-                    />
+                  ) : floor.reached ? null : (
+                    <Lock aria-hidden size={10} className="text-[var(--line-strong)]" />
                   )}
-                  {event.summary && (
-                    <p className="mt-[5px] max-w-[720px] text-[12.5px] leading-[1.5] text-[var(--ink-dim)]">
-                      {event.summary}
-                    </p>
-                  )}
-                  {event.participants.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-x-[14px] gap-y-[7px]">
-                      {event.participants.map((participant) => (
-                        <Link
-                          key={`${event.id}-${participant.id}-${participant.role}`}
-                          href={`/campaigns/${campaignId}/entities/${participant.id}?event=${event.id}`}
-                          className="inline-flex items-center gap-[6px] text-[11px] text-[var(--ink-dim)] hover:text-[var(--ink)]"
-                        >
-                          <TypeDot type={participant.type} size={6} />
-                          <span>{participant.name}</span>
-                          <span className="font-mono text-[8.5px] uppercase tracking-[.06em] text-[var(--ink-faint)]">
-                            {participant.role}
-                          </span>
-                        </Link>
-                      ))}
-                    </div>
-                  )}
-                  {(event.causedBy.length > 0 || event.causes.length > 0) && (
-                    <div className="mt-3 flex flex-col gap-[4px] text-[11px] text-[var(--ink-faint)]">
-                      {event.causedBy.length > 0 && (
-                        <p>Caused by {event.causedBy.map((cause) => cause.title).join(", ")}</p>
-                      )}
-                      {event.causes.length > 0 && (
-                        <p>Causes {event.causes.map((effect) => effect.title).join(", ")}</p>
-                      )}
-                    </div>
-                  )}
-                  {event.effects.length > 0 && (
-                    <div className="mt-3">
-                      <EventEffectsSection
-                        effects={event.effects}
-                        resolveName={resolveName}
-                        onApply={() =>
-                          applyCampaignEventEffectsAction(campaignId, event.id)
-                        }
-                      />
-                    </div>
-                  )}
-                </article>
-                );
-              })}
-            </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {canEdit && floors.floorEntities.length > 0 && (
+          <div className="border-t border-[var(--line)] px-[14px] py-[13px]">
+            <label
+              htmlFor="current-floor"
+              className="mb-[9px] block font-mono text-[9px] uppercase tracking-[.18em] text-[var(--ink-faint)]"
+            >
+              Current floor
+            </label>
+            <select
+              id="current-floor"
+              value={floors.currentFloorId ?? ""}
+              onChange={(domEvent) => handleFloorChange(domEvent.target.value)}
+              className="w-full border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[7px] font-mono text-[11px] text-[var(--ink)]"
+            >
+              <option value="">— None —</option>
+              {floors.floorEntities.map((floor) => (
+                <option key={floor.id} value={floor.id}>
+                  {floor.floorNumber != null ? `F${String(floor.floorNumber).padStart(2, "0")} · ` : ""}
+                  {floor.name}
+                </option>
+              ))}
+            </select>
           </div>
         )}
+
+        <div className="border-t border-[var(--line)] px-[14px] py-[15px]">
+          <div className="mb-[9px] font-mono text-[9px] uppercase tracking-[.18em] text-[var(--ink-faint)]">
+            Filter by origin
+          </div>
+          <div className="flex flex-wrap gap-[5px]">
+            {TIMELINE_FILTERS.map((option) => {
+              const on = filter === option;
+              const color = filterColor(option);
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setFilter(option)}
+                  className="border px-[9px] py-1 font-mono text-[10px] uppercase tracking-[.08em]"
+                  style={{
+                    background: on
+                      ? option === "ALL"
+                        ? "var(--accent)"
+                        : `color-mix(in srgb, ${color} 16%, transparent)`
+                      : "transparent",
+                    color: on
+                      ? option === "ALL"
+                        ? "var(--accent-ink)"
+                        : color
+                      : "var(--ink-dim)",
+                    borderColor: on ? color : "var(--line-strong)",
+                  }}
+                >
+                  {filterLabel(option)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </aside>
+
+      {/* ── Main timeline column ── */}
+      <div className="flex min-h-0 min-w-0 flex-col">
+        <div className="bracket border-b border-[var(--line)] bg-[var(--bg-1)] px-[26px] py-4">
+          <div className="flex flex-wrap items-start justify-between gap-[18px]">
+            <div>
+              <Kicker className="mb-2">Timeline · most recent first</Kicker>
+              <h1 className="font-display text-[27px] font-bold leading-tight tracking-[.01em]">
+                Crawl Timeline
+              </h1>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {floors.currentFloorNumber != null && (
+                <HudTag>
+                  <span className="live-dot" />
+                  Floor {floors.currentFloorNumber}
+                </HudTag>
+              )}
+              <HudTag>
+                {shownEvents.length} / {events.length} shown
+              </HudTag>
+              {canEdit && !open && (
+                <button
+                  type="button"
+                  onClick={() => setOpen(true)}
+                  className="inline-flex items-center gap-[7px] border border-[var(--accent)] bg-[var(--accent)] px-[13px] py-2 font-mono text-[11px] uppercase tracking-[.06em] text-[var(--accent-ink)]"
+                >
+                  <Plus aria-hidden size={14} />
+                  Log event
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-[26px] py-6">
+          <div className="max-w-[760px]">
+            {open && (
+              <div className="mb-6">
+                <NewEventForm
+                  campaignId={campaignId}
+                  candidates={candidates}
+                  anchorCandidates={anchorCandidates}
+                  onClose={() => setOpen(false)}
+                />
+              </div>
+            )}
+
+            {reorderError && (
+              <p role="alert" className="mb-3 text-[11px] text-[var(--no)]">
+                {reorderError}
+              </p>
+            )}
+
+            {events.length > 1 && canEdit && (
+              <p className="mb-4 font-mono text-[9.5px] uppercase tracking-[.08em] text-[var(--ink-faint)]">
+                Drag events to reorder them within a floor.
+              </p>
+            )}
+
+            {floorOrder.length === 0 ? (
+              <div className="grid min-h-[280px] place-items-center border border-dashed border-[var(--line)] p-[30px] text-center text-[var(--ink-faint)]">
+                <div>
+                  <Search aria-hidden size={26} className="mx-auto mb-3 opacity-60" />
+                  <p className="text-[13px]">
+                    {events.length === 0
+                      ? "No events logged yet. Use Log event to start the campaign timeline."
+                      : `No ${filter.toLowerCase()} events in the log yet.`}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              floorOrder.map((floorNumber, index) => {
+                const descriptor = floors.byNumber[floorNumber];
+                const isCurrent = floors.currentFloorNumber === floorNumber;
+                const floorEvents = eventsByFloor.get(floorNumber) ?? [];
+                return (
+                  <section
+                    key={floorNumber}
+                    id={`floor-${floorNumber}`}
+                    className={index === floorOrder.length - 1 ? "" : "mb-[30px]"}
+                  >
+                    <div className="relative">
+                      <div
+                        aria-hidden
+                        className="absolute bottom-0 left-[13px] top-[26px] w-px"
+                        style={{
+                          background: isCurrent
+                            ? "color-mix(in srgb, var(--accent) 35%, var(--line-strong))"
+                            : "var(--line-strong)",
+                        }}
+                      />
+                      {/* floor header */}
+                      <header className="relative mb-4 pl-10">
+                        <span
+                          aria-hidden
+                          className="absolute left-[6px] top-[5px] grid h-[17px] w-[17px] place-items-center"
+                          style={{
+                            border: `1.5px solid ${isCurrent ? "var(--accent)" : "var(--ink-faint)"}`,
+                            background: "var(--bg)",
+                          }}
+                        >
+                          <span
+                            className="h-[5px] w-[5px]"
+                            style={{ background: isCurrent ? "var(--accent)" : "var(--ink-faint)" }}
+                          />
+                        </span>
+                        <div className="flex flex-wrap items-baseline gap-[14px]">
+                          <span
+                            className="whitespace-nowrap font-mono text-[11px] tracking-[.22em]"
+                            style={{ color: isCurrent ? "var(--accent)" : "var(--ink-faint)" }}
+                          >
+                            FLOOR {String(floorNumber).padStart(2, "0")}
+                          </span>
+                          {descriptor?.name && (
+                            <h2 className="font-display text-[21px] font-bold uppercase tracking-[.01em] text-[var(--ink)]">
+                              {descriptor.name}
+                            </h2>
+                          )}
+                          {isCurrent && (
+                            <span className="inline-flex items-center gap-[6px] whitespace-nowrap font-mono text-[9.5px] uppercase tracking-[.14em] text-[var(--hot)]">
+                              <span className="live-dot" />
+                              On air
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-[5px] flex flex-wrap gap-[14px] font-mono text-[10.5px] text-[var(--ink-faint)]">
+                          {descriptor?.theme && (
+                            <span className="text-[var(--ink-dim)]">{descriptor.theme}</span>
+                          )}
+                          {dayRangeByFloor.get(floorNumber) && (
+                            <span>{formatDayRange(dayRangeByFloor.get(floorNumber)!)}</span>
+                          )}
+                          <span>
+                            {floorEvents.length} {floorEvents.length === 1 ? "event" : "events"}
+                          </span>
+                        </div>
+                      </header>
+
+                      <div>{floorEvents.map((event) => renderEvent(event))}</div>
+                    </div>
+                  </section>
+                );
+              })
+            )}
+
+            {/* the floor that hasn't happened yet */}
+            {filter === "ALL" &&
+              floors.currentFloorNumber != null &&
+              floors.currentFloorNumber < ladderMax &&
+              (() => {
+                const next = floors.ladder.find(
+                  (floor) => floor.number === floors.currentFloorNumber! + 1,
+                );
+                if (!next) return null;
+                return (
+                  <div className="relative mt-2 pl-10 opacity-50">
+                    <span
+                      aria-hidden
+                      className="absolute left-[7px] top-[3px] h-[13px] w-[13px] rounded-full"
+                      style={{ border: "2px dashed var(--line-strong)", background: "var(--bg)" }}
+                    />
+                    <div className="font-mono text-[10.5px] uppercase tracking-[.14em] text-[var(--ink-faint)]">
+                      Floor {next.number}
+                      {next.name ? ` — ${next.name}` : ""} · not yet reached
+                    </div>
+                  </div>
+                );
+              })()}
+          </div>
+        </div>
       </div>
     </div>
   );

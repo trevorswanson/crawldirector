@@ -107,6 +107,8 @@ const dataFields = new Set([
   "data.unique",
   "data.fleeting",
   "data.aiDescription",
+  "data.floorNumber",
+  "data.theme",
 ]);
 
 async function getMembership(userId: string, campaignId: string) {
@@ -1061,19 +1063,25 @@ function currentEntityValue(
     case "data.divine":
     case "data.unique":
     case "data.fleeting":
-    case "data.aiDescription": {
+    case "data.aiDescription":
+    case "data.floorNumber":
+    case "data.theme": {
       const metadata = entity.data as {
         itemTypeId?: string | null;
         divine?: boolean;
         unique?: boolean;
         fleeting?: boolean;
         aiDescription?: string | null;
+        floorNumber?: number | null;
+        theme?: string | null;
       } | null;
       if (field === "data.itemTypeId") return metadata?.itemTypeId ?? null;
       if (field === "data.divine") return metadata?.divine ?? false;
       if (field === "data.unique") return metadata?.unique ?? false;
       if (field === "data.fleeting") return metadata?.fleeting ?? false;
       if (field === "data.aiDescription") return metadata?.aiDescription ?? null;
+      if (field === "data.floorNumber") return metadata?.floorNumber ?? null;
+      if (field === "data.theme") return metadata?.theme ?? null;
       return undefined;
     }
   }
@@ -2227,6 +2235,12 @@ async function applyCreateEntity(
         unique: booleanWithDefault(readTo(patch, "data.unique"), false),
         fleeting: booleanWithDefault(readTo(patch, "data.fleeting"), false),
         aiDescription: nullableString(readTo(patch, "data.aiDescription")),
+        ...(type === EntityType.FLOOR
+          ? {
+              floorNumber: optionalNumber(readTo(patch, "data.floorNumber")) ?? null,
+              theme: nullableString(readTo(patch, "data.theme")),
+            }
+          : {}),
       } as Prisma.InputJsonValue,
       ...(type === EntityType.CRAWLER
         ? {
@@ -2473,6 +2487,8 @@ function entityUpdateData(patch: ReviewPatch, type: EntityType, existingData?: u
       unique?: boolean;
       fleeting?: boolean;
       aiDescription?: string | null;
+      floorNumber?: number | null;
+      theme?: string | null;
     };
     if ("data.itemTypeId" in patch) {
       currentData.itemTypeId = nullableString(readTo(patch, "data.itemTypeId"));
@@ -2488,6 +2504,12 @@ function entityUpdateData(patch: ReviewPatch, type: EntityType, existingData?: u
     }
     if ("data.aiDescription" in patch) {
       currentData.aiDescription = nullableString(readTo(patch, "data.aiDescription"));
+    }
+    if ("data.floorNumber" in patch) {
+      currentData.floorNumber = optionalNumber(readTo(patch, "data.floorNumber")) ?? null;
+    }
+    if ("data.theme" in patch) {
+      currentData.theme = nullableString(readTo(patch, "data.theme"));
     }
     data.data = currentData;
   }

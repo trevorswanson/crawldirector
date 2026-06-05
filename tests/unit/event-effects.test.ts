@@ -746,4 +746,38 @@ describe("event effects", () => {
       ServiceError,
     );
   });
+
+  it("rejects applying effects on a missing event", async () => {
+    const owner = await makeUser("apply-effects-missing@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await expect(
+      applyEventEffects(owner.id, campaign.id, "missing-event-id"),
+    ).rejects.toThrow("Event not found.");
+  });
+
+  it("tolerates non-array format in event effects when marking pending review", async () => {
+    const owner = await makeUser("apply-effects-non-array@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeCrawler(owner.id, campaign.id, "Carl");
+    
+    // Create an event with effects set to an object (not an array)
+    const event = await prisma.event.create({
+      data: {
+        campaignId: campaign.id,
+        title: "Test event",
+        summary: "",
+        status: "CANON",
+        effects: { someKey: "not an array" } as any,
+        participants: {
+          create: [{ entityId: carl.id, role: "ACTOR" }]
+        }
+      }
+    });
+
+    // Attempting to apply effects should fail because there are no effects left to apply
+    // (since it returned empty array and count of effects is 0)
+    await expect(
+      applyEventEffects(owner.id, campaign.id, event.id),
+    ).rejects.toThrow("This event has no effects left to apply.");
+  });
 });

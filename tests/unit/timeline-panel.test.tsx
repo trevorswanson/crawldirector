@@ -196,6 +196,32 @@ describe("TimelinePanel", () => {
     ).toBe("/campaigns/c1/entities/e1?event=ev1");
   });
 
+  it("routes a cause/effect event that isn't on this entity's timeline to the campaign timeline", () => {
+    render(
+      <TimelinePanel
+        campaignId="c1"
+        entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
+        events={[
+          event({
+            id: "ev1",
+            title: "Sponsor stock drops",
+            // The linked cause (ev9) does NOT participate in this entity's events.
+            causedBy: [{ id: "ev9", title: "Faction war erupts", linkId: "ec2" }],
+          }),
+        ]}
+        candidates={candidates}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Sponsor stock drops/ }));
+
+    expect(
+      screen.getByRole("link", { name: "Faction war erupts" }).getAttribute("href"),
+    ).toBe("/campaigns/c1/timeline?event=ev9");
+  });
+
   it("opens an event's details on load when initialEventId is set", () => {
     render(
       <TimelinePanel

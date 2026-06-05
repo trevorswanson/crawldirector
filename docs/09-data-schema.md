@@ -48,15 +48,19 @@ model User {
 }
 
 model Campaign {
-  id          String   @id @default(cuid())
-  name        String
-  summary     String?
-  styleGuide  String?               // tone/canon constraints for AI
-  ownerId     String
-  members     Membership[]
-  entities    Entity[]
+  id             String   @id @default(cuid())
+  name           String
+  summary        String?
+  styleGuide     String?               // tone/canon constraints for AI
+  // The floor the crawl is currently on — FK to the DM-chosen FLOOR entity.
+  // Drives the timeline's ON-AIR / current-floor styling (ADR 0005). The floor
+  // *number* is read from that entity's data.floorNumber. onDelete: SetNull.
+  currentFloorId String?
+  ownerId        String
+  members        Membership[]
+  entities       Entity[]
   // ...other relations
-  createdAt   DateTime @default(now())
+  createdAt      DateTime @default(now())
 }
 
 enum Role { OWNER CO_DM PLAYER }

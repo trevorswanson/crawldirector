@@ -43,7 +43,26 @@ Two distinct surfaces share one app and one data layer but feel different:
   _Mockup: `design/mockup/screen-graph.jsx` (M3)._
 - **Causality view** — for any event/entity, the upstream-cause /
   downstream-effect chain as a navigable DAG.
-- **Timeline** — chronological events with in-game-time ordering and filters.
+- **Timeline** — _the timeline IS the descent._ A left **floor rail** ladders the
+  dungeon `F01 → FNN` (cleared floors filled, the current floor accented and
+  "ON AIR", unreached floors locked-and-faint), doubling as a navigable spine and
+  a provenance filter — the same rail pattern as the Review Queue. The main column
+  is a floor-banded broadcast spine: events group under big mono floor headers
+  (`FLOOR 09 · LARRACOS · ON AIR`), each spine node coloured by provenance
+  (AI/player/import/DM), causality drawn as threaded "Caused by / Causes" links,
+  and effects rendered as signed stat diffs (`+9 / −6`) with an Apply control.
+  Floor names/themes come from FLOOR entities; the current floor is a campaign
+  setting (ADR 0005). Band headers also show an inferred `Day min – max` range for
+  floors whose events carry absolute (`COLLAPSE` / `ABSOLUTE_DAY`) coordinates —
+  the timeline assembles a unified dated view as the DM dates more of the crawl.
+  The timeline has full event-management parity with the entity viewer: lock/
+  unlock, archive, and causality editing (add/remove cause↔effect links) live on
+  each event node, and causality links are clickable — scrolling to + highlighting
+  the linked event, or deep-linking to `/timeline?event=<id>` from elsewhere.
+  Drag-reorder is offered only for events whose order isn't already inferred from
+  their time anchor (ADR 0004). DM-only controls (Log/Edit, lock, archive,
+  drag-reorder, Apply, causality editing, the current-floor picker) are hidden
+  from player viewers.
 - **AI generation panel** — pick a generator, set params/scope, preview cost,
   run; results flow to the Review Queue. For persona-aware generators, show the
   compiled System AI persona that will flavor the run, with inline edit.

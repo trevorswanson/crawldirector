@@ -3,7 +3,10 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { CanonStatus, Role } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
-import { createCampaign } from "@/server/services/campaigns";
+import {
+  createCampaign,
+  setCampaignCurrentFloor,
+} from "@/server/services/campaigns";
 import { createCrawler, createGenericEntity } from "@/server/services/entities";
 import {
   archiveEvent,
@@ -11,6 +14,7 @@ import {
   applyEventEffects,
   createEvent,
   linkEventCause,
+  listCampaignFloors,
   listCampaignTimeline,
   listEventsForEntity,
   reorderEvent,
@@ -348,6 +352,14 @@ describe("event service", () => {
     expect(result.participantIds).toEqual([carl.id]);
     const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
     expect(timeline).toHaveLength(0);
+  });
+
+  it("rejects archiving a missing event", async () => {
+    const owner = await makeUser("archive-missing@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await expect(
+      archiveEvent(owner.id, campaign.id, "missing-event-id"),
+    ).rejects.toThrow("Event not found.");
   });
 
   it("locks and unlocks an event with audit history", async () => {
@@ -941,6 +953,14 @@ describe("event service", () => {
     expect(failed.length).toBe(1);
     expect((failed[0] as PromiseRejectedResult).reason.message).toMatch(/cycle/i);
   });
+
+  it("rejects archiving a missing event causality link", async () => {
+    const owner = await makeUser("archive-causality-missing@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await expect(
+      archiveEventCausality(owner.id, campaign.id, "missing-causality-id"),
+    ).rejects.toThrow("Causality link not found.");
+  });
 });
 
 describe("updateEvent", () => {
@@ -1459,10 +1479,68 @@ describe("event order (orderKey + rank)", () => {
       secret: false,
       participants: [{ entityId: carl.id, role: "ACTOR" }],
     });
-
     await expect(
       reorderEvent(player.id, campaign.id, event.id, { aboveId: null, belowId: null }),
     ).rejects.toBeInstanceOf(ServiceError);
+  });
+
+  it("rejects reordering next to itself", async () => {
+    const owner = await makeUser("reorder-self@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Scene",
+      floor: 4,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    await expect(
+      reorderEvent(owner.id, campaign.id, event.id, { aboveId: event.id }),
+    ).rejects.toThrow("An event cannot be reordered next to itself.");
+  });
+
+  it("handles identical rank reorder early return", async () => {
+    const owner = await makeUser("reorder-same@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Scene",
+      floor: 4,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    const result = await reorderEvent(owner.id, campaign.id, event.id, {
+      aboveId: null,
+      belowId: null,
+    });
+    expect(result.id).toBe(event.id);
+  });
+
+  it("rejects reordering when aboveId and belowId are the same", async () => {
+    const owner = await makeUser("reorder-same-neighbor@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Scene",
+      floor: 4,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const neighbor = await createEvent(owner.id, campaign.id, {
+      title: "Neighbor",
+      floor: 4,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    await expect(
+      reorderEvent(owner.id, campaign.id, event.id, {
+        aboveId: neighbor.id,
+        belowId: neighbor.id,
+      }),
+    ).rejects.toThrow("Could not place the event between those neighbours.");
   });
 });
 
@@ -1640,5 +1718,194 @@ describe("typed timeRef (ADR 0004 slice 2)", () => {
         secret: false,
       }),
     ).rejects.toBeInstanceOf(ServiceError);
+  });
+});
+
+describe("campaign floor metadata", () => {
+  async function makeFloor(
+    userId: string,
+    campaignId: string,
+    name: string,
+    floorNumber: number,
+    theme = "",
+    visibility: "DM_ONLY" | "SHARED_WITH_PLAYERS" = "DM_ONLY",
+  ) {
+    return createGenericEntity(userId, campaignId, {
+      type: "FLOOR",
+      name,
+      summary: "",
+      description: "",
+      visibility,
+      tags: [],
+      floorNumber,
+      theme,
+    });
+  }
+
+  it("ladders floors, names them from FLOOR entities, and marks the current floor", async () => {
+    const owner = await makeUser("owner-floors@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const larracos = await makeFloor(
+      owner.id,
+      campaign.id,
+      "Larracos",
+      9,
+      "Castle siege · the moat runs red",
+    );
+    await makeFloor(owner.id, campaign.id, "The Bone Market", 8);
+
+    await createEvent(owner.id, campaign.id, {
+      title: "Floor 8 deal",
+      floor: 8,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await createEvent(owner.id, campaign.id, {
+      title: "Floor 9 opener",
+      floor: 9,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await createEvent(owner.id, campaign.id, {
+      title: "Floor 9 siege",
+      floor: 9,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    await setCampaignCurrentFloor(owner.id, campaign.id, larracos.id);
+
+    const meta = await listCampaignFloors(owner.id, campaign.id);
+
+    expect(meta.currentFloorId).toBe(larracos.id);
+    expect(meta.currentFloorNumber).toBe(9);
+    expect(meta.byNumber[9]).toMatchObject({
+      name: "Larracos",
+      theme: "Castle siege · the moat runs red",
+      entityId: larracos.id,
+    });
+    expect(meta.byNumber[8]?.name).toBe("The Bone Market");
+
+    // Ladder runs 1 → deepest known, with reached/logged/current flags.
+    expect(meta.ladder).toHaveLength(9);
+    const floor9 = meta.ladder.find((floor) => floor.number === 9)!;
+    expect(floor9).toMatchObject({ current: true, reached: true, logged: true, count: 2 });
+    const floor8 = meta.ladder.find((floor) => floor.number === 8)!;
+    expect(floor8).toMatchObject({ current: false, reached: true, logged: true, count: 1 });
+    const floor1 = meta.ladder.find((floor) => floor.number === 1)!;
+    expect(floor1).toMatchObject({ logged: false, reached: true });
+
+    // The live event is the newest event on the current floor.
+    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    const topFloor9 = timeline.find((event) => event.orderKey === 9);
+    expect(meta.liveEventId).toBe(topFloor9?.id);
+
+    // Picker lists FLOOR entities sorted by number.
+    expect(meta.floorEntities.map((floor) => floor.floorNumber)).toEqual([8, 9]);
+  });
+
+  it("hides secret events and DM-only floors from players", async () => {
+    const owner = await makeUser("owner-floor-vis@test.com");
+    const player = await makeUser("player-floor-vis@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const carl = await makeEntity(
+      owner.id,
+      campaign.id,
+      "Carl",
+      "SHARED_WITH_PLAYERS",
+    );
+    await makeFloor(owner.id, campaign.id, "Hidden Floor", 9); // DM_ONLY
+
+    await createEvent(owner.id, campaign.id, {
+      title: "Public beat",
+      floor: 9,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await createEvent(owner.id, campaign.id, {
+      title: "Secret beat",
+      floor: 9,
+      secret: true,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    const playerMeta = await listCampaignFloors(player.id, campaign.id);
+    // The DM-only FLOOR entity isn't visible, so no name resolves.
+    expect(playerMeta.byNumber[9]).toBeUndefined();
+    expect(playerMeta.floorEntities).toHaveLength(0);
+    // Only the public event is counted on floor 9.
+    expect(playerMeta.ladder.find((floor) => floor.number === 9)?.count).toBe(1);
+  });
+
+  it("sets and clears the current floor, rejecting non-floor targets and players", async () => {
+    const owner = await makeUser("owner-set-floor@test.com");
+    const player = await makeUser("player-set-floor@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const floor = await makeFloor(owner.id, campaign.id, "Larracos", 9);
+    const npc = await makeEntity(owner.id, campaign.id, "Mordecai");
+
+    const set = await setCampaignCurrentFloor(owner.id, campaign.id, floor.id);
+    expect(set).toEqual({ currentFloorId: floor.id, floorNumber: 9 });
+    expect(
+      (await prisma.campaign.findUnique({ where: { id: campaign.id } }))?.currentFloorId,
+    ).toBe(floor.id);
+
+    // Non-FLOOR target is rejected.
+    await expect(
+      setCampaignCurrentFloor(owner.id, campaign.id, npc.id),
+    ).rejects.toBeInstanceOf(ServiceError);
+
+    // Players can't set it.
+    await expect(
+      setCampaignCurrentFloor(player.id, campaign.id, floor.id),
+    ).rejects.toBeInstanceOf(ServiceError);
+
+    // Clearing nulls the pointer.
+    const cleared = await setCampaignCurrentFloor(owner.id, campaign.id, null);
+    expect(cleared.currentFloorId).toBeNull();
+    expect(
+      (await prisma.campaign.findUnique({ where: { id: campaign.id } }))?.currentFloorId,
+    ).toBeNull();
+  });
+
+  it("returns empty metadata for non-members in listCampaignFloors", async () => {
+    const owner = await makeUser("owner-floor-non@test.com");
+    const stranger = await makeUser("stranger-floor-non@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const meta = await listCampaignFloors(stranger.id, campaign.id);
+    expect(meta.ladder).toHaveLength(0);
+    expect(meta.floorEntities).toHaveLength(0);
+  });
+
+  it("tolerates invalid json format in floor data", async () => {
+    const owner = await makeUser("owner-floor-invalid@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    
+    // Create a floor entity with invalid data (string instead of object)
+    await prisma.entity.create({
+      data: {
+        campaignId: campaign.id,
+        type: "FLOOR",
+        name: "Broken Floor",
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        status: CanonStatus.ACTIVE,
+        data: "invalid json string" as any,
+      }
+    });
+
+    const meta = await listCampaignFloors(owner.id, campaign.id);
+    // Should not throw, but should handle null floorNumber
+    expect(meta.floorEntities).toHaveLength(1);
+    expect(meta.floorEntities[0].floorNumber).toBeNull();
   });
 });

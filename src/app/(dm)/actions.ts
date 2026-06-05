@@ -7,7 +7,7 @@ import { z } from "zod";
 import { signOut } from "@/server/auth";
 import { requireUser } from "@/server/auth/session";
 import { ServiceError } from "@/lib/errors";
-import { createCampaign } from "@/server/services/campaigns";
+import { createCampaign, setCampaignCurrentFloor } from "@/server/services/campaigns";
 import {
   createCampaignSchema,
   createCrawlerSchema,
@@ -112,6 +112,8 @@ export async function createGenericEntityAction(
     unique: formData.get("unique"),
     fleeting: formData.get("fleeting"),
     aiDescription: formData.get("aiDescription"),
+    floorNumber: formData.get("floorNumber"),
+    theme: formData.get("theme"),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -254,6 +256,8 @@ export async function updateEntityAction(
     unique: formData.get("unique") === "true" || formData.get("unique") === "on",
     fleeting: formData.get("fleeting") === "true" || formData.get("fleeting") === "on",
     aiDescription: formData.get("aiDescription")?.toString() ?? "",
+    floorNumber: formData.get("floorNumber") ? Number(formData.get("floorNumber")) : undefined,
+    theme: formData.get("theme")?.toString() ?? "",
   };
 
   const parsed = updateEntitySchema.safeParse({
@@ -280,6 +284,8 @@ export async function updateEntityAction(
     unique: formData.get("unique"),
     fleeting: formData.get("fleeting"),
     aiDescription: formData.get("aiDescription"),
+    floorNumber: formData.get("floorNumber"),
+    theme: formData.get("theme"),
   });
   if (!parsed.success) {
     return {
@@ -882,6 +888,21 @@ export async function createCampaignEventAction(
 // mechanical, not canon (ADR 0004), so this bypasses the review pipeline. The
 // client passes the ids of the events shown immediately above/below the drop
 // slot (null at an end of the list).
+export async function setCampaignCurrentFloorAction(
+  campaignId: string,
+  floorEntityId: string | null,
+): Promise<EventActionState> {
+  const user = await requireUser();
+  try {
+    await setCampaignCurrentFloor(user.id, campaignId, floorEntityId);
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    return { error: "Could not set the current floor. Please try again." };
+  }
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
+  return undefined;
+}
+
 export async function reorderEventAction(
   campaignId: string,
   eventId: string,
@@ -1021,6 +1042,65 @@ export async function archiveEventCausalityAction(
   const user = await requireUser();
   await archiveEventCausality(user.id, campaignId, eventCausalityId);
   revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
+}
+
+// ── Campaign-timeline variants (no single viewed entity) ──
+// Same services as the entity-viewer actions, but revalidate the timeline plus
+// every affected participant entity page rather than one viewed entity.
+
+export async function setCampaignEventLockAction(
+  campaignId: string,
+  eventId: string,
+  locked: boolean,
+): Promise<void> {
+  const user = await requireUser();
+  const result = await setEventLock(user.id, campaignId, eventId, !locked);
+  for (const participantId of result.participantIds) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${participantId}`);
+  }
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
+}
+
+export async function archiveCampaignEventAction(
+  campaignId: string,
+  eventId: string,
+): Promise<void> {
+  const user = await requireUser();
+  const result = await archiveEvent(user.id, campaignId, eventId);
+  for (const participantId of result.participantIds) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${participantId}`);
+  }
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
+}
+
+export async function linkCampaignEventCauseAction(
+  campaignId: string,
+  effectId: string,
+  _prev: EventCausalityActionState,
+  formData: FormData,
+): Promise<EventCausalityActionState> {
+  const user = await requireUser();
+  const causeId = formData.get("causeId")?.toString().trim();
+  if (!causeId) {
+    return { error: "Choose a cause event." };
+  }
+  try {
+    await linkEventCause(user.id, campaignId, { causeId, effectId });
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    return { error: "Could not link the events. Please try again." };
+  }
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
+  return undefined;
+}
+
+export async function archiveCampaignEventCausalityAction(
+  campaignId: string,
+  eventCausalityId: string,
+): Promise<void> {
+  const user = await requireUser();
+  await archiveEventCausality(user.id, campaignId, eventCausalityId);
   revalidatePath(`/campaigns/${campaignId}/timeline`);
 }
 

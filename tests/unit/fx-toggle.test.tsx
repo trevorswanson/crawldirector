@@ -48,12 +48,19 @@ describe("FxToggle", () => {
   });
 
   it("survives a localStorage write failure", () => {
-    // localStorage may be unavailable (or throw) in this environment; the
-    // toggle swallows the failure so the cosmetic preference never breaks the UI.
+    let mockSetItem;
+    if (typeof localStorage !== "undefined") {
+      mockSetItem = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+        throw new Error("quota exceeded");
+      });
+    }
     render(<FxToggle />);
 
     const button = screen.getByRole("button", { name: /FX/ });
     expect(() => fireEvent.click(button)).not.toThrow();
     expect(button.getAttribute("aria-pressed")).toBe("false");
+    if (mockSetItem) {
+      expect(mockSetItem).toHaveBeenCalled();
+    }
   });
 });
