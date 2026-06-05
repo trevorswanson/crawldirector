@@ -130,6 +130,10 @@ function readTo(patch: ReviewPatch, field: string) {
   return patch[field]?.to;
 }
 
+function restoresArchivedStatus(patch: ReviewPatch) {
+  return readTo(patch, "status") === CanonStatus.CANON;
+}
+
 function nullableString(value: JsonValue | undefined) {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
@@ -778,6 +782,25 @@ export async function listPendingChangeSetsForUser(
   const changeSets = await prisma.changeSet.findMany({
     where: { campaignId, status: ChangeSetStatus.PENDING },
     orderBy: { createdAt: "asc" },
+    include: { operations: { orderBy: { id: "asc" } } },
+  });
+
+  return enrichReviewQueueItems(campaignId, changeSets);
+}
+
+export async function listClosedChangeSetsForUser(
+  userId: string,
+  campaignId: string,
+): Promise<ReviewQueueItem[]> {
+  await assertCampaignDm(userId, campaignId);
+
+  const changeSets = await prisma.changeSet.findMany({
+    where: {
+      campaignId,
+      source: { not: ChangeSource.DM },
+      status: { not: ChangeSetStatus.PENDING },
+    },
+    orderBy: [{ reviewedAt: "desc" }, { updatedAt: "desc" }],
     include: { operations: { orderBy: { id: "asc" } } },
   });
 
@@ -2274,11 +2297,12 @@ async function applyUpdateEntity(
   entityId: string,
   patch: ReviewPatch,
 ) {
+  const isRestore = restoresArchivedStatus(patch);
   const entity = await tx.entity.findFirst({
     where: {
       id: entityId,
       campaignId: changeSet.campaignId,
-      status: { not: CanonStatus.ARCHIVED },
+      status: isRestore ? CanonStatus.ARCHIVED : { not: CanonStatus.ARCHIVED },
     },
     select: {
       id: true,
@@ -2413,6 +2437,9 @@ function entityUpdateData(patch: ReviewPatch, type: EntityType, existingData?: u
   const data: Prisma.EntityUpdateInput = {
     version: { increment: 1 },
   };
+  if ("status" in patch) {
+    data.status = (readTo(patch, "status") as CanonStatus) ?? CanonStatus.CANON;
+  }
   if ("name" in patch) data.name = String(readTo(patch, "name") ?? "");
   if ("summary" in patch) data.summary = nullableString(readTo(patch, "summary"));
   if ("description" in patch) {
@@ -2649,13 +2676,14 @@ async function applyUpdateRelationship(
   relationshipId: string,
   patch: ReviewPatch,
 ) {
+  const isRestore = restoresArchivedStatus(patch);
   const relationship = await tx.relationship.findFirst({
     where: {
       id: relationshipId,
       campaignId: changeSet.campaignId,
-      status: { not: CanonStatus.ARCHIVED },
+      status: isRestore ? CanonStatus.ARCHIVED : { not: CanonStatus.ARCHIVED },
     },
-    select: { id: true, locked: true, version: true },
+    select: { id: true, locked: true, version: true, sourceId: true, targetId: true },
   });
   if (!relationship) throw new ServiceError("Relationship not found.");
 
@@ -2679,8 +2707,15 @@ async function applyUpdateRelationship(
     });
     throw new ServiceError("This relationship is locked.");
   }
+  if (isRestore) {
+    await assertCanonEntity(tx, changeSet.campaignId, relationship.sourceId);
+    await assertCanonEntity(tx, changeSet.campaignId, relationship.targetId);
+  }
 
   const data: Prisma.RelationshipUpdateInput = { version: { increment: 1 } };
+  if ("status" in patch) {
+    data.status = (readTo(patch, "status") as CanonStatus) ?? CanonStatus.CANON;
+  }
   if ("type" in patch) {
     const type = readTo(patch, "type");
     if (typeof type !== "string") throw new ServiceError("Relationship type is required.");
@@ -3283,6 +3318,7 @@ async function applyEventOperation(
         changeSet,
         operation.id,
         operation.targetId,
+        patch,
       );
     default:
       throw new ServiceError("Unsupported event operation.");
@@ -3372,13 +3408,21 @@ async function applyUpdateEvent(
   eventId: string,
   patch: ReviewPatch,
 ) {
+  const isRestore = restoresArchivedStatus(patch);
   const event = await tx.event.findFirst({
     where: {
       id: eventId,
       campaignId: changeSet.campaignId,
-      status: { not: CanonStatus.ARCHIVED },
+      status: isRestore ? CanonStatus.ARCHIVED : { not: CanonStatus.ARCHIVED },
     },
-    select: { id: true, locked: true, version: true, effects: true, orderKey: true },
+    select: {
+      id: true,
+      locked: true,
+      version: true,
+      effects: true,
+      orderKey: true,
+      participants: { select: { entityId: true } },
+    },
   });
   if (!event) throw new ServiceError("Event not found.");
 
@@ -3401,6 +3445,11 @@ async function applyUpdateEvent(
       data: { blockedByLock: true },
     });
     throw new ServiceError("This event is locked.");
+  }
+  if (isRestore) {
+    for (const participant of event.participants) {
+      await assertCanonEntity(tx, changeSet.campaignId, participant.entityId);
+    }
   }
 
   // UPDATE_EVENT covers both soft-archive (a status change) and field edits.
@@ -3821,14 +3870,20 @@ async function applyDeleteEventCausality(
   changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
   operationId: string,
   eventCausalityId: string,
+  inputPatch?: ReviewPatch,
 ) {
+  const patch: ReviewPatch = inputPatch ?? {
+    status: { to: CanonStatus.ARCHIVED },
+  };
+  const nextStatus = (readTo(patch, "status") as CanonStatus) ?? CanonStatus.ARCHIVED;
+  const isRestore = nextStatus === CanonStatus.CANON;
   const edge = await tx.eventCausality.findFirst({
     where: {
       id: eventCausalityId,
       campaignId: changeSet.campaignId,
-      status: { not: CanonStatus.ARCHIVED },
+      status: isRestore ? CanonStatus.ARCHIVED : { not: CanonStatus.ARCHIVED },
     },
-    select: { id: true, locked: true },
+    select: { id: true, locked: true, causeId: true, effectId: true },
   });
   if (!edge) throw new ServiceError("Causality link not found.");
   if (edge.locked) {
@@ -3838,13 +3893,14 @@ async function applyDeleteEventCausality(
     });
     throw new ServiceError("This causality link is locked.");
   }
+  if (isRestore) {
+    await assertCanonEvent(tx, changeSet.campaignId, edge.causeId);
+    await assertCanonEvent(tx, changeSet.campaignId, edge.effectId);
+  }
 
-  const patch: ReviewPatch = {
-    status: { to: CanonStatus.ARCHIVED },
-  };
   await tx.eventCausality.update({
     where: { id: eventCausalityId },
-    data: { status: CanonStatus.ARCHIVED, version: { increment: 1 } },
+    data: { status: nextStatus, version: { increment: 1 } },
     select: { id: true },
   });
   await writeEventCausalityProvenance(tx, changeSet, eventCausalityId, patch);

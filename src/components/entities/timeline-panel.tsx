@@ -11,6 +11,8 @@ import {
   archiveEventAction,
   createEventAction,
   linkEventCauseAction,
+  restoreEventAction,
+  restoreEventCausalityAction,
   toggleEventLockAction,
   updateEventAction,
   type EventCausalityActionState,
@@ -149,6 +151,7 @@ function EditEventForm({
   entityId,
   causeCandidates,
   entityEventIds,
+  onRemoveCausality,
 }: {
   event: EntityEvent;
   self: EntityCandidate;
@@ -163,6 +166,7 @@ function EditEventForm({
   entityId: string;
   causeCandidates: EntityEvent[];
   entityEventIds: Set<string>;
+  onRemoveCausality: (linkId: string) => void;
 }) {
   // Prefill the participant editor with the full current set: a row for every
   // role the viewed entity holds (it can have more than one) followed by the
@@ -255,12 +259,14 @@ function EditEventForm({
                   />
                   {!event.locked && (
                     <form
-                      action={archiveEventCausalityAction.bind(
-                        null,
-                        campaignId,
-                        entityId,
-                        cause.linkId,
-                      )}
+                      action={async () => {
+                        await archiveEventCausalityAction(
+                          campaignId,
+                          entityId,
+                          cause.linkId,
+                        );
+                        onRemoveCausality(cause.linkId);
+                      }}
                     >
                       <button
                         type="submit"
@@ -293,12 +299,14 @@ function EditEventForm({
                   />
                   {!event.locked && (
                     <form
-                      action={archiveEventCausalityAction.bind(
-                        null,
-                        campaignId,
-                        entityId,
-                        effect.linkId,
-                      )}
+                      action={async () => {
+                        await archiveEventCausalityAction(
+                          campaignId,
+                          entityId,
+                          effect.linkId,
+                        );
+                        onRemoveCausality(effect.linkId);
+                      }}
                     >
                       <button
                         type="submit"
@@ -392,6 +400,11 @@ export function TimelinePanel({
   // Which event is being edited inline, with its own error slot.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
+  const [removedEventId, setRemovedEventId] = useState<string | null>(null);
+  const [removedCausalityId, setRemovedCausalityId] = useState<string | null>(null);
+  const visibleEvents = removedEventId
+    ? events.filter((event) => event.id !== removedEventId)
+    : events;
   // Which event's details (summary, participants, causality, controls) are
   // revealed. The compact rail mirrors the mockup; the rest opens on click.
   const [expandedId, setExpandedId] = useState<string | null>(
@@ -442,21 +455,66 @@ export function TimelinePanel({
   return (
     <div>
       <Kicker dim noLead className="mb-3">
-        Timeline · {events.length} events
+        Timeline · {visibleEvents.length} events
       </Kicker>
 
-      {events.length === 0 && (
+      {(removedEventId || removedCausalityId) && (
+        <div className="mb-3 flex flex-col gap-2">
+          {removedEventId && (
+            <div className="flex items-center justify-between gap-3 border border-[var(--line)] bg-[var(--bg-2)] px-3 py-2 text-xs text-[var(--ink-dim)]">
+              <span>Event removed.</span>
+              <form
+                action={async () => {
+                  await restoreEventAction(campaignId, entityId, removedEventId);
+                  setRemovedEventId(null);
+                }}
+              >
+                <button
+                  type="submit"
+                  className="font-mono text-[10px] uppercase tracking-[.08em] text-[var(--accent)] hover:text-[var(--ink)]"
+                >
+                  Undo
+                </button>
+              </form>
+            </div>
+          )}
+          {removedCausalityId && (
+            <div className="flex items-center justify-between gap-3 border border-[var(--line)] bg-[var(--bg-2)] px-3 py-2 text-xs text-[var(--ink-dim)]">
+              <span>Causality link removed.</span>
+              <form
+                action={async () => {
+                  await restoreEventCausalityAction(
+                    campaignId,
+                    entityId,
+                    removedCausalityId,
+                  );
+                  setRemovedCausalityId(null);
+                }}
+              >
+                <button
+                  type="submit"
+                  className="font-mono text-[10px] uppercase tracking-[.08em] text-[var(--accent)] hover:text-[var(--ink)]"
+                >
+                  Undo
+                </button>
+              </form>
+            </div>
+          )}
+        </div>
+      )}
+
+      {visibleEvents.length === 0 && (
         <p className="text-[12.5px] text-[var(--ink-faint)]">
           No events logged for this entity yet.
         </p>
       )}
 
-      {events.length > 0 && (
+      {visibleEvents.length > 0 && (
         <div className="relative pl-[22px]">
           {/* the spine connecting every node, like the mockup */}
           <div className="absolute bottom-1 left-[5px] top-1 w-px bg-[var(--line-strong)]" />
           <div className="flex flex-col gap-[14px]">
-            {events.map((e) => {
+            {visibleEvents.map((e) => {
               const when = formatTime(e.time);
               const prov = provenanceMeta(e.source);
               const expanded = expandedId === e.id;
@@ -610,6 +668,7 @@ export function TimelinePanel({
                           entityId={entityId}
                           causeCandidates={causeCandidates}
                           entityEventIds={entityEventIds}
+                          onRemoveCausality={setRemovedCausalityId}
                         />
                       ) : null}
                       <div className="flex flex-wrap gap-[6px]">
@@ -657,12 +716,10 @@ export function TimelinePanel({
                         </form>
                         {!e.locked && (
                           <form
-                            action={archiveEventAction.bind(
-                              null,
-                              campaignId,
-                              entityId,
-                              e.id,
-                            )}
+                            action={async () => {
+                              await archiveEventAction(campaignId, entityId, e.id);
+                              setRemovedEventId(e.id);
+                            }}
                           >
                         <button
                           type="submit"

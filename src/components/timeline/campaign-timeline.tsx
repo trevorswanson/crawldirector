@@ -23,6 +23,8 @@ import {
   createCampaignEventAction,
   linkCampaignEventCauseAction,
   reorderEventAction,
+  restoreCampaignEventAction,
+  restoreCampaignEventCausalityAction,
   setCampaignCurrentFloorAction,
   setCampaignEventLockAction,
   updateCampaignEventAction,
@@ -344,6 +346,7 @@ function EditEventForm({
   resolveName,
   causeCandidates,
   onFocusEvent,
+  onRemoveCausality,
   onClose,
 }: {
   campaignId: string;
@@ -354,6 +357,7 @@ function EditEventForm({
   resolveName: (targetId: string) => string;
   causeCandidates: { id: string; title: string }[];
   onFocusEvent: (eventId: string) => void;
+  onRemoveCausality: (linkId: string) => void;
   onClose: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -452,6 +456,7 @@ function EditEventForm({
               campaignId={campaignId}
               canEdit={!event.locked}
               onFocusEvent={onFocusEvent}
+              onRemove={onRemoveCausality}
             />
           )}
           {event.causes.length > 0 && (
@@ -461,6 +466,7 @@ function EditEventForm({
               campaignId={campaignId}
               canEdit={!event.locked}
               onFocusEvent={onFocusEvent}
+              onRemove={onRemoveCausality}
             />
           )}
           {!event.locked && causeCandidates.length > 0 && (
@@ -592,12 +598,14 @@ function Thread({
   campaignId,
   canEdit,
   onFocusEvent,
+  onRemove,
 }: {
   dir: "in" | "out";
   items: { id: string; title: string; linkId: string }[];
   campaignId: string;
   canEdit: boolean;
   onFocusEvent: (eventId: string) => void;
+  onRemove: (linkId: string) => void;
 }) {
   const inbound = dir === "in";
   return (
@@ -621,7 +629,10 @@ function Thread({
             </button>
             {canEdit && (
               <form
-                action={archiveCampaignEventCausalityAction.bind(null, campaignId, item.linkId)}
+                action={async () => {
+                  await archiveCampaignEventCausalityAction(campaignId, item.linkId);
+                  onRemove(item.linkId);
+                }}
               >
                 <button
                   type="submit"
@@ -708,6 +719,8 @@ export function CampaignTimeline({
   const [reorderError, setReorderError] = useState<string | null>(null);
   const [filter, setFilter] = useState<TimelineFilter>("ALL");
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [removedEventId, setRemovedEventId] = useState<string | null>(null);
+  const [removedCausalityId, setRemovedCausalityId] = useState<string | null>(null);
   const [reordering, startReorder] = useTransition();
   const [, startFloorChange] = useTransition();
   const router = useRouter();
@@ -796,10 +809,13 @@ export function CampaignTimeline({
     }
   }
 
+  const liveEvents = removedEventId
+    ? events.filter((event) => event.id !== removedEventId)
+    : events;
   const shownEvents =
     filter === "ALL"
-      ? events
-      : events.filter((event) => sourceFilterKey(event.source) === filter);
+      ? liveEvents
+      : liveEvents.filter((event) => sourceFilterKey(event.source) === filter);
 
   // Group the shown events by floor (orderKey). `events` arrive sorted
   // (orderKey desc, rank desc), so each floor's events are already in display
@@ -983,7 +999,12 @@ export function CampaignTimeline({
                   </button>
                 </form>
                 {!event.locked && (
-                  <form action={archiveCampaignEventAction.bind(null, campaignId, event.id)}>
+                  <form
+                    action={async () => {
+                      await archiveCampaignEventAction(campaignId, event.id);
+                      setRemovedEventId(event.id);
+                    }}
+                  >
                     <button
                       type="submit"
                       aria-label="Remove event"
@@ -1012,6 +1033,7 @@ export function CampaignTimeline({
               resolveName={resolveName}
               causeCandidates={causeCandidates}
               onFocusEvent={focusEvent}
+              onRemoveCausality={setRemovedCausalityId}
               onClose={() => setEditingId(null)}
             />
           )}
@@ -1049,6 +1071,7 @@ export function CampaignTimeline({
                   campaignId={campaignId}
                   canEdit={false}
                   onFocusEvent={focusEvent}
+                  onRemove={setRemovedCausalityId}
                 />
               )}
               {event.causes.length > 0 && (
@@ -1058,6 +1081,7 @@ export function CampaignTimeline({
                   campaignId={campaignId}
                   canEdit={false}
                   onFocusEvent={focusEvent}
+                  onRemove={setRemovedCausalityId}
                 />
               )}
             </div>
@@ -1257,6 +1281,50 @@ export function CampaignTimeline({
             </div>
           </div>
         </div>
+
+        {(removedEventId || removedCausalityId) && (
+          <div className="border-b border-[var(--line)] bg-[var(--bg-2)] px-[26px] py-3">
+            {removedEventId && (
+              <div className="flex max-w-[760px] items-center justify-between gap-3 text-xs text-[var(--ink-dim)]">
+                <span>Event removed.</span>
+                <form
+                  action={async () => {
+                    await restoreCampaignEventAction(campaignId, removedEventId);
+                    setRemovedEventId(null);
+                  }}
+                >
+                  <button
+                    type="submit"
+                    className="font-mono text-[10px] uppercase tracking-[.08em] text-[var(--accent)] hover:text-[var(--ink)]"
+                  >
+                    Undo
+                  </button>
+                </form>
+              </div>
+            )}
+            {removedCausalityId && (
+              <div className="flex max-w-[760px] items-center justify-between gap-3 text-xs text-[var(--ink-dim)]">
+                <span>Causality link removed.</span>
+                <form
+                  action={async () => {
+                    await restoreCampaignEventCausalityAction(
+                      campaignId,
+                      removedCausalityId,
+                    );
+                    setRemovedCausalityId(null);
+                  }}
+                >
+                  <button
+                    type="submit"
+                    className="font-mono text-[10px] uppercase tracking-[.08em] text-[var(--accent)] hover:text-[var(--ink)]"
+                  >
+                    Undo
+                  </button>
+                </form>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-[26px] py-6">
           <div className="max-w-[760px]">

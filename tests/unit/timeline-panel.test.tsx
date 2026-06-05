@@ -13,17 +13,21 @@ const {
   createEventAction,
   updateEventAction,
   archiveEventAction,
+  restoreEventAction,
   toggleEventLockAction,
   linkEventCauseAction,
   archiveEventCausalityAction,
+  restoreEventCausalityAction,
   applyEventEffectsAction,
 } = vi.hoisted(() => ({
   createEventAction: vi.fn(),
   updateEventAction: vi.fn(),
   archiveEventAction: vi.fn(),
+  restoreEventAction: vi.fn(),
   toggleEventLockAction: vi.fn(),
   linkEventCauseAction: vi.fn(),
   archiveEventCausalityAction: vi.fn(),
+  restoreEventCausalityAction: vi.fn(),
   applyEventEffectsAction: vi.fn(),
 }));
 
@@ -31,9 +35,11 @@ vi.mock("@/app/(dm)/actions", () => ({
   createEventAction,
   updateEventAction,
   archiveEventAction,
+  restoreEventAction,
   toggleEventLockAction,
   linkEventCauseAction,
   archiveEventCausalityAction,
+  restoreEventCausalityAction,
   applyEventEffectsAction,
 }));
 vi.mock("next/link", () => ({
@@ -257,6 +263,35 @@ describe("TimelinePanel", () => {
     expect(screen.queryByRole("button", { name: /Remove event/ })).toBeNull();
   });
 
+  it("shows an undo affordance after removing an event", async () => {
+    archiveEventAction.mockResolvedValue(undefined);
+    restoreEventAction.mockResolvedValue(undefined);
+    render(
+      <TimelinePanel
+        campaignId="c1"
+        entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
+        events={[event()]}
+        candidates={candidates}
+        initialEventId="ev1"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Remove event/ }));
+    await waitFor(() =>
+      expect(archiveEventAction).toHaveBeenCalledWith("c1", "e1", "ev1"),
+    );
+
+    expect(screen.getByText("Event removed.")).toBeDefined();
+    expect(screen.queryByText("Floor 9 boss fight")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() =>
+      expect(restoreEventAction).toHaveBeenCalledWith("c1", "e1", "ev1"),
+    );
+  });
+
   it("gates causality edit controls behind edit mode and locks", () => {
     render(
       <TimelinePanel
@@ -306,6 +341,42 @@ describe("TimelinePanel", () => {
     // Controls should be hidden and Edit event button not visible
     expect(screen.queryByRole("button", { name: "Edit event" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Remove cause link" })).toBeNull();
+  });
+
+  it("shows an undo affordance after removing a cause link", async () => {
+    archiveEventCausalityAction.mockResolvedValue(undefined);
+    restoreEventCausalityAction.mockResolvedValue(undefined);
+    render(
+      <TimelinePanel
+        campaignId="c1"
+        entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
+        events={[
+          event({
+            id: "ev1",
+            title: "Sponsor stock drops",
+            causedBy: [{ id: "ev2", title: "Arena stunt", linkId: "ec1" }],
+            locked: false,
+          }),
+          event({ id: "ev2", title: "Arena stunt" }),
+        ]}
+        candidates={candidates}
+        initialEventId="ev1"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit event" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove cause link" }));
+    await waitFor(() =>
+      expect(archiveEventCausalityAction).toHaveBeenCalledWith("c1", "e1", "ec1"),
+    );
+
+    expect(screen.getByText("Causality link removed.")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() =>
+      expect(restoreEventCausalityAction).toHaveBeenCalledWith("c1", "e1", "ec1"),
+    );
   });
 
   it("edits an event: prefilled form, submits, and closes on success", async () => {

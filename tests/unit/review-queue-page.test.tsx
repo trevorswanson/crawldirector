@@ -6,6 +6,7 @@ const {
   requireUser,
   getCampaignForUser,
   listPendingChangeSetsForUser,
+  listClosedChangeSetsForUser,
   getReviewChangeSetForUser,
   getReviewChangeSetSummary,
   listEntitiesForUser,
@@ -24,6 +25,7 @@ const {
   requireUser: vi.fn(),
   getCampaignForUser: vi.fn(),
   listPendingChangeSetsForUser: vi.fn(),
+  listClosedChangeSetsForUser: vi.fn(),
   getReviewChangeSetForUser: vi.fn(),
   getReviewChangeSetSummary: vi.fn(),
   listEntitiesForUser: vi.fn(),
@@ -46,6 +48,7 @@ vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/campaigns", () => ({ getCampaignForUser }));
 vi.mock("@/server/services/review", () => ({
   listPendingChangeSetsForUser,
+  listClosedChangeSetsForUser,
   getReviewChangeSetForUser,
   getReviewChangeSetSummary,
 }));
@@ -82,6 +85,7 @@ beforeEach(() => {
     _count: { members: 1, entities: 0 },
   });
   listPendingChangeSetsForUser.mockResolvedValue([]);
+  listClosedChangeSetsForUser.mockResolvedValue([]);
   getReviewChangeSetForUser.mockResolvedValue(null);
   getReviewChangeSetSummary.mockResolvedValue(null);
   listEntitiesForUser.mockResolvedValue({ entities: [] });
@@ -1088,6 +1092,124 @@ describe("ReviewQueuePage", () => {
 
     expect(screen.getByText("Proposal rejected")).toBeDefined();
     expect(screen.getByRole("button", { name: "Reopen" })).toBeDefined();
+  });
+
+  it("renders closed review history with rejected proposals reopenable", async () => {
+    listClosedChangeSetsForUser.mockResolvedValue([
+      {
+        id: "cs-closed",
+        campaignId: "c1",
+        source: "PLAYER_SUGGESTION",
+        title: "Rejected player suggestion",
+        summary: null,
+        status: "REJECTED",
+        actorUserId: "u1",
+        providerId: null,
+        model: null,
+        promptId: null,
+        promptVersion: null,
+        runId: null,
+        baseVersions: {},
+        reviewedById: "u1",
+        reviewedAt: new Date(),
+        reviewNotes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        operations: [
+          {
+            id: "op-closed",
+            changeSetId: "cs-closed",
+            op: "UPDATE_ENTITY",
+            targetType: "ENTITY",
+            targetId: "entity-1",
+            targetLabel: "Zev",
+            targetEntityType: "NPC",
+            targetLocked: false,
+            lockedFields: [],
+            currentValues: { summary: "Current" },
+            patch: { summary: { from: "Current", to: "Suggested" } },
+            editedPatch: null,
+            decision: "REJECTED",
+            blockedByLock: false,
+            isStale: false,
+          },
+        ],
+      },
+    ]);
+
+    render(
+      await ReviewQueuePage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({ show: "closed" }),
+      }),
+    );
+
+    expect(listClosedChangeSetsForUser).toHaveBeenCalledWith("u1", "c1");
+    expect(screen.getAllByText("Rejected player suggestion").length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "Pending" })[0].getAttribute("href")).toBe(
+      "/campaigns/c1/review",
+    );
+    expect(screen.getAllByRole("link", { name: "Closed" })[0].getAttribute("href")).toBe(
+      "/campaigns/c1/review?show=closed",
+    );
+    expect(screen.getByRole("button", { name: "Reopen" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull();
+  });
+
+  it("renders approved closed history as read-only inspection", async () => {
+    listClosedChangeSetsForUser.mockResolvedValue([
+      {
+        id: "cs-approved",
+        campaignId: "c1",
+        source: "AI",
+        title: "Approved history",
+        summary: null,
+        status: "APPROVED",
+        actorUserId: "u1",
+        providerId: null,
+        model: null,
+        promptId: null,
+        promptVersion: null,
+        runId: null,
+        baseVersions: {},
+        reviewedById: "u1",
+        reviewedAt: new Date(),
+        reviewNotes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        operations: [
+          {
+            id: "op-approved",
+            changeSetId: "cs-approved",
+            op: "UPDATE_ENTITY",
+            targetType: "ENTITY",
+            targetId: "entity-1",
+            targetLabel: "Zev",
+            targetEntityType: "NPC",
+            targetLocked: false,
+            lockedFields: [],
+            currentValues: { summary: "Approved" },
+            patch: { summary: { from: "Current", to: "Approved" } },
+            editedPatch: null,
+            decision: "ACCEPTED",
+            blockedByLock: false,
+            isStale: false,
+          },
+        ],
+      },
+    ]);
+
+    render(
+      await ReviewQueuePage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({ show: "closed" }),
+      }),
+    );
+
+    expect(screen.getAllByText("Approved history").length).toBeGreaterThan(0);
+    expect(screen.getByText("Done · read-only history")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Reopen" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull();
   });
 
   it("reopens an approved proposal as read-only history", async () => {

@@ -10,6 +10,7 @@ import {
   createRelationship,
   getCampaignRelationshipGraph,
   listConnectionsForEntity,
+  restoreRelationship,
   setRelationshipLock,
   updateRelationship,
 } from "@/server/services/relationships";
@@ -151,6 +152,34 @@ describe("relationship service", () => {
     expect(row?.status).toBe(CanonStatus.ARCHIVED);
     const connections = await listConnectionsForEntity(owner.id, campaign.id, source.id);
     expect(connections).toHaveLength(0);
+  });
+
+  it("restores an archived edge through an audited change set", async () => {
+    const owner = await makeUser("restore-edge@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const source = await makeEntity(owner.id, campaign.id, "A");
+    const target = await makeEntity(owner.id, campaign.id, "B");
+    const edge = await createRelationship(owner.id, campaign.id, source.id, {
+      type: "RIVAL_OF",
+      targetId: target.id,
+      secret: false,
+    });
+
+    await archiveRelationship(owner.id, campaign.id, edge.id);
+    const result = await restoreRelationship(owner.id, campaign.id, edge.id);
+
+    expect(result.id).toBe(edge.id);
+    const row = await prisma.relationship.findUnique({ where: { id: edge.id } });
+    expect(row?.status).toBe(CanonStatus.CANON);
+    const connections = await listConnectionsForEntity(owner.id, campaign.id, source.id);
+    expect(connections).toHaveLength(1);
+    const provenance = await prisma.provenance.findMany({
+      where: { relationshipId: edge.id },
+      orderBy: { createdAt: "asc" },
+      include: { changeSet: { select: { title: true } } },
+    });
+    expect(provenance.at(-1)?.changeSet.title).toBe("Restore connection");
+    expect(provenance.at(-1)?.source).toBe("DM");
   });
 
   it("locks and unlocks an edge with audit history", async () => {

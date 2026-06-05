@@ -405,3 +405,32 @@ export async function archiveRelationship(
   });
   return { id: relationshipId };
 }
+
+export async function restoreRelationship(
+  userId: string,
+  campaignId: string,
+  relationshipId: string,
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  const existing = await prisma.relationship.findFirst({
+    where: { id: relationshipId, campaignId, status: CanonStatus.ARCHIVED },
+    select: { id: true, status: true, version: true },
+  });
+  if (!existing) throw new ServiceError("Archived relationship not found.");
+
+  await applyAutoApprovedRelationshipChangeSet(userId, campaignId, {
+    title: "Restore connection",
+    operations: [
+      {
+        op: OpKind.UPDATE_RELATIONSHIP,
+        targetId: relationshipId,
+        patch: {
+          _baseVersion: { to: existing.version },
+          status: { from: existing.status, to: CanonStatus.CANON },
+        },
+      },
+    ],
+  });
+  return { id: relationshipId };
+}

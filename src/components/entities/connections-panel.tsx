@@ -8,6 +8,7 @@ import { ArrowRight, Lock, Pencil, Plus, Unlock, X } from "lucide-react";
 import {
   archiveRelationshipAction,
   createRelationshipAction,
+  restoreRelationshipAction,
   toggleRelationshipLockAction,
   updateRelationshipAction,
 } from "@/app/(dm)/actions";
@@ -310,6 +311,10 @@ export function ConnectionsPanel({
   // Which edge is being edited inline, with its own error slot.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
+  const [removedConnection, setRemovedConnection] = useState<string | null>(null);
+  const visibleConnections = removedConnection
+    ? connections.filter((connection) => connection.id !== removedConnection)
+    : connections;
 
   const handleSubmit = async (formData: FormData) => {
     setError(null);
@@ -340,15 +345,34 @@ export function ConnectionsPanel({
   return (
     <div>
       <Kicker dim noLead className="mb-3">
-        Connections · {connections.length}
+        Connections · {visibleConnections.length}
       </Kicker>
 
-      {connections.length === 0 && (
+      {removedConnection && (
+        <div className="mb-3 flex items-center justify-between gap-3 border border-[var(--line)] bg-[var(--bg-2)] px-3 py-2 text-xs text-[var(--ink-dim)]">
+          <span>Connection removed.</span>
+          <form
+            action={async () => {
+              await restoreRelationshipAction(campaignId, entityId, removedConnection);
+              setRemovedConnection(null);
+            }}
+          >
+            <button
+              type="submit"
+              className="font-mono text-[10px] uppercase tracking-[.08em] text-[var(--accent)] hover:text-[var(--ink)]"
+            >
+              Undo
+            </button>
+          </form>
+        </div>
+      )}
+
+      {visibleConnections.length === 0 && (
         <p className="text-xs text-[var(--ink-faint)]">No relationships yet.</p>
       )}
 
       <div className="flex flex-col gap-[6px]">
-        {connections.map((c) => (
+        {visibleConnections.map((c) => (
           <div key={c.id}>
           <div
             className="group flex items-start gap-2 border border-[var(--line)] px-[10px] py-[9px]"
@@ -422,12 +446,10 @@ export function ConnectionsPanel({
             </form>
             {!c.locked && (
             <form
-              action={archiveRelationshipAction.bind(
-                null,
-                campaignId,
-                entityId,
-                c.id,
-              )}
+              action={async () => {
+                await archiveRelationshipAction(campaignId, entityId, c.id);
+                setRemovedConnection(c.id);
+              }}
             >
               <button
                 type="submit"

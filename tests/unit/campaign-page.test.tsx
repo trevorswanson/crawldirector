@@ -44,6 +44,10 @@ vi.mock("@/components/entities/entity-forms", () => ({
   QuickCreateStub: ({ campaignId }: { campaignId: string }) => (
     <div>Quick create {campaignId}</div>
   ),
+  RestoreEntityUndoForm: ({ campaignId, entityId }: {
+    campaignId: string;
+    entityId: string;
+  }) => <div>Undo archive {campaignId}/{entityId}</div>,
 }));
 
 import CampaignPage from "@/app/(dm)/campaigns/[id]/page";
@@ -169,6 +173,27 @@ describe("CampaignPage", () => {
       screen.getByRole("link", { name: /Carl/ }).getAttribute("href"),
     ).toBe("/campaigns/c3/entities/e1");
     expect(screen.getByText("Floor 1")).toBeDefined();
+  });
+
+  it("renders an entity archive undo notice from the redirect query", async () => {
+    getCampaignForUser.mockResolvedValue({
+      id: "c1",
+      name: "World One",
+      summary: null,
+      createdAt: new Date(),
+      members: [{ role: "OWNER" }],
+      _count: { members: 1, entities: 0 },
+    });
+
+    render(
+      await CampaignPage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({ archivedEntity: "e1" }),
+      }),
+    );
+
+    expect(screen.getByText("Entity archived.")).toBeDefined();
+    expect(screen.getByText("Undo archive c1/e1")).toBeDefined();
   });
 
   it("shows an empty state when no entities match", async () => {

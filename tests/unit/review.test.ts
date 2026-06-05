@@ -19,6 +19,7 @@ import {
   createPendingEventChangeSet,
   getEntityProvenance,
   getReviewChangeSetForUser,
+  listClosedChangeSetsForUser,
   listPendingChangeSetsForUser,
   rejectChangeSet,
   reopenChangeSet,
@@ -814,6 +815,59 @@ describe("review service — reopenChangeSet", () => {
     await expect(reopenChangeSet(dmId, campaignId, set.id)).rejects.toThrow(
       /can't be reopened/i,
     );
+  });
+});
+
+describe("review service — closed change sets", () => {
+  it("lists approved and rejected history while excluding pending proposals", async () => {
+    const { dmId, campaignId } = await seed();
+    const entityId = await createEntity(dmId, campaignId, "History Target");
+    const baseVersion = await versionOf(entityId);
+    const approved = await createPendingEntityChangeSet(dmId, campaignId, {
+      source: "AI",
+      title: "Approved history",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: entityId,
+          patch: { _baseVersion: { to: baseVersion }, summary: { to: "Approved" } },
+        },
+      ],
+    });
+    await acceptAllOperations(approved.id);
+    await approveChangeSet(dmId, campaignId, approved.id);
+    const nextVersion = await versionOf(entityId);
+    const rejected = await createPendingEntityChangeSet(dmId, campaignId, {
+      source: "PLAYER_SUGGESTION",
+      title: "Rejected history",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: entityId,
+          patch: { _baseVersion: { to: nextVersion }, description: { to: "Nope" } },
+        },
+      ],
+    });
+    await rejectChangeSet(dmId, campaignId, rejected.id);
+    await createPendingEntityChangeSet(dmId, campaignId, {
+      source: "IMPORT",
+      title: "Still pending",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: entityId,
+          patch: { _baseVersion: { to: nextVersion }, tags: { to: ["pending"] } },
+        },
+      ],
+    });
+
+    const closed = await listClosedChangeSetsForUser(dmId, campaignId);
+
+    expect(closed.map((item) => item.title)).toEqual([
+      "Rejected history",
+      "Approved history",
+    ]);
+    expect(closed.map((item) => item.status)).toEqual(["REJECTED", "APPROVED"]);
   });
 });
 

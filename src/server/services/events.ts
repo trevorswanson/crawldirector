@@ -1292,6 +1292,43 @@ export async function archiveEventCausality(
   };
 }
 
+export async function restoreEventCausality(
+  userId: string,
+  campaignId: string,
+  eventCausalityId: string,
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  const existing = await prisma.eventCausality.findFirst({
+    where: {
+      id: eventCausalityId,
+      campaignId,
+      status: CanonStatus.ARCHIVED,
+    },
+    select: { id: true, causeId: true, effectId: true, status: true, version: true },
+  });
+  if (!existing) throw new ServiceError("Archived causality link not found.");
+
+  await applyAutoApprovedEventChangeSet(userId, campaignId, {
+    title: "Restore event causality",
+    operations: [
+      {
+        op: OpKind.DELETE_EVENT_CAUSALITY,
+        targetId: eventCausalityId,
+        patch: {
+          _baseVersion: { to: existing.version },
+          status: { from: existing.status, to: CanonStatus.CANON },
+        },
+      },
+    ],
+  });
+
+  return {
+    id: eventCausalityId,
+    affectedEventIds: [existing.causeId, existing.effectId],
+  };
+}
+
 /**
  * Soft-archive an event (retains history + causal links) through the review
  * pipeline. DM-only.
@@ -1316,6 +1353,43 @@ export async function archiveEvent(
         op: OpKind.UPDATE_EVENT,
         targetId: eventId,
         patch: { status: { from: existing.status, to: CanonStatus.ARCHIVED } },
+      },
+    ],
+  });
+  return {
+    id: eventId,
+    participantIds: existing.participants.map((participant) => participant.entityId),
+  };
+}
+
+export async function restoreEvent(
+  userId: string,
+  campaignId: string,
+  eventId: string,
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  const existing = await prisma.event.findFirst({
+    where: { id: eventId, campaignId, status: CanonStatus.ARCHIVED },
+    select: {
+      id: true,
+      status: true,
+      version: true,
+      participants: { select: { entityId: true } },
+    },
+  });
+  if (!existing) throw new ServiceError("Archived event not found.");
+
+  await applyAutoApprovedEventChangeSet(userId, campaignId, {
+    title: "Restore event",
+    operations: [
+      {
+        op: OpKind.UPDATE_EVENT,
+        targetId: eventId,
+        patch: {
+          _baseVersion: { to: existing.version },
+          status: { from: existing.status, to: CanonStatus.CANON },
+        },
       },
     ],
   });

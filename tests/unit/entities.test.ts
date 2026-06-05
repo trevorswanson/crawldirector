@@ -13,6 +13,7 @@ import {
   getEntityTypeCounts,
   listCampaignTags,
   listEntitiesForUser,
+  restoreEntity,
   updateEntity,
 } from "@/server/services/entities";
 import {
@@ -848,6 +849,33 @@ describe("entity service", () => {
     expect(await getEntityForUser(owner.id, campaign.id, entity.id)).toBeNull();
     const stored = await prisma.entity.findUnique({ where: { id: entity.id } });
     expect(stored?.status).toBe("ARCHIVED");
+  });
+
+  it("restores an archived entity through an audited change set", async () => {
+    const owner = await makeUser("restore-entity@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "SHOW",
+      name: "Dungeon Crawler World",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    await archiveEntity(owner.id, campaign.id, entity.id);
+    const result = await restoreEntity(owner.id, campaign.id, entity.id);
+
+    expect(result.id).toBe(entity.id);
+    const restored = await getEntityForUser(owner.id, campaign.id, entity.id);
+    expect(restored?.status).toBe("CANON");
+    const provenance = await prisma.provenance.findMany({
+      where: { entityId: entity.id },
+      orderBy: { createdAt: "asc" },
+      include: { changeSet: { select: { title: true } } },
+    });
+    expect(provenance.at(-1)?.changeSet.title).toBe("Restore Dungeon Crawler World");
+    expect(provenance.at(-1)?.source).toBe("DM");
   });
 
   it("is a no-op when an update changes nothing", async () => {
