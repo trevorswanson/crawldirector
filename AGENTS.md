@@ -52,7 +52,21 @@ producers. Pending `APPLY_EVENT_EFFECTS` proposals now render a **structured
 effect-row editor** in the Review Queue (kind/target/stat/value pickers reusing
 the timeline's `EffectRows`) instead of a raw JSON patch — a DM corrects effects
 and saves an `EDITED` decision the existing approval path reconciles by effect
-id. Still to come in M3: time-bounded membership and knowledge/reveal grants.
+id. Event **order is now derived, not authored** (ADR 0004 slice 1): `orderKey`
+(the floor) is computed server-side and stripped from the reviewable patch — no
+more `ORDERKEY` leak in the queue — and a fractional intra-floor `rank`
+(`src/lib/rank.ts`) gives stable within-floor ordering the DM sets by **dragging**
+events on the campaign timeline (a mechanical, audited, review-bypassing update).
+ADR 0004 slice 2 then replaced the overloaded `{ floor, label }` in-game time with
+a **typed `timeRef`** (`src/lib/time-ref.ts`): `{ basis, floor?, offset?, unit?,
+anchorEventId?, label? }`, where every DCC time flavor is an offset from a basis
+(`FLOOR_START`/`FLOOR_COLLAPSE`/`COLLAPSE`/`ABSOLUTE_DAY`/`EVENT`/`UNSCHEDULED`).
+The human phrasing is now **generated** from the structure (`label` is an optional
+override), and a concrete floor-relative offset **derives** the intra-floor `rank`
+automatically (manual drag still wins for unscheduled/label-only events). A shared
+`EventTimeFields` picker drives the timeline forms and the Review Queue editor.
+Still to come in M3: time-bounded membership and knowledge/reveal grants, plus
+ADR 0004 slice 3 (causality ordering checks / "order from causality").
 **M3.5 (tagging)** is
 underway: the service layer (campaign tag list, tag filtering, tag-aware search)
 plus the UI — a tag-selection input with campaign autocomplete on the entity

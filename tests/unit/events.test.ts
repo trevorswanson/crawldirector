@@ -13,6 +13,7 @@ import {
   linkEventCause,
   listCampaignTimeline,
   listEventsForEntity,
+  reorderEvent,
   setEventLock,
   updateEvent,
 } from "@/server/services/events";
@@ -121,7 +122,7 @@ describe("event service", () => {
     expect(row?.status).toBe(CanonStatus.CANON);
     expect(row?.title).toBe("Floor 9 boss fight");
     expect(row?.orderKey).toBe(9);
-    expect(row?.inGameTime).toEqual({ floor: 9, label: "Day 3" });
+    expect(row?.inGameTime).toEqual({ basis: "FLOOR_START", floor: 9, label: "Day 3" });
     expect(row?.source).toBe("DM");
     expect(row?.participants).toHaveLength(2);
 
@@ -135,7 +136,12 @@ describe("event service", () => {
     const carlTimeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
     expect(carlTimeline).toHaveLength(1);
     expect(carlTimeline[0].role).toBe("ACTOR");
-    expect(carlTimeline[0].time).toEqual({ floor: 9, label: "Day 3" });
+    expect(carlTimeline[0].time).toMatchObject({
+      basis: "FLOOR_START",
+      floor: 9,
+      label: "Day 3",
+      phrase: "Day 3",
+    });
     expect(carlTimeline[0].others).toHaveLength(1);
     expect(carlTimeline[0].others[0].name).toBe("Donut");
 
@@ -182,7 +188,12 @@ describe("event service", () => {
     });
 
     const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
-    expect(timeline[0].time).toEqual({ floor: null, label: null });
+    expect(timeline[0].time).toMatchObject({
+      basis: "UNSCHEDULED",
+      floor: null,
+      label: null,
+      phrase: null,
+    });
   });
 
   it("lists the campaign-wide timeline with visible participants", async () => {
@@ -214,7 +225,7 @@ describe("event service", () => {
       "Later boss fight",
       "Early stunt",
     ]);
-    expect(timeline[0].time).toEqual({ floor: 9, label: "Day 3" });
+    expect(timeline[0].time).toMatchObject({ floor: 9, label: "Day 3", phrase: "Day 3" });
     expect(timeline[0].participants.map((p) => `${p.name}:${p.role}`)).toEqual([
       "Carl:ACTOR",
       "Donut:TARGET",
@@ -1280,6 +1291,352 @@ describe("updateEvent", () => {
     await expect(
       updateEvent(player.id, campaign.id, event.id, {
         title: "Event",
+        secret: false,
+      }),
+    ).rejects.toBeInstanceOf(ServiceError);
+  });
+});
+
+describe("event order (orderKey + rank)", () => {
+  it("derives orderKey from the floor and never carries it in the patch", async () => {
+    const owner = await makeUser("order-derive@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Floor 7 scene",
+      floor: 7,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    const row = await prisma.event.findUnique({ where: { id: event.id } });
+    expect(row?.orderKey).toBe(7);
+    expect(row?.rank).toBeTruthy();
+
+    // The reviewable patch the change set stored must not contain `orderKey` —
+    // order is derived, not editable canon (ADR 0004).
+    const operation = await prisma.changeOperation.findFirst({
+      where: { op: OpKind.CREATE_EVENT, targetId: event.id },
+    });
+    expect(operation).not.toBeNull();
+    expect(Object.keys(operation?.patch as object)).not.toContain("orderKey");
+  });
+
+  it("gives events on a floor distinct ranks, newest first", async () => {
+    const owner = await makeUser("order-rank@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    const first = await createEvent(owner.id, campaign.id, {
+      title: "First",
+      floor: 9,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const second = await createEvent(owner.id, campaign.id, {
+      title: "Second",
+      floor: 9,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    const rows = await prisma.event.findMany({
+      where: { id: { in: [first.id, second.id] } },
+      select: { id: true, rank: true },
+    });
+    const rankById = new Map(rows.map((row) => [row.id, row.rank]));
+    expect(rankById.get(first.id)).not.toBe(rankById.get(second.id));
+    // Newer event ranks higher, so it sorts first within the floor.
+    expect(rankById.get(second.id)! > rankById.get(first.id)!).toBe(true);
+
+    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual(["Second", "First"]);
+  });
+
+  it("reorders an event within its floor by dropping it between neighbours", async () => {
+    const owner = await makeUser("reorder@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    const a = await createEvent(owner.id, campaign.id, {
+      title: "A",
+      floor: 5,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await createEvent(owner.id, campaign.id, {
+      title: "B",
+      floor: 5,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const c = await createEvent(owner.id, campaign.id, {
+      title: "C",
+      floor: 5,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    // Newest first → displayed order is C, B, A.
+    let timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual(["C", "B", "A"]);
+
+    // Move C to the bottom: drop it below A (aboveId = A, belowId = null).
+    const result = await reorderEvent(owner.id, campaign.id, c.id, {
+      aboveId: a.id,
+      belowId: null,
+    });
+    expect(result.participantIds).toContain(carl.id);
+
+    timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual(["B", "A", "C"]);
+  });
+
+  it("rejects a cross-floor reorder", async () => {
+    const owner = await makeUser("reorder-cross@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const onFive = await createEvent(owner.id, campaign.id, {
+      title: "Five",
+      floor: 5,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const onNine = await createEvent(owner.id, campaign.id, {
+      title: "Nine",
+      floor: 9,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    await expect(
+      reorderEvent(owner.id, campaign.id, onFive.id, { aboveId: onNine.id }),
+    ).rejects.toBeInstanceOf(ServiceError);
+  });
+
+  it("reassigns orderKey and rank when an edit moves the event to a new floor", async () => {
+    const owner = await makeUser("reorder-move-floor@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    // An existing event on floor 12 so the moved event must rank below it.
+    await createEvent(owner.id, campaign.id, {
+      title: "Resident",
+      floor: 12,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Mover",
+      floor: 3,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const before = await prisma.event.findUnique({ where: { id: event.id } });
+
+    await updateEvent(owner.id, campaign.id, event.id, {
+      title: "Mover",
+      floor: 12,
+      secret: false,
+    });
+
+    const after = await prisma.event.findUnique({ where: { id: event.id } });
+    expect(after?.orderKey).toBe(12);
+    expect(after?.rank).not.toBe(before?.rank);
+  });
+
+  it("requires DM access to reorder", async () => {
+    const owner = await makeUser("reorder-owner@test.com");
+    const player = await makeUser("reorder-player@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Scene",
+      floor: 4,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    await expect(
+      reorderEvent(player.id, campaign.id, event.id, { aboveId: null, belowId: null }),
+    ).rejects.toBeInstanceOf(ServiceError);
+  });
+});
+
+describe("typed timeRef (ADR 0004 slice 2)", () => {
+  it("persists the typed basis/offset/unit and generates the phrase", async () => {
+    const owner = await makeUser("timeref-basic@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Air throttled",
+      basis: "FLOOR_COLLAPSE",
+      floor: 9,
+      offset: 12,
+      unit: "HOUR",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    const row = await prisma.event.findUnique({ where: { id: event.id } });
+    expect(row?.orderKey).toBe(9);
+    expect(row?.inGameTime).toEqual({
+      basis: "FLOOR_COLLAPSE",
+      floor: 9,
+      offset: 12,
+      unit: "HOUR",
+    });
+
+    const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    expect(timeline[0].time).toMatchObject({
+      basis: "FLOOR_COLLAPSE",
+      offset: 12,
+      unit: "HOUR",
+      phrase: "12 hours before Floor 9 falls",
+    });
+  });
+
+  it("derives intra-floor rank from FLOOR_START offsets, later-in-fiction first", async () => {
+    const owner = await makeUser("timeref-derive-start@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    // Logged out of order; the offset (not the log order) decides placement.
+    for (const [title, offset] of [
+      ["Day 1", 1],
+      ["Day 5", 5],
+      ["Day 3", 3],
+    ] as const) {
+      await createEvent(owner.id, campaign.id, {
+        title,
+        basis: "FLOOR_START",
+        floor: 9,
+        offset,
+        unit: "DAY",
+        secret: false,
+        participants: [{ entityId: carl.id, role: "ACTOR" }],
+      });
+    }
+
+    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual(["Day 5", "Day 3", "Day 1"]);
+  });
+
+  it("derives FLOOR_COLLAPSE rank so less time remaining sorts later", async () => {
+    const owner = await makeUser("timeref-derive-collapse@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    await createEvent(owner.id, campaign.id, {
+      title: "10h before",
+      basis: "FLOOR_COLLAPSE",
+      floor: 9,
+      offset: 10,
+      unit: "HOUR",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await createEvent(owner.id, campaign.id, {
+      title: "2h before",
+      basis: "FLOOR_COLLAPSE",
+      floor: 9,
+      offset: 2,
+      unit: "HOUR",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    // 2h-before is closer to collapse (later in fiction) so it sorts on top.
+    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual(["2h before", "10h before"]);
+  });
+
+  it("re-derives the rank when an edit changes the offset within a floor", async () => {
+    const owner = await makeUser("timeref-reedit@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    const early = await createEvent(owner.id, campaign.id, {
+      title: "Early",
+      basis: "FLOOR_START",
+      floor: 9,
+      offset: 1,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await createEvent(owner.id, campaign.id, {
+      title: "Mid",
+      basis: "FLOOR_START",
+      floor: 9,
+      offset: 5,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    // Push Early past Mid by bumping its offset; the derived rank should follow.
+    await updateEvent(owner.id, campaign.id, early.id, {
+      title: "Early",
+      basis: "FLOOR_START",
+      floor: 9,
+      offset: 9,
+      unit: "DAY",
+      secret: false,
+    });
+
+    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual(["Early", "Mid"]);
+  });
+
+  it("resolves the anchor title for EVENT-basis phrasing and validates the anchor", async () => {
+    const owner = await makeUser("timeref-anchor@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    const stunt = await createEvent(owner.id, campaign.id, {
+      title: "Carl's stunt",
+      floor: 3,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const fallout = await createEvent(owner.id, campaign.id, {
+      title: "Fallout",
+      basis: "EVENT",
+      anchorEventId: stunt.id,
+      offset: -2,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    const falloutRow = timeline.find((event) => event.id === fallout.id);
+    expect(falloutRow?.time).toMatchObject({
+      basis: "EVENT",
+      anchorEventId: stunt.id,
+      phrase: "2 days before Carl's stunt",
+    });
+
+    // A dangling anchor is rejected; an event can't anchor to itself.
+    await expect(
+      createEvent(owner.id, campaign.id, {
+        title: "Bad anchor",
+        basis: "EVENT",
+        anchorEventId: "does-not-exist",
+        secret: false,
+        participants: [{ entityId: carl.id, role: "ACTOR" }],
+      }),
+    ).rejects.toBeInstanceOf(ServiceError);
+    await expect(
+      updateEvent(owner.id, campaign.id, stunt.id, {
+        title: "Carl's stunt",
+        basis: "EVENT",
+        anchorEventId: stunt.id,
         secret: false,
       }),
     ).rejects.toBeInstanceOf(ServiceError);

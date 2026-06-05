@@ -216,8 +216,20 @@ model Event {
   title       String
   summary     String?
   description String?
-  inGameTime  Json     @default("{}")   // { floor?, dayInFloor?, absoluteDay?, label? }
-  orderKey    Int      @default(0)       // sortable timeline position
+  // Typed timeRef (ADR 0004 slice 2, src/lib/time-ref.ts):
+  //   { basis, floor?, offset?, unit?, anchorEventId?, label? }
+  // basis ∈ COLLAPSE|FLOOR_START|FLOOR_COLLAPSE|EVENT|ABSOLUTE_DAY|UNSCHEDULED.
+  // The display phrase is generated from the structure; label is an optional
+  // one-off override.
+  inGameTime  Json     @default("{}")
+  // Order is mechanical and derived, never authored (ADR 0004): orderKey is the
+  // floor (coarse macro-clock), rank is a fractional index (lexicographically
+  // sortable string, COLLATE "C") giving stable DM-controllable order *within* a
+  // floor. rank is derived from a concrete floor-relative offset, or set by drag
+  // for unscheduled events. The timeline sorts by (orderKey, rank); neither is a
+  // reviewable change-set field.
+  orderKey    Int      @default(0)
+  rank        String   @default("a0")
   secret      Boolean  @default(false)
   source      ChangeSource @default(DM)
   status      CanonStatus @default(CANON)
@@ -228,7 +240,7 @@ model Event {
   causes      EventCausality[] @relation("Cause")
   // Future M3/M6: structured deltas (optionally applied), including PERSONA_SHIFT.
   provenance  Provenance[]
-  @@index([campaignId, orderKey])
+  @@index([campaignId, orderKey, rank])
 }
 
 enum ParticipantRole { ACTOR TARGET WITNESS LOCATION AFFECTED }

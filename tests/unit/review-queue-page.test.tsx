@@ -403,7 +403,9 @@ describe("ReviewQueuePage", () => {
             currentValues: {},
             patch: {
               title: { to: "Borant throttles Carl's air supply" },
-              inGameTime: { to: { floor: 9, label: "After the collapse" } },
+              inGameTime: {
+                to: { basis: "FLOOR_START", floor: 9, offset: 3, unit: "DAY" },
+              },
               participants: {
                 to: [
                   { entityId: "carl", role: "AFFECTED" },
@@ -422,10 +424,12 @@ describe("ReviewQueuePage", () => {
 
     render(await ReviewQueuePage({ params: Promise.resolve({ id: "c1" }) }));
 
-    expect(screen.getByText("Floor 9 · After the collapse")).toBeDefined();
+    expect(screen.getByText("Floor 9 · 3 days in")).toBeDefined();
     expect(screen.getByText("Carl · Affected; Borant Syndicate · Actor")).toBeDefined();
     expect(screen.getByRole("button", { name: "Accept title" })).toBeDefined();
-    expect(screen.queryByText('{"floor":9,"label":"After the collapse"}')).toBeNull();
+    expect(
+      screen.queryByText('{"basis":"FLOOR_START","floor":9,"offset":3,"unit":"DAY"}'),
+    ).toBeNull();
     expect(screen.getByRole("button", { name: "Edit inGameTime" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Edit participants" })).toBeDefined();
     expect(listEntitiesForUser).toHaveBeenCalledWith("u1", "c1");

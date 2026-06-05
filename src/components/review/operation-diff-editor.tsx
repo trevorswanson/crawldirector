@@ -20,7 +20,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { ReviewInputKind } from "@/lib/review";
-import { eventParticipantRoleValues } from "@/lib/validation";
+import {
+  eventParticipantRoleValues,
+  timeBasisValues,
+  timeUnitValues,
+  type TimeBasisValue,
+  type TimeUnitValue,
+} from "@/lib/validation";
 import { cn } from "@/lib/utils";
 
 type FieldDecision = "ACCEPTED" | "PENDING" | "REJECTED";
@@ -28,7 +34,15 @@ type ParticipantRole = (typeof eventParticipantRoleValues)[number];
 
 export type ReviewStructuredField =
   | { kind: "entity"; value: EntityCandidate | null }
-  | { kind: "inGameTime"; floor: number | null; label: string }
+  | {
+      kind: "inGameTime";
+      basis: TimeBasisValue;
+      floor: number | null;
+      offset: number | null;
+      unit: TimeUnitValue | null;
+      anchorEventId: string | null;
+      label: string;
+    }
   | {
       kind: "participants";
       value: { entity: EntityCandidate | null; role: ParticipantRole }[];
@@ -339,13 +353,7 @@ function ValueInput({
     );
   }
   if (structured?.kind === "inGameTime") {
-    return (
-      <InGameTimeReviewInput
-        floor={structured.floor}
-        label={structured.label}
-        onChange={onChange}
-      />
-    );
+    return <InGameTimeReviewInput structured={structured} onChange={onChange} />;
   }
   if (structured?.kind === "participants") {
     return (
@@ -424,49 +432,130 @@ function EntityReviewInput({
   );
 }
 
+// A short human hint for each basis, so the picker reads in plain language.
+const basisLabels: Record<TimeBasisValue, string> = {
+  COLLAPSE: "Since collapse",
+  FLOOR_START: "After floor opened",
+  FLOOR_COLLAPSE: "Before floor falls",
+  EVENT: "Before/after an event",
+  ABSOLUTE_DAY: "Absolute day",
+  UNSCHEDULED: "Unscheduled",
+};
+
+// Structured editor for an event's typed `timeRef` (ADR 0004 slice 2): the DM
+// edits basis + floor + offset + unit (+ a one-off label override) and the
+// hidden `value` carries the normalized JSON. An EVENT-basis anchor id is
+// preserved as-is (the review queue has no event typeahead yet — see PROGRESS).
 function InGameTimeReviewInput({
-  floor: initialFloor,
-  label: initialLabel,
+  structured,
   onChange,
 }: {
-  floor: number | null;
-  label: string;
+  structured: Extract<ReviewStructuredField, { kind: "inGameTime" }>;
   onChange: (value: string) => void;
 }) {
-  const [floor, setFloor] = useState(initialFloor == null ? "" : String(initialFloor));
-  const [label, setLabel] = useState(initialLabel);
-  const update = (nextFloor: string, nextLabel: string) => {
-    const value = JSON.stringify({
-      ...(nextFloor.trim() ? { floor: Number(nextFloor) } : {}),
-      ...(nextLabel.trim() ? { label: nextLabel.trim() } : {}),
+  const [basis, setBasis] = useState<TimeBasisValue>(structured.basis);
+  const [floor, setFloor] = useState(
+    structured.floor == null ? "" : String(structured.floor),
+  );
+  const [offset, setOffset] = useState(
+    structured.offset == null ? "" : String(structured.offset),
+  );
+  const [unit, setUnit] = useState<TimeUnitValue>(structured.unit ?? "DAY");
+  const [label, setLabel] = useState(structured.label);
+
+  const usesOffset = basis !== "UNSCHEDULED";
+  const serialize = (next: {
+    basis: TimeBasisValue;
+    floor: string;
+    offset: string;
+    unit: TimeUnitValue;
+    label: string;
+  }) =>
+    JSON.stringify({
+      basis: next.basis,
+      ...(next.floor.trim() ? { floor: Number(next.floor) } : {}),
+      ...(structured.anchorEventId && next.basis === "EVENT"
+        ? { anchorEventId: structured.anchorEventId }
+        : {}),
+      ...(next.basis !== "UNSCHEDULED" && next.offset.trim()
+        ? { offset: Number(next.offset), unit: next.unit }
+        : {}),
+      ...(next.label.trim() ? { label: next.label.trim() } : {}),
     });
-    onChange(value);
+  const current = { basis, floor, offset, unit, label };
+  const update = (patch: Partial<typeof current>) => {
+    const next = { ...current, ...patch };
+    onChange(serialize(next));
   };
+
   return (
-    <div className="grid gap-2 sm:grid-cols-[110px_minmax(0,1fr)]">
-      <input type="hidden" name="value" value={JSON.stringify({
-        ...(floor.trim() ? { floor: Number(floor) } : {}),
-        ...(label.trim() ? { label: label.trim() } : {}),
-      })} />
-      <Input
-        aria-label="In-game floor"
-        min={1}
-        max={18}
-        placeholder="Floor"
-        type="number"
-        value={floor}
+    <div className="grid gap-2">
+      <input type="hidden" name="value" value={serialize(current)} />
+      <select
+        aria-label="Time basis"
+        className="h-8 w-full border border-[var(--line-strong)] bg-[var(--bg)] px-2 font-mono text-[11px] text-[var(--ink)] focus-visible:border-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ring)]"
+        value={basis}
         onChange={(event) => {
-          setFloor(event.target.value);
-          update(event.target.value, label);
+          const nextBasis = event.target.value as TimeBasisValue;
+          setBasis(nextBasis);
+          update({ basis: nextBasis });
         }}
-      />
+      >
+        {timeBasisValues.map((value) => (
+          <option key={value} value={value}>
+            {basisLabels[value]}
+          </option>
+        ))}
+      </select>
+      <div className="grid gap-2 sm:grid-cols-[90px_90px_minmax(0,1fr)]">
+        <Input
+          aria-label="In-game floor"
+          min={1}
+          max={18}
+          placeholder="Floor"
+          type="number"
+          value={floor}
+          onChange={(event) => {
+            setFloor(event.target.value);
+            update({ floor: event.target.value });
+          }}
+        />
+        <Input
+          aria-label="Time offset"
+          placeholder="Offset"
+          type="number"
+          disabled={!usesOffset}
+          value={offset}
+          onChange={(event) => {
+            setOffset(event.target.value);
+            update({ offset: event.target.value });
+          }}
+        />
+        <select
+          aria-label="Time unit"
+          disabled={!usesOffset}
+          className="h-8 w-full border border-[var(--line-strong)] bg-[var(--bg)] px-2 font-mono text-[11px] text-[var(--ink)] disabled:opacity-50 focus-visible:border-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ring)]"
+          value={unit}
+          onChange={(event) => {
+            const nextUnit = event.target.value as TimeUnitValue;
+            setUnit(nextUnit);
+            update({ unit: nextUnit });
+          }}
+        >
+          {timeUnitValues.map((value) => (
+            <option key={value} value={value}>
+              {value.toLowerCase()}
+            </option>
+          ))}
+        </select>
+      </div>
       <Input
         aria-label="In-game time label"
-        placeholder="Time label"
+        placeholder="Label override (optional)"
         value={label}
         onChange={(event) => {
           setLabel(event.target.value);
-          update(floor, event.target.value);
+          update({ label: event.target.value });
         }}
       />
     </div>

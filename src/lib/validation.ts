@@ -405,11 +405,56 @@ const optionalFloor = z.preprocess(
     .optional(),
 );
 
+// Structured in-fiction time anchor (ADR 0004 slice 2). The canonical
+// definitions live in src/lib/time-ref.ts; imported here for the Zod schemas and
+// re-exported so UI components that import from validation.ts get them without a
+// second import.
+import { timeBasisValues, timeUnitValues } from "@/lib/time-ref";
+export { timeBasisValues, timeUnitValues };
+export type { TimeBasis as TimeBasisValue, TimeUnit as TimeUnitValue } from "@/lib/time-ref";
+
+const optionalBasis = z.preprocess(
+  (value) => (value === "" || value === null || value === undefined ? undefined : value),
+  z.enum(timeBasisValues).optional(),
+);
+
+const optionalUnit = z.preprocess(
+  (value) => (value === "" || value === null || value === undefined ? undefined : value),
+  z.enum(timeUnitValues).optional(),
+);
+
+// Signed offset magnitude (e.g. +3, -12). Empty/absent => undefined.
+const optionalOffset = z.preprocess(
+  (value) => (value === "" || value === null || value === undefined ? undefined : value),
+  z.coerce
+    .number()
+    .int("Time offset must be a whole number.")
+    .min(-100000, "Time offset is out of range.")
+    .max(100000, "Time offset is out of range.")
+    .optional(),
+);
+
+const optionalAnchorEventId = z.preprocess(
+  (value) => (value === "" || value === null || value === undefined ? undefined : value),
+  z.string().trim().max(60).optional(),
+);
+
+// The structured-time fields shared by the create/update event schemas. `floor`
+// + `timeLabel` are retained (floor is still the coarse clock; `timeLabel`
+// overrides the generated phrase).
+const eventTimeFields = {
+  basis: optionalBasis,
+  floor: optionalFloor,
+  offset: optionalOffset,
+  unit: optionalUnit,
+  anchorEventId: optionalAnchorEventId,
+  timeLabel: optionalText(120),
+} as const;
+
 export const createEventSchema = z.object({
   title: z.string().trim().min(1, "Event title is required.").max(200),
   summary: optionalText(2000),
-  floor: optionalFloor,
-  timeLabel: optionalText(120),
+  ...eventTimeFields,
   secret: z
     .preprocess((value) => value === true || value === "true" || value === "on", z.boolean())
     .default(false),
@@ -427,8 +472,7 @@ export type CreateEventInput = z.infer<typeof createEventSchema>;
 export const updateEventSchema = z.object({
   title: z.string().trim().min(1, "Event title is required.").max(200),
   summary: optionalText(2000),
-  floor: optionalFloor,
-  timeLabel: optionalText(120),
+  ...eventTimeFields,
   secret: z
     .preprocess((value) => value === true || value === "true" || value === "on", z.boolean())
     .default(false),

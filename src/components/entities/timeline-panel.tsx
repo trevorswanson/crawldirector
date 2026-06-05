@@ -24,6 +24,7 @@ import {
   type EffectRowValue,
 } from "@/components/entities/effect-rows";
 import { EventEffectsSection } from "@/components/entities/event-effects-section";
+import { EventTimeFields } from "@/components/entities/event-time-fields";
 import {
   ParticipantRows,
   type ParticipantRowValue,
@@ -39,9 +40,8 @@ import type { EntityEvent } from "@/server/services/events";
 export type TimelineCandidate = EntityCandidate;
 
 function formatTime(time: EntityEvent["time"]) {
-  if (time.label) return time.label;
-  if (time.floor != null) return `Floor ${time.floor}`;
-  return null;
+  // The phrase is generated server-side from the typed timeRef (ADR 0004).
+  return time.phrase;
 }
 
 function EventLink({
@@ -133,6 +133,7 @@ function EditEventForm({
   self,
   candidates,
   crawlerCandidates,
+  anchorCandidates,
   resolveName,
   onSubmit,
   onCancel,
@@ -142,6 +143,7 @@ function EditEventForm({
   self: EntityCandidate;
   candidates: EntityCandidate[];
   crawlerCandidates: EntityCandidate[];
+  anchorCandidates: { id: string; title: string }[];
   resolveName: (targetId: string) => string;
   onSubmit: (formData: FormData) => Promise<void>;
   onCancel: () => void;
@@ -196,26 +198,11 @@ function EditEventForm({
         placeholder="Summary (optional)"
         className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
       />
-      <div className="flex gap-2">
-        <input
-          name="floor"
-          type="number"
-          min={1}
-          max={18}
-          defaultValue={event.time.floor ?? ""}
-          aria-label="Floor"
-          placeholder="Floor"
-          className="w-[80px] border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
-        />
-        <input
-          name="timeLabel"
-          maxLength={120}
-          defaultValue={event.time.label ?? ""}
-          aria-label="Time label"
-          placeholder="Time label (e.g. Day 3)"
-          className="min-w-0 flex-1 border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
-        />
-      </div>
+      <EventTimeFields
+        initial={event.time}
+        anchorCandidates={anchorCandidates}
+        excludeEventId={event.id}
+      />
       <ParticipantRows candidates={candidates} initial={initialParticipants} />
       <EffectRows candidates={crawlerCandidates} initial={initialEffects} />
       <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
@@ -283,6 +270,8 @@ export function TimelinePanel({
   );
   const resolveName = (targetId: string) =>
     nameById.get(targetId) ?? "Unknown crawler";
+  // EVENT-basis anchors pick from the entity's other logged events.
+  const anchorCandidates = events.map((e) => ({ id: e.id, title: e.title }));
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [participant, setParticipant] = useState<TimelineCandidate | null>(null);
@@ -534,6 +523,7 @@ export function TimelinePanel({
                           self={self}
                           candidates={candidates}
                           crawlerCandidates={crawlerCandidates}
+                          anchorCandidates={anchorCandidates}
                           resolveName={resolveName}
                           onSubmit={handleEdit(e.id)}
                           onCancel={() => {
@@ -627,22 +617,7 @@ export function TimelinePanel({
             placeholder="Summary (optional)"
             className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
           />
-          <div className="flex gap-2">
-            <input
-              name="floor"
-              type="number"
-              min={1}
-              max={18}
-              placeholder="Floor"
-              className="w-[80px] border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
-            />
-            <input
-              name="timeLabel"
-              maxLength={120}
-              placeholder="Time label (e.g. Day 3)"
-              className="min-w-0 flex-1 border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
-            />
-          </div>
+          <EventTimeFields anchorCandidates={anchorCandidates} />
           <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
             This entity&rsquo;s role
             <select

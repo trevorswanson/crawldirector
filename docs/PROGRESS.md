@@ -57,6 +57,75 @@ in the general search bar.
 membership, log events with participants, and traverse cause→effect chains;
 relationships/events are reviewable + lockable.
 
+### Done — slice 16: typed `timeRef` + generated phrasing + derived rank (ADR 0004 slice 2) (2026-06-04)
+
+- [x] **Typed `timeRef`** (`src/lib/time-ref.ts`): `Event.inGameTime` now holds a
+      structured `{ basis, floor?, offset?, unit?, anchorEventId?, label? }` instead
+      of an overloaded `{ floor?, label? }`. `basis` is one of `COLLAPSE`,
+      `FLOOR_START`, `FLOOR_COLLAPSE`, `EVENT`, `ABSOLUTE_DAY`, `UNSCHEDULED` — every
+      DCC time flavor is an *offset from a basis*. `buildTimeRef`/`readTimeRef`
+      normalize + read (tolerating legacy `{ floor, label }` rows), and the service
+      validates an `EVENT` anchor (live, non-self event).
+- [x] **Generated phrasing**: `phraseTimeRef` renders a consistent display string
+      from the structure ("Floor 9 · 3 days in", "12 hours before Floor 9 falls",
+      "Day 47 since the collapse", "2 days before *Carl's stunt*"). The free
+      `timeLabel` is now an optional **one-off override** of the generated phrase,
+      not the only home for the coordinate. Timelines + Review Queue render the
+      phrase; the entity/campaign timelines resolve EVENT-anchor titles.
+- [x] **Derived rank**: when the basis is floor-relative with a concrete offset
+      (`FLOOR_START` ascending, `FLOOR_COLLAPSE` counting down), the intra-floor
+      `rank` is derived automatically at apply time (`rankForEvent` /
+      `deriveRankForFloor` in `review.ts`) by bracketing the event among its
+      same-basis floor siblings — no manual drag needed. `UNSCHEDULED`/label-only
+      (and non-floor-relative) anchors fall back to the manual drag-rank. Editing an
+      offset within a floor re-derives the rank.
+- [x] **UI**: a shared `EventTimeFields` (basis/floor/offset/unit pickers + an
+      EVENT-basis anchor selector + label-override) replaces the bare floor + label
+      inputs on the entity Timeline panel and the campaign Timeline create/edit
+      forms; the Review Queue's structured `inGameTime` editor renders the same
+      basis/offset/unit controls. Still **no** `orderKey`/`rank` field in the queue.
+- [x] **Migration** `20260604220000_m3_event_timeref`: data-only JSONB backfill
+      stamping a `basis` onto existing rows (a floor ⇒ `FLOOR_START`, else
+      `UNSCHEDULED`), preserving the old `label` verbatim as the override. No column
+      change (`rank` landed in slice 1).
+- [x] Tests: `time-ref` pure unit suite (build/read/phrase/sort-key); service tests
+      for typed persistence, FLOOR_START/FLOOR_COLLAPSE derived ordering, offset-edit
+      re-rank, and EVENT-anchor phrasing + validation; `EventTimeFields` +
+      Review-Queue editor component tests.
+- [ ] **Deferred to ADR 0004 slice 3:** causality-consistency warnings (an effect
+      sorted above its cause) and "order from causality." Review-Queue EVENT-anchor
+      editing still preserves the existing anchor id rather than offering an event
+      typeahead.
+
+### Done — slice 15: derived event order + intra-floor rank/drag (ADR 0004 slice 1) (2026-06-04)
+
+- [x] **Stopped the `ORDERKEY` leak** into the Review Queue: `createEvent` /
+      `updateEvent` no longer put `orderKey` in the reviewable patch. Order is
+      now **derived server-side** from the event's in-game-time anchor (the
+      floor) in the review apply path (`applyCreateEvent` / `applyUpdateEvent`),
+      so a derived sort key is never presented to the DM as editable canon.
+- [x] **Added an intra-floor `rank`** (`Event.rank`, a fractional index —
+      lexicographically-sortable string, `src/lib/rank.ts`, a self-contained port
+      of the `fractional-indexing` algorithm). The timeline sorts by
+      `(orderKey desc, rank desc, createdAt desc)`; new events append above their
+      floor (newest-first), and a floor move re-derives `orderKey` + a fresh rank.
+- [x] **Intra-floor drag** on the campaign timeline page: events are draggable
+      with a grip handle and "drag to reorder within a floor" hint; dropping
+      computes the dragged event's new neighbours (pure `computeReorderNeighbors`)
+      and calls `reorderEvent` (a mechanical, audited, review-bypassing `rank`
+      update like `setEventLock`). Cross-floor drops are no-ops/rejected.
+- [x] **Migration** `20260604210000_m3_event_rank`: additive `rank TEXT COLLATE
+      "C"` column (bytewise ordering — the rank alphabet spans both letter cases)
+      + per-`(campaign, floor)` backfill spacing existing rows by their current
+      order, and a `(campaignId, orderKey, rank)` index replacing the coarse one.
+- [x] Tests: `rank` fractional-index unit suite; service tests for derived
+      `orderKey`/`rank`, reorder (incl. cross-floor reject + DM-only), floor-move
+      re-rank; `reorderEventAction` + drag-interaction/neighbour component tests.
+      Verified end-to-end in-app (drag persisted a `REORDER` audit entry).
+- [x] **Followed by ADR 0004 slice 2** (typed `timeRef` + generated phrasing +
+      derived rank — see slice 16 above). Slice 3 (causality-consistency warnings /
+      "order from causality") remains.
+
 ### Done — slice 14: independent field decisions + resolved effect previews (2026-06-04)
 
 - [x] Fixed per-field review persistence by adding `ChangeOperation.fieldDecisions`.

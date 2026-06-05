@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
-import { Pencil, Plus, Trash2, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { GripVertical, Pencil, Plus, Trash2, X } from "lucide-react";
 
 import {
   applyCampaignEventEffectsAction,
   createCampaignEventAction,
+  reorderEventAction,
   updateCampaignEventAction,
   type EventActionState,
 } from "@/app/(dm)/actions";
@@ -19,6 +21,7 @@ import {
   type EffectRowValue,
 } from "@/components/entities/effect-rows";
 import { EventEffectsSection } from "@/components/entities/event-effects-section";
+import { EventTimeFields } from "@/components/entities/event-time-fields";
 import {
   ParticipantRows,
   type ParticipantRowValue,
@@ -37,18 +40,51 @@ type ParticipantDraft = {
 };
 
 function formatTime(time: CampaignTimelineEvent["time"]) {
-  if (time.label) return time.label;
-  if (time.floor != null) return `Floor ${time.floor}`;
-  return "Unplaced";
+  // Generated phrase from the typed timeRef (ADR 0004); falls back when blank.
+  return time.phrase ?? "Unplaced";
+}
+
+// Resolve the neighbours a dragged event would land between, given the displayed
+// (rank-descending) order. Intra-floor only — dropping onto an event on another
+// floor is a no-op (returns null). Dropping moves the dragged event past the
+// target on the side it came from, so every slot within a floor is reachable.
+// The returned ids are the events directly above/below the drop slot (null at a
+// floor boundary), which `reorderEvent` slots a fresh rank between (ADR 0004).
+export function computeReorderNeighbors(
+  events: Pick<CampaignTimelineEvent, "id" | "orderKey">[],
+  draggedId: string,
+  targetId: string,
+): { aboveId: string | null; belowId: string | null } | null {
+  if (draggedId === targetId) return null;
+  const dragged = events.find((event) => event.id === draggedId);
+  const target = events.find((event) => event.id === targetId);
+  if (!dragged || !target) return null;
+  if (dragged.orderKey !== target.orderKey) return null;
+
+  const origIndex = events.findIndex((event) => event.id === draggedId);
+  const targetIndex = events.findIndex((event) => event.id === targetId);
+  const rest = events.filter((event) => event.id !== draggedId);
+  const targetInRest = rest.findIndex((event) => event.id === targetId);
+
+  // Moving down (the drag started above the target) drops below the target;
+  // moving up drops above it.
+  const above = origIndex < targetIndex ? rest[targetInRest] : rest[targetInRest - 1];
+  const below = origIndex < targetIndex ? rest[targetInRest + 1] : rest[targetInRest];
+
+  const sameFloorId = (event: { id: string; orderKey: number } | undefined) =>
+    event && event.orderKey === dragged.orderKey ? event.id : null;
+  return { aboveId: sameFloorId(above), belowId: sameFloorId(below) };
 }
 
 function NewEventForm({
   campaignId,
   candidates,
+  anchorCandidates,
   onClose,
 }: {
   campaignId: string;
   candidates: EntityCandidate[];
+  anchorCandidates: { id: string; title: string }[];
   onClose: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -103,22 +139,7 @@ function NewEventForm({
         placeholder="Summary (optional)"
         className="border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2 text-[12.5px] text-[var(--ink)]"
       />
-      <div className="grid gap-2 sm:grid-cols-[100px_minmax(0,1fr)]">
-        <input
-          name="floor"
-          type="number"
-          min={1}
-          max={18}
-          placeholder="Floor"
-          className="border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2 text-[12px] text-[var(--ink)]"
-        />
-        <input
-          name="timeLabel"
-          maxLength={120}
-          placeholder="Time label (e.g. Day 3)"
-          className="border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2 text-[12px] text-[var(--ink)]"
-        />
-      </div>
+      <EventTimeFields anchorCandidates={anchorCandidates} />
 
       <input type="hidden" name="participantCount" value={rows.length} />
       <div className="flex flex-col gap-2">
@@ -221,6 +242,7 @@ function EditEventForm({
   event,
   candidates,
   crawlerCandidates,
+  anchorCandidates,
   resolveName,
   onClose,
 }: {
@@ -228,6 +250,7 @@ function EditEventForm({
   event: CampaignTimelineEvent;
   candidates: EntityCandidate[];
   crawlerCandidates: EntityCandidate[];
+  anchorCandidates: { id: string; title: string }[];
   resolveName: (targetId: string) => string;
   onClose: () => void;
 }) {
@@ -301,26 +324,11 @@ function EditEventForm({
         placeholder="Summary (optional)"
         className="border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2 text-[12.5px] text-[var(--ink)]"
       />
-      <div className="grid gap-2 sm:grid-cols-[100px_minmax(0,1fr)]">
-        <input
-          name="floor"
-          type="number"
-          min={1}
-          max={18}
-          defaultValue={event.time.floor ?? ""}
-          aria-label="Floor"
-          placeholder="Floor"
-          className="border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2 text-[12px] text-[var(--ink)]"
-        />
-        <input
-          name="timeLabel"
-          maxLength={120}
-          defaultValue={event.time.label ?? ""}
-          aria-label="Time label"
-          placeholder="Time label (e.g. Day 3)"
-          className="border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2 text-[12px] text-[var(--ink)]"
-        />
-      </div>
+      <EventTimeFields
+        initial={event.time}
+        anchorCandidates={anchorCandidates}
+        excludeEventId={event.id}
+      />
 
       <ParticipantRows candidates={candidates} initial={initialParticipants} />
       <EffectRows candidates={crawlerCandidates} initial={initialEffects} />
@@ -362,6 +370,31 @@ export function CampaignTimeline({
 }) {
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [reorderError, setReorderError] = useState<string | null>(null);
+  const [reordering, startReorder] = useTransition();
+  const router = useRouter();
+
+  const draggingEvent = events.find((event) => event.id === draggingId) ?? null;
+
+  const handleDrop = (targetId: string) => {
+    const sourceId = draggingId;
+    setDraggingId(null);
+    setDropTargetId(null);
+    if (!sourceId) return;
+    const neighbors = computeReorderNeighbors(events, sourceId, targetId);
+    if (!neighbors) return;
+    setReorderError(null);
+    startReorder(async () => {
+      const result = await reorderEventAction(campaignId, sourceId, neighbors);
+      if (result?.error) {
+        setReorderError(result.error);
+        return;
+      }
+      router.refresh();
+    });
+  };
 
   const crawlerCandidates = candidates.filter(
     (candidate) => candidate.type === "CRAWLER",
@@ -371,6 +404,11 @@ export function CampaignTimeline({
   );
   const resolveName = (targetId: string) =>
     nameById.get(targetId) ?? "Unknown crawler";
+  // EVENT-basis anchors pick from the campaign's other logged events.
+  const anchorCandidates = events.map((event) => ({
+    id: event.id,
+    title: event.title,
+  }));
 
   return (
     <div className="h-full overflow-y-auto">
@@ -400,8 +438,21 @@ export function CampaignTimeline({
           <NewEventForm
             campaignId={campaignId}
             candidates={candidates}
+            anchorCandidates={anchorCandidates}
             onClose={() => setOpen(false)}
           />
+        )}
+
+        {reorderError && (
+          <p role="alert" className="text-[11px] text-[var(--no)]">
+            {reorderError}
+          </p>
+        )}
+
+        {events.length > 1 && (
+          <p className="font-mono text-[9.5px] uppercase tracking-[.08em] text-[var(--ink-faint)]">
+            Drag events to reorder them within a floor.
+          </p>
         )}
 
         {events.length === 0 ? (
@@ -414,13 +465,57 @@ export function CampaignTimeline({
           <div className="relative pl-[28px]">
             <div className="absolute bottom-2 left-[7px] top-2 w-px bg-[var(--line-strong)]" />
             <div className="flex flex-col gap-5">
-              {events.map((event) => (
-                <article key={event.id} className="relative">
+              {events.map((event) => {
+                const canDrag =
+                  !event.locked && editingId !== event.id && !reordering;
+                const canDrop =
+                  draggingId !== null &&
+                  draggingId !== event.id &&
+                  draggingEvent?.orderKey === event.orderKey;
+                return (
+                <article
+                  key={event.id}
+                  data-event-id={event.id}
+                  draggable={canDrag}
+                  onDragStart={() => setDraggingId(event.id)}
+                  onDragEnd={() => {
+                    setDraggingId(null);
+                    setDropTargetId(null);
+                  }}
+                  onDragOver={(domEvent) => {
+                    if (!canDrop) return;
+                    domEvent.preventDefault();
+                    setDropTargetId(event.id);
+                  }}
+                  onDragLeave={() =>
+                    setDropTargetId((current) =>
+                      current === event.id ? null : current,
+                    )
+                  }
+                  onDrop={(domEvent) => {
+                    domEvent.preventDefault();
+                    handleDrop(event.id);
+                  }}
+                  className={[
+                    "relative transition-opacity",
+                    draggingId === event.id ? "opacity-40" : "",
+                    canDrop && dropTargetId === event.id
+                      ? "before:absolute before:-left-[20px] before:-top-[10px] before:h-px before:w-[calc(100%+20px)] before:bg-[var(--accent)]"
+                      : "",
+                  ].join(" ")}
+                >
                   <span
                     aria-hidden
                     className="absolute left-[-27px] top-[5px] h-[13px] w-[13px] rounded-full border-2 border-[var(--accent)] bg-[var(--bg)]"
                   />
                   <div className="flex flex-wrap items-center gap-[8px]">
+                    {canDrag && (
+                      <GripVertical
+                        aria-hidden
+                        size={13}
+                        className="cursor-grab text-[var(--ink-faint)]"
+                      />
+                    )}
                     <span className="font-mono text-[10px] tracking-[.04em] text-[var(--ink-faint)]">
                       {formatTime(event.time)}
                     </span>
@@ -460,6 +555,7 @@ export function CampaignTimeline({
                       event={event}
                       candidates={candidates}
                       crawlerCandidates={crawlerCandidates}
+                      anchorCandidates={anchorCandidates}
                       resolveName={resolveName}
                       onClose={() => setEditingId(null)}
                     />
@@ -508,7 +604,8 @@ export function CampaignTimeline({
                     </div>
                   )}
                 </article>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
