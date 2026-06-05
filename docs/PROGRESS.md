@@ -4,6 +4,38 @@ Running checklist of milestones/tasks, newest first. See
 [`11-roadmap.md`](./11-roadmap.md) for the full plan and
 [`12-working-sessions.md`](./12-working-sessions.md) for how to pick up work.
 
+## M3 — Causality-consistency warnings (ADR 0004 slice 3, part 1) ✅ (2026-06-05)
+
+**Goal:** use the `EventCausality` DAG as a soft coherence signal on the timeline.
+A cause must precede its effect in fiction; when the timeline's mechanical sort
+(floor `orderKey` + intra-floor `rank`) contradicts that — an effect placed
+*before* its own cause — flag it. Non-blocking, per [ADR 0004](./adr/0004-event-time-model-and-ordering.md).
+
+- [x] Added `src/lib/causality.ts` (`findCausalityWarnings`): a pure, UI-agnostic
+      check that, given the timeline events' `(orderKey, rank)` positions and their
+      outgoing causal edges, returns the set of causality `linkId`s whose effect
+      sorts strictly earlier in fiction than its cause. Ties (identical position)
+      and edges to events not in the set (e.g. visibility-filtered) don't warn.
+- [x] Surfaced inline on the campaign timeline (`CampaignTimeline`): a memoized
+      warning set (computed over the live event set, so it stays accurate after a
+      local drag/remove; the just-removed link held for undo is dropped) drives an
+      `AlertTriangle` marker next to each flagged `Caused by` / `Causes` link and a
+      `N out of order` count chip in the header (both in the `--hot` hazard color).
+- [x] Tests: `tests/unit/causality.test.ts` (consistent chain, earlier-floor
+      inversion, intra-floor rank inversion, tie = no-warn, missing endpoint,
+      mixed chain flags only the bad link); component tests asserting the inline
+      markers + header chip appear for an inverted link and are absent for a
+      consistent one. lint + typecheck green; timeline/lib test files pass.
+- [ ] **Still pending in slice 3:** "order from causality" — topologically sort
+      `UNSCHEDULED` stretches using the DAG to settle ambiguous adjacency. This is
+      the interactive reorder half (rewrites `rank` for unscheduled events) and is
+      a follow-up slice.
+- **Verification note:** Docker/Postgres isn't available in this environment, so
+      the DB-backed service suite + aggregate coverage gate run in CI (precedent:
+      slices 11, M3.5). This slice adds no service-layer code — it's pure-lib +
+      client component, both fully covered by the jsdom/node tests above. In-browser
+      verification deferred for the same DB reason.
+
 ## M3 — DM undo + closed Review Queue history ✅ (2026-06-05)
 
 - [x] Added audited restore operations for every current DM soft-delete surface:
