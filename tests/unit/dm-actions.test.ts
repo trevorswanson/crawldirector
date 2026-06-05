@@ -31,6 +31,7 @@ const {
   restoreEvent,
   setEventLock,
   reorderEvent,
+  orderEventsFromCausality,
   linkEventCause,
   archiveEventCausality,
   restoreEventCausality,
@@ -71,6 +72,7 @@ const {
   restoreEvent: vi.fn(),
   setEventLock: vi.fn(),
   reorderEvent: vi.fn(),
+  orderEventsFromCausality: vi.fn(),
   linkEventCause: vi.fn(),
   archiveEventCausality: vi.fn(),
   restoreEventCausality: vi.fn(),
@@ -123,6 +125,7 @@ vi.mock("@/server/services/events", () => ({
   restoreEvent,
   setEventLock,
   reorderEvent,
+  orderEventsFromCausality,
   linkEventCause,
   archiveEventCausality,
   restoreEventCausality,
@@ -168,6 +171,7 @@ import {
   archiveEventAction,
   restoreEventAction,
   reorderEventAction,
+  orderEventsFromCausalityAction,
   toggleEventLockAction,
   linkEventCauseAction,
   archiveEventCausalityAction,
@@ -1608,6 +1612,49 @@ describe("reorderEventAction", () => {
     const result = await reorderEventAction("c1", "ev1", {});
 
     expect(result).toEqual({ error: "Could not reorder the event. Please try again." });
+  });
+});
+
+describe("orderEventsFromCausalityAction", () => {
+  it("orders the timeline and revalidates affected entity + timeline pages", async () => {
+    orderEventsFromCausality.mockResolvedValue({
+      updatedIds: ["ev1", "ev2"],
+      affectedEntityIds: ["e1", "e2"],
+    });
+
+    const result = await orderEventsFromCausalityAction("c1");
+
+    expect(result).toBeUndefined();
+    expect(orderEventsFromCausality).toHaveBeenCalledWith("u1", "c1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+  });
+
+  it("still revalidates the timeline when nothing moved", async () => {
+    orderEventsFromCausality.mockResolvedValue({ updatedIds: [], affectedEntityIds: [] });
+
+    const result = await orderEventsFromCausalityAction("c1");
+
+    expect(result).toBeUndefined();
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+  });
+
+  it("returns the service error message and does not revalidate", async () => {
+    orderEventsFromCausality.mockRejectedValue(new ServiceError("Not allowed."));
+
+    const result = await orderEventsFromCausalityAction("c1");
+
+    expect(result).toEqual({ error: "Not allowed." });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("returns a generic error for an unexpected failure", async () => {
+    orderEventsFromCausality.mockRejectedValue(new Error("boom"));
+
+    const result = await orderEventsFromCausalityAction("c1");
+
+    expect(result).toEqual({ error: "Could not order the timeline. Please try again." });
   });
 });
 

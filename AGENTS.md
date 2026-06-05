@@ -72,13 +72,14 @@ model + `knowledge` service let a DM reveal a canon entity to one actor entity
 ("Known to" / "Knows about") on the entity detail page. This M3 slice wires
 ENTITY→ENTITY grants; the schema already supports field/relationship/event/FACT
 targets + MEMBERSHIP recipients for the M7 player "known world" and M11 agent
-fog-of-war. ADR 0004 slice 3 part 1 is in: the timeline flags **causality-consistency
+fog-of-war. ADR 0004 slice 3 is complete: the timeline flags **causality-consistency
 warnings** (`src/lib/causality.ts`) — a causal link whose effect is ordered
 earlier in fiction than its cause shows an inline ⚠ + a header "N out of order"
-count, non-blocking. Still to come in M3: time-bounded membership and
-knowledge/reveal grants, plus the rest of ADR 0004 slice 3 ("order from
-causality" — topologically sort unscheduled stretches from the DAG). Still to come
-in M3: time-bounded membership.
+count, non-blocking — and a one-click **Order from causality**
+(`src/lib/causality-order.ts` + `orderEventsFromCausality`) topologically sorts
+each floor's *movable* (unlocked, non-derived-order) events from the DAG so causes
+precede their effects, an audited review-bypassing `rank` rewrite that leaves
+locked/system-derived events pinned. Still to come in M3: time-bounded membership.
 **M3.5 (tagging)** is
 underway: the service layer (campaign tag list, tag filtering, tag-aware search)
 plus the UI — a tag-selection input with campaign autocomplete on the entity

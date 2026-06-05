@@ -15,6 +15,7 @@ const {
   updateCampaignEventAction,
   applyCampaignEventEffectsAction,
   reorderEventAction,
+  orderEventsFromCausalityAction,
   setCampaignCurrentFloorAction,
   setCampaignEventLockAction,
   archiveCampaignEventAction,
@@ -28,6 +29,7 @@ const {
   updateCampaignEventAction: vi.fn(),
   applyCampaignEventEffectsAction: vi.fn(),
   reorderEventAction: vi.fn(),
+  orderEventsFromCausalityAction: vi.fn(),
   setCampaignCurrentFloorAction: vi.fn(),
   setCampaignEventLockAction: vi.fn(),
   archiveCampaignEventAction: vi.fn(),
@@ -43,6 +45,7 @@ vi.mock("@/app/(dm)/actions", () => ({
   updateCampaignEventAction,
   applyCampaignEventEffectsAction,
   reorderEventAction,
+  orderEventsFromCausalityAction,
   setCampaignCurrentFloorAction,
   setCampaignEventLockAction,
   archiveCampaignEventAction,
@@ -267,6 +270,72 @@ describe("CampaignTimeline", () => {
       screen.queryByLabelText("Out of order: this effect is placed before its cause"),
     ).toBeNull();
     expect(screen.queryByText("1 out of order")).toBeNull();
+  });
+
+  // ── "Order from causality" affordance (ADR 0004 slice 3) ──
+
+  // A same-floor inverted pair: the cause ("ev-cause", rank a1, later in fiction)
+  // is declared the cause of the effect ("ev-effect", rank a0, earlier) — so a
+  // reorder would move them, and both are movable (FLOOR_START, no offset).
+  function invertedFloorPair(): CampaignTimelineEvent[] {
+    return [
+      {
+        ...makeEvent("ev-cause", "The decree", 9, "a1"),
+        causes: [{ id: "ev-effect", title: "The fallout", linkId: "lk1" }],
+      },
+      {
+        ...makeEvent("ev-effect", "The fallout", 9, "a0"),
+        causedBy: [{ id: "ev-cause", title: "The decree", linkId: "lk1" }],
+      },
+    ];
+  }
+
+  it("shows 'Order from causality' and runs it when a reorder would help", async () => {
+    orderEventsFromCausalityAction.mockResolvedValue(undefined);
+    renderTimeline({ events: invertedFloorPair() });
+
+    const button = screen.getByRole("button", { name: /order from causality/i });
+    await act(async () => {
+      fireEvent.click(button);
+    });
+
+    expect(orderEventsFromCausalityAction).toHaveBeenCalledWith("c1");
+    await waitFor(() => expect(routerRefresh).toHaveBeenCalled());
+  });
+
+  it("surfaces the error and does not refresh when ordering fails", async () => {
+    orderEventsFromCausalityAction.mockResolvedValue({ error: "Not allowed." });
+    renderTimeline({ events: invertedFloorPair() });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /order from causality/i }));
+    });
+
+    expect(await screen.findByText("Not allowed.")).toBeDefined();
+    expect(routerRefresh).not.toHaveBeenCalled();
+  });
+
+  it("hides 'Order from causality' when the timeline is already in order", () => {
+    renderTimeline({
+      events: [
+        {
+          ...makeEvent("ev-cause", "The decree", 9, "a0"),
+          causes: [{ id: "ev-effect", title: "The fallout", linkId: "lk1" }],
+        },
+        {
+          ...makeEvent("ev-effect", "The fallout", 9, "a1"),
+          causedBy: [{ id: "ev-cause", title: "The decree", linkId: "lk1" }],
+        },
+      ],
+    });
+
+    expect(screen.queryByRole("button", { name: /order from causality/i })).toBeNull();
+  });
+
+  it("hides 'Order from causality' for a non-DM viewer", () => {
+    renderTimeline({ events: invertedFloorPair(), canEdit: false });
+
+    expect(screen.queryByRole("button", { name: /order from causality/i })).toBeNull();
   });
 
   it("submits a multi-participant event", async () => {

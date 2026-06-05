@@ -17,6 +17,7 @@ import {
   listCampaignFloors,
   listCampaignTimeline,
   listEventsForEntity,
+  orderEventsFromCausality,
   reorderEvent,
   restoreEvent,
   restoreEventCausality,
@@ -1608,6 +1609,156 @@ describe("event order (orderKey + rank)", () => {
         belowId: neighbor.id,
       }),
     ).rejects.toThrow("Could not place the event between those neighbours.");
+  });
+});
+
+describe("order from causality (ADR 0004 slice 3)", () => {
+  it("reorders an inverted causal pair so the cause precedes its effect", async () => {
+    const owner = await makeUser("order-causality@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    // A logged first (earlier in fiction), C logged second (later). Then C is
+    // declared the cause of A — an inversion: the effect A sits before its cause.
+    const a = await createEvent(owner.id, campaign.id, {
+      title: "A",
+      floor: 5,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const c = await createEvent(owner.id, campaign.id, {
+      title: "C",
+      floor: 5,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await linkEventCause(owner.id, campaign.id, { causeId: c.id, effectId: a.id });
+
+    // Before: newest-first display is C, A.
+    let timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual(["C", "A"]);
+
+    const result = await orderEventsFromCausality(owner.id, campaign.id);
+    expect(result.updatedIds.length).toBeGreaterThan(0);
+    expect(result.affectedEntityIds).toContain(carl.id);
+
+    // After: C precedes A in fiction, so the later-first display is A, C.
+    timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual(["A", "C"]);
+
+    // The reorder is audited as a mechanical causality pass.
+    const audit = await prisma.auditLog.findFirst({
+      where: { campaignId: campaign.id, action: "REORDER", targetId: c.id },
+      orderBy: { createdAt: "desc" },
+    });
+    expect((audit?.detail as { reason?: string })?.reason).toBe("CAUSALITY");
+  });
+
+  it("is a no-op when the timeline is already causally ordered", async () => {
+    const owner = await makeUser("order-causality-noop@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    // A (earlier) causes C (later) — already consistent.
+    const a = await createEvent(owner.id, campaign.id, {
+      title: "A",
+      floor: 5,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const c = await createEvent(owner.id, campaign.id, {
+      title: "C",
+      floor: 5,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await linkEventCause(owner.id, campaign.id, { causeId: a.id, effectId: c.id });
+
+    const result = await orderEventsFromCausality(owner.id, campaign.id);
+    expect(result.updatedIds).toEqual([]);
+    expect(result.affectedEntityIds).toEqual([]);
+  });
+
+  it("never moves a locked (pinned) event, flowing movable ones around it", async () => {
+    const owner = await makeUser("order-causality-locked@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    const pinned = await createEvent(owner.id, campaign.id, {
+      title: "Pinned",
+      floor: 5,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const movable = await createEvent(owner.id, campaign.id, {
+      title: "Movable",
+      floor: 5,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await setEventLock(owner.id, campaign.id, pinned.id, true);
+    // The movable event is declared the cause of the locked one — it must sort
+    // before the locked event, which itself cannot move.
+    await linkEventCause(owner.id, campaign.id, {
+      causeId: movable.id,
+      effectId: pinned.id,
+    });
+
+    const before = await prisma.event.findUnique({ where: { id: pinned.id } });
+    const result = await orderEventsFromCausality(owner.id, campaign.id);
+    expect(result.updatedIds).toEqual([movable.id]);
+    const after = await prisma.event.findUnique({ where: { id: pinned.id } });
+    expect(after?.rank).toBe(before?.rank); // pinned rank untouched
+
+    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    // Movable now precedes Pinned in fiction → later-first display is Pinned, Movable.
+    expect(timeline.map((event) => event.title)).toEqual(["Pinned", "Movable"]);
+  });
+
+  it("never moves an event whose intra-floor order is system-derived", async () => {
+    const owner = await makeUser("order-causality-derived@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    // A FLOOR_START anchor with a concrete offset is order-derived → pinned.
+    const derived = await createEvent(owner.id, campaign.id, {
+      title: "Derived",
+      basis: "FLOOR_START",
+      floor: 5,
+      offset: 2,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const movable = await createEvent(owner.id, campaign.id, {
+      title: "Movable",
+      floor: 5,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await linkEventCause(owner.id, campaign.id, {
+      causeId: movable.id,
+      effectId: derived.id,
+    });
+
+    const before = await prisma.event.findUnique({ where: { id: derived.id } });
+    const result = await orderEventsFromCausality(owner.id, campaign.id);
+    expect(result.updatedIds).not.toContain(derived.id);
+    const after = await prisma.event.findUnique({ where: { id: derived.id } });
+    expect(after?.rank).toBe(before?.rank); // derived-order rank untouched
+  });
+
+  it("denies a non-DM", async () => {
+    const owner = await makeUser("order-causality-owner@test.com");
+    const player = await makeUser("order-causality-player@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+
+    await expect(
+      orderEventsFromCausality(player.id, campaign.id),
+    ).rejects.toBeInstanceOf(ServiceError);
   });
 });
 
