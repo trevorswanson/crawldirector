@@ -253,7 +253,6 @@ describe("TimelinePanel", () => {
       />,
     );
 
-    expect(screen.getByText("Locked")).toBeDefined();
     expect(screen.getByRole("button", { name: "Unlock event" })).toBeDefined();
     expect(screen.queryByRole("button", { name: /Remove event/ })).toBeNull();
   });

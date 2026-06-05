@@ -44,7 +44,6 @@ import {
 } from "@/components/entities/participant-rows";
 import { HudTag } from "@/components/ui/hud-tag";
 import { Kicker } from "@/components/ui/kicker";
-import { LockChip } from "@/components/ui/lock-chip";
 import { SourceBadge } from "@/components/ui/source-badge";
 import { TypeDot } from "@/components/ui/type-dot";
 import { provenanceMeta } from "@/lib/entities";
@@ -908,7 +907,7 @@ export function CampaignTimeline({
                 DM-only
               </span>
             )}
-            {event.locked && <LockChip locked />}
+
             <span className="font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)]">
               {event.participants.length} participants
             </span>
@@ -930,9 +929,13 @@ export function CampaignTimeline({
                     type="submit"
                     aria-label={event.locked ? "Unlock event" : "Lock event"}
                     title={event.locked ? "Unlock event" : "Lock event"}
-                    className="inline-flex items-center border border-[var(--line)] px-[7px] py-[5px] text-[var(--ink-faint)] hover:border-[var(--sys)] hover:text-[var(--sys)]"
+                    className="inline-flex items-center border px-[7px] py-[5px] transition-colors cursor-pointer"
+                    style={{
+                      borderColor: event.locked ? "var(--sys)" : "var(--line)",
+                      color: event.locked ? "var(--sys)" : "var(--ink-faint)",
+                    }}
                   >
-                    {event.locked ? <Unlock aria-hidden size={11} /> : <Lock aria-hidden size={11} />}
+                    {event.locked ? <Lock aria-hidden size={11} /> : <Unlock aria-hidden size={11} />}
                   </button>
                 </form>
                 {!event.locked && (

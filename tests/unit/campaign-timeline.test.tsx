@@ -211,7 +211,7 @@ describe("CampaignTimeline", () => {
 
     expect(screen.getByText("Unplaced")).toBeDefined();
     expect(screen.getByText("DM-only")).toBeDefined();
-    expect(screen.getByText("Locked")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Unlock event" })).toBeDefined();
     expect(screen.getByText("0 participants")).toBeDefined();
     // Causality is now a thread: a label plus the linked event title.
     expect(screen.getByText("Caused by")).toBeDefined();

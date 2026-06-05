@@ -30,7 +30,6 @@ import {
   type ParticipantRowValue,
 } from "@/components/entities/participant-rows";
 import { Kicker } from "@/components/ui/kicker";
-import { LockChip } from "@/components/ui/lock-chip";
 import { SourceBadge } from "@/components/ui/source-badge";
 import { TypeDot } from "@/components/ui/type-dot";
 import { provenanceMeta } from "@/lib/entities";
@@ -391,7 +390,7 @@ export function TimelinePanel({
                         secret
                       </span>
                     )}
-                    {e.locked && <LockChip locked />}
+
                   </div>
                   <button
                     type="button"
@@ -575,12 +574,16 @@ export function TimelinePanel({
                             type="submit"
                             aria-label={e.locked ? "Unlock event" : "Lock event"}
                             title={e.locked ? "Unlock event" : "Lock event"}
-                            className="inline-flex items-center gap-[6px] border border-[var(--line)] px-[8px] py-[5px] font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:border-[var(--sys)] hover:text-[var(--sys)]"
+                            className="inline-flex items-center gap-[6px] border px-[8px] py-[5px] font-mono text-[9px] uppercase tracking-[.08em] transition-colors cursor-pointer"
+                            style={{
+                              borderColor: e.locked ? "var(--sys)" : "var(--line)",
+                              color: e.locked ? "var(--sys)" : "var(--ink-faint)",
+                            }}
                           >
                             {e.locked ? (
-                              <Unlock aria-hidden size={11} />
-                            ) : (
                               <Lock aria-hidden size={11} />
+                            ) : (
+                              <Unlock aria-hidden size={11} />
                             )}
                             {e.locked ? "Unlock event" : "Lock event"}
                           </button>
