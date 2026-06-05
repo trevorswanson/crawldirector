@@ -844,7 +844,6 @@ export function CampaignTimeline({
     }) !== null;
     const canDrag =
       canEdit && !event.locked && !orderDerived && editingId !== event.id && !reordering;
-    const showCausalityControls = canEdit && !event.locked && editingId === event.id;
     const canDrop =
       draggingId !== null &&
       draggingId !== event.id &&

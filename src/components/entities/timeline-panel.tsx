@@ -464,7 +464,6 @@ export function TimelinePanel({
               const causeCandidates = events.filter(
                 (candidate) => !unavailableCauseIds.has(candidate.id),
               );
-              const showCausalityControls = !e.locked && editingId === e.id;
               return (
                 <div key={e.id} className="relative">
                   {/* provenance-colored node on the spine */}
