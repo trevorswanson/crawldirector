@@ -949,7 +949,10 @@ export async function listCampaignFloors(
         )
         .sort(
           (a, b) =>
-            b.rank.localeCompare(a.rank) ||
+            // Bytewise rank order (descending), matching the DM branch's
+            // `orderBy: { rank: "desc" }` (the column is TEXT COLLATE "C").
+            // localeCompare would disagree across the upper/lowercase boundary.
+            (a.rank < b.rank ? 1 : a.rank > b.rank ? -1 : 0) ||
             b.createdAt.getTime() - a.createdAt.getTime(),
         )[0];
       liveEventId = live?.id ?? null;
