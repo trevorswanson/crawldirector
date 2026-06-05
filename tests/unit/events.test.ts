@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
-import { CanonStatus, Role } from "@/generated/prisma/client";
+import { CanonStatus, Prisma, Role } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 import {
@@ -1898,8 +1898,8 @@ describe("campaign floor metadata", () => {
         summary: "",
         description: "",
         visibility: "DM_ONLY",
-        status: CanonStatus.ACTIVE,
-        data: "invalid json string" as any,
+        status: CanonStatus.CANON,
+        data: "invalid json string" as unknown as Prisma.InputJsonValue,
       }
     });
 

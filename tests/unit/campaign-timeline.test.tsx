@@ -742,11 +742,11 @@ describe("CampaignTimeline", () => {
     Element.prototype.scrollIntoView = scrollIntoView;
     const mockGetElement = vi.spyOn(document, "getElementById").mockReturnValue({
       scrollIntoView,
-    } as any);
+    } as unknown as HTMLElement);
 
     const floors: CampaignFloorMeta = {
       ...emptyFloors,
-      ladder: [{ number: 9, name: "Larracos", count: 1, current: false, reached: true, logged: true }],
+      ladder: [{ number: 9, name: "Larracos", count: 1, current: false, reached: true, logged: true, entityId: null }],
     };
     renderTimeline({ events: [...events], floors });
 
@@ -760,8 +760,8 @@ describe("CampaignTimeline", () => {
       ...emptyFloors,
       currentFloorNumber: 1,
       ladder: [
-        { number: 1, name: "First", count: 1, current: true, reached: true, logged: true },
-        { number: 2, name: "Second", count: 0, current: false, reached: false, logged: false },
+        { number: 1, name: "First", count: 1, current: true, reached: true, logged: true, entityId: null },
+        { number: 2, name: "Second", count: 0, current: false, reached: false, logged: false, entityId: null },
       ],
     };
     renderTimeline({ events: [...events], floors });
@@ -785,41 +785,47 @@ describe("CampaignTimeline", () => {
       effects: [
         {
           id: "eff-1",
-          eventId: "ev1",
           kind: "ADJUST_STAT",
           targetId: "e1",
-          targetName: "Carl",
           stat: "gold",
           delta: 0,
+          valueNumber: null,
           value: null,
           note: "Bonus chest",
           applied: false,
+          appliedChangeSetId: null,
+          pendingChangeSetId: null,
+          pendingOperationId: null,
           reviewStatus: "PENDING",
         },
         {
           id: "eff-2",
-          eventId: "ev1",
           kind: "SET_ALIVE",
           targetId: "e1",
-          targetName: "Carl",
           stat: null,
           delta: null,
+          valueNumber: null,
           value: null,
           note: null,
           applied: false,
+          appliedChangeSetId: null,
+          pendingChangeSetId: null,
+          pendingOperationId: null,
           reviewStatus: "REJECTED",
         },
         {
           id: "eff-3",
-          eventId: "ev1",
           kind: "SET_STAT",
           targetId: "e1",
-          targetName: "Carl",
           stat: "hp",
           delta: null,
-          value: 100,
+          valueNumber: 100,
+          value: null,
           note: null,
           applied: false,
+          appliedChangeSetId: null,
+          pendingChangeSetId: null,
+          pendingOperationId: null,
           reviewStatus: "SUPERSEDED",
         }
       ]

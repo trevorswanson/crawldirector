@@ -48,19 +48,36 @@ describe("FxToggle", () => {
   });
 
   it("survives a localStorage write failure", () => {
-    let mockSetItem;
-    if (typeof localStorage !== "undefined") {
-      mockSetItem = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+    // jsdom's localStorage may use getters or be non-configurable on the
+    // instance, so we override the whole property on `window` with a trap
+    // that always throws for `setItem`.
+    const real = window.localStorage;
+    let setItemCalled = false;
+    const trap = {
+      ...real,
+      setItem() {
+        setItemCalled = true;
         throw new Error("quota exceeded");
-      });
-    }
+      },
+    };
+    Object.defineProperty(window, "localStorage", {
+      value: trap,
+      writable: true,
+      configurable: true,
+    });
+
     render(<FxToggle />);
 
     const button = screen.getByRole("button", { name: /FX/ });
     expect(() => fireEvent.click(button)).not.toThrow();
     expect(button.getAttribute("aria-pressed")).toBe("false");
-    if (mockSetItem) {
-      expect(mockSetItem).toHaveBeenCalled();
-    }
+    expect(setItemCalled).toBe(true);
+
+    // Restore the real localStorage.
+    Object.defineProperty(window, "localStorage", {
+      value: real,
+      writable: true,
+      configurable: true,
+    });
   });
 });

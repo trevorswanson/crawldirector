@@ -767,7 +767,7 @@ describe("event effects", () => {
         title: "Test event",
         summary: "",
         status: "CANON",
-        effects: { someKey: "not an array" } as any,
+        effects: { someKey: "not an array" } as Prisma.InputJsonValue,
         participants: {
           create: [{ entityId: carl.id, role: "ACTOR" }]
         }
