@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
+  ArrowDownUp,
   Check,
   GripVertical,
   Lock,
@@ -23,6 +24,7 @@ import {
   archiveCampaignEventCausalityAction,
   createCampaignEventAction,
   linkCampaignEventCauseAction,
+  orderEventsFromCausalityAction,
   reorderEventAction,
   restoreCampaignEventAction,
   restoreCampaignEventCausalityAction,
@@ -50,6 +52,7 @@ import { Kicker } from "@/components/ui/kicker";
 import { SourceBadge } from "@/components/ui/source-badge";
 import { TypeDot } from "@/components/ui/type-dot";
 import { findCausalityWarnings } from "@/lib/causality";
+import { orderFromCausality } from "@/lib/causality-order";
 import { provenanceMeta } from "@/lib/entities";
 import { describeEffect } from "@/lib/event-effects";
 import { floorRelativeSortKey } from "@/lib/time-ref";
@@ -735,6 +738,7 @@ export function CampaignTimeline({
   const [removedEventId, setRemovedEventId] = useState<string | null>(null);
   const [removedCausalityId, setRemovedCausalityId] = useState<string | null>(null);
   const [reordering, startReorder] = useTransition();
+  const [ordering, startOrdering] = useTransition();
   const [, startFloorChange] = useTransition();
   const router = useRouter();
 
@@ -835,6 +839,44 @@ export function CampaignTimeline({
     if (removedCausalityId) set.delete(removedCausalityId);
     return set;
   }, [liveEvents, removedCausalityId]);
+
+  // Whether "order from causality" (ADR 0004 slice 3) would actually move
+  // anything: topologically sort each floor's movable (unlocked, non-derived)
+  // events from the DAG and see if any rank changes. Recomputed server-side from
+  // canon when applied — this only gates the affordance. Movable mirrors the
+  // drag gate (`floorRelativeSortKey === null` and not locked).
+  const canOrderFromCausality = useMemo(
+    () =>
+      orderFromCausality(
+        liveEvents.map((event) => ({
+          id: event.id,
+          orderKey: event.orderKey,
+          rank: event.rank,
+          movable:
+            !event.locked &&
+            floorRelativeSortKey({
+              basis: event.time.basis,
+              floor: event.time.floor ?? undefined,
+              offset: event.time.offset ?? undefined,
+              unit: event.time.unit ?? undefined,
+            }) === null,
+          causes: event.causes.map((cause) => ({ id: cause.id })),
+        })),
+      ).length > 0,
+    [liveEvents],
+  );
+
+  const handleOrderFromCausality = () => {
+    setReorderError(null);
+    startOrdering(async () => {
+      const result = await orderEventsFromCausalityAction(campaignId);
+      if (result?.error) {
+        setReorderError(result.error);
+        return;
+      }
+      router.refresh();
+    });
+  };
   const shownEvents =
     filter === "ALL"
       ? liveEvents
@@ -1302,6 +1344,19 @@ export function CampaignTimeline({
                   <AlertTriangle aria-hidden size={12} />
                   {causalityWarnings.size} out of order
                 </span>
+              )}
+              {canEdit && canOrderFromCausality && (
+                <button
+                  type="button"
+                  onClick={handleOrderFromCausality}
+                  disabled={ordering}
+                  title="Reorder unscheduled events within each floor so every cause sits before its effect. Locked and time-anchored events stay put."
+                  className="inline-flex items-center gap-[6px] border px-[9px] py-[5px] font-mono text-[10px] uppercase tracking-[.08em] disabled:opacity-50"
+                  style={{ borderColor: "var(--accent)", color: "var(--accent)" }}
+                >
+                  <ArrowDownUp aria-hidden size={12} />
+                  {ordering ? "Ordering..." : "Order from causality"}
+                </button>
               )}
               {canEdit && !open && (
                 <button

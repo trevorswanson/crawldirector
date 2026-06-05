@@ -1,8 +1,7 @@
 # ADR 0004 — Event time model: derived ordering, intra-floor rank, and structured time references
 
-- **Status:** accepted (slices 1–2 delivered 2026-06-04; slice 3 in progress —
-  causality-consistency warnings delivered 2026-06-05, "order from causality"
-  still pending)
+- **Status:** accepted (slices 1–3 delivered; slices 1–2 on 2026-06-04, slice 3
+  on 2026-06-05 — causality-consistency warnings, then "order from causality")
 - **Date:** 2026-06-04
 - **Milestone:** M3 (events, timeline, causality)
 
@@ -187,8 +186,13 @@ A Prisma migration plus a data backfill:
      `findCausalityWarnings` flags causal links whose effect is ordered earlier
      in fiction than its cause; the campaign timeline surfaces them inline next
      to each link and as a header count, non-blocking) and "order from
-     causality" (**pending** — topologically sort `UNSCHEDULED` stretches using
-     the DAG).
+     causality" (**delivered** — `src/lib/causality-order.ts`'s
+     `orderFromCausality` topologically sorts each floor's *movable* events
+     (unlocked, non-derived order) from the DAG, leaving locked / system-derived
+     events pinned and unsatisfiable contradictions to the warning;
+     `orderEventsFromCausality` applies the resulting `rank` rewrites as an
+     audited, review-bypassing pass, surfaced as a one-click **Order from
+     causality** button on the campaign timeline).
 
 ### Deferred (explicitly out of scope)
 

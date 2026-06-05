@@ -37,6 +37,7 @@ import {
   archiveEventCausality,
   createEvent,
   linkEventCause,
+  orderEventsFromCausality,
   reorderEvent,
   restoreEvent,
   restoreEventCausality,
@@ -1025,6 +1026,25 @@ export async function reorderEventAction(
   }
 
   for (const id of result.participantIds) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${id}`);
+  }
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
+  return undefined;
+}
+
+export async function orderEventsFromCausalityAction(
+  campaignId: string,
+): Promise<EventActionState> {
+  const user = await requireUser();
+  let result: { affectedEntityIds: string[] };
+  try {
+    result = await orderEventsFromCausality(user.id, campaignId);
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    return { error: "Could not order the timeline. Please try again." };
+  }
+
+  for (const id of result.affectedEntityIds) {
     revalidatePath(`/campaigns/${campaignId}/entities/${id}`);
   }
   revalidatePath(`/campaigns/${campaignId}/timeline`);

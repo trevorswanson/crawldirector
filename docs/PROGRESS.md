@@ -4,6 +4,58 @@ Running checklist of milestones/tasks, newest first. See
 [`11-roadmap.md`](./11-roadmap.md) for the full plan and
 [`12-working-sessions.md`](./12-working-sessions.md) for how to pick up work.
 
+## M3 — Order from causality (ADR 0004 slice 3, part 2) ✅ (2026-06-05)
+
+**Goal:** finish [ADR 0004](./adr/0004-event-time-model-and-ordering.md) slice 3.
+Part 1 (2026-06-05) made the timeline *detect* causal inconsistency (an effect
+sorted before its cause). This is the one-click *fix*: topologically sort each
+floor's events from the `EventCausality` DAG so causes precede their effects,
+rewriting only the intra-floor `rank` the DM hasn't pinned.
+
+- [x] Added `src/lib/causality-order.ts` (`orderFromCausality`): a pure,
+      UI-agnostic, self-contained reorder. Per floor, it stable-topo-sorts events
+      from their causal edges and returns the `rank` rewrites that put causes
+      before effects. **Movable** events (unlocked *and* not system-derived order
+      — the same gate the drag affordance uses, `floorRelativeSortKey === null`)
+      are the only ones moved; **pinned** events (locked, or with a derived
+      intra-floor order) keep their exact rank and current relative order
+      (synthetic chain edges hold them in place), and movable events flow into the
+      gaps between them. An already-ordered floor returns nothing; an
+      unsatisfiable constraint (a contradiction between two pinned events, or a
+      cycle) leaves that floor untouched for the inline warning to flag. Rank
+      generation reuses `src/lib/rank.ts`; bytewise rank order throughout (matches
+      the `TEXT COLLATE "C"` column + `src/lib/causality.ts`).
+- [x] Service `orderEventsFromCausality` (`events.ts`): recomputes the reorder
+      from canon (movable = `!locked && floorRelativeSortKey(readTimeRef(...)) ===
+      null`), then applies the `rank` rewrites in a transaction — a mechanical,
+      audited (`REORDER` with `detail.reason = "CAUSALITY"`), review-bypassing
+      update, the bulk counterpart to a manual drag (order is not canon, ADR
+      0004). Returns the moved ids + affected participant ids; an empty result
+      means the timeline was already causally ordered. DM/co-DM only.
+- [x] Action `orderEventsFromCausalityAction` + a one-click **Order from
+      causality** button on the campaign timeline header (next to the "N out of
+      order" warning chip). It appears only for a DM and only when a reorder would
+      actually change something (computed client-side over the live event set with
+      the same `orderFromCausality`), runs the action, and refreshes.
+- [x] Tests: `tests/unit/causality-order.test.ts` (already-ordered no-op,
+      inverted pair, three-event chain, pinned-event never moved, pinned relative
+      order kept, pinned-vs-pinned contradiction left alone, per-floor
+      independence, missing/cross-floor edges ignored, single-event floor);
+      DB-backed service tests (reorder + `REORDER`/`CAUSALITY` audit, no-op when
+      ordered, locked-pinned and derived-order-pinned both untouched, non-DM
+      denial); action revalidation tests; and component tests (button shown +
+      runs / surfaces error / hidden when ordered / hidden for non-DM). lint,
+      typecheck, build, and the full coverage gate green (statements 95.23%).
+- [x] **Verified in-browser** against the seeded Demo Campaign's Floor 9: added a
+      backwards causal link (collar overload → breach), which raised the **1 out
+      of order** warning and the **Order from causality** button; clicking it
+      reordered the floor so every cause precedes its effect (warning + button
+      cleared). Reverted the test link + restored the original floor order
+      afterward.
+- [ ] **Follow-ups:** none for ADR 0004 — slices 1–3 are all delivered. Possible
+      future refinement: a per-floor "order this floor" affordance (vs. the
+      current campaign-wide pass) if a DM wants finer control.
+
 ## M3 — Knowledge / reveal grants (fog-of-war foundation) ✅ (2026-06-05)
 
 **Goal:** the M3 roadmap's "knowledge/reveal foundations for fog of war" — a DM

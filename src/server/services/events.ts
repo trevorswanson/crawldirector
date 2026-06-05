@@ -8,10 +8,12 @@ import {
   Role,
   Visibility,
 } from "@/generated/prisma/client";
+import { orderFromCausality } from "@/lib/causality-order";
 import { ServiceError } from "@/lib/errors";
 import { generateRankBetween } from "@/lib/rank";
 import {
   buildTimeRef,
+  floorRelativeSortKey,
   phraseTimeRef,
   readTimeRef,
   type TimeBasis,
@@ -1131,6 +1133,88 @@ export async function reorderEvent(
 
     return { id: event.id, participantIds };
   });
+}
+
+/**
+ * Reorder every floor's *movable* events so causes sort before their effects,
+ * using the `EventCausality` DAG (ADR 0004 slice 3 — "order from causality").
+ * This is the bulk, one-click counterpart to a manual drag: a mechanical, audited
+ * `rank` rewrite that bypasses the review pipeline (order is not canon, ADR 0004).
+ * Pinned events — locked, or with a system-derived intra-floor order — are never
+ * moved; floors with an unsatisfiable causal constraint (a contradiction between
+ * pinned events, or a cycle) are left for the inline warning to flag. Returns the
+ * moved event ids and the participant ids whose timelines need revalidation; an
+ * empty `updatedIds` means the timeline was already causally ordered. DM/co-DM only.
+ */
+export async function orderEventsFromCausality(
+  userId: string,
+  campaignId: string,
+) {
+  await assertCampaignDm(userId, campaignId);
+
+  const events = await prisma.event.findMany({
+    where: { campaignId, status: { not: CanonStatus.ARCHIVED } },
+    select: {
+      id: true,
+      orderKey: true,
+      rank: true,
+      locked: true,
+      inGameTime: true,
+      participants: { select: { entityId: true } },
+      causes: {
+        where: { status: { not: CanonStatus.ARCHIVED } },
+        select: { effectId: true },
+      },
+    },
+  });
+
+  const orderable = events.map((event) => ({
+    id: event.id,
+    orderKey: event.orderKey,
+    rank: event.rank,
+    // Movable = the DM can drag it: unlocked and not system-derived order.
+    movable: !event.locked && floorRelativeSortKey(readTimeRef(event.inGameTime)) === null,
+    causes: event.causes.map((edge) => ({ id: edge.effectId })),
+  }));
+
+  const updates = orderFromCausality(orderable);
+  if (updates.length === 0) {
+    return { updatedIds: [] as string[], affectedEntityIds: [] as string[] };
+  }
+
+  const participantsById = new Map(
+    events.map((event) => [event.id, event.participants.map((p) => p.entityId)] as const),
+  );
+  const rankById = new Map(events.map((event) => [event.id, event.rank] as const));
+
+  const affectedEntityIds = new Set<string>();
+  await prisma.$transaction(async (tx) => {
+    for (const update of updates) {
+      await tx.event.update({ where: { id: update.id }, data: { rank: update.rank } });
+      await tx.auditLog.create({
+        data: {
+          campaignId,
+          actorUserId: userId,
+          action: "REORDER",
+          targetType: "EVENT",
+          targetId: update.id,
+          detail: {
+            rank: update.rank,
+            previousRank: rankById.get(update.id) ?? null,
+            reason: "CAUSALITY",
+          },
+        },
+      });
+      for (const entityId of participantsById.get(update.id) ?? []) {
+        affectedEntityIds.add(entityId);
+      }
+    }
+  });
+
+  return {
+    updatedIds: updates.map((update) => update.id),
+    affectedEntityIds: Array.from(affectedEntityIds),
+  };
 }
 
 function markEffectsPendingReview(
