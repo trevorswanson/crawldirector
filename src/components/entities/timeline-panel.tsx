@@ -253,22 +253,24 @@ function EditEventForm({
                     event={cause}
                     inEntityTimeline={entityEventIds.has(cause.id)}
                   />
-                  <form
-                    action={archiveEventCausalityAction.bind(
-                      null,
-                      campaignId,
-                      entityId,
-                      cause.linkId,
-                    )}
-                  >
-                    <button
-                      type="submit"
-                      title="Remove cause link"
-                      className="inline-flex p-[2px] text-[var(--ink-faint)] hover:text-[var(--no)]"
+                  {!event.locked && (
+                    <form
+                      action={archiveEventCausalityAction.bind(
+                        null,
+                        campaignId,
+                        entityId,
+                        cause.linkId,
+                      )}
                     >
-                      <X aria-hidden size={10} />
-                    </button>
-                  </form>
+                      <button
+                        type="submit"
+                        title="Remove cause link"
+                        className="inline-flex p-[2px] text-[var(--ink-faint)] hover:text-[var(--no)]"
+                      >
+                        <X aria-hidden size={10} />
+                      </button>
+                    </form>
+                  )}
                 </span>
               ))}
             </div>
@@ -289,27 +291,29 @@ function EditEventForm({
                     event={effect}
                     inEntityTimeline={entityEventIds.has(effect.id)}
                   />
-                  <form
-                    action={archiveEventCausalityAction.bind(
-                      null,
-                      campaignId,
-                      entityId,
-                      effect.linkId,
-                    )}
-                  >
-                    <button
-                      type="submit"
-                      title="Remove cause link"
-                      className="inline-flex p-[2px] text-[var(--ink-faint)] hover:text-[var(--no)]"
+                  {!event.locked && (
+                    <form
+                      action={archiveEventCausalityAction.bind(
+                        null,
+                        campaignId,
+                        entityId,
+                        effect.linkId,
+                      )}
                     >
-                      <X aria-hidden size={10} />
-                    </button>
-                  </form>
+                      <button
+                        type="submit"
+                        title="Remove cause link"
+                        className="inline-flex p-[2px] text-[var(--ink-faint)] hover:text-[var(--no)]"
+                      >
+                        <X aria-hidden size={10} />
+                      </button>
+                    </form>
+                  )}
                 </span>
               ))}
             </div>
           )}
-          {causeCandidates.length > 0 && (
+          {!event.locked && causeCandidates.length > 0 && (
             <CauseLinkForm
               campaignId={campaignId}
               entityId={entityId}
