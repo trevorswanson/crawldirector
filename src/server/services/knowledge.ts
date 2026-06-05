@@ -36,6 +36,14 @@ async function assertCampaignDm(userId: string, campaignId: string) {
   return membership;
 }
 
+// Knowledge grants are a DM curation surface. A player (or non-member) sees none
+// — the reads return [] rather than throwing, so a player-visible entity page
+// (which also renders this page path) stays readable instead of erroring.
+async function isCampaignDm(userId: string, campaignId: string) {
+  const membership = await getMembership(userId, campaignId);
+  return !!membership && membership.role !== Role.PLAYER;
+}
+
 const knownEntitySelect = {
   id: true,
   name: true,
@@ -65,9 +73,11 @@ function activeGrantWhere(now: Date) {
   };
 }
 
-async function liveEntity(campaignId: string, entityId: string) {
+// A reveal endpoint must be *live canon* — not a DRAFT/PENDING/REJECTED row that
+// could later disappear, leaving a grant pointing at non-canon material.
+async function liveCanonEntity(campaignId: string, entityId: string) {
   return prisma.entity.findFirst({
-    where: { id: entityId, campaignId, status: { not: CanonStatus.ARCHIVED } },
+    where: { id: entityId, campaignId, status: CanonStatus.CANON },
     select: knownEntitySelect,
   });
 }
@@ -92,8 +102,8 @@ export async function grantEntityKnowledge(
   }
 
   const [target, recipient] = await Promise.all([
-    liveEntity(campaignId, targetEntityId),
-    liveEntity(campaignId, recipientEntityId),
+    liveCanonEntity(campaignId, targetEntityId),
+    liveCanonEntity(campaignId, recipientEntityId),
   ]);
   if (!target) throw new ServiceError("The revealed entity is not live canon in this campaign.");
   if (!recipient) throw new ServiceError("The recipient entity is not live canon in this campaign.");
@@ -200,7 +210,7 @@ async function projectGrants(
   const ids = grants.map((g) => (pick === "target" ? g.targetId : g.recipientId));
   if (ids.length === 0) return [];
   const entities = await prisma.entity.findMany({
-    where: { id: { in: ids }, campaignId, status: { not: CanonStatus.ARCHIVED } },
+    where: { id: { in: ids }, campaignId, status: CanonStatus.CANON },
     select: knownEntitySelect,
   });
   const byId = new Map(entities.map((e) => [e.id, e] as const));
@@ -222,7 +232,7 @@ export async function listKnowledgeOfEntity(
   campaignId: string,
   entityId: string,
 ): Promise<KnowledgeGrantView[]> {
-  await assertCampaignDm(userId, campaignId);
+  if (!(await isCampaignDm(userId, campaignId))) return [];
   const grants = await prisma.knowledgeGrant.findMany({
     where: {
       campaignId,
@@ -244,7 +254,7 @@ export async function listKnowledgeHeldByEntity(
   campaignId: string,
   entityId: string,
 ): Promise<KnowledgeGrantView[]> {
-  await assertCampaignDm(userId, campaignId);
+  if (!(await isCampaignDm(userId, campaignId))) return [];
   const grants = await prisma.knowledgeGrant.findMany({
     where: {
       campaignId,

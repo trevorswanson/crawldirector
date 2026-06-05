@@ -97,6 +97,9 @@ export default async function EntityPage({
       type: candidate.type,
     }));
   const timelineCandidates: TimelineCandidate[] = candidates;
+  // Knowledge grants are a DM curation surface; players reaching a player-visible
+  // entity page never see the reveal panel (and the reads return [] for them).
+  const isDm = candidateList.role !== "PLAYER";
   const fields = entityFields(entity, candidateList.entities);
   const detailHref = `/campaigns/${id}/entities/${entityId}`;
   const existingData = (entity.data as {
@@ -470,17 +473,19 @@ export default async function EntityPage({
           />
         </div>
 
-        {/* knowledge — private reveals / fog of war (M3) */}
-        <div className="border-b border-[var(--line)] px-[18px] py-4">
-          <KnowledgePanel
-            campaignId={id}
-            entityId={entityId}
-            entityName={entity.name}
-            knownTo={knownTo}
-            knowsAbout={knowsAbout}
-            candidates={candidates}
-          />
-        </div>
+        {/* knowledge — private reveals / fog of war (M3), DM-only curation */}
+        {isDm && (
+          <div className="border-b border-[var(--line)] px-[18px] py-4">
+            <KnowledgePanel
+              campaignId={id}
+              entityId={entityId}
+              entityName={entity.name}
+              knownTo={knownTo}
+              knowsAbout={knowsAbout}
+              candidates={candidates}
+            />
+          </div>
+        )}
 
         {/* provenance */}
         <div className="px-[18px] py-4">

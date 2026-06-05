@@ -244,6 +244,15 @@ describe("EntityPage", () => {
     expect(screen.getByText("Knowledge panel (1/2)")).toBeDefined();
   });
 
+  it("hides the DM-only knowledge panel from a player viewer", async () => {
+    getEntityForUser.mockResolvedValue(crawler());
+    listEntitiesForUser.mockResolvedValue({ entities: [], role: "PLAYER" });
+
+    await renderPage();
+
+    expect(screen.queryByText(/Knowledge panel/)).toBeNull();
+  });
+
   it("renders entity tags as links that filter the World Browser", async () => {
     getEntityForUser.mockResolvedValue(
       crawler({ tags: ["floor 1", "sponsor"] }),

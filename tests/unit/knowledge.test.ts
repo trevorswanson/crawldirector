@@ -155,7 +155,27 @@ describe("grantEntityKnowledge", () => {
     await expect(
       grantEntityKnowledge(stranger.id, campaign.id, { targetEntityId: a.id, recipientEntityId: b.id }),
     ).rejects.toThrow(ServiceError);
-    await expect(listKnowledgeOfEntity(player.id, campaign.id, a.id)).rejects.toThrow(ServiceError);
+    // Reads are a DM curation surface: a player/non-member sees nothing (not an
+    // error), so a player-visible entity page that triggers these reads stays up.
+    await grantEntityKnowledge(dm.id, campaign.id, { targetEntityId: a.id, recipientEntityId: b.id });
+    expect(await listKnowledgeOfEntity(player.id, campaign.id, a.id)).toHaveLength(0);
+    expect(await listKnowledgeHeldByEntity(player.id, campaign.id, b.id)).toHaveLength(0);
+    expect(await listKnowledgeOfEntity(stranger.id, campaign.id, a.id)).toHaveLength(0);
+  });
+
+  it("rejects a grant to a non-canon (e.g. pending) entity", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    const canon = await makeEntity(dm.id, campaign.id, "Canon");
+    const pending = await makeEntity(dm.id, campaign.id, "Pending");
+    await prisma.entity.update({ where: { id: pending.id }, data: { status: "PENDING" } });
+
+    await expect(
+      grantEntityKnowledge(dm.id, campaign.id, {
+        targetEntityId: pending.id,
+        recipientEntityId: canon.id,
+      }),
+    ).rejects.toThrow(ServiceError);
   });
 });
 
@@ -239,5 +259,20 @@ describe("active-grant projection", () => {
     // Expired grant dropped; archived-recipient grant dropped → nothing active.
     const knownTo = await listKnowledgeOfEntity(dm.id, campaign.id, target.id);
     expect(knownTo).toHaveLength(0);
+  });
+
+  it("drops grants whose counterpart entity is no longer canon (e.g. pending)", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    const target = await makeEntity(dm.id, campaign.id, "Vault");
+    const recipient = await makeEntity(dm.id, campaign.id, "Spy");
+    await grantEntityKnowledge(dm.id, campaign.id, {
+      targetEntityId: target.id,
+      recipientEntityId: recipient.id,
+    });
+
+    expect(await listKnowledgeOfEntity(dm.id, campaign.id, target.id)).toHaveLength(1);
+    await prisma.entity.update({ where: { id: recipient.id }, data: { status: "PENDING" } });
+    expect(await listKnowledgeOfEntity(dm.id, campaign.id, target.id)).toHaveLength(0);
   });
 });
