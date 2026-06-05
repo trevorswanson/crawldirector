@@ -37,11 +37,13 @@ function link(
   type: "MEMBER_OF" | "LEADS",
   targetId: string,
   secret = false,
+  bounds: { sinceDay?: number; untilDay?: number } = {},
 ) {
   return createRelationship(userId, campaignId, sourceId, {
     type,
     targetId,
     secret,
+    ...bounds,
   });
 }
 
@@ -218,6 +220,66 @@ describe("getGroupRoster", () => {
     roster = await getGroupRoster(dm.id, campaign.id, party.id);
     expect(roster?.members).toHaveLength(0);
     expect(roster?.rolledUpMemberCount).toBe(0);
+  });
+
+  it("filters roster membership to the requested crawl day", async () => {
+    const dm = await makeUser("dm-bounded@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    const party = await makeEntity(dm.id, campaign.id, "PARTY", "Party");
+    const founder = await makeEntity(dm.id, campaign.id, "NPC", "Founder");
+    const lateJoiner = await makeEntity(dm.id, campaign.id, "NPC", "Late Joiner");
+    const departed = await makeEntity(dm.id, campaign.id, "NPC", "Departed");
+    const leader = await makeEntity(dm.id, campaign.id, "NPC", "Captain");
+
+    await link(dm.id, campaign.id, founder.id, "MEMBER_OF", party.id, false, {
+      sinceDay: 5,
+    });
+    await link(dm.id, campaign.id, lateJoiner.id, "MEMBER_OF", party.id, false, {
+      sinceDay: 12,
+    });
+    await link(dm.id, campaign.id, departed.id, "MEMBER_OF", party.id, false, {
+      sinceDay: 1,
+      untilDay: 8,
+    });
+    await link(dm.id, campaign.id, leader.id, "LEADS", party.id, false, {
+      sinceDay: 10,
+    });
+
+    const day7 = await getGroupRoster(dm.id, campaign.id, party.id, { asOfDay: 7 });
+    expect(day7?.members.map((m) => m.entity.name).sort()).toEqual([
+      "Departed",
+      "Founder",
+    ]);
+    expect(day7?.leaders).toHaveLength(0);
+    expect(day7?.rolledUpMemberCount).toBe(2);
+
+    const day12 = await getGroupRoster(dm.id, campaign.id, party.id, { asOfDay: 12 });
+    expect(day12?.members.map((m) => m.entity.name).sort()).toEqual([
+      "Founder",
+      "Late Joiner",
+    ]);
+    expect(day12?.leaders.map((m) => m.entity.name)).toEqual(["Captain"]);
+    expect(day12?.rolledUpMemberCount).toBe(2);
+  });
+
+  it("treats bounded historical memberships as inactive in the current roster", async () => {
+    const dm = await makeUser("dm-current-bounds@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    const party = await makeEntity(dm.id, campaign.id, "PARTY", "Party");
+    const current = await makeEntity(dm.id, campaign.id, "NPC", "Current");
+    const departed = await makeEntity(dm.id, campaign.id, "NPC", "Departed");
+
+    await link(dm.id, campaign.id, current.id, "MEMBER_OF", party.id, false, {
+      sinceDay: 5,
+    });
+    await link(dm.id, campaign.id, departed.id, "MEMBER_OF", party.id, false, {
+      sinceDay: 1,
+      untilDay: 8,
+    });
+
+    const roster = await getGroupRoster(dm.id, campaign.id, party.id);
+    expect(roster?.members.map((m) => m.entity.name)).toEqual(["Current"]);
+    expect(roster?.rolledUpMemberCount).toBe(1);
   });
 
   it("returns null for a non-member of the campaign", async () => {

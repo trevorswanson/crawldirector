@@ -296,27 +296,55 @@ const optionalDisposition = z.preprocess(
     .optional(),
 );
 
-export const createRelationshipSchema = z.object({
-  type: z.enum(relationshipTypeValues),
-  targetId: z.string().trim().min(1, "Pick an entity to connect to."),
-  disposition: optionalDisposition,
-  notes: optionalText(500),
-  secret: z
-    .preprocess((value) => value === true || value === "true" || value === "on", z.boolean())
-    .default(false),
-});
+const optionalRelationshipDay = (label: string) => optionalInt(label, 0);
+
+const relationshipBoundsSchema = {
+  sinceDay: optionalRelationshipDay("Since day"),
+  untilDay: optionalRelationshipDay("Until day"),
+};
+
+function orderedRelationshipBounds<T extends { sinceDay?: number; untilDay?: number }>(
+  schema: z.ZodType<T>,
+) {
+  return schema.refine(
+    (value) =>
+      value.sinceDay === undefined ||
+      value.untilDay === undefined ||
+      value.sinceDay <= value.untilDay,
+    {
+      message: "Since day must be before or equal to until day.",
+      path: ["untilDay"],
+    },
+  );
+}
+
+export const createRelationshipSchema = orderedRelationshipBounds(
+  z.object({
+    type: z.enum(relationshipTypeValues),
+    targetId: z.string().trim().min(1, "Pick an entity to connect to."),
+    disposition: optionalDisposition,
+    ...relationshipBoundsSchema,
+    notes: optionalText(500),
+    secret: z
+      .preprocess((value) => value === true || value === "true" || value === "on", z.boolean())
+      .default(false),
+  }),
+);
 export type CreateRelationshipInput = z.infer<typeof createRelationshipSchema>;
 
 // Editing an edge changes its mutable fields only; endpoints are fixed
 // (re-pointing an edge is a remove + add, so provenance stays honest).
-export const updateRelationshipSchema = z.object({
-  type: z.enum(relationshipTypeValues),
-  disposition: optionalDisposition,
-  notes: optionalText(500),
-  secret: z
-    .preprocess((value) => value === true || value === "true" || value === "on", z.boolean())
-    .default(false),
-});
+export const updateRelationshipSchema = orderedRelationshipBounds(
+  z.object({
+    type: z.enum(relationshipTypeValues),
+    disposition: optionalDisposition,
+    ...relationshipBoundsSchema,
+    notes: optionalText(500),
+    secret: z
+      .preprocess((value) => value === true || value === "true" || value === "on", z.boolean())
+      .default(false),
+  }),
+);
 export type UpdateRelationshipInput = z.infer<typeof updateRelationshipSchema>;
 
 // Knowledge / reveal grant (fog of war, M3). A grant ties the viewed entity to

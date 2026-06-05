@@ -43,6 +43,8 @@ export type EntityConnection = {
   type: RelationshipType;
   direction: "out" | "in";
   disposition: number | null;
+  sinceDay: number | null;
+  untilDay: number | null;
   notes: string | null;
   secret: boolean;
   locked: boolean;
@@ -116,6 +118,8 @@ export async function createRelationship(
     sourceId: { to: sourceId },
     targetId: { to: parsed.targetId },
     disposition: { to: parsed.disposition ?? null },
+    sinceDay: { to: parsed.sinceDay ?? null },
+    untilDay: { to: parsed.untilDay ?? null },
     notes: { to: nullIfEmpty(parsed.notes) },
     secret: { to: parsed.secret },
   };
@@ -151,6 +155,8 @@ export async function updateRelationship(
     _baseVersion: { to: existing.version },
     type: { to: parsed.type },
     disposition: { to: parsed.disposition ?? null },
+    sinceDay: { to: parsed.sinceDay ?? null },
+    untilDay: { to: parsed.untilDay ?? null },
     notes: { to: nullIfEmpty(parsed.notes) },
     secret: { to: parsed.secret },
   };
@@ -190,6 +196,8 @@ export async function listConnectionsForEntity(
       sourceId: true,
       targetId: true,
       disposition: true,
+      sinceDay: true,
+      untilDay: true,
       notes: true,
       secret: true,
       locked: true,
@@ -211,6 +219,8 @@ export async function listConnectionsForEntity(
       type: edge.type,
       direction: outgoing ? "out" : "in",
       disposition: edge.disposition,
+      sinceDay: edge.sinceDay,
+      untilDay: edge.untilDay,
       notes: edge.notes,
       secret: edge.secret,
       locked: edge.locked,

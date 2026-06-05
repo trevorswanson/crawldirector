@@ -52,6 +52,8 @@ function connection(overrides: Partial<EntityConnection> = {}): EntityConnection
     type: "ALLY_OF",
     direction: "out",
     disposition: 50,
+    sinceDay: null,
+    untilDay: null,
     notes: null,
     secret: false,
     locked: false,
@@ -115,6 +117,34 @@ describe("ConnectionsPanel", () => {
     expect(screen.getByText("Donut").closest("a")?.getAttribute("href")).toBe(
       "/campaigns/c1/entities/e2",
     );
+  });
+
+  it("shows day bounds on bounded membership edges", () => {
+    render(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="e1"
+        sourceType="CRAWLER"
+        connections={[
+          connection({
+            type: "MEMBER_OF",
+            sinceDay: 12,
+            untilDay: 20,
+            other: { id: "party", name: "Princess Posse", type: "PARTY" },
+          }),
+          connection({
+            id: "r2",
+            type: "LEADS",
+            sinceDay: 21,
+            other: { id: "guild", name: "Guild", type: "GUILD" },
+          }),
+        ]}
+        candidates={candidates}
+      />,
+    );
+
+    expect(screen.getByText("Day 12 -> 20")).toBeDefined();
+    expect(screen.getByText("Day 21 -> current")).toBeDefined();
   });
 
   it("renders connection lock controls with field-lock affordances", () => {
@@ -219,6 +249,30 @@ describe("ConnectionsPanel", () => {
     );
     // form closes once the edit resolves without error
     await waitFor(() => expect(screen.queryByLabelText("Relationship type")).toBeNull());
+  });
+
+  it("prefills membership day bounds when editing a membership edge", () => {
+    render(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="e1"
+        sourceType="CRAWLER"
+        connections={[
+          connection({
+            type: "MEMBER_OF",
+            sinceDay: 7,
+            untilDay: 13,
+            other: { id: "party", name: "Princess Posse", type: "PARTY" },
+          }),
+        ]}
+        candidates={candidates}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit connection" }));
+
+    expect((screen.getByLabelText("Since day") as HTMLInputElement).value).toBe("7");
+    expect((screen.getByLabelText("Until day") as HTMLInputElement).value).toBe("13");
   });
 
   it("keeps the edit form open and shows the error when an edit fails", async () => {
@@ -336,6 +390,12 @@ describe("ConnectionsPanel", () => {
       target: { value: "__SHOW_ALL_TYPES__" },
     });
     expect(screen.getByRole("option", { name: "Sponsors" })).toBeDefined();
+
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "MEMBER_OF" },
+    });
+    expect(screen.getByLabelText("Since day")).toBeDefined();
+    expect(screen.getByLabelText("Until day")).toBeDefined();
 
     // cancel hides it again
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));

@@ -109,8 +109,9 @@ so the hierarchy is just typed edges, not a rigid table.
 **Party** (`PARTY`) — a small group of crawlers adventuring together (the
 earliest form of organization). Fields: name, formation/disband status, notes.
 Membership: `Crawler --MEMBER_OF--> Party`, with an optional
-`Crawler --LEADS--> Party`. Membership edges carry `since`/`until`, so the
-history of who was in a party when is preserved.
+`Crawler --LEADS--> Party`. Membership edges carry optional crawl-day
+`sinceDay` / `untilDay` bounds, so the history of who was in a party when is
+preserved.
 
 **Guild** (`GUILD`) — a larger crawler-formed organization that **multiple
 parties fan out into**. Membership can be expressed two ways (both supported):

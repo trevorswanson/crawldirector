@@ -79,7 +79,12 @@ count, non-blocking — and a one-click **Order from causality**
 (`src/lib/causality-order.ts` + `orderEventsFromCausality`) topologically sorts
 each floor's *movable* (unlocked, non-derived-order) events from the DAG so causes
 precede their effects, an audited review-bypassing `rank` rewrite that leaves
-locked/system-derived events pinned. Still to come in M3: time-bounded membership.
+locked/system-derived events pinned. **Time-bounded membership** is now modeled
+on relationship edges with optional `sinceDay` / `untilDay` crawl-day bounds:
+`MEMBER_OF`, `PART_OF`, and `LEADS` edges preserve "who was where, when"; the
+Connections panel can display/edit the bounds; and the group roster service shows
+current open-ended memberships by default or reconstructs a historical roster via
+`getGroupRoster(..., { asOfDay })`.
 **M3.5 (tagging)** is
 underway: the service layer (campaign tag list, tag filtering, tag-aware search)
 plus the UI — a tag-selection input with campaign autocomplete on the entity

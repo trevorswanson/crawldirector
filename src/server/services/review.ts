@@ -905,6 +905,8 @@ async function enrichReviewQueueItems(
           id: true,
           type: true,
           disposition: true,
+          sinceDay: true,
+          untilDay: true,
           notes: true,
           secret: true,
           locked: true,
@@ -1037,6 +1039,8 @@ function currentRelationshipValue(
   relationship: {
     type: RelationshipType;
     disposition: number | null;
+    sinceDay: number | null;
+    untilDay: number | null;
     notes: string | null;
     secret: boolean;
   },
@@ -1047,6 +1051,10 @@ function currentRelationshipValue(
       return relationship.type;
     case "disposition":
       return relationship.disposition;
+    case "sinceDay":
+      return relationship.sinceDay;
+    case "untilDay":
+      return relationship.untilDay;
     case "notes":
       return relationship.notes;
     case "secret":
@@ -2644,6 +2652,8 @@ async function applyCreateRelationship(
       sourceId,
       targetId,
       disposition: optionalNumber(readTo(patch, "disposition")),
+      sinceDay: optionalNumber(readTo(patch, "sinceDay")),
+      untilDay: optionalNumber(readTo(patch, "untilDay")),
       notes: nullableString(readTo(patch, "notes")),
       secret: booleanWithDefault(readTo(patch, "secret"), false),
       source: changeSet.source,
@@ -2722,6 +2732,8 @@ async function applyUpdateRelationship(
     data.type = type as RelationshipType;
   }
   if ("disposition" in patch) data.disposition = optionalNumber(readTo(patch, "disposition"));
+  if ("sinceDay" in patch) data.sinceDay = optionalNumber(readTo(patch, "sinceDay"));
+  if ("untilDay" in patch) data.untilDay = optionalNumber(readTo(patch, "untilDay"));
   if ("notes" in patch) data.notes = nullableString(readTo(patch, "notes"));
   if ("secret" in patch) data.secret = booleanWithDefault(readTo(patch, "secret"), false);
 
