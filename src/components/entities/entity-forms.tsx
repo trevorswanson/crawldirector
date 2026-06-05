@@ -175,6 +175,44 @@ function CoreFields({
           </div>
         );
       })()}
+      {entity?.type === "FLOOR" && (() => {
+        // Floor number ties this entity to the events on that floor
+        // (Event.orderKey) and powers the timeline's floor-band header + rail
+        // (docs/adr/0005). Theme is the one-line flavour under the header.
+        const existingData = (entity.data as { floorNumber?: number | null; theme?: string | null }) || {};
+        return (
+          <div className="grid gap-4 sm:grid-cols-[160px_minmax(0,1fr)]">
+            <div className="grid gap-2">
+              <Label htmlFor="floorNumber">Floor number</Label>
+              <Input
+                id="floorNumber"
+                name="floorNumber"
+                type="number"
+                min={1}
+                defaultValue={getVal("floorNumber", existingData.floorNumber ?? "") as string}
+                readOnly={isLocked("data.floorNumber")}
+                placeholder="e.g. 9"
+              />
+              {isLocked("data.floorNumber") && (
+                <input type="hidden" name="floorNumber" value={existingData.floorNumber ?? ""} />
+              )}
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="theme">Theme</Label>
+              <Input
+                id="theme"
+                name="theme"
+                defaultValue={getVal("theme", existingData.theme ?? "") as string}
+                readOnly={isLocked("data.theme")}
+                placeholder="e.g. Castle siege · the moat runs red"
+              />
+              {isLocked("data.theme") && (
+                <input type="hidden" name="theme" value={existingData.theme ?? ""} />
+              )}
+            </div>
+          </div>
+        );
+      })()}
       <div className="grid gap-2">
         <Label htmlFor="description">Description</Label>
         <Textarea

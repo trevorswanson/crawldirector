@@ -57,6 +57,70 @@ export async function getCampaignForUser(userId: string, campaignId: string) {
   });
 }
 
+// Point the campaign's "current floor" at a DM-chosen FLOOR entity (or clear it
+// with null). Drives the timeline's ON-AIR / current-floor styling (ADR 0005).
+// Not canon — a direct campaign setting, audited like an event lock. DM/co-DM
+// only. Returns the resolved floor number (from the entity's data.floorNumber)
+// so callers can revalidate/label without a re-read.
+export async function setCampaignCurrentFloor(
+  userId: string,
+  campaignId: string,
+  floorEntityId: string | null,
+): Promise<{ currentFloorId: string | null; floorNumber: number | null }> {
+  const membership = await prisma.membership.findUnique({
+    where: { userId_campaignId: { userId, campaignId } },
+    select: { role: true },
+  });
+  if (!membership || membership.role === Role.PLAYER) {
+    throw new ServiceError("You do not have permission to edit this campaign.");
+  }
+
+  let floorNumber: number | null = null;
+  if (floorEntityId) {
+    const entity = await prisma.entity.findFirst({
+      where: {
+        id: floorEntityId,
+        campaignId,
+        type: EntityType.FLOOR,
+        status: { not: CanonStatus.ARCHIVED },
+      },
+      select: { id: true, data: true },
+    });
+    if (!entity) throw new ServiceError("Floor entity not found.");
+    const data = (entity.data as { floorNumber?: number | null }) ?? {};
+    floorNumber = typeof data.floorNumber === "number" ? data.floorNumber : null;
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const campaign = await tx.campaign.findUnique({
+      where: { id: campaignId },
+      select: { currentFloorId: true },
+    });
+    if (!campaign) throw new ServiceError("Campaign not found.");
+    if (campaign.currentFloorId === floorEntityId) return;
+
+    await tx.campaign.update({
+      where: { id: campaignId },
+      data: { currentFloorId: floorEntityId },
+    });
+    await tx.auditLog.create({
+      data: {
+        campaignId,
+        actorUserId: userId,
+        action: "SET_CURRENT_FLOOR",
+        targetType: "CAMPAIGN",
+        targetId: campaignId,
+        detail: {
+          currentFloorId: floorEntityId,
+          previousCurrentFloorId: campaign.currentFloorId,
+        },
+      },
+    });
+  });
+
+  return { currentFloorId: floorEntityId, floorNumber };
+}
+
 export type CanonIntegrity = {
   dmPercent: number;
   aiPercent: number;

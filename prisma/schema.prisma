@@ -223,6 +223,12 @@ model Campaign {
   ownerId String
   owner   User   @relation("OwnedCampaigns", fields: [ownerId], references: [id])
 
+  // The floor the crawl is currently on — a DM-chosen FLOOR entity. Drives the
+  // timeline's "ON AIR" / current-floor styling (docs/adr/0005). Nulled if the
+  // referenced entity is deleted.
+  currentFloorId String?
+  currentFloor   Entity? @relation("CampaignCurrentFloor", fields: [currentFloorId], references: [id], onDelete: SetNull)
+
   members          Membership[]
   entities         Entity[]
   relationships    Relationship[]
@@ -276,6 +282,8 @@ model Entity {
   campaign    Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   createdById String?
   createdBy   User?              @relation("CreatedEntities", fields: [createdById], references: [id], onDelete: SetNull)
+  // Campaigns pointing at this entity as their current floor (FLOOR entities).
+  currentFloorOf Campaign[]      @relation("CampaignCurrentFloor")
   crawler     Crawler?
   outEdges    Relationship[]     @relation("SourceEntity")
   inEdges     Relationship[]     @relation("TargetEntity")

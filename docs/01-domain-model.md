@@ -134,7 +134,10 @@ collective "personality" a subagent can role-play.
 
 **Floor** (1–18) — biome/theme, difficulty, descent mechanic, time limit,
 special rules, boss, recap/summary, "showrunner gimmick." Floor 9 is special
-(Faction Wars).
+(Faction Wars). A FLOOR entity carries its `data.floorNumber` (matching event
+`orderKey`) and `data.theme`, so the timeline can band events under named floor
+headers; the campaign's `currentFloorId` points at the FLOOR entity the crawl is
+currently on (ADR 0005).
 
 **Neighborhood / Zone** — subdivisions of a floor (DCC floors are explicitly
 divided into neighborhoods/districts). Hold local mobs, NPCs, locations.

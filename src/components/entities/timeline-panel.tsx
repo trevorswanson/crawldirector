@@ -30,7 +30,6 @@ import {
   type ParticipantRowValue,
 } from "@/components/entities/participant-rows";
 import { Kicker } from "@/components/ui/kicker";
-import { LockChip } from "@/components/ui/lock-chip";
 import { SourceBadge } from "@/components/ui/source-badge";
 import { TypeDot } from "@/components/ui/type-dot";
 import { provenanceMeta } from "@/lib/entities";
@@ -48,14 +47,22 @@ function EventLink({
   campaignId,
   entityId,
   event,
+  inEntityTimeline,
 }: {
   campaignId: string;
   entityId: string;
   event: { id: string; title: string };
+  // Whether the linked event is in *this* entity's timeline. If so, deep-link to
+  // it here (expands inline); otherwise the event lives elsewhere, so send the DM
+  // to the campaign timeline scrolled to it instead of uselessly reloading.
+  inEntityTimeline: boolean;
 }) {
+  const href = inEntityTimeline
+    ? `/campaigns/${campaignId}/entities/${entityId}?event=${event.id}`
+    : `/campaigns/${campaignId}/timeline?event=${event.id}`;
   return (
     <Link
-      href={`/campaigns/${campaignId}/entities/${entityId}?event=${event.id}`}
+      href={href}
       className="text-[11px] text-[var(--ink-dim)] hover:text-[var(--ink)]"
     >
       {event.title}
@@ -272,6 +279,9 @@ export function TimelinePanel({
     nameById.get(targetId) ?? "Unknown crawler";
   // EVENT-basis anchors pick from the entity's other logged events.
   const anchorCandidates = events.map((e) => ({ id: e.id, title: e.title }));
+  // Cause/effect events in this entity's own timeline can deep-link inline; ones
+  // that aren't route to the campaign timeline instead (see EventLink).
+  const entityEventIds = new Set(events.map((e) => e.id));
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [participant, setParticipant] = useState<TimelineCandidate | null>(null);
@@ -380,7 +390,7 @@ export function TimelinePanel({
                         secret
                       </span>
                     )}
-                    {e.locked && <LockChip locked />}
+
                   </div>
                   <button
                     type="button"
@@ -443,6 +453,7 @@ export function TimelinePanel({
                                     campaignId={campaignId}
                                     entityId={entityId}
                                     event={cause}
+                                    inEntityTimeline={entityEventIds.has(cause.id)}
                                   />
                                   <form
                                     action={archiveEventCausalityAction.bind(
@@ -478,6 +489,7 @@ export function TimelinePanel({
                                     campaignId={campaignId}
                                     entityId={entityId}
                                     event={effect}
+                                    inEntityTimeline={entityEventIds.has(effect.id)}
                                   />
                                   <form
                                     action={archiveEventCausalityAction.bind(
@@ -562,12 +574,16 @@ export function TimelinePanel({
                             type="submit"
                             aria-label={e.locked ? "Unlock event" : "Lock event"}
                             title={e.locked ? "Unlock event" : "Lock event"}
-                            className="inline-flex items-center gap-[6px] border border-[var(--line)] px-[8px] py-[5px] font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:border-[var(--sys)] hover:text-[var(--sys)]"
+                            className="inline-flex items-center gap-[6px] border px-[8px] py-[5px] font-mono text-[9px] uppercase tracking-[.08em] transition-colors cursor-pointer"
+                            style={{
+                              borderColor: e.locked ? "var(--sys)" : "var(--line)",
+                              color: e.locked ? "var(--sys)" : "var(--ink-faint)",
+                            }}
                           >
                             {e.locked ? (
-                              <Unlock aria-hidden size={11} />
-                            ) : (
                               <Lock aria-hidden size={11} />
+                            ) : (
+                              <Unlock aria-hidden size={11} />
                             )}
                             {e.locked ? "Unlock event" : "Lock event"}
                           </button>

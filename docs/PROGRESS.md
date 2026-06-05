@@ -4,6 +4,74 @@ Running checklist of milestones/tasks, newest first. See
 [`11-roadmap.md`](./11-roadmap.md) for the full plan and
 [`12-working-sessions.md`](./12-working-sessions.md) for how to pick up work.
 
+## M3 — Timeline redesign: "the timeline IS the descent" 🚧 (in progress)
+
+**Goal:** rework the Crawl Timeline from a centered changelog into the broadcast
+floor-banded "descent" the design mockup lays out, and bring its event-management
+parity up to the entity viewer. See [ADR 0005](./adr/0005-campaign-current-floor.md)
+and [`10-ui-ux.md`](./10-ui-ux.md).
+
+### Done — slice A: floor-railed broadcast-spine redesign (2026-06-05)
+
+- [x] Rebuilt `/campaigns/[id]/timeline` to the mockup
+      (`docs/design/mockup/CrawlDirector Timeline.html` + `timeline-refined.jsx`):
+      a 264px **floor rail** ("The Descent") laddering `F01 → FNN` (reached/current/
+      locked), provenance origin filter, and a current-floor picker; a floor-banded
+      broadcast spine with `FLOOR 09 · LARRACOS · ON AIR` headers, provenance-colored
+      spine nodes, a NOW marker, threaded `Caused by / Causes` links, and signed-diff
+      effect chips + Apply. Preserves drag-reorder, inline log/edit forms, the real
+      effects→Review-Queue flow, and role-gates DM controls.
+- [x] Schema: `Campaign.currentFloorId` (FK → FLOOR entity, `onDelete: SetNull`,
+      migration `campaign_current_floor`). FLOOR entities carry `data.floorNumber` +
+      `data.theme` (no new model; registered through the review pipeline like other
+      `data.*` fields). Services: `setCampaignCurrentFloor` + `listCampaignFloors`.
+- [x] ADR 0005; docs (10-ui-ux, 01-domain-model, 09-data-schema); tests (component
+      bands/rail/filter/picker, `listCampaignFloors`, `setCampaignCurrentFloor`).
+      Verified in-browser against a seeded multi-floor Demo Campaign.
+
+### Slice B: timeline parity + causality navigation + inferred dates 🚧 (todo)
+
+DM feedback after slice A — bring the timeline to feature parity with the entity
+viewer and pull the descent toward a single inferred timeline. Implement one-by-one;
+keep this checklist current so work can resume across sessions.
+
+- [x] **1. Lock/unlock an event from the timeline.** Added a lock/unlock control
+      to each timeline event node (`setCampaignEventLockAction` →
+      `setEventLock`), matching the entity-viewer pattern.
+- [x] **2. Causal-link editing from the timeline.** Each event node now shows an
+      "add cause" form and per-link remove controls (`linkCampaignEventCauseAction`
+      / `archiveCampaignEventCausalityAction`), so cause↔effect links can be
+      created/removed without leaving the timeline (mirrors the entity panel's
+      per-event causality editor rather than nesting in the create form).
+- [x] **3. Delete (archive) an event from the timeline.** Added a remove control to
+      each unlocked event node (`archiveCampaignEventAction` → `archiveEvent`).
+- [x] **4. Timeline causality links are clickable.** `Caused by` / `Causes` items
+      are buttons that scroll the timeline to + briefly highlight the linked event
+      (`focusEvent`, clearing any active provenance filter so the target is shown).
+- [x] **5. Cross-event causality navigation from the entity viewer.** `EventLink`
+      now deep-links within the entity page only when the linked event is in that
+      entity's own timeline; otherwise it routes to the campaign timeline scrolled
+      to the event (`/timeline?event=<id>`, honored on mount via `initialEventId`).
+- [x] **6. Inferred floor day-ranges in the band headers (Day 388 – 412).** Each
+      floor band now shows a `Day min – max` range inferred client-side from the
+      events on that floor that sit on the *absolute* axis (a `COLLAPSE` "Day N
+      since collapse" or `ABSOLUTE_DAY` coordinate → day = offset). Floors with no
+      absolute-dated events show no range, so the timeline assembles itself as the
+      DM dates more of the crawl. **Deliberately bounded:** floor-relative anchors
+      (`FLOOR_START` / `FLOOR_COLLAPSE`) are *not* converted to absolute days,
+      because that needs per-floor start/collapse anchors we don't model (ADR 0004
+      is explicit that mixing the two axes needs floor-duration data). The natural
+      next step for fuller chaining is to let FLOOR entities carry a `data.startDay`
+      (a "floor opens" anchor, same plumbing as `data.floorNumber`), which would
+      let `FLOOR_START` offsets resolve and the floor-1→N chain fill in — noted as a
+      follow-up rather than built now.
+- [x] **7. Events with system-inferred order aren't draggable.** Drag-reorder is
+      gated on `floorRelativeSortKey(time) === null` — i.e. drag is suppressed
+      exactly when the intra-floor order is auto-derived (a floor-relative anchor
+      *with a concrete offset*, ADR 0004). Unscheduled events and bare-floor anchors
+      (no offset, order not inferable) stay draggable. This is the precise reading
+      of "anchors let the system infer order, so the DM shouldn't reorder by hand."
+
 ## M3.5 — Tagging system 🚧 (in progress)
 
 **Goal:** replace freeform tag strings with a structured, queryable tagging

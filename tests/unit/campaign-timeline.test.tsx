@@ -7,6 +7,7 @@ import {
   screen,
   waitFor,
   within,
+  act,
 } from "@testing-library/react";
 
 const {
@@ -14,12 +15,22 @@ const {
   updateCampaignEventAction,
   applyCampaignEventEffectsAction,
   reorderEventAction,
+  setCampaignCurrentFloorAction,
+  setCampaignEventLockAction,
+  archiveCampaignEventAction,
+  linkCampaignEventCauseAction,
+  archiveCampaignEventCausalityAction,
   routerRefresh,
 } = vi.hoisted(() => ({
   createCampaignEventAction: vi.fn(),
   updateCampaignEventAction: vi.fn(),
   applyCampaignEventEffectsAction: vi.fn(),
   reorderEventAction: vi.fn(),
+  setCampaignCurrentFloorAction: vi.fn(),
+  setCampaignEventLockAction: vi.fn(),
+  archiveCampaignEventAction: vi.fn(),
+  linkCampaignEventCauseAction: vi.fn(),
+  archiveCampaignEventCausalityAction: vi.fn(),
   routerRefresh: vi.fn(),
 }));
 
@@ -28,6 +39,11 @@ vi.mock("@/app/(dm)/actions", () => ({
   updateCampaignEventAction,
   applyCampaignEventEffectsAction,
   reorderEventAction,
+  setCampaignCurrentFloorAction,
+  setCampaignEventLockAction,
+  archiveCampaignEventAction,
+  linkCampaignEventCauseAction,
+  archiveCampaignEventCausalityAction,
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: routerRefresh }),
@@ -48,12 +64,41 @@ import {
   CampaignTimeline,
   computeReorderNeighbors,
 } from "@/components/timeline/campaign-timeline";
-import type { CampaignTimelineEvent } from "@/server/services/events";
+import type {
+  CampaignFloorMeta,
+  CampaignTimelineEvent,
+} from "@/server/services/events";
 
 const candidates = [
   { id: "e1", name: "Carl", type: "CRAWLER" },
   { id: "e2", name: "Donut", type: "CRAWLER" },
 ];
+
+const emptyFloors: CampaignFloorMeta = {
+  ladder: [],
+  byNumber: {},
+  currentFloorNumber: null,
+  currentFloorId: null,
+  liveEventId: null,
+  floorEntities: [],
+};
+
+// Render with the new floor-meta + canEdit props defaulted; individual tests
+// override events/candidates/floors/canEdit as needed.
+function renderTimeline(
+  props: Partial<React.ComponentProps<typeof CampaignTimeline>> = {},
+) {
+  return render(
+    <CampaignTimeline
+      campaignId="c1"
+      events={[]}
+      candidates={candidates}
+      floors={emptyFloors}
+      canEdit
+      {...props}
+    />,
+  );
+}
 
 function timeInfo(
   over: Partial<CampaignTimelineEvent["time"]> = {},
@@ -135,9 +180,7 @@ afterEach(() => {
 
 describe("CampaignTimeline", () => {
   it("renders events with all visible participants", () => {
-    render(
-      <CampaignTimeline campaignId="c1" events={[...events]} candidates={candidates} />,
-    );
+    renderTimeline({ events: [...events] });
 
     expect(screen.getByText("Boss fight")).toBeDefined();
     expect(screen.getByText("Carl")).toBeDefined();
@@ -145,42 +188,41 @@ describe("CampaignTimeline", () => {
     expect(screen.getByText("2 participants")).toBeDefined();
   });
 
-  it("renders event state, unplaced time, and causality summaries", () => {
-    render(
-      <CampaignTimeline
-        campaignId="c1"
-        candidates={candidates}
-        events={[
-          {
-            id: "ev-secret",
-            title: "Secret locked scene",
-            summary: null,
-            time: timeInfo(),
-            orderKey: 0,
-            rank: "a0",
-            secret: true,
-            locked: true,
-            source: "AI",
-            participants: [],
-            causedBy: [{ id: "cause", title: "Earlier scene", linkId: "link1" }],
-            causes: [{ id: "effect", title: "Later scene", linkId: "link2" }],
-            effects: [],
-          },
-        ]}
-      />,
-    );
+  it("renders event state, unplaced time, and causality threads", () => {
+    renderTimeline({
+      events: [
+        {
+          id: "ev-secret",
+          title: "Secret locked scene",
+          summary: null,
+          time: timeInfo(),
+          orderKey: 0,
+          rank: "a0",
+          secret: true,
+          locked: true,
+          source: "AI",
+          participants: [],
+          causedBy: [{ id: "cause", title: "Earlier scene", linkId: "link1" }],
+          causes: [{ id: "effect", title: "Later scene", linkId: "link2" }],
+          effects: [],
+        },
+      ],
+    });
 
     expect(screen.getByText("Unplaced")).toBeDefined();
-    expect(screen.getByText("secret")).toBeDefined();
-    expect(screen.getByText("Locked")).toBeDefined();
+    expect(screen.getByText("DM-only")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Unlock event" })).toBeDefined();
     expect(screen.getByText("0 participants")).toBeDefined();
-    expect(screen.getByText("Caused by Earlier scene")).toBeDefined();
-    expect(screen.getByText("Causes Later scene")).toBeDefined();
+    // Causality is now a thread: a label plus the linked event title.
+    expect(screen.getByText("Caused by")).toBeDefined();
+    expect(screen.getByText("Earlier scene")).toBeDefined();
+    expect(screen.getByText("Causes")).toBeDefined();
+    expect(screen.getByText("Later scene")).toBeDefined();
   });
 
   it("submits a multi-participant event", async () => {
     createCampaignEventAction.mockResolvedValue(undefined);
-    render(<CampaignTimeline campaignId="c1" events={[]} candidates={candidates} />);
+    renderTimeline({ events: [] });
 
     fireEvent.click(screen.getByRole("button", { name: "Log event" }));
     fireEvent.change(screen.getByPlaceholderText("What happened?"), {
@@ -211,7 +253,7 @@ describe("CampaignTimeline", () => {
 
   it("surfaces action errors and lets the DM cancel", async () => {
     createCampaignEventAction.mockResolvedValue({ error: "Choose at least one participant." });
-    render(<CampaignTimeline campaignId="c1" events={[]} candidates={candidates} />);
+    renderTimeline({ events: [] });
 
     fireEvent.click(screen.getByRole("button", { name: "Log event" }));
     fireEvent.change(screen.getByPlaceholderText("What happened?"), {
@@ -229,9 +271,7 @@ describe("CampaignTimeline", () => {
 
   it("edits an event from the timeline: prefilled scalars + participants, submits", async () => {
     updateCampaignEventAction.mockResolvedValue(undefined);
-    render(
-      <CampaignTimeline campaignId="c1" events={[...events]} candidates={candidates} />,
-    );
+    renderTimeline({ events: [...events] });
 
     fireEvent.click(screen.getByRole("button", { name: "Edit event" }));
 
@@ -265,9 +305,7 @@ describe("CampaignTimeline", () => {
   });
 
   it("adds, re-roles, and removes participant rows in the edit form", () => {
-    render(
-      <CampaignTimeline campaignId="c1" events={[...events]} candidates={candidates} />,
-    );
+    renderTimeline({ events: [...events] });
 
     fireEvent.click(screen.getByRole("button", { name: "Edit event" }));
     const form = screen.getByLabelText("Event title").closest("form")!;
@@ -293,19 +331,21 @@ describe("CampaignTimeline", () => {
   });
 
   it("hides the edit control for locked events", () => {
-    render(
-      <CampaignTimeline
-        campaignId="c1"
-        candidates={candidates}
-        events={[{ ...events[0], locked: true }]}
-      />,
-    );
+    renderTimeline({ events: [{ ...events[0], locked: true }] });
 
     expect(screen.queryByRole("button", { name: "Edit event" })).toBeNull();
   });
 
+  it("hides all DM controls for read-only (player) viewers", () => {
+    renderTimeline({ events: [...events], canEdit: false });
+
+    expect(screen.queryByRole("button", { name: "Log event" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit event" })).toBeNull();
+    expect(screen.queryByText(/Drag events to reorder/)).toBeNull();
+  });
+
   it("removes added participant rows", () => {
-    render(<CampaignTimeline campaignId="c1" events={[]} candidates={candidates} />);
+    renderTimeline({ events: [] });
 
     fireEvent.click(screen.getByRole("button", { name: "Log event" }));
     fireEvent.click(screen.getByRole("button", { name: "Add participant" }));
@@ -318,38 +358,36 @@ describe("CampaignTimeline", () => {
 
   it("renders and applies event effects from the campaign timeline", async () => {
     applyCampaignEventEffectsAction.mockResolvedValue(undefined);
-    render(
-      <CampaignTimeline
-        campaignId="c1"
-        candidates={candidates}
-        events={[
-          {
-            ...events[0],
-            effects: [
-              {
-                id: "fx1",
-                kind: "SET_STAT",
-                targetId: "e1",
-                stat: "currentFloor",
-                delta: null,
-                valueNumber: 1,
-                value: null,
-                note: "Entered the crawl",
-                applied: false,
-                appliedChangeSetId: null,
-                pendingChangeSetId: null,
-                pendingOperationId: null,
-                reviewStatus: null,
-              },
-            ],
-          },
-        ]}
-      />,
-    );
+    renderTimeline({
+      events: [
+        {
+          ...events[0],
+          effects: [
+            {
+              id: "fx1",
+              kind: "ADJUST_STAT",
+              targetId: "e1",
+              stat: "gold",
+              delta: 12000,
+              valueNumber: null,
+              value: null,
+              note: null,
+              applied: false,
+              appliedChangeSetId: null,
+              pendingChangeSetId: null,
+              pendingOperationId: null,
+              reviewStatus: null,
+            },
+          ],
+        },
+      ],
+    });
 
-    expect(screen.getByText("Floor = 1")).toBeDefined();
+    // Effects render as signed stat diffs: target · stat · +N.
+    expect(screen.getByText("gold")).toBeDefined();
+    expect(screen.getByText("+12,000")).toBeDefined();
     expect(screen.getByText("unapplied")).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: /Send to review/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Apply/ }));
 
     await waitFor(() =>
       expect(applyCampaignEventEffectsAction).toHaveBeenCalledWith("c1", "ev1"),
@@ -358,34 +396,30 @@ describe("CampaignTimeline", () => {
 
   it("prefills effect rows in the edit form and keeps it open on save errors", async () => {
     updateCampaignEventAction.mockResolvedValue({ error: "Effect target is locked." });
-    render(
-      <CampaignTimeline
-        campaignId="c1"
-        candidates={candidates}
-        events={[
-          {
-            ...events[0],
-            effects: [
-              {
-                id: "fx-unknown",
-                kind: "SET_STAT",
-                targetId: "missing-crawler",
-                stat: "currentFloor",
-                delta: null,
-                valueNumber: 1,
-                value: null,
-                note: "Entered the crawl",
-                applied: false,
-                appliedChangeSetId: null,
-                pendingChangeSetId: null,
-                pendingOperationId: null,
-                reviewStatus: null,
-              },
-            ],
-          },
-        ]}
-      />,
-    );
+    renderTimeline({
+      events: [
+        {
+          ...events[0],
+          effects: [
+            {
+              id: "fx-unknown",
+              kind: "SET_STAT",
+              targetId: "missing-crawler",
+              stat: "currentFloor",
+              delta: null,
+              valueNumber: 1,
+              value: null,
+              note: "Entered the crawl",
+              applied: false,
+              appliedChangeSetId: null,
+              pendingChangeSetId: null,
+              pendingOperationId: null,
+              reviewStatus: null,
+            },
+          ],
+        },
+      ],
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Edit event" }));
     const form = screen.getByLabelText("Event title").closest("form")!;
@@ -407,7 +441,7 @@ describe("CampaignTimeline", () => {
   });
 
   it("shows the no-candidate state in the new-event participant picker", () => {
-    render(<CampaignTimeline campaignId="c1" events={[]} candidates={[]} />);
+    renderTimeline({ events: [], candidates: [] });
 
     fireEvent.click(screen.getByRole("button", { name: "Log event" }));
 
@@ -421,15 +455,13 @@ describe("CampaignTimeline", () => {
   it("reorders an event within its floor by drag and refreshes", async () => {
     reorderEventAction.mockResolvedValue(undefined);
     const floorEvents = floor9Trio();
-    render(
-      <CampaignTimeline campaignId="c1" events={floorEvents} candidates={candidates} />,
-    );
+    renderTimeline({ events: floorEvents });
 
     expect(screen.getByText(/Drag events to reorder/)).toBeDefined();
 
     // Drag the top event (ev-a) onto the bottom event (ev-c): it moves below it.
-    const top = screen.getByText("Alpha").closest("article") as HTMLElement;
-    const bottom = screen.getByText("Charlie").closest("article") as HTMLElement;
+    const top = screen.getByRole("heading", { name: "Alpha" }).closest("article") as HTMLElement;
+    const bottom = screen.getByRole("heading", { name: "Charlie" }).closest("article") as HTMLElement;
     fireEvent.dragStart(top);
     fireEvent.dragOver(bottom);
     fireEvent.drop(bottom);
@@ -445,12 +477,10 @@ describe("CampaignTimeline", () => {
 
   it("surfaces a reorder error and does not refresh", async () => {
     reorderEventAction.mockResolvedValue({ error: "This event is locked." });
-    render(
-      <CampaignTimeline campaignId="c1" events={floor9Trio()} candidates={candidates} />,
-    );
+    renderTimeline({ events: floor9Trio() });
 
-    const top = screen.getByText("Alpha").closest("article") as HTMLElement;
-    const middle = screen.getByText("Bravo").closest("article") as HTMLElement;
+    const top = screen.getByRole("heading", { name: "Alpha" }).closest("article") as HTMLElement;
+    const middle = screen.getByRole("heading", { name: "Bravo" }).closest("article") as HTMLElement;
     fireEvent.dragStart(top);
     fireEvent.dragOver(middle);
     fireEvent.drop(middle);
@@ -462,11 +492,9 @@ describe("CampaignTimeline", () => {
   });
 
   it("tracks and clears the drop affordance on drag over, leave, and end", () => {
-    render(
-      <CampaignTimeline campaignId="c1" events={floor9Trio()} candidates={candidates} />,
-    );
-    const top = screen.getByText("Alpha").closest("article") as HTMLElement;
-    const bottom = screen.getByText("Charlie").closest("article") as HTMLElement;
+    renderTimeline({ events: floor9Trio() });
+    const top = screen.getByRole("heading", { name: "Alpha" }).closest("article") as HTMLElement;
+    const bottom = screen.getByRole("heading", { name: "Charlie" }).closest("article") as HTMLElement;
 
     fireEvent.dragStart(top);
     fireEvent.dragOver(bottom);
@@ -485,14 +513,343 @@ describe("CampaignTimeline", () => {
       makeEvent("ev-a", "Alpha", 9, "a2"),
       makeEvent("ev-x", "Xenon", 2, "a0"),
     ];
-    render(<CampaignTimeline campaignId="c1" events={mixed} candidates={candidates} />);
+    renderTimeline({ events: mixed });
 
-    const floor9 = screen.getByText("Alpha").closest("article") as HTMLElement;
-    const floor2 = screen.getByText("Xenon").closest("article") as HTMLElement;
+    const floor9 = screen.getByRole("heading", { name: "Alpha" }).closest("article") as HTMLElement;
+    const floor2 = screen.getByRole("heading", { name: "Xenon" }).closest("article") as HTMLElement;
     fireEvent.dragStart(floor9);
     fireEvent.drop(floor2);
 
     expect(reorderEventAction).not.toHaveBeenCalled();
+  });
+
+  it("bands events under named floor headers with ON AIR on the current floor", () => {
+    const floors: CampaignFloorMeta = {
+      ladder: [
+        { number: 8, name: null, count: 1, current: false, reached: true, logged: true, entityId: null },
+        { number: 9, name: "Larracos", count: 1, current: true, reached: true, logged: true, entityId: "f9" },
+      ],
+      byNumber: {
+        9: { number: 9, name: "Larracos", theme: "Castle siege · the moat runs red", entityId: "f9" },
+      },
+      currentFloorNumber: 9,
+      currentFloorId: "f9",
+      liveEventId: "ev1",
+      floorEntities: [{ id: "f9", name: "Larracos", floorNumber: 9 }],
+    };
+    renderTimeline({
+      events: [events[0], makeEvent("ev-8", "Bone market deal", 8, "a0")],
+      floors,
+    });
+
+    expect(screen.getByText("FLOOR 09")).toBeDefined();
+    expect(screen.getByText("FLOOR 08")).toBeDefined();
+    expect(screen.getAllByText("Larracos").length).toBeGreaterThan(0);
+    expect(screen.getByText("Castle siege · the moat runs red")).toBeDefined();
+    expect(screen.getByText("On air")).toBeDefined();
+    // The live event shows the NOW marker.
+    expect(screen.getByText("Now")).toBeDefined();
+  });
+
+  it("filters events by provenance origin from the rail", () => {
+    const dm = makeEvent("ev-dm", "DM scene", 9, "a1");
+    const ai = { ...makeEvent("ev-ai", "AI beat", 9, "a0"), source: "AI" as const };
+    renderTimeline({ events: [dm, ai] });
+
+    expect(screen.getByRole("heading", { name: "DM scene" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "AI beat" })).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "AI" }));
+
+    expect(screen.queryByRole("heading", { name: "DM scene" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "AI beat" })).toBeDefined();
+  });
+
+  it("changes the current floor from the rail picker", async () => {
+    setCampaignCurrentFloorAction.mockResolvedValue(undefined);
+    const floors: CampaignFloorMeta = {
+      ...emptyFloors,
+      floorEntities: [
+        { id: "f9", name: "Larracos", floorNumber: 9 },
+        { id: "f8", name: "Bone Market", floorNumber: 8 },
+      ],
+    };
+    renderTimeline({ events: [...events], floors });
+
+    fireEvent.change(screen.getByLabelText("Current floor"), {
+      target: { value: "f9" },
+    });
+
+    await waitFor(() =>
+      expect(setCampaignCurrentFloorAction).toHaveBeenCalledWith("c1", "f9"),
+    );
+  });
+
+  it("locks and archives an event from the timeline", async () => {
+    setCampaignEventLockAction.mockResolvedValue(undefined);
+    archiveCampaignEventAction.mockResolvedValue(undefined);
+    renderTimeline({ events: [...events] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Lock event" }));
+    await waitFor(() =>
+      // Form actions receive a trailing FormData arg after the bound ones.
+      expect(setCampaignEventLockAction).toHaveBeenCalledWith(
+        "c1",
+        "ev1",
+        false,
+        expect.any(FormData),
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove event" }));
+    await waitFor(() =>
+      expect(archiveCampaignEventAction).toHaveBeenCalledWith(
+        "c1",
+        "ev1",
+        expect.any(FormData),
+      ),
+    );
+  });
+
+  it("shows unlock (not remove) for a locked event", () => {
+    renderTimeline({ events: [{ ...events[0], locked: true }] });
+
+    expect(screen.getByRole("button", { name: "Unlock event" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Remove event" })).toBeNull();
+  });
+
+  it("adds a causal link from an event's node", async () => {
+    linkCampaignEventCauseAction.mockResolvedValue(undefined);
+    renderTimeline({ events: floor9Trio() });
+
+    const alpha = screen
+      .getByRole("heading", { name: "Alpha" })
+      .closest("article")!;
+    const q = within(alpha as HTMLElement);
+    // Alpha's add-cause picker lists the other floor-9 events.
+    fireEvent.change(q.getByRole("combobox", { name: "Cause event" }), {
+      target: { value: "ev-b" },
+    });
+    fireEvent.click(q.getByRole("button", { name: "Add cause" }));
+
+    await waitFor(() =>
+      // bind(null, campaignId, effectId) prepends to the useActionState call.
+      expect(linkCampaignEventCauseAction).toHaveBeenCalledWith(
+        "c1",
+        "ev-a",
+        undefined,
+        expect.any(FormData),
+      ),
+    );
+  });
+
+  it("removes a causality link from the timeline", async () => {
+    archiveCampaignEventCausalityAction.mockResolvedValue(undefined);
+    renderTimeline({
+      events: [
+        {
+          ...events[0],
+          causedBy: [{ id: "cause-ev", title: "Earlier scene", linkId: "link-7" }],
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove causality link" }));
+    await waitFor(() =>
+      expect(archiveCampaignEventCausalityAction).toHaveBeenCalledWith(
+        "c1",
+        "link-7",
+        expect.any(FormData),
+      ),
+    );
+  });
+
+  it("scrolls to and highlights an event when a causality link is clicked", () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    const target = makeEvent("ev-target", "Origin beat", 9, "a1");
+    const effect: CampaignTimelineEvent = {
+      ...makeEvent("ev-effect", "Follow-up", 9, "a0"),
+      causedBy: [{ id: "ev-target", title: "Origin beat", linkId: "lk" }],
+    };
+    renderTimeline({ events: [target, effect] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Origin beat" }));
+
+    expect(scrollIntoView).toHaveBeenCalled();
+    const targetPanel = document
+      .getElementById("event-ev-target")!
+      .querySelector(".panel") as HTMLElement;
+    expect(targetPanel.style.boxShadow).toContain("var(--accent)");
+  });
+
+  it("infers a floor day-range from absolute-dated events, leaving others blank", () => {
+    const dated = (id: string, rank: string, floor: number, day: number) => ({
+      ...makeEvent(id, `Beat ${id}`, floor, rank),
+      time: timeInfo({ basis: "COLLAPSE", floor, offset: day, unit: "DAY", phrase: `Day ${day}` }),
+    });
+    renderTimeline({
+      events: [
+        dated("a", "a1", 9, 388),
+        dated("b", "a0", 9, 412),
+        // Floor 8 has only a floor-relative event → no absolute range inferable.
+        makeEvent("c", "Bone deal", 8, "a0"),
+      ],
+    });
+
+    // Floor 9 spans the absolute days of its dated events.
+    expect(screen.getByText("Day 388 – 412")).toBeDefined();
+    // Floor 8 (only a floor-relative event) shows no inferred day range.
+    const floor8 = screen.getByText("FLOOR 08").closest("section") as HTMLElement;
+    expect(within(floor8).queryByText(/Day \d/)).toBeNull();
+  });
+
+  it("disables drag for anchored events whose order the system infers", () => {
+    // basis FLOOR_START *with* a concrete offset → order derived → not draggable.
+    const anchored: CampaignTimelineEvent = {
+      ...events[0],
+      time: timeInfo({ basis: "FLOOR_START", floor: 9, offset: 3, unit: "DAY", phrase: "Floor 9 · 3 days in" }),
+    };
+    renderTimeline({ events: [anchored] });
+
+    const article = screen
+      .getByRole("heading", { name: "Boss fight" })
+      .closest("article") as HTMLElement;
+    expect(article.getAttribute("draggable")).toBe("false");
+  });
+
+  it("initialEventId landing logic and timeout highlight clearing", async () => {
+    vi.useFakeTimers();
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    renderTimeline({
+      events: [...events],
+      initialEventId: "ev1",
+    });
+
+    expect(scrollIntoView).toHaveBeenCalled();
+
+    // Now fast-forward timers to clear highlight
+    act(() => {
+      vi.advanceTimersByTime(2500);
+    });
+    vi.useRealTimers();
+  });
+
+  it("handles floor rail button clicks to jump to floor", () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    const mockGetElement = vi.spyOn(document, "getElementById").mockReturnValue({
+      scrollIntoView,
+    } as unknown as HTMLElement);
+
+    const floors: CampaignFloorMeta = {
+      ...emptyFloors,
+      ladder: [{ number: 9, name: "Larracos", count: 1, current: false, reached: true, logged: true, entityId: null }],
+    };
+    renderTimeline({ events: [...events], floors });
+
+    fireEvent.click(screen.getByTitle("Floor 9 — Larracos"));
+    expect(scrollIntoView).toHaveBeenCalled();
+    mockGetElement.mockRestore();
+  });
+
+  it("renders the not yet reached floor footer when current floor is less than max ladder", () => {
+    const floors: CampaignFloorMeta = {
+      ...emptyFloors,
+      currentFloorNumber: 1,
+      ladder: [
+        { number: 1, name: "First", count: 1, current: true, reached: true, logged: true, entityId: null },
+        { number: 2, name: "Second", count: 0, current: false, reached: false, logged: false, entityId: null },
+      ],
+    };
+    renderTimeline({ events: [...events], floors });
+    expect(screen.getByText(/Floor 2/)).toBeDefined();
+    expect(screen.getByText(/not yet reached/)).toBeDefined();
+  });
+
+  it("handles player suggestion provenance filter in sourceFilterKey", () => {
+    const suggestionEvent: CampaignTimelineEvent = {
+      ...events[0],
+      id: "ev-suggestion",
+      source: "PLAYER_SUGGESTION",
+    };
+    renderTimeline({ events: [suggestionEvent] });
+    expect(screen.getAllByText("PLR").length).toBeGreaterThan(0);
+  });
+
+  it("renders effect diff notes and review status labels", () => {
+    const effectEvent: CampaignTimelineEvent = {
+      ...events[0],
+      effects: [
+        {
+          id: "eff-1",
+          kind: "ADJUST_STAT",
+          targetId: "e1",
+          stat: "gold",
+          delta: 0,
+          valueNumber: null,
+          value: null,
+          note: "Bonus chest",
+          applied: false,
+          appliedChangeSetId: null,
+          pendingChangeSetId: null,
+          pendingOperationId: null,
+          reviewStatus: "PENDING",
+        },
+        {
+          id: "eff-2",
+          kind: "SET_ALIVE",
+          targetId: "e1",
+          stat: null,
+          delta: null,
+          valueNumber: null,
+          value: null,
+          note: null,
+          applied: false,
+          appliedChangeSetId: null,
+          pendingChangeSetId: null,
+          pendingOperationId: null,
+          reviewStatus: "REJECTED",
+        },
+        {
+          id: "eff-3",
+          kind: "SET_STAT",
+          targetId: "e1",
+          stat: "hp",
+          delta: null,
+          valueNumber: 100,
+          value: null,
+          note: null,
+          applied: false,
+          appliedChangeSetId: null,
+          pendingChangeSetId: null,
+          pendingOperationId: null,
+          reviewStatus: "SUPERSEDED",
+        }
+      ]
+    };
+    renderTimeline({ events: [effectEvent] });
+    expect(screen.getByText("Bonus chest")).toBeDefined();
+    expect(screen.getByText(/pending review/)).toBeDefined();
+    expect(screen.getByText(/rejected/)).toBeDefined();
+    expect(screen.getByText(/superseded/)).toBeDefined();
+  });
+
+  it("limits participant rows in NewEventForm to 20", () => {
+    renderTimeline({ canEdit: true });
+    // Click log event to open the form
+    fireEvent.click(screen.getByRole("button", { name: "Log event" }));
+
+    const addRowBtn = screen.getByRole("button", { name: "Add participant" });
+    // Click it 25 times
+    for (let i = 0; i < 25; i++) {
+      fireEvent.click(addRowBtn);
+    }
+    // There should be exactly 20 participant input groups (including the first one)
+    const actorPickers = screen.getAllByPlaceholderText("Search participant...");
+    expect(actorPickers.length).toBe(20);
   });
 });
 

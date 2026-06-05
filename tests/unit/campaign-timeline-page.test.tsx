@@ -6,12 +6,14 @@ const {
   requireUser,
   getCampaignForUser,
   listCampaignTimeline,
+  listCampaignFloors,
   listEntitiesForUser,
   notFound,
 } = vi.hoisted(() => ({
   requireUser: vi.fn(),
   getCampaignForUser: vi.fn(),
   listCampaignTimeline: vi.fn(),
+  listCampaignFloors: vi.fn(),
   listEntitiesForUser: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
@@ -20,7 +22,7 @@ const {
 
 vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/campaigns", () => ({ getCampaignForUser }));
-vi.mock("@/server/services/events", () => ({ listCampaignTimeline }));
+vi.mock("@/server/services/events", () => ({ listCampaignTimeline, listCampaignFloors }));
 vi.mock("@/server/services/entities", () => ({ listEntitiesForUser }));
 vi.mock("next/navigation", () => ({ notFound }));
 vi.mock("next/link", () => ({
@@ -60,7 +62,19 @@ import CampaignTimelinePage from "@/app/(dm)/campaigns/[id]/timeline/page";
 beforeEach(() => {
   vi.clearAllMocks();
   requireUser.mockResolvedValue({ id: "u1" });
-  getCampaignForUser.mockResolvedValue({ id: "c1", name: "World One" });
+  getCampaignForUser.mockResolvedValue({
+    id: "c1",
+    name: "World One",
+    members: [{ role: "OWNER" }],
+  });
+  listCampaignFloors.mockResolvedValue({
+    ladder: [],
+    byNumber: {},
+    currentFloorNumber: null,
+    currentFloorId: null,
+    liveEventId: null,
+    floorEntities: [],
+  });
   listEntitiesForUser.mockResolvedValue({
     entities: [
       { id: "e1", name: "Carl", type: "CRAWLER" },

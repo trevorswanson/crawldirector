@@ -4,6 +4,7 @@ const {
   requireUser,
   createCampaign,
   getCampaignCanonIntegrity,
+  setCampaignCurrentFloor,
   createCrawler,
   createGenericEntity,
   getEntityForUser,
@@ -37,6 +38,7 @@ const {
   requireUser: vi.fn(),
   createCampaign: vi.fn(),
   getCampaignCanonIntegrity: vi.fn(),
+  setCampaignCurrentFloor: vi.fn(),
   createCrawler: vi.fn(),
   createGenericEntity: vi.fn(),
   getEntityForUser: vi.fn(),
@@ -74,6 +76,7 @@ vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/campaigns", () => ({
   createCampaign,
   getCampaignCanonIntegrity,
+  setCampaignCurrentFloor,
 }));
 vi.mock("@/server/services/entities", () => ({
   archiveEntity,
@@ -149,6 +152,11 @@ import {
   applyCampaignEventEffectsAction,
   signOutAction,
   updateEntityAction,
+  setCampaignCurrentFloorAction,
+  setCampaignEventLockAction,
+  archiveCampaignEventAction,
+  linkCampaignEventCauseAction,
+  archiveCampaignEventCausalityAction,
 } from "@/app/(dm)/actions";
 
 import { ServiceError } from "@/lib/errors";
@@ -1604,5 +1612,139 @@ describe("archiveEventCausalityAction", () => {
 
     expect(archiveEventCausality).toHaveBeenCalledWith("u1", "c1", "ec1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/entity1");
+  });
+});
+
+describe("setCampaignCurrentFloorAction", () => {
+  it("sets the campaign current floor and revalidates the timeline page", async () => {
+    setCampaignCurrentFloor.mockResolvedValue({ currentFloorId: "f1", floorNumber: 1 });
+
+    const result = await setCampaignCurrentFloorAction("c1", "f1");
+
+    expect(result).toBeUndefined();
+    expect(setCampaignCurrentFloor).toHaveBeenCalledWith("u1", "c1", "f1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+  });
+
+  it("returns service error message on failure", async () => {
+    setCampaignCurrentFloor.mockRejectedValue(new ServiceError("Floor entity not found."));
+
+    const result = await setCampaignCurrentFloorAction("c1", "f1");
+
+    expect(result).toEqual({ error: "Floor entity not found." });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("returns generic error on unexpected error", async () => {
+    setCampaignCurrentFloor.mockRejectedValue(new Error("unexpected"));
+
+    const result = await setCampaignCurrentFloorAction("c1", "f1");
+
+    expect(result).toEqual({ error: "Could not set the current floor. Please try again." });
+  });
+});
+
+describe("setCampaignEventLockAction", () => {
+  it("toggles lock and revalidates affected participants + timeline page", async () => {
+    setEventLock.mockResolvedValue({
+      id: "ev1",
+      locked: true,
+      participantIds: ["e1", "e2"],
+    });
+
+    await setCampaignEventLockAction("c1", "ev1", false);
+
+    expect(setEventLock).toHaveBeenCalledWith("u1", "c1", "ev1", true);
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+  });
+});
+
+describe("archiveCampaignEventAction", () => {
+  it("archives event and revalidates affected participants + timeline page", async () => {
+    archiveEvent.mockResolvedValue({
+      id: "ev1",
+      participantIds: ["e1", "e2"],
+    });
+
+    await archiveCampaignEventAction("c1", "ev1");
+
+    expect(archiveEvent).toHaveBeenCalledWith("u1", "c1", "ev1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+  });
+});
+
+describe("linkCampaignEventCauseAction", () => {
+  it("links event cause and revalidates timeline page", async () => {
+    linkEventCause.mockResolvedValue({ id: "ec1" });
+
+    const result = await linkCampaignEventCauseAction(
+      "c1",
+      "effect1",
+      undefined,
+      form({ causeId: "cause1" }),
+    );
+
+    expect(result).toBeUndefined();
+    expect(linkEventCause).toHaveBeenCalledWith("u1", "c1", {
+      causeId: "cause1",
+      effectId: "effect1",
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+  });
+
+  it("returns error if causeId is missing", async () => {
+    const result = await linkCampaignEventCauseAction(
+      "c1",
+      "effect1",
+      undefined,
+      form({}),
+    );
+
+    expect(result).toEqual({ error: "Choose a cause event." });
+    expect(linkEventCause).not.toHaveBeenCalled();
+  });
+
+  it("surfaces service error message", async () => {
+    linkEventCause.mockRejectedValue(new ServiceError("Cycle detected."));
+
+    const result = await linkCampaignEventCauseAction(
+      "c1",
+      "effect1",
+      undefined,
+      form({ causeId: "cause1" }),
+    );
+
+    expect(result?.error).toBe("Cycle detected.");
+  });
+
+  it("returns generic error on unexpected error", async () => {
+    linkEventCause.mockRejectedValue(new Error("unexpected"));
+
+    const result = await linkCampaignEventCauseAction(
+      "c1",
+      "effect1",
+      undefined,
+      form({ causeId: "cause1" }),
+    );
+
+    expect(result).toEqual({ error: "Could not link the events. Please try again." });
+  });
+});
+
+describe("archiveCampaignEventCausalityAction", () => {
+  it("archives campaign event causality and revalidates timeline page", async () => {
+    archiveEventCausality.mockResolvedValue({
+      id: "ec1",
+      affectedEventIds: ["cause1", "effect1"],
+    });
+
+    await archiveCampaignEventCausalityAction("c1", "ec1");
+
+    expect(archiveEventCausality).toHaveBeenCalledWith("u1", "c1", "ec1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
   });
 });

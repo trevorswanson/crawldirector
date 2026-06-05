@@ -170,7 +170,7 @@ function entityCreatePatch(
   type: EntityType,
   input: Pick<
     CreateGenericEntityInput,
-    "name" | "summary" | "description" | "visibility" | "tags" | "isStub" | "itemTypeId" | "divine" | "unique" | "fleeting" | "aiDescription"
+    "name" | "summary" | "description" | "visibility" | "tags" | "isStub" | "itemTypeId" | "divine" | "unique" | "fleeting" | "aiDescription" | "floorNumber" | "theme"
   >,
 ) {
   const core = entityCoreData(userId, campaignId, input);
@@ -190,6 +190,12 @@ function entityCreatePatch(
     "data.unique": { to: input.unique ?? false },
     "data.fleeting": { to: input.fleeting ?? false },
     "data.aiDescription": { to: input.aiDescription ?? null },
+    ...(type === EntityType.FLOOR
+      ? {
+          "data.floorNumber": { to: input.floorNumber ?? null },
+          "data.theme": { to: nullIfEmpty(input.theme) },
+        }
+      : {}),
   } satisfies ReviewPatch;
 }
 
@@ -495,12 +501,18 @@ export async function updateEntity(
     unique?: boolean;
     fleeting?: boolean;
     aiDescription?: string | null;
+    floorNumber?: number | null;
+    theme?: string | null;
   }) || {};
   addPatch(patch, "data.itemTypeId", existingData.itemTypeId ?? null, parsed.itemTypeId ?? null);
   addPatch(patch, "data.divine", existingData.divine ?? false, parsed.divine ?? false);
   addPatch(patch, "data.unique", existingData.unique ?? false, parsed.unique ?? false);
   addPatch(patch, "data.fleeting", existingData.fleeting ?? false, parsed.fleeting ?? false);
   addPatch(patch, "data.aiDescription", existingData.aiDescription ?? null, parsed.aiDescription ?? null);
+  if (existing.type === EntityType.FLOOR) {
+    addPatch(patch, "data.floorNumber", existingData.floorNumber ?? null, parsed.floorNumber ?? null);
+    addPatch(patch, "data.theme", existingData.theme ?? null, nullIfEmpty(parsed.theme));
+  }
 
   if (existing.type === EntityType.CRAWLER && existing.crawler) {
     addPatch(patch, "crawler.realName", existing.crawler.realName, nullIfEmpty(parsed.realName));

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CrawlDirector — Reality Is Pending Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<style>
+:root {
+  /* Driven by Tweaks */
+  --accent: #F0C349;          /* DCC book-cover gold */
+  --accent-ink: #1a1306;      /* text on accent */
+  --hot: #ff5b3a;             /* hazard / live */
+  --font-display: 'Chakra Petch', sans-serif;
+  --font-body: 'Space Grotesk', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --grain-opacity: 0.05;
+  --scan-opacity: 0.05;
+
+  /* Fixed system palette */
+  --bg: #0a0908;
+  --bg-1: #100e0c;
+  --bg-2: #16130f;
+  --bg-3: #1e1a14;
+  --ink: #f3eee3;
+  --ink-dim: #a89f8d;
+  --ink-faint: #6d6557;
+  --line: rgba(240, 230, 200, 0.10);
+  --line-strong: rgba(240, 230, 200, 0.18);
+  --ok: #57d98a;
+  --no: #ff5d5d;
+  --sys: #74b6ff;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+::selection { background: var(--accent); color: var(--accent-ink); }
+
+/* ---- Global texture overlays ---- */
+.fx-layer { position: fixed; inset: 0; pointer-events: none; z-index: 9000; }
+.fx-scanlines {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(0,0,0,0) 0px,
+    rgba(0,0,0,0) 2px,
+    rgba(0,0,0,0.45) 3px,
+    rgba(0,0,0,0) 4px
+  );
+  opacity: var(--scan-opacity);
+  mix-blend-mode: multiply;
+}
+.fx-grain {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: var(--grain-opacity);
+  mix-blend-mode: overlay;
+}
+.fx-vignette {
+  background: radial-gradient(120% 90% at 50% 0%, transparent 55%, rgba(0,0,0,0.55) 100%);
+}
+
+/* ---- Reusable HUD primitives ---- */
+.mono { font-family: var(--font-mono); }
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.kicker::before {
+  content: "";
+  width: 18px; height: 1px;
+  background: var(--accent);
+  display: inline-block;
+}
+.tick { color: var(--ink-faint); }
+
+/* Bracket frame */
+.bracket { position: relative; }
+.bracket::before, .bracket::after {
+  content: "";
+  position: absolute;
+  width: 14px; height: 14px;
+  border-color: var(--line-strong);
+  border-style: solid;
+}
+.bracket::before { top: 0; left: 0; border-width: 1px 0 0 1px; }
+.bracket::after { bottom: 0; right: 0; border-width: 0 1px 1px 0; }
+
+.live-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--hot);
+  box-shadow: 0 0 0 0 var(--hot);
+  animation: pulse 1.8s infinite;
+  display: inline-block;
+}
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--hot) 70%, transparent); }
+  70% { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+button { font-family: inherit; cursor: pointer; }
+a { color: inherit; text-decoration: none; }
+
+/* reveal-on-scroll */
+.reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s cubic-bezier(.2,.7,.2,1); }
+.reveal.in { opacity: 1; transform: none; }
+
+#root { position: relative; z-index: 1; }
+</style>
+</head>
+<body>
+<template id="__bundler_thumbnail">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<rect width="100" height="100" fill="#0a0908"/>
+<rect x="30" y="30" width="40" height="40" rx="3" fill="none" stroke="#F0C349" stroke-width="3"/>
+<text x="50" y="62" font-family="monospace" font-size="30" font-weight="700" fill="#F0C349" text-anchor="middle">C</text>
+</svg>
+</template>
+<div id="root"></div>
+
+<!-- texture overlays (toggled via CSS vars from Tweaks) -->
+<div class="fx-layer fx-grain" id="fx-grain"></div>
+<div class="fx-layer fx-scanlines" id="fx-scanlines"></div>
+<div class="fx-layer fx-vignette"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="homepage-graph.jsx"></script>
+<script type="text/babel" src="homepage-sections.jsx"></script>
+<script type="text/babel" src="homepage-features.jsx"></script>
+<script type="text/babel" src="homepage-app.jsx"></script>
+</body>
+</html>
