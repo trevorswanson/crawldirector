@@ -1818,7 +1818,9 @@ describe("campaign floor metadata", () => {
       "Carl",
       "SHARED_WITH_PLAYERS",
     );
-    await makeFloor(owner.id, campaign.id, "Hidden Floor", 9); // DM_ONLY
+    const hiddenFloor = await makeFloor(owner.id, campaign.id, "Hidden Floor", 9); // DM_ONLY
+    const hiddenNpc = await makeEntity(owner.id, campaign.id, "Mordecai");
+    await setCampaignCurrentFloor(owner.id, campaign.id, hiddenFloor.id);
 
     await createEvent(owner.id, campaign.id, {
       title: "Public beat",
@@ -1832,13 +1834,78 @@ describe("campaign floor metadata", () => {
       secret: true,
       participants: [{ entityId: carl.id, role: "ACTOR" }],
     });
+    await createEvent(owner.id, campaign.id, {
+      title: "Public hidden-participant beat",
+      floor: 10,
+      secret: false,
+      participants: [{ entityId: hiddenNpc.id, role: "ACTOR" }],
+    });
 
     const playerMeta = await listCampaignFloors(player.id, campaign.id);
     // The DM-only FLOOR entity isn't visible, so no name resolves.
     expect(playerMeta.byNumber[9]).toBeUndefined();
     expect(playerMeta.floorEntities).toHaveLength(0);
-    // Only the public event is counted on floor 9.
+    // The raw current FLOOR id is hidden from the player projection.
+    expect(playerMeta.currentFloorId).toBeNull();
+    expect(playerMeta.currentFloorNumber).toBeNull();
+    // Only the public event with a visible participant is counted on floor 9.
     expect(playerMeta.ladder.find((floor) => floor.number === 9)?.count).toBe(1);
+    // A public event with only hidden participants should not extend/count the ladder.
+    expect(playerMeta.ladder.find((floor) => floor.number === 10)).toBeUndefined();
+  });
+
+  it("uses the player-visible event projection for the current floor live marker", async () => {
+    const owner = await makeUser("owner-floor-live-vis@test.com");
+    const player = await makeUser("player-floor-live-vis@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const carl = await makeEntity(
+      owner.id,
+      campaign.id,
+      "Carl",
+      "SHARED_WITH_PLAYERS",
+    );
+    const hiddenNpc = await makeEntity(owner.id, campaign.id, "Mordecai");
+    const floor = await makeFloor(
+      owner.id,
+      campaign.id,
+      "Larracos",
+      9,
+      "",
+      "SHARED_WITH_PLAYERS",
+    );
+
+    const visibleEvent = await createEvent(owner.id, campaign.id, {
+      title: "Visible current beat",
+      floor: 9,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const hiddenParticipantEvent = await createEvent(owner.id, campaign.id, {
+      title: "Hidden current beat",
+      floor: 9,
+      secret: false,
+      participants: [{ entityId: hiddenNpc.id, role: "ACTOR" }],
+    });
+    await prisma.event.update({
+      where: { id: visibleEvent.id },
+      data: { rank: "a1" },
+    });
+    await prisma.event.update({
+      where: { id: hiddenParticipantEvent.id },
+      data: { rank: "z1" },
+    });
+    await setCampaignCurrentFloor(owner.id, campaign.id, floor.id);
+
+    const playerMeta = await listCampaignFloors(player.id, campaign.id);
+
+    expect(playerMeta.currentFloorId).toBe(floor.id);
+    expect(playerMeta.currentFloorNumber).toBe(9);
+    expect(playerMeta.ladder.find((item) => item.number === 9)?.count).toBe(1);
+    expect(playerMeta.liveEventId).toBe(visibleEvent.id);
+    expect(playerMeta.liveEventId).not.toBe(hiddenParticipantEvent.id);
   });
 
   it("sets and clears the current floor, rejecting non-floor targets and players", async () => {

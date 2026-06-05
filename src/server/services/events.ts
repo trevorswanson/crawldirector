@@ -790,7 +790,36 @@ export async function listCampaignFloors(
   }
   const isPlayer = membership.role === Role.PLAYER;
 
-  const [campaign, floorRows, eventGroups] = await Promise.all([
+  // For DMs we can use a fast groupBy; for players we need to apply the same
+  // participant-visibility projection as listCampaignTimeline so the sidebar
+  // counts don't include events the player can't actually see.
+  const eventCountQuery = isPlayer
+    ? prisma.event.findMany({
+        where: {
+          campaignId,
+          status: { not: CanonStatus.ARCHIVED },
+          secret: false,
+        },
+        select: {
+          id: true,
+          orderKey: true,
+          rank: true,
+          createdAt: true,
+          participants: {
+            select: { entity: { select: otherEntitySelect } },
+          },
+        },
+      })
+    : prisma.event.groupBy({
+        by: ["orderKey"],
+        where: {
+          campaignId,
+          status: { not: CanonStatus.ARCHIVED },
+        },
+        _count: { _all: true },
+      });
+
+  const [campaign, floorRows, eventCountResult] = await Promise.all([
     prisma.campaign.findUnique({
       where: { id: campaignId },
       select: { currentFloorId: true },
@@ -810,15 +839,7 @@ export async function listCampaignFloors(
       },
       select: { id: true, name: true, data: true },
     }),
-    prisma.event.groupBy({
-      by: ["orderKey"],
-      where: {
-        campaignId,
-        status: { not: CanonStatus.ARCHIVED },
-        ...(isPlayer ? { secret: false } : {}),
-      },
-      _count: { _all: true },
-    }),
+    eventCountQuery,
   ]);
 
   // Floor number → descriptor + the picker list. A FLOOR entity without a
@@ -842,12 +863,40 @@ export async function listCampaignFloors(
 
   const countByFloor = new Map<number, number>();
   let maxEventFloor = 0;
-  for (const group of eventGroups) {
-    countByFloor.set(group.orderKey, group._count._all);
-    if (group.orderKey > maxEventFloor) maxEventFloor = group.orderKey;
+
+  if (isPlayer) {
+    // Apply participant-visibility projection: skip events where all
+    // participants are invisible to the player (same rule as listCampaignTimeline).
+    for (const event of eventCountResult as Array<{
+      orderKey: number;
+      participants: Array<{ entity: { status: CanonStatus; visibility: Visibility } }>;
+    }>) {
+      const hasVisibleParticipant = event.participants.some((p) =>
+        isPlayerVisible(p.entity),
+      );
+      if (!hasVisibleParticipant) continue;
+      countByFloor.set(event.orderKey, (countByFloor.get(event.orderKey) ?? 0) + 1);
+      if (event.orderKey > maxEventFloor) maxEventFloor = event.orderKey;
+    }
+  } else {
+    for (const group of eventCountResult as Array<{
+      orderKey: number;
+      _count: { _all: number };
+    }>) {
+      countByFloor.set(group.orderKey, group._count._all);
+      if (group.orderKey > maxEventFloor) maxEventFloor = group.orderKey;
+    }
   }
 
-  const currentFloorId = campaign?.currentFloorId ?? null;
+  const rawCurrentFloorId = campaign?.currentFloorId ?? null;
+  // For players, only expose the current-floor id if the referenced FLOOR entity
+  // survived the visibility filter — otherwise we'd leak a DM-only entity id.
+  const currentFloorId =
+    isPlayer && rawCurrentFloorId != null
+      ? floorEntities.some((f) => f.id === rawCurrentFloorId)
+        ? rawCurrentFloorId
+        : null
+      : rawCurrentFloorId;
   const currentFloorNumber =
     currentFloorId != null
       ? floorEntities.find((floor) => floor.id === currentFloorId)?.floorNumber ?? null
@@ -884,17 +933,38 @@ export async function listCampaignFloors(
 
   let liveEventId: string | null = null;
   if (currentFloorNumber != null && (countByFloor.get(currentFloorNumber) ?? 0) > 0) {
-    const live = await prisma.event.findFirst({
-      where: {
-        campaignId,
-        orderKey: currentFloorNumber,
-        status: { not: CanonStatus.ARCHIVED },
-        ...(isPlayer ? { secret: false } : {}),
-      },
-      orderBy: [{ rank: "desc" }, { createdAt: "desc" }],
-      select: { id: true },
-    });
-    liveEventId = live?.id ?? null;
+    if (isPlayer) {
+      const visibleEvents = eventCountResult as Array<{
+        id: string;
+        orderKey: number;
+        rank: string;
+        createdAt: Date;
+        participants: Array<{ entity: { status: CanonStatus; visibility: Visibility } }>;
+      }>;
+      const live = visibleEvents
+        .filter(
+          (event) =>
+            event.orderKey === currentFloorNumber &&
+            event.participants.some((p) => isPlayerVisible(p.entity)),
+        )
+        .sort(
+          (a, b) =>
+            b.rank.localeCompare(a.rank) ||
+            b.createdAt.getTime() - a.createdAt.getTime(),
+        )[0];
+      liveEventId = live?.id ?? null;
+    } else {
+      const live = await prisma.event.findFirst({
+        where: {
+          campaignId,
+          orderKey: currentFloorNumber,
+          status: { not: CanonStatus.ARCHIVED },
+        },
+        orderBy: [{ rank: "desc" }, { createdAt: "desc" }],
+        select: { id: true },
+      });
+      liveEventId = live?.id ?? null;
+    }
   }
 
   return {
