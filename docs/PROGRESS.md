@@ -13,13 +13,12 @@ keyword-scanning every doc.
 
 ### Active next slices
 
-- [ ] **M3 floor cleanup — ADR 0008 slices 2 + 3.** Slice 2: enforce
-      campaign-unique `data.floorNumber`, add a shared `resolveFloorEntity`
-      helper, and render resolved FLOOR-entity links wherever a bare number
-      appears. Slice 3: retire duplicate floor paths by steering event floor
-      selection to `timeRef.floor` (not FLOOR participants), steering crawler
-      floor state to `Crawler.currentFloor` (not crawler `LOCATED_ON`→FLOOR),
-      and surfacing `Crawler.currentFloor` as a resolved FLOOR link.
+- [ ] **M3 floor cleanup — ADR 0008 slice 3.** (Slice 2 shipped 2026-06-06 —
+      see the dated entry below.) Retire duplicate floor paths by steering event
+      floor selection to `timeRef.floor` (not FLOOR participants) and steering
+      crawler floor state to `Crawler.currentFloor` (not crawler
+      `LOCATED_ON`→FLOOR). The "surface `Crawler.currentFloor` as a resolved
+      FLOOR link" part of slice 3 landed early with slice 2.
 - [ ] **M4 generator expansion.** Add bulk-stub scaffolding and relationship
       inference generators, a generation panel for bulk runs, a `Job` table +
       worker for bulk/async runs, and usage/cost tracking with spend caps.
@@ -76,6 +75,52 @@ keyword-scanning every doc.
       - **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
+
+## M3 — Floor-number key + resolved FLOOR links (ADR 0008 slice 2) ✅ (2026-06-06)
+
+**Goal:** make the floor *number* a real campaign-unique key tied to its FLOOR
+entity, and resolve bare floor numbers to linked entities — the structural half
+of [ADR 0008](./adr/0008-floor-model-unification-and-time-inference.md) §1
+(slice 1 delivered the time anchors + inference). See ADR 0008 decision #1.
+
+- [x] **Floor-number uniqueness** enforced in the entity create/update appliers
+      (`assertFloorNumberAvailable`,
+      [`review.ts`](../src/server/services/review.ts)): a second **live** FLOOR
+      entity claiming a taken `data.floorNumber` is a `ServiceError` (reversing
+      ADR 0005's soft "first wins"); archiving a floor frees its number for
+      reuse; uniqueness is scoped per campaign. It can't be a DB constraint
+      (the number lives in `Entity.data` JSON), so the service enforces it on
+      both the create and update paths (the update path excludes the entity
+      being edited so a no-op re-save is fine).
+- [x] **Shared resolver** `resolveFloorEntity` / `resolveFloorEntities`
+      ([`events.ts`](../src/server/services/events.ts)): the single
+      visibility-scoped way code maps a floor number → its FLOOR entity (players
+      never resolve a DM-only floor; a number with no live entity is simply
+      absent so callers fall back to a number-only render).
+- [x] **Resolved FLOOR-entity links** wherever a bare number showed: the
+      campaign timeline band-header floor name links to its FLOOR entity; a
+      crawler's `currentFloor` resolves to "Floor N · Name" — a link on the
+      entity detail **Floor** field row (new optional `href` on `FieldRow`), and
+      inline text on the World Browser roster card (the card is itself a `Link`,
+      so no nested anchor). All gracefully fall back to the bare number when no
+      FLOOR entity resolves.
+- [x] **Tests:** DB-backed floor-number uniqueness (distinct ok, dup
+      create/update rejected, per-campaign scoping, self re-save ok, archived
+      number reuse) in `entities.test.ts`; `resolveFloorEntity(ies)` coverage
+      (resolve/miss/batch/empty/player-visibility/non-member) in `events.test.ts`;
+      component coverage for the entity-page floor link + bare fallback, the
+      roster card resolved name, and the timeline band-header link + plain-text
+      fallback. lint (0 errors), typecheck, build, and the full coverage gate
+      green (944 tests; statements 95.35%, branches 87.98%, functions 97.46%,
+      lines 97.25%).
+- [x] **Verified in-browser** against the reseeded Demo Campaign: Carl
+      (`currentFloor 9`) shows "Floor 9 · Larracos" linking to the Larracos
+      FLOOR entity on his detail page and the roster; the timeline band headers
+      (Larracos / The Bone Market / The Iron Choir) link to their FLOOR
+      entities. No console errors.
+- [x] **Remaining:** ADR 0008 slice 3 (retire the duplicate authoring paths —
+      FLOOR-as-event-participant and crawler `LOCATED_ON`→FLOOR) is mirrored in
+      the open backlog.
 
 ## M3 — Timeline/review quick fixes + floor-model ADR (2026-06-06)
 

@@ -41,7 +41,7 @@ import {
   type EntityDetail,
 } from "@/server/services/entities";
 import { listConnectionsForEntity } from "@/server/services/relationships";
-import { listEventsForEntity } from "@/server/services/events";
+import { listEventsForEntity, resolveFloorEntity } from "@/server/services/events";
 import { getGroupRoster, isGroupEntityType } from "@/server/services/groups";
 import {
   listKnowledgeHeldByEntity,
@@ -107,7 +107,13 @@ export default async function EntityPage({
   // Knowledge grants are a DM curation surface; players reaching a player-visible
   // entity page never see the reveal panel (and the reads return [] for them).
   const isDm = candidateList.role !== "PLAYER";
-  const fields = entityFields(entity, candidateList.entities);
+  // Resolve a crawler's current floor to its FLOOR entity so the Floor row links
+  // to the floor instead of showing a bare number (ADR 0008 §1).
+  const currentFloor =
+    entity.type === "CRAWLER" && entity.crawler?.currentFloor != null
+      ? await resolveFloorEntity(user.id, id, entity.crawler.currentFloor)
+      : null;
+  const fields = entityFields(entity, candidateList.entities, currentFloor);
   const detailHref = `/campaigns/${id}/entities/${entityId}`;
   const existingData = (entity.data as {
     itemTypeId?: string | null;
@@ -323,6 +329,13 @@ export default async function EntityPage({
                                 </Link>
                               ))}
                             </span>
+                          ) : f.href ? (
+                            <Link
+                              href={f.href}
+                              className="min-w-0 truncate text-[13.5px] text-[var(--ink)] transition-colors hover:text-[var(--accent)]"
+                            >
+                              {f.value}
+                            </Link>
                           ) : (
                             <span className="min-w-0 truncate text-[13.5px] text-[var(--ink)]">
                               {f.value}
@@ -601,7 +614,7 @@ export default async function EntityPage({
   );
 }
 
-type FieldRow = { key: string; label: string; value: string };
+type FieldRow = { key: string; label: string; value: string; href?: string };
 
 // Structured fields for the Fields table. Keys match the review service's patch
 // field names so each row's lock toggle maps to the same `lockedFields` entry.
@@ -609,6 +622,7 @@ type FieldRow = { key: string; label: string; value: string };
 function entityFields(
   entity: EntityDetail,
   allEntities: Array<{ id: string; name: string; type: string }>,
+  currentFloor: { id: string; name: string; floorNumber: number } | null,
 ): FieldRow[] {
   const rows: FieldRow[] = [];
   const existingData = (entity.data as {
@@ -659,7 +673,15 @@ function entityFields(
       {
         key: "crawler.currentFloor",
         label: "Floor",
-        value: c.currentFloor == null ? "Unknown" : String(c.currentFloor),
+        value:
+          c.currentFloor == null
+            ? "Unknown"
+            : currentFloor
+              ? `Floor ${c.currentFloor} · ${currentFloor.name}`
+              : `Floor ${c.currentFloor}`,
+        ...(currentFloor
+          ? { href: `/campaigns/${entity.campaignId}/entities/${currentFloor.id}` }
+          : {}),
       },
     );
   }

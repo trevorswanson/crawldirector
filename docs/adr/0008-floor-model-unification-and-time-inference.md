@@ -1,8 +1,8 @@
 # ADR 0008 — Floor model unification and absolute-day time inference
 
 - **Status:** accepted — slice 1 (floor time anchors + absolute-day inference)
-  delivered 2026-06-06; slices 2 (floor-number key) and 3 (retire duplicate
-  paths) pending
+  and slice 2 (floor-number key + resolved FLOOR links) delivered 2026-06-06;
+  slice 3 (retire duplicate paths) pending
 - **Date:** 2026-06-06
 - **Milestone:** M3 (events, timeline, causality) — cleanup + follow-up to
   [ADR 0004](./0004-event-time-model-and-ordering.md) and
@@ -219,9 +219,17 @@ floor anchors from `listCampaignFloors`.
    bounding each close at the next floor's open day. The campaign timeline's
    `dayRangeByFloor` now uses it, so an `EVENT`-relative time ("2 days after
    Event A") resolves and the floor-1→N chain fills in. No behavior removed.
-2. **Floor-number key (issue #2a).** Enforce per-campaign `floorNumber`
-   uniqueness in the appliers; add `resolveFloorEntity`; render resolved
-   FLOOR-entity links wherever a bare number shows.
+2. **Floor-number key (issue #2a).** ✅ **Delivered (2026-06-06).** Per-campaign
+   `floorNumber` uniqueness is enforced in the entity create/update appliers
+   (`assertFloorNumberAvailable` in [`review.ts`](../../src/server/services/review.ts)) —
+   a second live FLOOR claiming a taken number is a `ServiceError`, and archiving
+   a floor frees its number. A shared `resolveFloorEntity` /
+   `resolveFloorEntities` ([`events.ts`](../../src/server/services/events.ts),
+   visibility-scoped) maps a number → FLOOR entity, and bare floor numbers now
+   render as resolved entity links: the timeline band header name links to its
+   FLOOR entity, and a crawler's `currentFloor` resolves to "Floor N · Name" on
+   the entity detail page (linked) and the World Browser roster card (inline,
+   since the card is itself a link).
 3. **Retire duplicate floor paths (issue #2b).** Stop offering FLOOR entities in
    the event participant typeahead; stop offering crawler `LOCATED_ON` FLOOR;
    surface `Crawler.currentFloor` as a resolved entity link.

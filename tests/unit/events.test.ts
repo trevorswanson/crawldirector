@@ -19,6 +19,8 @@ import {
   listEventsForEntity,
   orderEventsFromCausality,
   reorderEvent,
+  resolveFloorEntities,
+  resolveFloorEntity,
   restoreEvent,
   restoreEventCausality,
   setEventLock,
@@ -2280,5 +2282,94 @@ describe("campaign floor metadata", () => {
     // Should not throw, but should handle null floorNumber
     expect(meta.floorEntities).toHaveLength(1);
     expect(meta.floorEntities[0].floorNumber).toBeNull();
+  });
+});
+
+describe("resolveFloorEntity (ADR 0008 §1)", () => {
+  function makeFloor(
+    userId: string,
+    campaignId: string,
+    name: string,
+    floorNumber: number,
+    visibility: "DM_ONLY" | "SHARED_WITH_PLAYERS" = "DM_ONLY",
+  ) {
+    return createGenericEntity(userId, campaignId, {
+      type: "FLOOR",
+      name,
+      summary: "",
+      description: "",
+      visibility,
+      tags: [],
+      floorNumber,
+    });
+  }
+
+  it("resolves a floor number to its FLOOR entity", async () => {
+    const owner = await makeUser("resolve-floor@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const larracos = await makeFloor(owner.id, campaign.id, "Larracos", 9);
+
+    const ref = await resolveFloorEntity(owner.id, campaign.id, 9);
+    expect(ref).toMatchObject({ id: larracos.id, name: "Larracos", floorNumber: 9 });
+  });
+
+  it("returns null for a number with no FLOOR entity", async () => {
+    const owner = await makeUser("resolve-floor-missing@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await makeFloor(owner.id, campaign.id, "Larracos", 9);
+
+    expect(await resolveFloorEntity(owner.id, campaign.id, 3)).toBeNull();
+  });
+
+  it("batch-resolves multiple numbers and skips unknowns", async () => {
+    const owner = await makeUser("resolve-floor-batch@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const floor8 = await makeFloor(owner.id, campaign.id, "The Bone Market", 8);
+    const floor9 = await makeFloor(owner.id, campaign.id, "Larracos", 9);
+
+    const map = await resolveFloorEntities(owner.id, campaign.id, [8, 9, 99]);
+    expect(map.get(8)?.id).toBe(floor8.id);
+    expect(map.get(9)?.id).toBe(floor9.id);
+    expect(map.has(99)).toBe(false);
+  });
+
+  it("returns an empty map when given no numbers", async () => {
+    const owner = await makeUser("resolve-floor-empty@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await makeFloor(owner.id, campaign.id, "Larracos", 9);
+
+    expect((await resolveFloorEntities(owner.id, campaign.id, [])).size).toBe(0);
+  });
+
+  it("does not resolve a DM-only floor for a player", async () => {
+    const owner = await makeUser("resolve-floor-dm@test.com");
+    const player = await makeUser("resolve-floor-player@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+
+    const hidden = await makeFloor(owner.id, campaign.id, "Secret Floor", 9, "DM_ONLY");
+    const shared = await makeFloor(
+      owner.id,
+      campaign.id,
+      "Open Floor",
+      8,
+      "SHARED_WITH_PLAYERS",
+    );
+
+    expect(await resolveFloorEntity(player.id, campaign.id, 9)).toBeNull();
+    expect((await resolveFloorEntity(player.id, campaign.id, 8))?.id).toBe(shared.id);
+    // The DM still resolves the hidden floor.
+    expect((await resolveFloorEntity(owner.id, campaign.id, 9))?.id).toBe(hidden.id);
+  });
+
+  it("returns an empty map for a non-member", async () => {
+    const owner = await makeUser("resolve-floor-owner@test.com");
+    const stranger = await makeUser("resolve-floor-stranger@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await makeFloor(owner.id, campaign.id, "Larracos", 9);
+
+    expect(await resolveFloorEntity(stranger.id, campaign.id, 9)).toBeNull();
   });
 });

@@ -1511,3 +1511,105 @@ describe("tagging system", () => {
     expect(loreList.entities[0].name).toBe("NPC 1");
   });
 });
+
+describe("floor number uniqueness (ADR 0008 §1)", () => {
+  function makeFloor(
+    userId: string,
+    campaignId: string,
+    name: string,
+    floorNumber: number,
+  ) {
+    return createGenericEntity(userId, campaignId, {
+      type: "FLOOR",
+      name,
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+      floorNumber,
+    });
+  }
+
+  it("allows distinct floor numbers within a campaign", async () => {
+    const owner = await makeUser("floor-unique-ok@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const floor8 = await makeFloor(owner.id, campaign.id, "The Bone Market", 8);
+    const floor9 = await makeFloor(owner.id, campaign.id, "Larracos", 9);
+
+    expect(floor8.id).not.toBe(floor9.id);
+  });
+
+  it("rejects creating a second FLOOR with a taken number", async () => {
+    const owner = await makeUser("floor-dup-create@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    await makeFloor(owner.id, campaign.id, "Larracos", 9);
+
+    await expect(
+      makeFloor(owner.id, campaign.id, "Impostor Floor", 9),
+    ).rejects.toThrow(/already used/i);
+  });
+
+  it("scopes uniqueness to the campaign", async () => {
+    const owner = await makeUser("floor-cross-campaign@test.com");
+    const a = await createCampaign(owner.id, { name: "Dungeon A" });
+    const b = await createCampaign(owner.id, { name: "Dungeon B" });
+
+    await makeFloor(owner.id, a.id, "Larracos", 9);
+    // Same number in a different campaign is fine.
+    const other = await makeFloor(owner.id, b.id, "Other Larracos", 9);
+    expect(other.id).toBeTruthy();
+  });
+
+  it("rejects updating a FLOOR onto another floor's number", async () => {
+    const owner = await makeUser("floor-dup-update@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    await makeFloor(owner.id, campaign.id, "The Bone Market", 8);
+    const larracos = await makeFloor(owner.id, campaign.id, "Larracos", 9);
+
+    await expect(
+      updateEntity(owner.id, campaign.id, larracos.id, {
+        type: "FLOOR",
+        name: "Larracos",
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: [],
+        floorNumber: 8,
+      }),
+    ).rejects.toThrow(/already used/i);
+  });
+
+  it("allows updating a FLOOR while keeping its own number", async () => {
+    const owner = await makeUser("floor-self-update@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const larracos = await makeFloor(owner.id, campaign.id, "Larracos", 9);
+    await updateEntity(owner.id, campaign.id, larracos.id, {
+      type: "FLOOR",
+      name: "Larracos Renamed",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+      floorNumber: 9,
+    });
+
+    const stored = await getEntityForUser(owner.id, campaign.id, larracos.id);
+    expect(stored?.name).toBe("Larracos Renamed");
+  });
+
+  it("frees an archived floor's number for reuse", async () => {
+    const owner = await makeUser("floor-archive-reuse@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const original = await makeFloor(owner.id, campaign.id, "Larracos", 9);
+    await archiveEntity(owner.id, campaign.id, original.id);
+
+    // Archiving releases the number — a fresh floor can claim it.
+    const replacement = await makeFloor(owner.id, campaign.id, "New Larracos", 9);
+    expect(replacement.id).not.toBe(original.id);
+  });
+});
