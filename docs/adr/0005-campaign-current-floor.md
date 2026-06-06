@@ -66,12 +66,9 @@ see.
 - `data.floorNumber` is not unique-constrained; if two FLOOR entities claim the
   same number the first one wins for band naming. Acceptable for a small, DM-
   curated set; can be tightened later if it bites.
-- **Inferred floor day-ranges** are computed client-side from events on the
-  *absolute* time axis only (`COLLAPSE` / `ABSOLUTE_DAY`, where day = offset).
-  Floor-relative anchors (`FLOOR_START` / `FLOOR_COLLAPSE`) are intentionally not
-  converted — ADR 0004 is explicit that the two axes can't be mixed without
-  floor-duration data we don't model. A floor with no absolute-dated events shows
-  no range. The natural extension is a `data.startDay` ("floor opens" anchor) on
-  FLOOR entities — the same `data.*` plumbing as `floorNumber` — which would let
-  `FLOOR_START` offsets resolve to absolute days and the floor-1→N chain fill in.
-  Deferred as a follow-up.
+- **Inferred floor day-ranges** originally used only events on the absolute time
+  axis (`COLLAPSE` / `ABSOLUTE_DAY`). ADR 0008 slice 1 delivered the follow-up
+  named here: FLOOR entities now carry optional `data.startDay` /
+  `data.collapseDay`, and `src/lib/time-resolve.ts` resolves EVENT chains plus
+  FLOOR_START/FLOOR_COLLAPSE offsets for display ranges. Remaining floor-model
+  cleanup lives in ADR 0008 slices 2–3.

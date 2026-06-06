@@ -246,10 +246,11 @@ floor anchors from `listCampaignFloors`.
 - **A soft guard, not a hard constraint.** Discouraging FLOOR participants /
   crawler `LOCATED_ON` is UI + suggestion-level, preserving invariant #7
   (relationships and participants stay any-to-any in the DB).
-- **One open question for the DM** (decision #3): keep `currentFloor` as the
-  crawler-position source of truth (this ADR), or go to the full `LOCATED_ON`
-  edge model now (Option B). Affects whether we get time-bounded location history
-  immediately at the cost of an effects-DSL rewrite.
+- **Crawler-position decision is settled for this cleanup:** keep
+  `Crawler.currentFloor` as the source of truth and retire crawler
+  `LOCATED_ON`→FLOOR as an authoring/read path. Option B remains only a deferred
+  future design if per-crawler spatial history becomes worth the effects-DSL
+  rewrite.
 
 ### Deferred (explicitly out of scope)
 

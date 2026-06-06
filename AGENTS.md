@@ -25,8 +25,10 @@ rejects proposals; and DMs can lock entities/fields (locked targets can't be
 overwritten). Per-field accept/edit/reject and `supersede` (a DM retires a stale
 or replaced proposal) work too. Batch review actions let DMs bulk approve/reject
 pending generator runs while blocked/stale proposals remain held for manual
-review. **M3 is underway**: typed any-to-any `Relationship` edges, `Event`s
-(with participants), and `EventCausality` cause→effect links route through the
+review. **M3's main relationship/event graph scope is complete; ADR 0008 floor
+cleanup still has follow-up slices.** Typed any-to-any `Relationship` edges,
+`Event`s (with participants), and `EventCausality` cause→effect links route
+through the
 pipeline (auto-approved DM path with provenance); the entity detail page's
 Connections panel shows real edges, and its Timeline panel shows real events
 plus simple cause/effect traversal and add/remove. Group-type entities
@@ -128,9 +130,12 @@ See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
    [`docs/00-overview.md`](./docs/00-overview.md),
    [`docs/03-review-pipeline.md`](./docs/03-review-pipeline.md) (the invariants),
    and the milestone you're working on in
-   [`docs/11-roadmap.md`](./docs/11-roadmap.md).
+   [`docs/11-roadmap.md`](./docs/11-roadmap.md). Also skim the ADRs relevant to
+   that milestone.
 2. **Find where things stand.** Check `git log`, the codebase, and
-   `docs/PROGRESS.md` (create it in M0 and keep it current).
+   `docs/PROGRESS.md` (create it in M0 and keep it current). Start with
+   **"Open backlog from docs / ADRs"**; it is the authoritative list for deferred
+   work discovered outside the newest milestone entry.
 3. **Pick the lowest-numbered unfinished milestone** in the roadmap. Don't skip
    ahead — dependencies are real (M2 underpins everything).
 4. **Decompose it into small vertical slices** (schema → service → minimal UI →
@@ -245,14 +250,11 @@ Every change ships with the tests that cover it; the bar rises as the product
 grows.
 
 - **High coverage floors**, enforced in CI. The exact per-metric floors live in
-  `vitest.config.ts`. **⚠️ Temporary (2026-05-29):** the floors were lowered to
-  90% statements/functions/lines, 85% branches for the CrawlDirector
-  design-language pass, which added two presentational client components
-  (`src/components/ui/fx-toggle.tsx`, `src/components/console/dm-nav.tsx`) without
-  their tests to ship the prototype in budget. **TODO next session:** add render/
-  interaction tests for those two and ratchet the floors back to **≥95/95/95/90**
-  (statements/functions/lines/branches). Treat the lowered values as a temporary
-  exception, not the new normal. The `build-and-test` job runs `npm run test:coverage`, and those
+  `vitest.config.ts`. Current gate: **95% statements / 85% branches / 95%
+  functions / 95% lines**. `FxToggle` and `DmNav` render/interaction tests now
+  exist; the remaining ratchet is branch coverage, which should move toward 90%
+  once aggregate coverage supports it. The `build-and-test` job runs
+  `npm run test:coverage`, and those
   thresholds make Vitest exit non-zero (failing the merge) if aggregate coverage
   drops below a floor. Treat them as a **floor, not a target** — ratchet them
   upward as coverage improves; never lower them to make a red build pass. Add the

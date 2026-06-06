@@ -1,10 +1,15 @@
 # ADR 0003 — Relationship create UX (target-first, ranked types) + typed inverse labels
 
-- **Status:** proposed
+- **Status:** accepted (delivered)
 - **Date:** 2026-05-31
 - **Milestone:** M3 (refinement of the connections panel)
 
 ## Context
+
+> Delivery note: this ADR is implemented in
+> [`src/lib/relationship-types.ts`](../../src/lib/relationship-types.ts) and the
+> `ConnectionsPanel` target-first add/edit forms. The deferred items below remain
+> intentionally out of scope.
 
 The "Add connection" form on the entity detail page
 ([`src/components/entities/connections-panel.tsx`](../../src/components/entities/connections-panel.tsx))

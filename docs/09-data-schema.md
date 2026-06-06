@@ -31,8 +31,9 @@
 > `CREATE_EVENT` / `UPDATE_EVENT`, `CREATE_EVENT_CAUSALITY` /
 > `DELETE_EVENT_CAUSALITY`, and `APPLY_EVENT_EFFECTS` now flow through the
 > pipeline. Unapplied event effects now submit pending Review Queue proposals
-> before mutating target entities. Pending relationship/event proposals remain a
-> future M3 slice.
+> before mutating target entities. Pending relationship proposals shipped in M3
+> slice 11, and event proposals use the same review dispatch path, so
+> relationships/events are reviewable rather than just auto-approved.
 
 ## Sketch
 
@@ -245,7 +246,10 @@ model Event {
   participants EventParticipant[]
   causedBy    EventCausality[] @relation("Effect")
   causes      EventCausality[] @relation("Cause")
-  // Future M3/M6: structured deltas (optionally applied), including PERSONA_SHIFT.
+  // Structured effect rows (M3): ADJUST_STAT, SET_STAT, SET_ALIVE today.
+  // PERSONA_SHIFT lands with the M6 persona model but uses the same reviewable
+  // APPLY_EVENT_EFFECTS path.
+  effects     Json     @default("[]")
   provenance  Provenance[]
   @@index([campaignId, orderKey, rank])
 }
@@ -286,6 +290,7 @@ enum OpKind {
   CREATE_ENTITY UPDATE_ENTITY DELETE_ENTITY
   CREATE_RELATIONSHIP UPDATE_RELATIONSHIP DELETE_RELATIONSHIP
   CREATE_EVENT UPDATE_EVENT APPLY_EVENT_EFFECTS
+  CREATE_EVENT_CAUSALITY DELETE_EVENT_CAUSALITY
 }
 enum OpDecision { PENDING ACCEPTED EDITED REJECTED }
 

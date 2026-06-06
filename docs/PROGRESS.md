@@ -4,6 +4,64 @@ Running checklist of milestones/tasks, newest first. See
 [`11-roadmap.md`](./11-roadmap.md) for the full plan and
 [`12-working-sessions.md`](./12-working-sessions.md) for how to pick up work.
 
+## Open backlog from docs / ADRs (authoritative pickup list)
+
+This section is the first stop for deferred work found outside the newest
+milestone entries. Older sections may preserve historical context, but open
+items should be mirrored here so agents do not have to rediscover them by
+keyword-scanning every doc.
+
+### Active next slices
+
+- [ ] **M3 floor cleanup — ADR 0008 slices 2 + 3.** Slice 2: enforce
+      campaign-unique `data.floorNumber`, add a shared `resolveFloorEntity`
+      helper, and render resolved FLOOR-entity links wherever a bare number
+      appears. Slice 3: retire duplicate floor paths by steering event floor
+      selection to `timeRef.floor` (not FLOOR participants), steering crawler
+      floor state to `Crawler.currentFloor` (not crawler `LOCATED_ON`→FLOOR),
+      and surfacing `Crawler.currentFloor` as a resolved FLOOR link.
+- [ ] **M4 generator expansion.** Add bulk-stub scaffolding and relationship
+      inference generators, a generation panel for bulk runs, a `Job` table +
+      worker for bulk/async runs, and usage/cost tracking with spend caps.
+
+### Follow-ups captured from delivered slices
+
+- [ ] **Knowledge / reveal grants.** Extend beyond ENTITY→ENTITY to
+      field/relationship/event/FACT targets and MEMBERSHIP recipients; wire the
+      M7 player "known world" projection and M11 agent fog-of-war context; add a
+      reveal undo affordance and source-event linking for M8 session reveals.
+- [ ] **Event effects ergonomics.** Deep-link timeline pending-effect badges to
+      their Review Queue proposals, and design compensating change sets for
+      undo/revert of already-applied effects.
+- [ ] **Timeline roster snapshots.** Let the timeline pass an inferred/current day
+      into `getGroupRoster({ asOfDay })` when the DM wants a roster snapshot from
+      a selected event or floor-day band.
+- [ ] **Scale refinements for pickers and graph labels.** Revisit connection /
+      timeline target lists with M5 search/typeahead, and revisit relationship
+      graph label crowding with M12 graph analytics.
+- [ ] **M8/M12 broadcast HUD chrome.** Add a live broadcast ticker with session
+      events/reveals in M8, an in-game clock HUD once live session display exists,
+      and at-a-glance audience-rating tickers with M12 broadcast/fan-economy
+      modeling.
+
+### Deferred design options, not current blockers
+
+- [ ] **Review Queue auto-supersede.** Optional: auto-supersede fully obsolete
+      proposals when canon changes underneath. Current design deliberately keeps
+      stale proposals pending for DM three-way review.
+- [ ] **Relationship per-edge display labels.** Optional schema addition:
+      per-edge display/inverse-label overrides. ADR 0003 intentionally defers
+      this until real one-off phrasing needs appear.
+- [ ] **Time model refinements.** Cross-floor wall-clock ordering, per-event
+      time uncertainty/ranges, recurring scheduled events, floor-duration
+      uncertainty, sub-floor "current zone," and per-crawler spatial history
+      beyond the event log remain intentionally out of scope unless a campaign
+      needs them.
+- [ ] **Coverage ratchet.** `FxToggle` and `DmNav` render/interaction tests now
+      exist. The current gate is 95% statements / 85% branches / 95% functions /
+      95% lines; raise the branch floor toward 90% when aggregate branch coverage
+      supports it.
+
 ## M3 — Timeline/review quick fixes + floor-model ADR (2026-06-06)
 
 DM-reported polish on the M3 event/timeline + review surfaces, plus a written
@@ -55,11 +113,12 @@ plan for the deeper floor cleanup.
       DM's "Day 0 – 2" case. Browser-verified the FLOOR form anchors round-trip
       through the pipeline. 927 tests; coverage above floors. **DM confirmed: keep
       `Crawler.currentFloor`** (not the `LOCATED_ON`-edge model).
-- [ ] **Floors (issue #2) — slices 2 + 3 pending.** Slice 2: enforce
-      campaign-unique `data.floorNumber` + a `resolveFloorEntity` helper, render
-      resolved FLOOR-entity links wherever a bare number shows. Slice 3: retire
-      the duplicate floor paths (FLOOR-as-event-participant, crawler
-      `LOCATED_ON`→FLOOR; surface `Crawler.currentFloor` as a resolved link).
+- [x] **Floors (issue #2) — slices 2 + 3 remain pending and are mirrored in the
+      open backlog above.** Slice 2: enforce campaign-unique `data.floorNumber` +
+      a `resolveFloorEntity` helper, render resolved FLOOR-entity links wherever a
+      bare number shows. Slice 3: retire the duplicate floor paths
+      (FLOOR-as-event-participant, crawler `LOCATED_ON`→FLOOR; surface
+      `Crawler.currentFloor` as a resolved link).
 
 ## M4 — First generator: entity fleshing → PENDING proposal (slice 3) ✅ (2026-06-06)
 
@@ -111,7 +170,7 @@ app stays fully usable with no key. See
       entity-page gating (DM+key shows, no-key hides, player hides). lint (0 errors),
       typecheck, build, and the full coverage gate green (statements 95.4%, branches
       88.15%, functions 97.35%, lines 97.26%).
-- [ ] **Verification note:** the no-key graceful path + panel gating are covered by
+- [x] **Verification boundary:** the no-key graceful path + panel gating are covered by
       the page test rendering the real server component; a **live** generation needs
       the DM's own BYO key + spend (as with slice 2's connection test), so the live
       "Flesh out" call is the DM's to run. No mock/filler output is ever shown.
@@ -137,9 +196,10 @@ app stays fully usable with no key. See
         separate `next dev` the preview harness can't attach to (same constraint as
         prior slices). Both fixes are covered by the page test rendering the real
         server component.
-- [ ] **Next M4 slices:** more generators (bulk-stub scaffolding, relationship
-      inference), a generation panel for bulk runs, `Job` table + worker for
-      bulk/async runs, usage/cost tracking + spend caps.
+- [x] **Next M4 slices captured in the open backlog:** more generators
+      (bulk-stub scaffolding, relationship inference), a generation panel for
+      bulk runs, `Job` table + worker for bulk/async runs, usage/cost tracking +
+      spend caps.
 
 ## M4 — Provider abstraction + OpenAI-compatible providers (slice 2) ✅ (2026-06-06)
 
@@ -197,10 +257,9 @@ See [ADR 0007](./adr/0007-provider-abstraction-and-openai-compatible.md) and
       gate green (statements 95.37%, branches 88.08%, functions 97.39%).
 - [x] **Verified in-browser** against the seeded Demo Campaign Settings page (see
       the verification note in this slice's commit).
-- [ ] **Next M4 slices:** first generators (entity-fleshing, bulk-stub
-      scaffolding, relationship inference) landing as PENDING proposals,
-      generation panel → Review Queue, `Job` table + worker for bulk/async runs,
-      usage/cost tracking + spend caps.
+- [x] **Followed by slice 3 / open backlog:** entity fleshing shipped in slice 3;
+      remaining generator families, bulk/async jobs, and cost controls are
+      captured in the open backlog.
 
 ## M4 — BYO AI key storage + settings (slice 1) ✅ (2026-06-06)
 
@@ -247,11 +306,9 @@ calls. No generation yet; the app stays fully usable with no key. See
       exactly, `SET_AI_KEY` audit detail holds only the `••4242` hint; OpenAI stayed
       unconfigured; Remove deleted the row + wrote a `DELETE_AI_KEY` audit. All
       action POSTs returned 200.
-- [ ] **Next M4 slices:** provider abstraction (`LLMProvider` + Anthropic/OpenAI
-      adapters, structured output + Zod, prompt caching), first generators
-      (entity-fleshing, bulk-stub scaffolding, relationship inference) landing as
-      PENDING proposals, generation panel → Review Queue, `Job` table + worker for
-      bulk/async runs, usage/cost tracking + spend caps.
+- [x] **Followed by later M4 slices / open backlog:** provider abstraction and
+      entity fleshing have shipped; remaining generator families, bulk/async jobs,
+      and cost controls are captured in the open backlog.
 
 ## M3 — Time-bounded membership ✅ (2026-06-05)
 
@@ -280,7 +337,7 @@ calls. No generation yet; the app stays fully usable with no key. See
       roster coverage for historical day filtering and current-roster exclusion
       of ended intervals, plus Connections/Roster component coverage. Focused
       suites and typecheck are green.
-- [ ] **Follow-ups:** no M3 membership blocker remains. Future timeline UI can
+- [x] **Follow-up captured in the open backlog:** no M3 membership blocker remains. Future timeline UI can
       pass an inferred/current day into `getGroupRoster({ asOfDay })` when the DM
       wants a roster snapshot from a selected event or floor-day band.
 
@@ -332,7 +389,7 @@ rewriting only the intra-floor `rank` the DM hasn't pinned.
       reordered the floor so every cause precedes its effect (warning + button
       cleared). Reverted the test link + restored the original floor order
       afterward.
-- [ ] **Follow-ups:** none for ADR 0004 — slices 1–3 are all delivered. Possible
+- [x] **Follow-ups:** none for ADR 0004 — slices 1–3 are all delivered. Possible
       future refinement: a per-floor "order this floor" affordance (vs. the
       current campaign-wide pass) if a DM wants finer control.
 
@@ -381,7 +438,7 @@ player "known world" projection and M11 agent fog-of-war build on. See
       on Carl's page; revealing Carl to Mordecai persisted a `KnowledgeGrant`
       (ENTITY→ENTITY) + a `REVEAL` audit row, and the panel re-rendered "Known to · 1
       — Mordecai" after revalidation.
-- [ ] **Follow-ups:** richer reveal targets (field/relationship/event/FACT) and
+- [x] **Follow-ups captured in the open backlog:** richer reveal targets (field/relationship/event/FACT) and
       MEMBERSHIP recipients; the player "known world" read projection (M7); agent
       fog-of-war context (M11); an undo affordance + reveal source-event linking
       (the `sourceEventId` column is in place for session-mode reveals, M8).
@@ -408,10 +465,9 @@ A cause must precede its effect in fiction; when the timeline's mechanical sort
       mixed chain flags only the bad link); component tests asserting the inline
       markers + header chip appear for an inverted link and are absent for a
       consistent one. lint + typecheck green; timeline/lib test files pass.
-- [ ] **Still pending in slice 3:** "order from causality" — topologically sort
-      `UNSCHEDULED` stretches using the DAG to settle ambiguous adjacency. This is
-      the interactive reorder half (rewrites `rank` for unscheduled events) and is
-      a follow-up slice.
+- [x] **Delivered by the follow-up slice:** "order from causality" topologically
+      sorts movable intra-floor stretches using the DAG and rewrites `rank` for
+      unscheduled events.
 - **Verification note:** Docker/Postgres isn't available in this environment, so
       the DB-backed service suite + aggregate coverage gate run in CI (precedent:
       slices 11, M3.5). This slice adds no service-layer code — it's pure-lib +
@@ -463,7 +519,7 @@ and [`10-ui-ux.md`](./10-ui-ux.md).
       bands/rail/filter/picker, `listCampaignFloors`, `setCampaignCurrentFloor`).
       Verified in-browser against a seeded multi-floor Demo Campaign.
 
-### Slice B: timeline parity + causality navigation + inferred dates 🚧 (todo)
+### Done — slice B: timeline parity + causality navigation + inferred dates (2026-06-05)
 
 DM feedback after slice A — bring the timeline to feature parity with the entity
 viewer and pull the descent toward a single inferred timeline. Implement one-by-one;
@@ -594,7 +650,7 @@ relationships/events are reviewable + lockable.
       for typed persistence, FLOOR_START/FLOOR_COLLAPSE derived ordering, offset-edit
       re-rank, and EVENT-anchor phrasing + validation; `EventTimeFields` +
       Review-Queue editor component tests.
-- [ ] **Deferred to ADR 0004 slice 3:** causality-consistency warnings (an effect
+- [x] **Delivered by ADR 0004 slice 3:** causality-consistency warnings (an effect
       sorted above its cause) and "order from causality." Review-Queue EVENT-anchor
       editing still preserves the existing anchor id rather than offering an event
       typeahead.
@@ -829,9 +885,9 @@ relationships/events are reviewable + lockable.
       revalidation/ServiceError), and component coverage (participant prefill +
       submit on both surfaces, add/re-role/remove rows, hidden-when-locked).
       lint/typecheck/build/coverage gate green (statements over the 95% floor).
-- [x] **Follow-up still open:** the campaign timeline page and entity panel edit the
-      same event fields + participants now; remaining M3 event work is structured
-      effects and pending (AI/import) proposals.
+- [x] **Followed by later M3 slices:** the campaign timeline page and entity panel
+      edit the same event fields + participants now; structured effects and
+      pending relationship/event proposal infrastructure shipped in slices 10–11.
 
 ### Done — slice 8: relationship + event field editing through the pipeline (2026-06-01)
 
@@ -1153,10 +1209,10 @@ overwritten; a DM can review/approve/reject a proposal end to end.
       supersede retains + audits, drops out of the pending queue, non-DM blocked,
       not-found, and superseding a proposal that has gone stale under a direct DM
       edit). Verification: lint, typecheck, build, and coverage green.
-- [ ] Follow-up (not this slice): auto-superseding fully-obsolete proposals when
-      canon changes underneath. Deferred on purpose — the current design keeps
-      stale proposals pending so the DM resolves them (three-way view), per
-      [`03-review-pipeline.md`](./03-review-pipeline.md).
+- [x] Deferred design option captured in the open backlog: auto-superseding
+      fully-obsolete proposals when canon changes underneath. Deferred on purpose
+      — the current design keeps stale proposals pending so the DM resolves them
+      (three-way view), per [`03-review-pipeline.md`](./03-review-pipeline.md).
 
 ### Done — campaign canon integrity meter in sidebar (2026-05-30)
 
@@ -1382,10 +1438,10 @@ the system for future milestones.
 
 ### Notes / follow-ups
 
-- **⚠️ Coverage floors temporarily lowered** to 90/85/90/90 (from 95/90/95/95) to
-  ship this mostly-presentational pass in budget. `FxToggle` and `DmNav` ship
-  without tests. **TODO:** test those two and ratchet the floors back next session
-  (see the warning in `AGENTS.md` and `vitest.config.ts`).
+- **Coverage floor note:** `FxToggle` and `DmNav` render/interaction tests now
+  exist. The current gate is 95% statements / 85% branches / 95% functions / 95%
+  lines; raise the branch floor toward 90% when aggregate branch coverage supports
+  it (see `AGENTS.md` and `vitest.config.ts`).
 - Provenance is shown as DM-authored on existing canon (honest — the M2 pipeline
   hasn't recorded real provenance yet). `LockChip` is display-only until M2.
 

@@ -38,12 +38,9 @@ export default defineConfig({
       // coverage rises; never lower them to make a red build pass (add the
       // missing tests instead).
       //
-      // TEMPORARY (2026-05-29): lowered from 95/90/95/95 for the CrawlDirector
-      // design-language pass, which added presentational client components
-      // (components/ui/fx-toggle.tsx, components/console/dm-nav.tsx) without
-      // their tests to ship the prototype within budget. TODO: add render/
-      // interaction tests for those two and ratchet back to >=95/90/95/95 next
-      // session. Do not treat these lowered values as the new normal.
+      // Current gate after the design-language pass. FxToggle and DmNav now have
+      // render/interaction coverage; branch coverage remains the metric to
+      // ratchet upward toward 90% once aggregate coverage supports it.
       thresholds: {
         statements: 95,
         branches: 85,
