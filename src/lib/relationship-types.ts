@@ -83,7 +83,7 @@ export const relationshipTypeMeta: Record<
     forward: "sponsors",
     inverse: "sponsored by",
     sourceTypes: ["SPONSOR", "FACTION", "ORGANIZATION"],
-    targetTypes: ["CRAWLER", "PARTY", "GUILD", "SHOW"],
+    targetTypes: ["CRAWLER", "PARTY", "GUILD", "SHOW", "FACTION"],
   },
   EMPLOYS: {
     group: "AFFILIATION",
