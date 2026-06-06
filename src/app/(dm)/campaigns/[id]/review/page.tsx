@@ -205,7 +205,7 @@ export default async function ReviewQueuePage({
         <div className="min-h-0 flex-1 overflow-y-auto">
           {filteredChangeSets.length === 0 ? (
             <div className="px-4 py-6 text-sm text-[var(--ink-faint)]">
-              No {showClosed ? "closed" : "pending"} {activeSource.toLowerCase()} proposals.
+              No {showClosed ? "closed" : "pending"} {activeSource.toLowerCase() == "all" ? "" : activeSource.toLowerCase()} proposals.
             </div>
           ) : (
             filteredChangeSets.map((changeSet) => {
