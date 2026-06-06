@@ -357,6 +357,16 @@ export const grantKnowledgeSchema = z.object({
 });
 export type GrantKnowledgeInput = z.infer<typeof grantKnowledgeSchema>;
 
+// BYO AI provider key (M4 — docs/04-ai-integration.md). `providerId` is checked
+// against the registry in the service; the apiKey is trimmed and length-bounded
+// here, then encrypted at rest. We deliberately don't enforce a prefix so any
+// provider/proxy key works — the registry's `keyPrefix` is only a UI hint.
+export const setAiKeySchema = z.object({
+  providerId: z.string().trim().min(1, "Pick a provider."),
+  apiKey: z.string().trim().min(8, "Enter a valid API key.").max(500),
+});
+export type SetAiKeyInput = z.infer<typeof setAiKeySchema>;
+
 // Event participant roles (docs/01-domain-model.md). Any-to-any, like
 // relationship types — every role is valid for any entity.
 export const eventParticipantRoleValues = [

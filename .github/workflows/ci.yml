@@ -17,6 +17,9 @@ env:
   DATABASE_URL: postgresql://postgres:postgres@localhost:5432/dcc?schema=public
   AUTH_SECRET: ci-test-secret-not-used-in-production
   AUTH_URL: http://localhost:3000
+  # Encrypts BYO AI keys at rest (M4 — src/server/crypto.ts). Tests need it set;
+  # this CI value is throwaway and never used in production.
+  AI_KEYS_SECRET: ci-test-ai-keys-secret-not-used-in-production
 
 jobs:
   # Fast feedback: lint + typecheck run in parallel with build-and-test, with

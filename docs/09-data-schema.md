@@ -360,13 +360,17 @@ model AuditLog {
 }
 
 // ───────────── AI config & jobs ─────────────
-model AiKey {            // encrypted at rest
+model AiKey {            // encrypted at rest — see docs/adr/0006
   id          String @id @default(cuid())
   campaignId  String
-  providerId  String
-  ciphertext  String   // envelope-encrypted key material
+  providerId  String   // matches src/lib/ai/providers.ts (e.g. "anthropic")
+  ciphertext  String   // AES-256-GCM envelope-encrypted key material (server-only)
+  lastFour    String   // non-secret display hint: the key's last 4 chars
+  createdById String   // who configured it
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
   @@unique([campaignId, providerId])
+  @@index([campaignId])
 }
 
 model Job {              // async generation / bulk + simulation + indexing runs
