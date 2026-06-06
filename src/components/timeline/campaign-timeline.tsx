@@ -1508,7 +1508,16 @@ export function CampaignTimeline({
                           </span>
                           {descriptor?.name && (
                             <h2 className="font-display text-[21px] font-bold uppercase tracking-[.01em] text-[var(--ink)]">
-                              {descriptor.name}
+                              {descriptor.entityId ? (
+                                <Link
+                                  href={`/campaigns/${campaignId}/entities/${descriptor.entityId}`}
+                                  className="transition-colors hover:text-[var(--accent)]"
+                                >
+                                  {descriptor.name}
+                                </Link>
+                              ) : (
+                                descriptor.name
+                              )}
                             </h2>
                           )}
                           {isCurrent && (

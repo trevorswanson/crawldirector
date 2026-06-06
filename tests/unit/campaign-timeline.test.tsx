@@ -197,6 +197,50 @@ describe("CampaignTimeline", () => {
     expect(screen.getByText("2 participants")).toBeDefined();
   });
 
+  it("links a floor band's name to its FLOOR entity (ADR 0008 §1)", () => {
+    renderTimeline({
+      events: [...events],
+      floors: {
+        ...emptyFloors,
+        byNumber: {
+          9: {
+            number: 9,
+            name: "Larracos",
+            theme: null,
+            entityId: "floor9",
+            startDay: null,
+            collapseDay: null,
+          },
+        },
+      },
+    });
+
+    const link = screen.getByRole("link", { name: "Larracos" });
+    expect(link.getAttribute("href")).toBe("/campaigns/c1/entities/floor9");
+  });
+
+  it("shows a floor band name as plain text when it has no FLOOR entity", () => {
+    renderTimeline({
+      events: [...events],
+      floors: {
+        ...emptyFloors,
+        byNumber: {
+          9: {
+            number: 9,
+            name: "Larracos",
+            theme: null,
+            entityId: null,
+            startDay: null,
+            collapseDay: null,
+          },
+        },
+      },
+    });
+
+    expect(screen.getByText("Larracos")).toBeDefined();
+    expect(screen.queryByRole("link", { name: "Larracos" })).toBeNull();
+  });
+
   it("renders event state, unplaced time, and causality threads", () => {
     renderTimeline({
       events: [

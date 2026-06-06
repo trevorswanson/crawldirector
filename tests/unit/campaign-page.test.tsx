@@ -8,6 +8,7 @@ const {
   listEntitiesForUser,
   getEntityTypeCounts,
   listCampaignTags,
+  resolveFloorEntities,
   notFound,
 } = vi.hoisted(() => ({
   requireUser: vi.fn(),
@@ -15,6 +16,7 @@ const {
   listEntitiesForUser: vi.fn(),
   getEntityTypeCounts: vi.fn(),
   listCampaignTags: vi.fn(),
+  resolveFloorEntities: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
@@ -27,6 +29,7 @@ vi.mock("@/server/services/entities", () => ({
   getEntityTypeCounts,
   listCampaignTags,
 }));
+vi.mock("@/server/services/events", () => ({ resolveFloorEntities }));
 vi.mock("next/navigation", () => ({
   notFound,
   useRouter: () => ({
@@ -58,6 +61,7 @@ beforeEach(() => {
   listEntitiesForUser.mockResolvedValue({ entities: [], role: "OWNER" });
   getEntityTypeCounts.mockResolvedValue({});
   listCampaignTags.mockResolvedValue([]);
+  resolveFloorEntities.mockResolvedValue(new Map());
 });
 
 afterEach(cleanup);
@@ -173,6 +177,40 @@ describe("CampaignPage", () => {
       screen.getByRole("link", { name: /Carl/ }).getAttribute("href"),
     ).toBe("/campaigns/c3/entities/e1");
     expect(screen.getByText("Floor 1")).toBeDefined();
+  });
+
+  it("names a crawler's current floor from its FLOOR entity (ADR 0008 §1)", async () => {
+    getCampaignForUser.mockResolvedValue({ id: "c3", name: "Dungeon", role: "OWNER" });
+    listEntitiesForUser.mockResolvedValue({
+      role: "OWNER",
+      entities: [
+        {
+          id: "e1",
+          type: "CRAWLER",
+          name: "Carl",
+          summary: "No shoes",
+          status: "CANON",
+          visibility: "PLAYER_FACING",
+          tags: [],
+          locked: false,
+          isStub: false,
+          updatedAt: new Date(),
+          crawler: { level: 2, realName: "Carl", crawlerNo: "1", isAlive: true, currentFloor: 9 },
+        },
+      ],
+    });
+    resolveFloorEntities.mockResolvedValue(
+      new Map([[9, { id: "floor9", name: "Larracos", floorNumber: 9 }]]),
+    );
+
+    render(
+      await CampaignPage({
+        params: Promise.resolve({ id: "c3" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+
+    expect(screen.getByText("Floor 9 · Larracos")).toBeDefined();
   });
 
   it("renders an entity archive undo notice from the redirect query", async () => {

@@ -144,6 +144,43 @@ function optionalNumber(value: JsonValue | undefined) {
   return typeof value === "number" ? value : null;
 }
 
+/**
+ * Floor number is the campaign-unique canonical key for a floor (ADR 0008 §1).
+ * It lives in `Entity.data` (JSON), so it can't be a DB unique constraint — the
+ * applier enforces it: a second live FLOOR entity claiming a taken number is a
+ * validation error, reversing the soft "first wins" behavior of ADR 0005.
+ */
+async function assertFloorNumberAvailable(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  floorNumber: number,
+  excludeEntityId?: string,
+) {
+  const floors = await tx.entity.findMany({
+    where: {
+      campaignId,
+      type: EntityType.FLOOR,
+      status: { not: CanonStatus.ARCHIVED },
+      ...(excludeEntityId ? { id: { not: excludeEntityId } } : {}),
+    },
+    select: { id: true, name: true, data: true },
+  });
+  const clash = floors.find((floor) => {
+    const data = floor.data;
+    return (
+      !!data &&
+      typeof data === "object" &&
+      !Array.isArray(data) &&
+      (data as { floorNumber?: unknown }).floorNumber === floorNumber
+    );
+  });
+  if (clash) {
+    throw new ServiceError(
+      `Floor number ${floorNumber} is already used by “${clash.name}”. Floor numbers must be unique within a campaign.`,
+    );
+  }
+}
+
 function relationshipDayBound(
   value: JsonValue | undefined,
   label: "Since day" | "Until day",
@@ -2299,6 +2336,13 @@ async function applyCreateEntity(
   const type = readTo(patch, "type");
   if (typeof type !== "string") throw new ServiceError("Entity type is required.");
 
+  if (type === EntityType.FLOOR) {
+    const floorNumber = optionalNumber(readTo(patch, "data.floorNumber"));
+    if (floorNumber != null) {
+      await assertFloorNumberAvailable(tx, changeSet.campaignId, floorNumber);
+    }
+  }
+
   const entity = await tx.entity.create({
     data: {
       campaignId: changeSet.campaignId,
@@ -2397,6 +2441,13 @@ async function applyUpdateEntity(
     }
     const fieldsText = lockedFields.map((f) => `"${f}"`).join(", ");
     throw new ServiceError(`This proposal touches locked entity fields: ${fieldsText}`);
+  }
+
+  if (entity.type === EntityType.FLOOR && "data.floorNumber" in patch) {
+    const floorNumber = optionalNumber(readTo(patch, "data.floorNumber"));
+    if (floorNumber != null) {
+      await assertFloorNumberAvailable(tx, changeSet.campaignId, floorNumber, entityId);
+    }
   }
 
   const data = entityUpdateData(patch, entity.type, entity.data);

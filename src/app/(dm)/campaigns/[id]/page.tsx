@@ -5,6 +5,7 @@ import type { EntityType, ChangeSource } from "@/generated/prisma/client";
 
 import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
+import { resolveFloorEntities } from "@/server/services/events";
 import {
   getEntityTypeCounts,
   listCampaignTags,
@@ -96,6 +97,17 @@ export default async function CampaignPage({
     listCampaignTags(user.id, id),
   ]);
   const total = Object.values(counts).reduce((sum, n) => sum + (n ?? 0), 0);
+
+  // Resolve the floor numbers crawlers stand on to their FLOOR entities so each
+  // card names the floor instead of showing a bare number (ADR 0008 §1). The
+  // card itself is a Link, so the name is shown inline (not a nested anchor).
+  const floorRefs = await resolveFloorEntities(
+    user.id,
+    id,
+    entities
+      .map((entity) => entity.crawler?.currentFloor)
+      .filter((n): n is number => typeof n === "number"),
+  );
 
   // Build a query string from the current facets with overrides applied.
   const hrefWith = (overrides: Record<string, string | undefined>) => {
@@ -349,6 +361,9 @@ export default async function CampaignPage({
                     {entity.crawler?.currentFloor != null && (
                       <span className="ml-auto font-mono text-[9.5px] text-[var(--ink-faint)]">
                         Floor {entity.crawler.currentFloor}
+                        {floorRefs.get(entity.crawler.currentFloor)
+                          ? ` · ${floorRefs.get(entity.crawler.currentFloor)!.name}`
+                          : ""}
                       </span>
                     )}
                   </div>

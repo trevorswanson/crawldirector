@@ -796,6 +796,64 @@ function readFloorData(value: unknown): {
   };
 }
 
+export type FloorRef = { id: string; name: string; floorNumber: number };
+
+/**
+ * Map floor numbers → their FLOOR entity (ADR 0008 §1). The single way code
+ * resolves a bare "which floor" number to the entity it names, so numbers and
+ * entities can't drift apart. Visibility-scoped: players never resolve a DM-only
+ * FLOOR. A number with no live FLOOR entity is simply absent from the map (the
+ * caller renders a number-only fallback). Floor numbers are unique per campaign
+ * (enforced in the review appliers), so at most one entity matches each number.
+ */
+export async function resolveFloorEntities(
+  userId: string,
+  campaignId: string,
+  floorNumbers: number[],
+): Promise<Map<number, FloorRef>> {
+  const result = new Map<number, FloorRef>();
+  const wanted = new Set(floorNumbers.filter((n) => Number.isFinite(n)));
+  if (wanted.size === 0) return result;
+
+  const membership = await getMembership(userId, campaignId);
+  if (!membership) return result;
+  const isPlayer = membership.role === Role.PLAYER;
+
+  const rows = await prisma.entity.findMany({
+    where: {
+      campaignId,
+      type: EntityType.FLOOR,
+      status: { not: CanonStatus.ARCHIVED },
+      ...(isPlayer
+        ? {
+            visibility: {
+              in: [Visibility.SHARED_WITH_PLAYERS, Visibility.PLAYER_FACING],
+            },
+          }
+        : {}),
+    },
+    select: { id: true, name: true, data: true },
+  });
+
+  for (const row of rows) {
+    const { floorNumber } = readFloorData(row.data);
+    if (floorNumber != null && wanted.has(floorNumber) && !result.has(floorNumber)) {
+      result.set(floorNumber, { id: row.id, name: row.name, floorNumber });
+    }
+  }
+  return result;
+}
+
+/** Resolve a single floor number to its FLOOR entity, or null. */
+export async function resolveFloorEntity(
+  userId: string,
+  campaignId: string,
+  floorNumber: number,
+): Promise<FloorRef | null> {
+  const map = await resolveFloorEntities(userId, campaignId, [floorNumber]);
+  return map.get(floorNumber) ?? null;
+}
+
 /**
  * Floor metadata for the campaign timeline: the dungeon ladder (1 → deepest
  * known), named/themed floor descriptors resolved from FLOOR entities, the

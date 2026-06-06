@@ -10,6 +10,7 @@ const {
   listCampaignTags,
   listConnectionsForEntity,
   listEventsForEntity,
+  resolveFloorEntity,
   listKnowledgeOfEntity,
   listKnowledgeHeldByEntity,
   getEntityProvenance,
@@ -23,6 +24,7 @@ const {
   listCampaignTags: vi.fn(),
   listConnectionsForEntity: vi.fn(),
   listEventsForEntity: vi.fn(),
+  resolveFloorEntity: vi.fn(),
   listKnowledgeOfEntity: vi.fn(),
   listKnowledgeHeldByEntity: vi.fn(),
   getEntityProvenance: vi.fn(),
@@ -40,7 +42,7 @@ vi.mock("@/server/services/entities", () => ({
   listCampaignTags,
 }));
 vi.mock("@/server/services/relationships", () => ({ listConnectionsForEntity }));
-vi.mock("@/server/services/events", () => ({ listEventsForEntity }));
+vi.mock("@/server/services/events", () => ({ listEventsForEntity, resolveFloorEntity }));
 vi.mock("@/server/services/review", () => ({ getEntityProvenance }));
 vi.mock("@/server/services/ai-keys", () => ({ listAiKeys }));
 vi.mock("@/server/services/knowledge", () => ({
@@ -152,6 +154,7 @@ beforeEach(() => {
   listCampaignTags.mockResolvedValue([]);
   listConnectionsForEntity.mockResolvedValue([]);
   listEventsForEntity.mockResolvedValue([]);
+  resolveFloorEntity.mockResolvedValue(null);
   listKnowledgeOfEntity.mockResolvedValue([]);
   listKnowledgeHeldByEntity.mockResolvedValue([]);
   listAiKeys.mockResolvedValue([]);
@@ -242,6 +245,30 @@ describe("EntityPage", () => {
     expect(screen.getByText("Connections panel (0/1)")).toBeDefined();
     expect(screen.getByText("Timeline panel (0/1)")).toBeDefined();
     expect(screen.queryAllByText(/Planned · M3/).length).toBe(0);
+  });
+
+  it("links a crawler's current floor to its FLOOR entity (ADR 0008 §1)", async () => {
+    getEntityForUser.mockResolvedValue(crawler());
+    resolveFloorEntity.mockResolvedValue({
+      id: "floor9",
+      name: "Larracos",
+      floorNumber: 2,
+    });
+
+    await renderPage();
+
+    const floorLink = screen.getByRole("link", { name: /Floor 2 · Larracos/ });
+    expect(floorLink.getAttribute("href")).toBe("/campaigns/c1/entities/floor9");
+  });
+
+  it("shows a bare floor number when no FLOOR entity resolves", async () => {
+    getEntityForUser.mockResolvedValue(crawler());
+    resolveFloorEntity.mockResolvedValue(null);
+
+    await renderPage();
+
+    expect(screen.getByText("Floor 2")).toBeDefined();
+    expect(screen.queryByRole("link", { name: /Floor 2/ })).toBeNull();
   });
 
   it("renders the knowledge panel with the entity's reveal grants", async () => {
