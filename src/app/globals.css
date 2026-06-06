@@ -111,6 +111,17 @@ body {
    tag remove buttons) keep their keyboard focus ring. */
 .field-shell input:focus-visible { outline: none; }
 
+/* Prevent browser autofill from styling inputs with light yellow/blue in dark mode */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px var(--bg) inset !important;
+  -webkit-text-fill-color: var(--ink) !important;
+  caret-color: var(--ink) !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
 /* ---------------------------- HUD primitives ---------------------------- */
 .mono { font-family: var(--font-mono); }
 .font-display { font-family: var(--font-display); }
@@ -215,7 +226,7 @@ html.fx .fx-layer { display: block; }
   opacity: var(--grain-opacity);
   mix-blend-mode: overlay;
 }
-.fx-vignette { background: radial-gradient(130% 100% at 50% 0%, transparent 60%, rgba(0, 0, 0, 0.5) 100%); }
+.fx-vignette { background: radial-gradient(130% 100% at 50% 0%, transparent 60%, rgba(0, 0, 0, 0.15) 100%); }
 
 /* Accessibility: no motion + no flicker overlays for users who ask for it. */
 @media (prefers-reduced-motion: reduce) {
