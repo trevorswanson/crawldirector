@@ -2185,6 +2185,7 @@ export type EntityProvenance = {
   approvedAt: Date | null;
   lastChangeTitle: string;
   lastChangeSource: ChangeSource;
+  lastChangeModel: string | null;
   changeCount: number;
 };
 
@@ -2234,15 +2235,24 @@ export async function getEntityProvenance(
   const label = (u: { name: string | null; email: string } | null) =>
     u?.name || u?.email || null;
 
+  // The "Model" row should reflect the most recent change that actually ran a
+  // model — typically an AI flesh-out — not the (usually null) origin model of a
+  // DM-created entity. Otherwise an AI contribution is invisible in provenance.
+  const latestModel = ops.reduce<string | null>(
+    (acc, op) => op.changeSet.model ?? acc,
+    null,
+  );
+
   return {
     source: origin.source,
     authorLabel: label(origin.actor),
     createdAt: origin.createdAt,
-    model: origin.model,
+    model: latestModel,
     approvedByLabel: label(origin.reviewer),
     approvedAt: origin.reviewedAt,
     lastChangeTitle: last.title,
     lastChangeSource: last.source,
+    lastChangeModel: last.model,
     changeCount: ops.length,
   };
 }

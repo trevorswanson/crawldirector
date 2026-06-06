@@ -132,6 +132,7 @@ const crawlerProvenance = {
   approvedAt: new Date("2026-05-01"),
   lastChangeTitle: "Update Carl",
   lastChangeSource: "DM",
+  lastChangeModel: null,
   changeCount: 2,
 };
 
@@ -288,6 +289,47 @@ describe("EntityPage", () => {
     await renderPage();
 
     expect(screen.queryByText("Generate panel")).toBeNull();
+  });
+
+  it("offers lock toggles for summary and description in the read view", async () => {
+    getEntityForUser.mockResolvedValue(crawler());
+
+    await renderPage();
+
+    // Both narrative fields expose an unlocked "Click to lock this field" toggle
+    // (alongside the structured-field toggles).
+    expect(screen.getAllByTitle("Click to lock this field").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("reflects a locked summary/description as locked toggles", async () => {
+    getEntityForUser.mockResolvedValue(
+      crawler({ lockedFields: ["summary", "description"] }),
+    );
+
+    await renderPage();
+
+    // summary + description both render as locked toggles.
+    expect(
+      screen.getAllByTitle("Locked field — click to unlock").length,
+    ).toBeGreaterThanOrEqual(2);
+  });
+
+  it("surfaces an AI last-change in provenance (source badge + model)", async () => {
+    getEntityForUser.mockResolvedValue(crawler());
+    getEntityProvenance.mockResolvedValue({
+      ...crawlerProvenance,
+      source: "DM",
+      model: "claude-opus-4-8",
+      lastChangeTitle: "Flesh out Carl",
+      lastChangeSource: "AI",
+      lastChangeModel: "claude-opus-4-8",
+    });
+
+    await renderPage();
+
+    expect(screen.getByText("Flesh out Carl")).toBeDefined();
+    // Shown in both the Model row and the Last-change row.
+    expect(screen.getAllByText(/claude-opus-4-8/).length).toBeGreaterThanOrEqual(1);
   });
 
   it("renders entity tags as links that filter the World Browser", async () => {

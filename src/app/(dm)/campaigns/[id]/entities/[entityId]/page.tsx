@@ -118,6 +118,12 @@ export default async function EntityPage({
   }) || {};
 
   const renderedDescription = entity.description || "";
+  // Whether the narrative fields are protected from edits/AI. Drives the
+  // read-view lock toggles so a DM can shield a summary/description (which the
+  // entity-fleshing generator then skips).
+  const summaryLocked = entity.locked || entity.lockedFields.includes("summary");
+  const descriptionLocked =
+    entity.locked || entity.lockedFields.includes("description");
   let renderedAiDescription = "";
   if (entity.type === "ITEM") {
     let prefix = "";
@@ -161,10 +167,28 @@ export default async function EntityPage({
           <h1 className="font-display text-[30px] font-bold leading-[1.05] tracking-[.01em]">
             {entity.name}
           </h1>
-          {entity.summary && (
+          {editing && entity.summary && (
             <p className="mt-[10px] text-[15px] leading-[1.4] text-[var(--ink-dim)]">
               {entity.summary}
             </p>
+          )}
+          {!editing && (entity.summary || summaryLocked) && (
+            <div className="mt-[10px] flex items-start justify-between gap-4">
+              <p className="flex-1 text-[15px] leading-[1.4] text-[var(--ink-dim)]">
+                {entity.summary || (
+                  <span className="italic text-[var(--ink-faint)]">
+                    No summary (locked)
+                  </span>
+                )}
+              </p>
+              <FieldLockToggle
+                campaignId={id}
+                entityId={entityId}
+                field="summary"
+                fieldLocked={summaryLocked}
+                entityLocked={entity.locked}
+              />
+            </div>
           )}
 
           {!editing && entity.type === "ITEM" && (renderedAiDescription || entity.lockedFields.includes("data.aiDescription")) && (() => {
@@ -241,12 +265,27 @@ export default async function EntityPage({
             </section>
           ) : (
             <>
-              {renderedDescription && (
+              {(renderedDescription || descriptionLocked) && (
                 <div className="mt-[22px]">
-                  <Kicker dim noLead className="mb-[10px]">
-                    Description
-                  </Kicker>
-                  <Markdown content={renderedDescription} />
+                  <div className="mb-[10px] flex items-center justify-between gap-4">
+                    <Kicker dim noLead>
+                      Description
+                    </Kicker>
+                    <FieldLockToggle
+                      campaignId={id}
+                      entityId={entityId}
+                      field="description"
+                      fieldLocked={descriptionLocked}
+                      entityLocked={entity.locked}
+                    />
+                  </div>
+                  {renderedDescription ? (
+                    <Markdown content={renderedDescription} />
+                  ) : (
+                    <span className="italic text-[var(--ink-faint)]">
+                      Empty description (locked)
+                    </span>
+                  )}
                 </div>
               )}
 
@@ -530,7 +569,17 @@ export default async function EntityPage({
                   <span className="text-[var(--accent)]">pending review</span>
                 )}
               </ProvRow>
-              <ProvRow k="Last change">{provenance.lastChangeTitle}</ProvRow>
+              <ProvRow k="Last change">
+                <SourceBadge source={provenance.lastChangeSource} small />
+                <span className="text-[var(--ink-dim)]">
+                  {provenance.lastChangeTitle}
+                </span>
+                {provenance.lastChangeModel && (
+                  <span className="font-mono text-[var(--ai)]">
+                    · {provenance.lastChangeModel}
+                  </span>
+                )}
+              </ProvRow>
             </div>
           ) : (
             <p className="text-xs text-[var(--ink-faint)]">
@@ -622,6 +671,54 @@ function entityFields(
     },
   );
   return rows;
+}
+
+// Per-field canon lock toggle for the read view (summary/description). Mirrors
+// the Fields-table toggles: locked fields can't be overwritten by edits or AI
+// generation. Disabled while the whole entity is locked.
+function FieldLockToggle({
+  campaignId,
+  entityId,
+  field,
+  fieldLocked,
+  entityLocked,
+}: {
+  campaignId: string;
+  entityId: string;
+  field: string;
+  fieldLocked: boolean;
+  entityLocked: boolean;
+}) {
+  return (
+    <form
+      action={toggleEntityFieldLockAction.bind(null, campaignId, entityId)}
+      className="shrink-0 self-start"
+    >
+      <input type="hidden" name="field" value={field} />
+      <button
+        type="submit"
+        disabled={entityLocked}
+        title={
+          entityLocked
+            ? "Whole entity is locked"
+            : fieldLocked
+              ? "Locked field — click to unlock"
+              : "Click to lock this field"
+        }
+        className="inline-flex cursor-pointer items-center border px-[5px] py-[3px] transition-colors disabled:opacity-50"
+        style={{
+          borderColor: fieldLocked ? "var(--sys)" : "var(--line)",
+          color: fieldLocked ? "var(--sys)" : "var(--ink-faint)",
+        }}
+      >
+        {fieldLocked ? (
+          <Lock aria-hidden size={11} />
+        ) : (
+          <Unlock aria-hidden size={11} />
+        )}
+      </button>
+    </form>
+  );
 }
 
 function ProvRow({ k, children }: { k: string; children: React.ReactNode }) {

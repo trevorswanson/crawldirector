@@ -58,6 +58,28 @@ app stays fully usable with no key. See
       the page test rendering the real server component; a **live** generation needs
       the DM's own BYO key + spend (as with slice 2's connection test), so the live
       "Flesh out" call is the DM's to run. No mock/filler output is ever shown.
+- [x] **Follow-up fixes (DM feedback, 2026-06-06):**
+      - **AI invisible in provenance.** The entity provenance panel showed only the
+        *origin* (DM creation) source/model and the last change's *title* — so an
+        approved AI flesh-out looked like a DM edit. `getEntityProvenance` now
+        surfaces the most recent model-bearing change in the **Model** row and
+        returns `lastChangeModel`; the panel's **Last change** row renders the
+        change's `SourceBadge` (AI/DM/import) + title + model. Origin stays the
+        (accurate) DM creation.
+      - **Couldn't lock summary/description.** The pipeline, generator, and edit
+        form already honored locks on these fields, but the read view had no
+        toggle to set them (only structured fields + item `aiDescription` did).
+        Added read-view lock toggles for **summary** and **description** (shared
+        `FieldLockToggle`), so a DM can shield narrative prose — the fleshing
+        generator already excludes locked fields.
+      - Tests: `getEntityProvenance` latest-model + origin-vs-last assertions;
+        entity-page coverage for the summary/description toggles (unlocked + locked)
+        and the AI last-change provenance display. lint/typecheck/build/coverage
+        gate green (statements 95.43%).
+      - **Verification note:** in-browser deferred — port 3000 was held by a
+        separate `next dev` the preview harness can't attach to (same constraint as
+        prior slices). Both fixes are covered by the page test rendering the real
+        server component.
 - [ ] **Next M4 slices:** more generators (bulk-stub scaffolding, relationship
       inference), a generation panel for bulk runs, `Job` table + worker for
       bulk/async runs, usage/cost tracking + spend caps.
