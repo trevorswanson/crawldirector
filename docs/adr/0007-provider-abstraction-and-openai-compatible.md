@@ -13,7 +13,7 @@ slices) calls so the [review pipeline](../03-review-pipeline.md) and persona/
 agent features stay provider-independent
 ([`04-ai-integration.md`](../04-ai-integration.md)).
 
-Two open questions drove the design:
+Two design questions drove the decision:
 
 1. **Which providers?** M4's storage slice supported Anthropic and OpenAI. DMs
    also want to point CrawlDirector at a **locally hosted model** (Ollama, LM

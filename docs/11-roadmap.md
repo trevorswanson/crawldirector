@@ -249,13 +249,13 @@ that produces its data:
 
 - **Live broadcast ticker** (scrolling world events: siege timers, faction
   standings, viral clips, pending persona drift) → **M8 (live session mode)**: a
-  feed of live session events + reveals. _Add as an explicit M8 deliverable._
+  feed of live session events + reveals. Captured in `PROGRESS.md`'s open backlog.
 - **In-game clock HUD** ("Floor N · Day D") → needs an in-game time/calendar
   model: data with **M3** (events carry in-game time), live display with **M8**.
 - **Fame / audience-rating tickers** (views/followers/favorites trends, sponsor-
   stock moves) → the `Crawler` model already tracks views/followers/favorites;
-  trends + fan-economy modeling are **M12 (broadcast/fan-economy)**. _Add the
-  at-a-glance rating ticker as an M12 deliverable._
+  trends + fan-economy modeling are **M12 (broadcast/fan-economy)**. Captured in
+  `PROGRESS.md`'s open backlog.
 
 ## Definition of done (every milestone)
 
