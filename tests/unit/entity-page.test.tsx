@@ -13,6 +13,7 @@ const {
   listKnowledgeOfEntity,
   listKnowledgeHeldByEntity,
   getEntityProvenance,
+  listAiKeys,
   notFound,
 } = vi.hoisted(() => ({
   requireUser: vi.fn(),
@@ -25,6 +26,7 @@ const {
   listKnowledgeOfEntity: vi.fn(),
   listKnowledgeHeldByEntity: vi.fn(),
   getEntityProvenance: vi.fn(),
+  listAiKeys: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
@@ -40,9 +42,15 @@ vi.mock("@/server/services/entities", () => ({
 vi.mock("@/server/services/relationships", () => ({ listConnectionsForEntity }));
 vi.mock("@/server/services/events", () => ({ listEventsForEntity }));
 vi.mock("@/server/services/review", () => ({ getEntityProvenance }));
+vi.mock("@/server/services/ai-keys", () => ({ listAiKeys }));
 vi.mock("@/server/services/knowledge", () => ({
   listKnowledgeOfEntity,
   listKnowledgeHeldByEntity,
+}));
+vi.mock("@/components/entities/generate-panel", () => ({
+  GeneratePanel: ({ locked }: { locked: boolean }) => (
+    <div>Generate panel{locked ? " (locked)" : ""}</div>
+  ),
 }));
 vi.mock("@/components/entities/knowledge-panel", () => ({
   KnowledgePanel: ({
@@ -145,6 +153,7 @@ beforeEach(() => {
   listEventsForEntity.mockResolvedValue([]);
   listKnowledgeOfEntity.mockResolvedValue([]);
   listKnowledgeHeldByEntity.mockResolvedValue([]);
+  listAiKeys.mockResolvedValue([]);
 });
 
 afterEach(cleanup);
@@ -251,6 +260,34 @@ describe("EntityPage", () => {
     await renderPage();
 
     expect(screen.queryByText(/Knowledge panel/)).toBeNull();
+  });
+
+  it("shows the AI generation panel to a DM when a provider key is configured", async () => {
+    getEntityForUser.mockResolvedValue(crawler());
+    listAiKeys.mockResolvedValue([{ providerId: "anthropic" }]);
+
+    await renderPage();
+
+    expect(screen.getByText("Generate panel")).toBeDefined();
+  });
+
+  it("hides the AI generation panel when no provider key is configured", async () => {
+    getEntityForUser.mockResolvedValue(crawler());
+    listAiKeys.mockResolvedValue([]);
+
+    await renderPage();
+
+    expect(screen.queryByText("Generate panel")).toBeNull();
+  });
+
+  it("hides the AI generation panel from a player viewer", async () => {
+    getEntityForUser.mockResolvedValue(crawler());
+    listEntitiesForUser.mockResolvedValue({ entities: [], role: "PLAYER" });
+    listAiKeys.mockResolvedValue([{ providerId: "anthropic" }]);
+
+    await renderPage();
+
+    expect(screen.queryByText("Generate panel")).toBeNull();
   });
 
   it("renders entity tags as links that filter the World Browser", async () => {

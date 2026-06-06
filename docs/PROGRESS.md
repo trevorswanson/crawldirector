@@ -4,6 +4,64 @@ Running checklist of milestones/tasks, newest first. See
 [`11-roadmap.md`](./11-roadmap.md) for the full plan and
 [`12-working-sessions.md`](./12-working-sessions.md) for how to pick up work.
 
+## M4 — First generator: entity fleshing → PENDING proposal (slice 3) ✅ (2026-06-06)
+
+**Goal:** the first real generator. A DM with their own key fleshes a thin/stub
+entity into a richer summary/description/tags; the result lands in the Review
+Queue as a **PENDING** `UPDATE_ENTITY` proposal (never canon — invariant #1),
+respecting locks (invariant #2) and carrying AI provenance (invariant #3). The
+app stays fully usable with no key. See
+[`04-ai-integration.md`](./04-ai-integration.md).
+
+- [x] **Generator** (`src/server/ai/generators/flesh-entity.ts`): pure, UI- and
+      SDK-agnostic. `buildFleshEntityPrompt` assembles cacheable framing + an
+      optional campaign **style guide** block + a per-entity user message (current
+      canon as read-only reference, existing campaign tags offered for reuse,
+      locked fields called out as do-not-modify). `fleshEntityOutputSchema` (Zod)
+      bounds the writable fields (summary/description/tags). `fleshEntityToPatch`
+      turns the model output into a `ReviewPatch` (current→proposed), **dropping
+      locked fields** and any unchanged field, and `patchHasChanges` detects a
+      no-op. `FLESH_ENTITY_GENERATOR { id, version }` is the versioned identity
+      recorded for provenance.
+- [x] **Provider resolution** (`src/server/ai/index.ts`): `resolveCampaignProvider`
+      returns whichever provider the campaign has a usable key for (registry order,
+      Anthropic first) — generators don't ask the DM to pick a vendor per run.
+      Exported `describeProviderError` so the generation seam reuses the same safe,
+      key-free error translation as the connection test (invariant #6).
+- [x] **Service** (`src/server/services/generation.ts`): `fleshOutEntity` — DM/co-DM
+      only — loads the entity + campaign style guide + sibling tags, refuses a fully
+      locked entity, resolves the provider (graceful `ServiceError` when none), calls
+      `generateStructured`, builds the patch (locked fields excluded), and files it
+      via `createPendingEntityChangeSet` with `source: AI` + provider/model/promptId/
+      promptVersion. Provider failures become safe `ServiceError`s (ProviderError
+      message preserved; raw SDK text never reflected). A no-op proposal is refused.
+- [x] **Pipeline:** extended `createPendingEntityChangeSet` to persist
+      `providerId`/`model`/`promptId`/`promptVersion` on the `ChangeSet`; the existing
+      approval path already copies them onto each field's `Provenance` row, so an
+      approved AI proposal answers "where did this come from?" (invariant #3).
+- [x] **Action + UI:** `fleshOutEntityAction` returns a safe success (with a link to
+      the proposed change set) / error state and revalidates the queue + entity. A
+      DM-only **GeneratePanel** ("Flesh out") sits on the entity detail rail, shown
+      only when a provider key is configured (`listAiKeys`) and the entity isn't
+      locked; success links straight to the Review Queue.
+- [x] **Tests:** pure generator unit (prompt framing/style-guide/lock-exclusion/
+      tag-dedupe/no-op/schema bounds); DB-backed `fleshOutEntity` (PENDING AI proposal
+      with provider/model/prompt metadata + patch, style-guide+tags in prompt, locked-
+      field exclusion, fully-locked + no-provider + no-change + player rejections,
+      ProviderError + raw-SDK-error → safe message, AI provenance on approval);
+      `resolveCampaignProvider` factory unit; action coverage (success/link/revalidate +
+      ServiceError/generic); GeneratePanel component (render/locked/success-link/error);
+      entity-page gating (DM+key shows, no-key hides, player hides). lint (0 errors),
+      typecheck, build, and the full coverage gate green (statements 95.4%, branches
+      88.15%, functions 97.35%, lines 97.26%).
+- [ ] **Verification note:** the no-key graceful path + panel gating are covered by
+      the page test rendering the real server component; a **live** generation needs
+      the DM's own BYO key + spend (as with slice 2's connection test), so the live
+      "Flesh out" call is the DM's to run. No mock/filler output is ever shown.
+- [ ] **Next M4 slices:** more generators (bulk-stub scaffolding, relationship
+      inference), a generation panel for bulk runs, `Job` table + worker for
+      bulk/async runs, usage/cost tracking + spend caps.
+
 ## M4 — Provider abstraction + OpenAI-compatible providers (slice 2) ✅ (2026-06-06)
 
 **Goal:** build the vendor-neutral provider layer every generator (later slices)

@@ -63,10 +63,25 @@ Generators are named, versioned units that turn an intent + context into a
 Change Set proposal. Each declares: input params, the canon context it needs,
 its prompt template (versioned, for provenance), and its output schema.
 
+**Status (M4 slice 3, delivered):** the **first generator** is live —
+**entity fleshing**. The pure prompt/schema/patch logic lives in
+[`src/server/ai/generators/flesh-entity.ts`](../../src/server/ai/generators/flesh-entity.ts)
+(cacheable framing + optional campaign style guide + current canon as read-only
+reference + locked-field call-outs; a Zod output schema bounding summary/
+description/tags); the orchestration is `fleshOutEntity`
+([`src/server/services/generation.ts`](../../src/server/services/generation.ts)),
+which resolves the campaign's provider, calls `generateStructured`, drops locked
+fields from the proposed patch, and files it as a **PENDING `UPDATE_ENTITY`
+proposal** via `createPendingEntityChangeSet` (`source: AI`, with provider/model/
+prompt id+version recorded so approval writes complete provenance). A DM-only
+"Flesh out" panel on the entity detail rail (shown only when a key is configured)
+triggers it; the result links straight to the Review Queue. Nothing becomes canon
+without DM approval.
+
 Planned generator families (build incrementally — see roadmap):
 
 - **Entity fleshing:** expand a stub into a full entity ("flesh out Floor 7",
-  "detail this faction").
+  "detail this faction"). **(Delivered — see status above.)**
 - **Bulk scaffolding:** generate N stubs ("10 mob types for the ice floor",
   "the nine Faction-Wars armies").
 - **Relationship inference:** propose edges among existing entities ("who would

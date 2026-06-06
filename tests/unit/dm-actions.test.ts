@@ -38,6 +38,7 @@ const {
   applyEventEffects,
   grantEntityKnowledge,
   revokeKnowledge,
+  fleshOutEntity,
   signOut,
   redirect,
   revalidatePath,
@@ -79,6 +80,7 @@ const {
   applyEventEffects: vi.fn(),
   grantEntityKnowledge: vi.fn(),
   revokeKnowledge: vi.fn(),
+  fleshOutEntity: vi.fn(),
   signOut: vi.fn(),
   redirect: vi.fn(() => {
     throw new Error("NEXT_REDIRECT");
@@ -135,6 +137,7 @@ vi.mock("@/server/services/knowledge", () => ({
   grantEntityKnowledge,
   revokeKnowledge,
 }));
+vi.mock("@/server/services/generation", () => ({ fleshOutEntity }));
 vi.mock("@/server/auth", () => ({ signOut }));
 vi.mock("next/navigation", () => ({ redirect }));
 vi.mock("next/cache", () => ({ revalidatePath }));
@@ -190,6 +193,7 @@ import {
   grantEntityKnownToAction,
   grantEntityKnowsAboutAction,
   revokeKnowledgeAction,
+  fleshOutEntityAction,
 } from "@/app/(dm)/actions";
 
 import { ServiceError } from "@/lib/errors";
@@ -1986,5 +1990,32 @@ describe("revokeKnowledgeAction", () => {
     expect(revokeKnowledge).toHaveBeenCalledWith("u1", "c1", "k1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/viewed");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/actor");
+  });
+});
+
+describe("fleshOutEntityAction", () => {
+  it("files a proposal and returns a success message + link, revalidating queue + entity", async () => {
+    fleshOutEntity.mockResolvedValue({ changeSetId: "cs1", providerId: "anthropic", model: "claude-opus-4-8" });
+
+    const result = await fleshOutEntityAction("c1", "e1", undefined, form({}));
+
+    expect(fleshOutEntity).toHaveBeenCalledWith("u1", "c1", "e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(result?.success).toContain("claude-opus-4-8");
+    expect(result?.changeSetId).toBe("cs1");
+    expect(result?.error).toBeUndefined();
+  });
+
+  it("surfaces a ServiceError message and a generic fallback", async () => {
+    fleshOutEntity.mockRejectedValueOnce(new ServiceError("No AI provider is configured."));
+    expect((await fleshOutEntityAction("c1", "e1", undefined, form({})))?.error).toBe(
+      "No AI provider is configured.",
+    );
+
+    fleshOutEntity.mockRejectedValueOnce(new Error("boom"));
+    expect((await fleshOutEntityAction("c1", "e1", undefined, form({})))?.error).toBe(
+      "Generation failed. Please try again.",
+    );
   });
 });

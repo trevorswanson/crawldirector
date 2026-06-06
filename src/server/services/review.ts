@@ -437,6 +437,13 @@ export async function createPendingEntityChangeSet(
     title: string;
     summary?: string;
     runId?: string;
+    // AI provenance (M4 generators): persisted on the ChangeSet so approval can
+    // copy them onto each field's Provenance row (invariant #3 — "where did this
+    // come from?"). Secret-free: the provider id/model/prompt are not the key.
+    providerId?: string;
+    model?: string;
+    promptId?: string;
+    promptVersion?: string;
     operations: EntityReviewOperationInput[];
   },
 ) {
@@ -464,6 +471,10 @@ export async function createPendingEntityChangeSet(
         title: input.title,
         summary: input.summary,
         runId: input.runId,
+        providerId: input.providerId,
+        model: input.model,
+        promptId: input.promptId,
+        promptVersion: input.promptVersion,
         actorUserId: userId,
         baseVersions,
         operations: {

@@ -16,6 +16,7 @@ import {
 } from "@/components/entities/timeline-panel";
 import { RosterPanel } from "@/components/entities/roster-panel";
 import { KnowledgePanel } from "@/components/entities/knowledge-panel";
+import { GeneratePanel } from "@/components/entities/generate-panel";
 import {
   ArchiveEntityForm,
   EditEntityForm,
@@ -47,6 +48,7 @@ import {
   listKnowledgeOfEntity,
 } from "@/server/services/knowledge";
 import { getEntityProvenance } from "@/server/services/review";
+import { listAiKeys } from "@/server/services/ai-keys";
 
 export default async function EntityPage({
   params,
@@ -77,6 +79,7 @@ export default async function EntityPage({
     campaignTags,
     knownTo,
     knowsAbout,
+    aiKeys,
   ] = await Promise.all([
     getEntityProvenance(user.id, id, entityId),
     listConnectionsForEntity(user.id, id, entityId),
@@ -88,7 +91,11 @@ export default async function EntityPage({
     editing ? listCampaignTags(user.id, id) : Promise.resolve<string[]>([]),
     listKnowledgeOfEntity(user.id, id, entityId),
     listKnowledgeHeldByEntity(user.id, id, entityId),
+    // Gate the AI generation panel on a configured provider key (DM-only read;
+    // returns [] for players). AI is additive — no key, no panel.
+    listAiKeys(user.id, id),
   ]);
+  const aiConfigured = aiKeys.length > 0;
   const candidates: ConnectionCandidate[] = candidateList.entities
     .filter((candidate) => candidate.id !== entityId)
     .map((candidate) => ({
@@ -472,6 +479,14 @@ export default async function EntityPage({
             candidates={candidates}
           />
         </div>
+
+        {/* AI generation — flesh out into a review proposal (M4), DM-only and
+            only with a configured provider key */}
+        {isDm && aiConfigured && !editing && (
+          <div className="border-b border-[var(--line)] px-[18px] py-4">
+            <GeneratePanel campaignId={id} entityId={entityId} locked={entity.locked} />
+          </div>
+        )}
 
         {/* knowledge — private reveals / fog of war (M3), DM-only curation */}
         {isDm && (
