@@ -1,9 +1,10 @@
 # 04 — AI Integration (BYO-key, multi-provider)
 
 > **Decided:** bring-your-own-key, provider-agnostic. DMs supply their own API
-> key(s); the app supports multiple providers (Claude, OpenAI, others) behind a
-> common interface. The [review pipeline](./03-review-pipeline.md) is provider-
-> independent — generation produces proposals, never canon.
+> key(s); the app supports multiple providers (Claude, OpenAI, and any
+> **OpenAI-compatible** endpoint — a self-hosted model or third-party proxy)
+> behind a common interface. The [review pipeline](./03-review-pipeline.md) is
+> provider-independent — generation produces proposals, never canon.
 
 ## Goals
 
@@ -39,6 +40,22 @@ interface LLMProvider {
 > `openai`) behind the interface. When building Claude-backed generators, enable
 > **prompt caching** for the large, stable context blocks (campaign canon, type
 > schemas, style guide) to cut cost — see the `claude-api` skill.
+
+**Status (M4 slice 2, delivered):** the interface is real — `LLMProvider` lives
+in [`src/server/ai/types.ts`](../../src/server/ai/types.ts) with **two** adapters
+behind it: Anthropic (`@anthropic-ai/sdk`, structured output via forced tool use
++ prompt caching) and an OpenAI-compatible adapter (`openai` SDK, `json_schema`
+output) shared by OpenAI itself and any compatible endpoint (a self-hosted LLM or
+proxy — just a different `baseURL` + explicit model). `generateStructured` derives
+the JSON Schema from a Zod schema, validates the result, and retries once on
+failure before erroring (no partial canon). `getCampaignProvider`
+([`src/server/ai/index.ts`](../../src/server/ai/index.ts)) is the single seam
+generators call — it decrypts the BYO key at the call site. A DM-only
+**connection test** on the Settings page verifies a configured key/endpoint/model
+with a tiny live call before any generation is wired up. See
+[ADR 0007](./adr/0007-provider-abstraction-and-openai-compatible.md). The
+endpoint URL + model are stored as non-secret config on `AiKey`; for
+OpenAI-compatible providers the key is optional (local servers often need none).
 
 ## Generators
 

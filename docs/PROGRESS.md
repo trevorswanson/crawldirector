@@ -4,6 +4,67 @@ Running checklist of milestones/tasks, newest first. See
 [`11-roadmap.md`](./11-roadmap.md) for the full plan and
 [`12-working-sessions.md`](./12-working-sessions.md) for how to pick up work.
 
+## M4 — Provider abstraction + OpenAI-compatible providers (slice 2) ✅ (2026-06-06)
+
+**Goal:** build the vendor-neutral provider layer every generator (later slices)
+calls, and extend BYO support beyond Anthropic/OpenAI to **any OpenAI-compatible
+endpoint** (a self-hosted model — Ollama/LM Studio/vLLM/llama.cpp — or a
+third-party proxy). No generators yet; the app stays fully usable with no key.
+See [ADR 0007](./adr/0007-provider-abstraction-and-openai-compatible.md) and
+[`04-ai-integration.md`](./04-ai-integration.md).
+
+- [x] **Registry** (`src/lib/ai/providers.ts`): added an adapter `kind`
+      (`anthropic` | `openai-compatible`) + per-provider flags (`requiresBaseUrl`,
+      `requiresModel`, `keyOptional`, `defaultModel`) and a third provider,
+      `openai-compatible`. `resolveAiModel` picks the per-key override, then the
+      provider default, then null. Still pure + client-safe.
+- [x] **Schema:** nullable `AiKey.baseUrl` + `AiKey.model` (non-secret endpoint +
+      model config; the key stays in `ciphertext`), migration
+      `20260606120000_m4_ai_key_endpoint`. Updated
+      [`09-data-schema.md`](./09-data-schema.md).
+- [x] **Provider abstraction** (`src/server/ai/`, server-only): `LLMProvider`
+      (`generate` + `generateStructured<T>`) with **two** adapters — Anthropic
+      (`@anthropic-ai/sdk`; structured output via forced tool use, prompt caching
+      on stable system blocks, default `claude-opus-4-8`) and an OpenAI-compatible
+      adapter (`openai` SDK; `response_format: json_schema` strict) shared by
+      OpenAI and any compatible endpoint (just a different `baseURL` + model).
+      `generateStructured` derives a JSON Schema from Zod (`z.toJSONSchema`,
+      `$schema` stripped), Zod-validates, and **repairs once** before throwing
+      `ProviderError` (no partial canon). Token usage (incl. cache hits) returned
+      on every result for later cost tracking.
+- [x] **Factory + connection test** (`src/server/ai/index.ts`):
+      `getCampaignProvider` resolves a campaign's stored key + config into a ready
+      adapter, decrypting at the call site (invariant #6 — the single seam
+      generators will call), returning null when no usable key is configured.
+      `testAiConnection` (DM-only) makes a tiny structured ping through the whole
+      stack so a DM can verify a key/endpoint/model before generators exist;
+      provider/SDK errors become short, key-safe messages (e.g. 401 → auth
+      failed). Added `getAiKeyConfig` + exported `assertCampaignDm` on the
+      `ai-keys` service; `setAiKey` now validates + stores `baseUrl`/`model`
+      (URL normalized; endpoint/model required for compatible providers; key
+      optional for local servers) and the safe view + audit carry the non-secret
+      config.
+- [x] **UI:** the Settings `AiKeysPanel` adds endpoint-URL + model inputs for
+      OpenAI-compatible providers, an optional-key affordance, and a per-provider
+      **Test** button surfacing the model + latency (or a safe error).
+- [x] **Deps:** added `@anthropic-ai/sdk` + `openai` (imported only under
+      `src/server/ai/`).
+- [x] **Tests:** registry unit (kinds/flags/`resolveAiModel`); adapter unit with
+      mocked SDKs (forced tool use + `$schema` stripping + usage mapping, prompt
+      caching, repair-retry, hard-fail `ProviderError`, no-tool-block, custom
+      `baseURL`, json_schema strict, unparseable-JSON repair, empty-response,
+      plain `generate`); factory + connection test (null paths, adapter selection,
+      placeholder key, DM gate, error translation); DB-backed `ai-keys` for the
+      compatible storage path + validation + `getAiKeyConfig`; updated action +
+      panel coverage. lint (0 errors), typecheck, build, and the full coverage
+      gate green (statements 95.37%, branches 88.08%, functions 97.39%).
+- [x] **Verified in-browser** against the seeded Demo Campaign Settings page (see
+      the verification note in this slice's commit).
+- [ ] **Next M4 slices:** first generators (entity-fleshing, bulk-stub
+      scaffolding, relationship inference) landing as PENDING proposals,
+      generation panel → Review Queue, `Job` table + worker for bulk/async runs,
+      usage/cost tracking + spend caps.
+
 ## M4 — BYO AI key storage + settings (slice 1) ✅ (2026-06-06)
 
 **Goal:** lay the M4 foundation — let a DM store their own provider API key per

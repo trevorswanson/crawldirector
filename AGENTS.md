@@ -96,10 +96,20 @@ stores their own provider API key per campaign on a new **Settings** page
 `src/server/crypto.ts`, keyed off a new `AI_KEYS_SECRET` env var). The `ai-keys`
 service set/remove/list keeps secrets server-side only (never ciphertext/plaintext
 to the client; audited `SET_AI_KEY`/`DELETE_AI_KEY` carry only a last-four hint);
-`getDecryptedAiKey` is the single server-only seam the upcoming provider
-abstraction + generators will call (invariant #6). The provider registry lives in
+`getDecryptedAiKey`/`getAiKeyConfig` are the server-only seams the provider
+abstraction calls (invariant #6). The provider registry lives in
 `src/lib/ai/providers.ts`. See [ADR 0006](./docs/adr/0006-ai-key-encryption-at-rest.md).
-No generation yet — the app stays fully usable with no key configured.
+The **provider abstraction** then landed (M4 slice 2): a vendor-neutral
+`LLMProvider` (`src/server/ai/`) with an Anthropic adapter (forced tool use +
+prompt caching) and a single OpenAI-compatible adapter (`json_schema` output)
+that serves OpenAI itself **and any OpenAI-compatible endpoint** — a self-hosted
+model (Ollama/LM Studio/vLLM) or third-party proxy, configured by a non-secret
+`baseUrl` + `model` on `AiKey` (key optional for local servers).
+`generateStructured` derives a JSON Schema from Zod, validates, and repairs once
+before erroring. `getCampaignProvider` is the single seam generators will call;
+a DM-only **connection test** on the Settings page verifies a key/endpoint/model
+with a tiny live call. See [ADR 0007](./docs/adr/0007-provider-abstraction-and-openai-compatible.md).
+No generators yet — the app stays fully usable with no key configured.
 See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
 ## Start here, every session

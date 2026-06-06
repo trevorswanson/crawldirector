@@ -6,6 +6,7 @@ import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
 import {
   deleteAiKey,
+  getAiKeyConfig,
   getDecryptedAiKey,
   listAiKeys,
   setAiKey,
@@ -162,5 +163,95 @@ describe("getDecryptedAiKey", () => {
 
     expect(await getDecryptedAiKey(campaign.id, "anthropic")).toBe("sk-ant-roundtrip-5555");
     expect(await getDecryptedAiKey(campaign.id, "openai")).toBeNull();
+  });
+});
+
+describe("OpenAI-compatible providers", () => {
+  it("stores a base URL + model, allows a blank key, and projects them in the safe view", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+
+    const view = await setAiKey(dm.id, campaign.id, {
+      providerId: "openai-compatible",
+      apiKey: "",
+      baseUrl: "http://localhost:11434/v1/",
+      model: "llama3.1",
+    });
+    // Trailing slash normalized off; non-secret config is safe to return.
+    expect(view.baseUrl).toBe("http://localhost:11434/v1");
+    expect(view.model).toBe("llama3.1");
+    expect(view.lastFour).toBe("");
+
+    const config = await getAiKeyConfig(campaign.id, "openai-compatible");
+    expect(config).toEqual({ apiKey: "", baseUrl: "http://localhost:11434/v1", model: "llama3.1" });
+
+    const audit = await prisma.auditLog.findFirstOrThrow({ where: { action: "SET_AI_KEY" } });
+    expect((audit.detail as { baseUrl?: string }).baseUrl).toBe("http://localhost:11434/v1");
+    expect((audit.detail as { model?: string }).model).toBe("llama3.1");
+
+    const views = await listAiKeys(dm.id, campaign.id);
+    expect(views[0]).toMatchObject({ baseUrl: "http://localhost:11434/v1", model: "llama3.1" });
+  });
+
+  it("requires an endpoint URL and a model, and rejects a junk URL", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+
+    // Missing base URL.
+    await expect(
+      setAiKey(dm.id, campaign.id, { providerId: "openai-compatible", apiKey: "", model: "llama3.1" }),
+    ).rejects.toBeInstanceOf(ServiceError);
+    // Missing model.
+    await expect(
+      setAiKey(dm.id, campaign.id, {
+        providerId: "openai-compatible",
+        apiKey: "",
+        baseUrl: "http://localhost:11434/v1",
+      }),
+    ).rejects.toBeInstanceOf(ServiceError);
+    // Non-http(s) endpoint.
+    await expect(
+      setAiKey(dm.id, campaign.id, {
+        providerId: "openai-compatible",
+        apiKey: "",
+        baseUrl: "not a url",
+        model: "llama3.1",
+      }),
+    ).rejects.toBeInstanceOf(ServiceError);
+    expect(await prisma.aiKey.count()).toBe(0);
+  });
+
+  it("preserves an existing key when an edit submits a blank key (key-optional provider)", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+
+    // Configure a compatible endpoint WITH a real proxy key.
+    await setAiKey(dm.id, campaign.id, {
+      providerId: "openai-compatible",
+      apiKey: "proxy-secret-7777",
+      baseUrl: "http://localhost:11434/v1",
+      model: "llama3.1",
+    });
+    expect((await getAiKeyConfig(campaign.id, "openai-compatible"))?.apiKey).toBe("proxy-secret-7777");
+
+    // Re-save with only the model changed and a blank key (password fields render
+    // blank on edit) — the stored key must survive.
+    const view = await setAiKey(dm.id, campaign.id, {
+      providerId: "openai-compatible",
+      apiKey: "",
+      baseUrl: "http://localhost:11434/v1",
+      model: "llama3.2",
+    });
+    expect(view.model).toBe("llama3.2");
+    expect(view.lastFour).toBe("7777");
+    const config = await getAiKeyConfig(campaign.id, "openai-compatible");
+    expect(config?.apiKey).toBe("proxy-secret-7777");
+    expect(config?.model).toBe("llama3.2");
+  });
+
+  it("getAiKeyConfig returns null when nothing is configured", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    expect(await getAiKeyConfig(campaign.id, "anthropic")).toBeNull();
   });
 });

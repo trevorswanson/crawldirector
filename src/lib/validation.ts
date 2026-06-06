@@ -363,7 +363,12 @@ export type GrantKnowledgeInput = z.infer<typeof grantKnowledgeSchema>;
 // provider/proxy key works — the registry's `keyPrefix` is only a UI hint.
 export const setAiKeySchema = z.object({
   providerId: z.string().trim().min(1, "Pick a provider."),
-  apiKey: z.string().trim().min(8, "Enter a valid API key.").max(500),
+  // The key may be optional (local/compatible servers) and the endpoint/model
+  // may be required — the service applies the per-provider rules from the
+  // registry, since only it knows which provider this is.
+  apiKey: z.string().trim().max(500).optional().default(""),
+  baseUrl: z.string().trim().max(500).optional().default(""),
+  model: z.string().trim().max(200).optional().default(""),
 });
 export type SetAiKeyInput = z.infer<typeof setAiKeySchema>;
 

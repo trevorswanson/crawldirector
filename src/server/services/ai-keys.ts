@@ -1,6 +1,6 @@
 import { Role } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
-import { aiProviderLabel, isAiProviderId } from "@/lib/ai/providers";
+import { aiProviderLabel, getAiProvider } from "@/lib/ai/providers";
 import { decryptSecret, encryptSecret } from "@/server/crypto";
 import { prisma } from "@/server/db";
 
@@ -11,7 +11,7 @@ import { prisma } from "@/server/db";
 // DM action (AuditLog SET_AI_KEY / DELETE_AI_KEY) — never a content change set,
 // and the audit detail records only the provider + last-four hint, never the key.
 
-async function assertCampaignDm(userId: string, campaignId: string) {
+export async function assertCampaignDm(userId: string, campaignId: string) {
   const membership = await prisma.membership.findUnique({
     where: { userId_campaignId: { userId, campaignId } },
     select: { role: true },
@@ -37,42 +37,105 @@ export type AiKeyView = {
   providerId: string;
   label: string;
   lastFour: string;
+  // Non-secret config for OpenAI-compatible endpoints (null for first-party
+  // providers). Safe to render — neither carries the key.
+  baseUrl: string | null;
+  model: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
 
+// Validate a custom endpoint URL: http/https only, parseable. Rejects junk so a
+// typo fails loudly at store time rather than at the provider call.
+function normalizeBaseUrl(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new ServiceError("Enter a valid endpoint URL (e.g. http://localhost:11434/v1).");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new ServiceError("The endpoint URL must use http or https.");
+  }
+  return url.toString().replace(/\/$/, "");
+}
+
 // Store (or replace) the DM's key for a provider. The plaintext key is encrypted
-// immediately and never persisted or logged in the clear. Returns the safe view.
+// immediately and never persisted or logged in the clear. Endpoint URL + model
+// are non-secret config and stored alongside. Returns the safe view.
 export async function setAiKey(
   userId: string,
   campaignId: string,
-  input: { providerId: string; apiKey: string },
+  input: { providerId: string; apiKey: string; baseUrl?: string; model?: string },
 ): Promise<AiKeyView> {
   await assertCampaignDm(userId, campaignId);
 
   const providerId = input.providerId.trim();
-  if (!isAiProviderId(providerId)) {
+  const provider = getAiProvider(providerId);
+  if (!provider) {
     throw new ServiceError("Unknown AI provider.");
   }
-  const apiKey = input.apiKey.trim();
-  if (apiKey.length < 8) {
+
+  const apiKey = (input.apiKey ?? "").trim();
+  // Local/compatible servers often need no auth; first-party providers always do.
+  if (!provider.keyOptional && apiKey.length < 8) {
     throw new ServiceError("That doesn't look like a valid API key.");
   }
 
-  const ciphertext = encryptSecret(apiKey);
-  const lastFour = apiKey.slice(-4);
+  let baseUrl: string | null = null;
+  const rawBaseUrl = (input.baseUrl ?? "").trim();
+  if (provider.requiresBaseUrl) {
+    if (!rawBaseUrl) {
+      throw new ServiceError("Enter the endpoint URL for this provider.");
+    }
+    baseUrl = normalizeBaseUrl(rawBaseUrl);
+  } else if (rawBaseUrl) {
+    baseUrl = normalizeBaseUrl(rawBaseUrl);
+  }
+
+  let model: string | null = null;
+  const rawModel = (input.model ?? "").trim();
+  if (provider.requiresModel && !rawModel) {
+    throw new ServiceError("Enter the model name this endpoint serves.");
+  }
+  if (rawModel) model = rawModel;
 
   const existing = await prisma.aiKey.findUnique({
     where: { campaignId_providerId: { campaignId, providerId } },
-    select: { id: true },
+    select: { id: true, ciphertext: true, lastFour: true },
   });
+
+  // Password inputs render blank on edit, so a keyOptional provider's form can
+  // submit a blank key when the DM only meant to change the endpoint/model.
+  // Preserve the stored key in that case rather than silently overwriting a real
+  // secret with an empty one. A new keyless config (no existing row) stores an
+  // encrypted empty string, which the factory treats as "no auth needed".
+  let ciphertext: string;
+  let lastFour: string;
+  if (apiKey.length > 0) {
+    ciphertext = encryptSecret(apiKey);
+    lastFour = apiKey.length >= 4 ? apiKey.slice(-4) : "";
+  } else if (existing) {
+    ciphertext = existing.ciphertext;
+    lastFour = existing.lastFour;
+  } else {
+    ciphertext = encryptSecret("");
+    lastFour = "";
+  }
 
   const saved = await prisma.$transaction(async (tx) => {
     const row = await tx.aiKey.upsert({
       where: { campaignId_providerId: { campaignId, providerId } },
-      create: { campaignId, providerId, ciphertext, lastFour, createdById: userId },
-      update: { ciphertext, lastFour },
-      select: { providerId: true, lastFour: true, createdAt: true, updatedAt: true },
+      create: { campaignId, providerId, ciphertext, lastFour, baseUrl, model, createdById: userId },
+      update: { ciphertext, lastFour, baseUrl, model },
+      select: {
+        providerId: true,
+        lastFour: true,
+        baseUrl: true,
+        model: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
 
     await tx.auditLog.create({
@@ -82,8 +145,8 @@ export async function setAiKey(
         action: "SET_AI_KEY",
         targetType: "AI_KEY",
         targetId: providerId,
-        // Never the key itself — only the non-secret hint + whether we replaced one.
-        detail: { providerId, lastFour, replaced: !!existing },
+        // Never the key itself — only non-secret hints + whether we replaced one.
+        detail: { providerId, lastFour, baseUrl, model, replaced: !!existing },
       },
     });
 
@@ -94,6 +157,8 @@ export async function setAiKey(
     providerId: saved.providerId,
     label: aiProviderLabel(saved.providerId),
     lastFour: saved.lastFour,
+    baseUrl: saved.baseUrl,
+    model: saved.model,
     createdAt: saved.createdAt,
     updatedAt: saved.updatedAt,
   };
@@ -135,16 +200,42 @@ export async function listAiKeys(userId: string, campaignId: string): Promise<Ai
   const keys = await prisma.aiKey.findMany({
     where: { campaignId },
     orderBy: { providerId: "asc" },
-    select: { providerId: true, lastFour: true, createdAt: true, updatedAt: true },
+    select: {
+      providerId: true,
+      lastFour: true,
+      baseUrl: true,
+      model: true,
+      createdAt: true,
+      updatedAt: true,
+    },
   });
 
   return keys.map((k) => ({
     providerId: k.providerId,
     label: aiProviderLabel(k.providerId),
     lastFour: k.lastFour,
+    baseUrl: k.baseUrl,
+    model: k.model,
     createdAt: k.createdAt,
     updatedAt: k.updatedAt,
   }));
+}
+
+// INTERNAL — server-only. The full decrypted config (key + endpoint + model) the
+// provider abstraction needs to construct an adapter. Returns null when no key
+// is configured; throws if a stored key can't be decrypted (rotated secret) so
+// callers treat it as "no usable key". The plaintext key here must NEVER reach
+// the client, logs, or provenance (invariant #6).
+export async function getAiKeyConfig(
+  campaignId: string,
+  providerId: string,
+): Promise<{ apiKey: string; baseUrl: string | null; model: string | null } | null> {
+  const key = await prisma.aiKey.findUnique({
+    where: { campaignId_providerId: { campaignId, providerId } },
+    select: { ciphertext: true, baseUrl: true, model: true },
+  });
+  if (!key) return null;
+  return { apiKey: decryptSecret(key.ciphertext), baseUrl: key.baseUrl, model: key.model };
 }
 
 // INTERNAL — server-only. Resolve and decrypt a campaign's provider key for an

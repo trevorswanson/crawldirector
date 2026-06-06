@@ -618,6 +618,8 @@ model AiKey {
   providerId  String // matches an id in src/lib/ai/providers.ts (e.g. "anthropic")
   ciphertext  String // AES-256-GCM envelope-encrypted API key — never leaves the server
   lastFour    String // non-secret hint: the key's last 4 chars
+  baseUrl     String? // OpenAI-compatible endpoint (self-hosted / proxy); non-secret config
+  model       String? // optional per-key model override; falls back to the provider default
   createdById String
 
   campaign  Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
