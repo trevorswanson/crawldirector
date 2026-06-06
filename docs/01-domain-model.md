@@ -33,19 +33,20 @@ Every modeled noun is an `Entity`. Shared attributes:
 - `id`, `campaignId` (scoping)
 - `type` (CRAWLER, NPC, PARTY, GUILD, FLOOR, NEIGHBORHOOD, BOSS, MOB_TYPE,
   FACTION, ORGANIZATION, SPONSOR, SHOW, SYSTEM_AI, ITEM, SKILL, CLASS, SPECIES,
-  ACHIEVEMENT, TITLE, LOCATION, DEITY, … extensible)
+  ACHIEVEMENT, TITLE, LOCATION, DEITY, BOX, … extensible)
 - `name`, `summary` (short), `description` (long, markdown)
 - `status` lifecycle: `DRAFT → PENDING → CANON` (plus `ARCHIVED`, `REJECTED`)
 - `provenance` (origin + history; see review pipeline)
 - `locked` / per-field locks
-- `visibility` — campaign-wide default visibility/presentation:
+- `visibility` — campaign-wide default visibility:
   - `DM_ONLY`: visible only to DMs unless a private knowledge grant reveals a
     specific fact/field/entity to someone else.
-  - `SHARED_WITH_PLAYERS`: visible to players as ordinary known-world canon.
-  - `PLAYER_FACING`: visible to players and intentionally authored for the
-    in-fiction crawler/System UI (sheet fields, achievements, item copy, System
-    messages). This is a presentation signal, not a different recipient scope.
-- `tags[]`, `customFields` (JSON), `attachments[]`
+  - `PLAYER_VISIBLE`: visible to players as ordinary campaign canon. Both DMs and
+    players can view entities as standard lore wiki pages; the crawler interface
+    (player-facing console) displays a parallel in-fiction system console UI
+    for these entities.
+- `imageUrl`: optional main portrait, map, or illustration URL.
+- `tags[]`, `customFields` (JSON), `attachments[]` (additional images or files).
 - timestamps, `createdBy`, `lastReviewedBy`
 
 First-class types add their own structured columns/relations on top.
@@ -60,9 +61,9 @@ First-class types add their own structured columns/relations on top.
 - Progression: level, the core **stats** (the published TTRPG's stat set — keep
   configurable; the books use a small set of core stats each rolling up many
   sub-aptitudes), HP/MP/stamina, gold.
-- Inventory & kit: items, equipped gear, **loot boxes** (tier + opened state),
-  skills, spells.
-- Meta-game: **achievements**, **titles**, sponsorships, audience ratings
+- Inventory & kit: items, equipped gear, **loot boxes** (represented by the
+  first-class `BOX` entity type containing items), skills, spells.
+- Meta-game: **achievements** (which can reward boxes), **titles**, sponsorships, audience ratings
   (`viewCount`, `followerCount`, `favoriteCount`), kill count, notable
   broadcasts/clips, deaths/respawns.
   - **Views:** each approximately 8-second feed watch counts as one view.
@@ -205,10 +206,10 @@ programs. Host(s), format, audience size, recurring segments, featured crawlers.
 
 ### Game-system catalog
 
-**Item**, **Skill**, **Spell**, **Achievement**, **Title**, **LootBox tier**,
+**Item**, **Skill**, **Spell**, **Achievement**, **Title**, **Box**,
 **Class**, **Species** — reusable catalog entries the crawler interface and
-generators draw from. These are the building blocks the player-facing System UI
-displays.
+generators draw from (with achievements granting boxes, and boxes containing items).
+These are the building blocks the player-facing System UI displays.
 
 **SystemMessage / Edict** — in-fiction System announcements, rule changes,
 patches, and notifications. Useful both as flavor the DM publishes to players
@@ -242,7 +243,8 @@ Relationship types (extensible enum), grouped:
 - **Spatial / structural:** `LOCATED_ON` (floor), `PART_OF` (neighborhood/zone),
   `CONTAINS`, `BOSS_OF`, `SPAWNS_ON`.
 - **Game:** `HAS_CLASS`, `HAS_SPECIES`, `OWNS_ITEM`, `KNOWS_SKILL`,
-  `EARNED_ACHIEVEMENT`, `HOLDS_TITLE`, `APPEARS_ON` (show).
+  `EARNED_ACHIEVEMENT`, `HOLDS_TITLE`, `APPEARS_ON` (show), `GRANTS_BOX`,
+  `CONTAINS`.
 - **Narrative:** `KNOWS_ABOUT`, `BETRAYED`, `KILLED`, `SAVED`.
 
 Edge attributes: `strength`/`disposition` (-100..100), `since`/`until`,
@@ -271,7 +273,8 @@ Event fields:
   This is how "Carl's stunt → sponsor stock drop → faction defunded → war shift"
   is represented and traversed.
 - **Effects:** structured changes (e.g. "Crawler Y gold +50", "Crawler Y current
-  floor = 1", "Faction X strength −10", "Crawler Y gained Title Z", or a
+  floor = 1", "Faction X strength −10", "Crawler Y gained Title Z", "Crawler Y
+  granted Achievement A" via structured `GRANT_ACHIEVEMENT`, or a
   **`PERSONA_SHIFT`** that nudges the System AI's dials — see
   [`05-system-ai-persona.md`](./05-system-ai-persona.md)) that can be applied to
   entity state through the review pipeline. Effect declarations are distinct

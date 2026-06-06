@@ -21,7 +21,7 @@ Two distinct surfaces share one app and one data layer but feel different:
 
 ### Information architecture
 
-- **Campaign switcher** (a DM may own/co-DM several).
+- **Global Header** — Persists at the top of every page. Contains the **Campaign switcher**, global search bar (M5), and an in-game clock HUD in the top-right displaying the current campaign floor (resolved via `Campaign.currentFloorId`) and the inferred current day (derived from the most recent event's absolute day using `resolveAbsoluteDay`, e.g., `Floor 9 · Day 4`).
 - **Review Queue** — the home base. Pending Change Sets grouped by source and
   run, with diff views and batch actions. This should be the most polished
   screen; it is where the product's promise is felt. (See pipeline doc.)
@@ -33,7 +33,7 @@ Two distinct surfaces share one app and one data layer but feel different:
   and a natural-language Q&A that answers from canon with **citations** linking to
   the source entities/events. Read-only; never writes canon. See
   [`07-search-retrieval.md`](./07-search-retrieval.md).
-- **Entity detail** — structured fields + markdown description, the
+- **Entity detail** — Main image/avatar header (portrait for characters, card/illustration layout for items/locations/floors; renders if `imageUrl` is set), structured fields + markdown description, the
   **connections panel** (in/out relationships), a **timeline** of events the
   entity participated in, provenance ("authored by you" vs "AI-generated, model
   X, approved by you on …"), lock controls, and an **entity history / audit trail panel**
@@ -85,8 +85,7 @@ Two distinct surfaces share one app and one data layer but feel different:
 - **Sharing controls** — set campaign-wide entity/field visibility, grant or
   revoke private knowledge for specific players/crawlers/NPCs/parties/guilds,
   and manage player↔crawler links.
-- **Campaign settings** — members/roles, AI providers + keys, style guide, spend
-  caps, import shared library.
+- **Campaign settings** — A three-pane layout matching the rest of the console. The middle pane contains a settings sub-nav with options: **AI Providers** (from M4, configures provider keys/endpoints), **General** (campaign name, description, dungeon public visibility toggle), and **Crawlers** (for inviting other users to the campaign and managing members/roles), along with sections for style guide, spend caps, and importing shared libraries.
 - **Archive / Trash Bin** — view all soft-deleted/archived entities (those with
   status `ARCHIVED`), with actions for the DM to inspect provenance and restore
   them back to canon or draft.
@@ -118,11 +117,7 @@ An in-fiction reskin of canon, scoped by the visibility projection
 ([`02-architecture.md`](./02-architecture.md)). It should evoke the DCC System
 UI a crawler "sees." _Mockup: `design/mockup/screen-crawler.jsx` (M7)._
 
-`SHARED_WITH_PLAYERS` and `PLAYER_FACING` are both player-visible. The
-difference is presentation: shared content appears as normal known-world canon;
-player-facing content is written for direct display in the crawler/System UI
-(messages, achievements, item text, sheet fields). Private reveals decide *who*
-gets access to otherwise hidden facts.
+Player-visible entities (`PLAYER_VISIBLE`) are viewable by default as standard campaign wiki pages (similar to the DM's view). However, the crawler interface (player-facing console) will also display these entities in a themed in-fiction system console UI. Private reveals/knowledge grants decide *who* gets access to otherwise hidden facts.
 
 - **Crawler sheet:** name, species/class, level, the core stats, HP/MP/stamina,
   gold, current floor/location.
@@ -131,7 +126,7 @@ gets access to otherwise hidden facts.
 - **System messages / notifications:** the DM-published in-fiction feed (rule
   changes, announcements, personal notifications).
 - **Known world:** entities/relationships/facts the DM has shared broadly
-  (`SHARED_WITH_PLAYERS`) plus private knowledge grants for that player or their
+  (`PLAYER_VISIBLE`) plus private knowledge grants for that player or their
   linked crawler — e.g. floors they've cleared, NPCs they've met, secrets only
   their crawler learned, populated from the reveal/knowledge log
   ([`08-session-mode.md`](./08-session-mode.md)). Secrets and DM-only data never

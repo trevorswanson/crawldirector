@@ -78,16 +78,13 @@
 Reads for players go through a **projection** that combines two layers:
 - **Campaign-wide defaults** from record/field visibility:
   - `DM_ONLY`: not broadly visible to players.
-  - `SHARED_WITH_PLAYERS`: visible to players as ordinary known-world canon.
-  - `PLAYER_FACING`: visible to players and intended for in-fiction crawler UI /
-    System presentation. This is a presentation signal layered on top of
-    visibility, not a separate audience.
+  - `PLAYER_VISIBLE`: visible to players as ordinary campaign canon.
 - **Per-recipient knowledge grants** from the reveal/knowledge log: a fact,
   field, entity, relationship, or event may be visible only to specific
   crawlers, player memberships, NPCs, parties, guilds, or other actor entities.
 
 The projection:
-- includes campaign-wide shared/player-facing data,
+- includes campaign-wide player-visible data,
 - includes private grants addressed to the requesting player's linked crawler(s)
   or membership,
 - strips `secret` relationship/edge attributes and DM-only fields unless that
