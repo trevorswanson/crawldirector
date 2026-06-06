@@ -30,9 +30,8 @@ decomposition, not a frozen spec — refine at the start of each session
 ## M1 — Entity core + one first-class type
 **Goal:** model and edit canon for the generic `Entity` plus `Crawler`.
 - `Entity` table + `Crawler` satellite; Zod entity schemas; visibility/lock
-  columns (columns now, enforcement in M2). Treat `PLAYER_FACING` as a
-  presentation hint for crawler/System UI content, not a different audience
-  scope from `SHARED_WITH_PLAYERS`. Entity-type enum incl. `PARTY`, `GUILD`,
+  columns (columns now, enforcement in M2). Visibility is simplified to a binary
+  `DM_ONLY` and `PLAYER_VISIBLE`. Entity-type enum incl. `PARTY`, `GUILD`,
   `SYSTEM_AI`, etc.
 - Entity CRUD through the **service layer** (not yet routed through the pipeline
   — but written so M2 can slot the pipeline underneath).
@@ -129,7 +128,7 @@ drives the generation prompts.
 **Goal:** scoped, in-fiction player experience.
 - Visibility projection enforced for player reads; player↔crawler linking;
   private reveals/knowledge grants respected per player/crawler.
-- Crawler sheet, inventory/loot, achievements/titles, System-message feed,
+- Crawler sheet, inventory/loot (supporting the `BOX` entity type containing items, with achievements rewarding boxes), achievements/titles (events can grant crawlers achievements via structured `GRANT_ACHIEVEMENT` event effects), System-message feed,
   "known world," scoped Ask, and player **suggestions** (→ pipeline).
 - **Done when:** a player logs in, sees only shared/own-crawler data (verified by
   tests that pending/secret data never leaks), and can submit a suggestion.
@@ -151,10 +150,14 @@ drives the generation prompts.
   audit/provenance review screens (including global audit log and per-entity history/audit trails)
   & a unified archive/trash bin (to view and restore soft-deleted entities); performance pass on
   graph/search queries (indexes / materialized views); accessibility + responsive polish.
+- **Campaign settings layout refactoring:** Redesign the settings page to use a three-pane layout where the middle pane is a sub-navigation for:
+  - **General settings** (campaign name, description, dungeon public visibility toggle).
+  - **Crawlers settings** (inviting other users to the campaign and managing user memberships/roles).
+  - **AI Providers** (configured provider keys/endpoints, from M4).
 - **Export/import:** campaign export to JSON + Markdown (provenance included);
   import as reviewable `IMPORT` change sets.
 - **Done when:** deployed, backed up, exportable; a real campaign can be run by a
-  DM + players; DMs can view and restore archived entities, and view detailed entity edit histories.
+  DM + players; DMs can view and restore archived entities, view detailed entity edit histories, and configure campaign settings via the three-pane layout.
 
 ## M10 — Shared canon library & event-consequence AI
 **Goal:** leverage and scale.

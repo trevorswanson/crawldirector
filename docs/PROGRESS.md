@@ -23,6 +23,7 @@ keyword-scanning every doc.
 - [ ] **M4 generator expansion.** Add bulk-stub scaffolding and relationship
       inference generators, a generation panel for bulk runs, a `Job` table +
       worker for bulk/async runs, and usage/cost tracking with spend caps.
+- [ ] **Visibility model simplification.** Refactor the visibility enum throughout the codebase (Prisma schema, type validation, forms, and visibility projections) from the three-state model (`DM_ONLY`, `SHARED_WITH_PLAYERS`, `PLAYER_FACING`) to a clean binary model (`DM_ONLY`, `PLAYER_VISIBLE`), mapping any subset access strictly to dynamic `KnowledgeGrant` (fog of war).
 
 ### Follow-ups captured from delivered slices
 
@@ -61,6 +62,16 @@ keyword-scanning every doc.
       exist. The current gate is 95% statements / 85% branches / 95% functions /
       95% lines; raise the branch floor toward 90% when aggregate branch coverage
       supports it.
+- [ ] **Campaign settings page redesign & expansion (M9).** Redesign the settings
+      page `/campaigns/[id]/settings` to use the three-pane layout. The middle
+      pane will act as a sub-nav with options:
+      - **General**: Campaign name, description, and visibility toggle (allow dungeons to be publicly visible if the DM wants).
+      - **Crawlers**: Inviting other users to the campaign and managing user memberships/roles.
+      - **AI Providers**: BYO API keys configuration.
+- [ ] **Game-progression modeling (M7).** Implement:
+      - **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect.
+      - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
+      - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
 
 ## M3 — Timeline/review quick fixes + floor-model ADR (2026-06-06)
 

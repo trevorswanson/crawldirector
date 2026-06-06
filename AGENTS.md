@@ -120,7 +120,7 @@ description/tags into a **PENDING `UPDATE_ENTITY` proposal** in the Review Queue
 never canon (invariant #1), with locked fields excluded (invariant #2) and AI
 provenance (provider/model/prompt) recorded on approval (invariant #3).
 `resolveCampaignProvider` picks whichever provider the campaign has a key for.
-The app stays fully usable with no key configured.
+The app stays fully usable with no key configured. The visibility model is transitioning to a clean binary model (`DM_ONLY` and `PLAYER_VISIBLE`) per user decision — see `docs/PROGRESS.md` backlog to implement the database and codebase refactoring.
 See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
 ## Start here, every session
@@ -160,7 +160,9 @@ relevant milestone exists.
    service/domain layer (`/src/server/services`), where auth, review, visibility,
    and provenance live.
 5. **Players read only via the visibility projection.** Never hand a player query
-   raw canon; pending/DM-only/secret content must never reach the client.
+   raw canon; pending/DM-only/secret content must never reach the client. (Note:
+   The visibility model is transitioning to a clean binary model: `DM_ONLY` and
+   `PLAYER_VISIBLE`.)
 6. **Secrets (BYO-key API keys) never reach the client, logs, or provenance.**
    Decrypt only at the server-side provider call.
 7. **Relationships are any-to-any** (both endpoints FK to the generic `Entity`);

@@ -36,8 +36,7 @@ human-scale spine (most DMs think in "last session / next session").
 
 - During a session the DM can **reveal** an entity or fact either broadly or to
   specific recipients. A broad reveal updates the campaign-wide visibility to
-  `SHARED_WITH_PLAYERS` for ordinary known-world canon, or `PLAYER_FACING` when
-  the content is meant to appear as in-fiction crawler/System UI. A private
+  `PLAYER_VISIBLE` for ordinary campaign canon. A private
   reveal creates knowledge grants for selected player memberships, crawlers,
   NPCs, parties, guilds, or other actor entities without making the fact visible
   to everyone.

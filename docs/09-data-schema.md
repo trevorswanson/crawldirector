@@ -86,18 +86,16 @@ enum EntityType {
   FACTION ORGANIZATION SPONSOR
   SHOW
   SYSTEM_AI
-  ITEM SKILL SPELL ACHIEVEMENT TITLE SYSTEM_MESSAGE DEITY
+  ITEM SKILL SPELL ACHIEVEMENT TITLE SYSTEM_MESSAGE DEITY BOX
   // extensible
 }
 
 enum CanonStatus { DRAFT PENDING CANON REJECTED ARCHIVED }
-// Visibility is a campaign-wide default plus a presentation hint.
+// Visibility is a campaign-wide default:
 // - DM_ONLY: not broadly visible to players. Private KnowledgeGrant rows may
 //   reveal exact facts/fields/entities to selected recipients.
-// - SHARED_WITH_PLAYERS: visible to players as ordinary known-world canon.
-// - PLAYER_FACING: visible to players and authored for the in-fiction
-//   crawler/System UI. It is not a separate audience scope.
-enum Visibility  { DM_ONLY SHARED_WITH_PLAYERS PLAYER_FACING }
+// - PLAYER_VISIBLE: visible to players as ordinary campaign canon.
+enum Visibility  { DM_ONLY PLAYER_VISIBLE }
 
 model Entity {
   id           String      @id @default(cuid())
@@ -188,6 +186,7 @@ enum RelationshipType {
   ALLY_OF ENEMY_OF MENTOR_OF MANAGES LOVES FAMILY_OF OWES
   LOCATED_ON PART_OF CONTAINS BOSS_OF SPAWNS_ON
   HAS_CLASS HAS_SPECIES OWNS_ITEM KNOWS_SKILL EARNED_ACHIEVEMENT HOLDS_TITLE APPEARS_ON
+  GRANTS_BOX CONTAINS
   KNOWS_ABOUT BETRAYED KILLED SAVED
   // extensible
 }
@@ -484,7 +483,8 @@ model SessionLogEntry {             // real-time capture; NOT canon until promot
 - `Event.effects` v1 stores crawler-targeted consequences in `Event.effects`
   JSON: `ADJUST_STAT` deltas non-null numeric crawler fields, `SET_STAT` writes
   an absolute numeric crawler field (for nullable values like `currentFloor`),
-  and `SET_ALIVE` flips `Crawler.isAlive`. Submitting them creates a pending
+  `SET_ALIVE` flips `Crawler.isAlive`, and `GRANT_ACHIEVEMENT` records achievement
+  awards. Submitting them creates a pending
   `APPLY_EVENT_EFFECTS` Change Set and stores `pendingChangeSetId` /
   `pendingOperationId` plus `reviewStatus` on each effect row. Approval applies
   the reviewed effect rows through the review pipeline, writes
