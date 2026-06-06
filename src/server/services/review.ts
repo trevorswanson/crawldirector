@@ -437,6 +437,13 @@ export async function createPendingEntityChangeSet(
     title: string;
     summary?: string;
     runId?: string;
+    // AI provenance (M4 generators): persisted on the ChangeSet so approval can
+    // copy them onto each field's Provenance row (invariant #3 — "where did this
+    // come from?"). Secret-free: the provider id/model/prompt are not the key.
+    providerId?: string;
+    model?: string;
+    promptId?: string;
+    promptVersion?: string;
     operations: EntityReviewOperationInput[];
   },
 ) {
@@ -464,6 +471,10 @@ export async function createPendingEntityChangeSet(
         title: input.title,
         summary: input.summary,
         runId: input.runId,
+        providerId: input.providerId,
+        model: input.model,
+        promptId: input.promptId,
+        promptVersion: input.promptVersion,
         actorUserId: userId,
         baseVersions,
         operations: {
@@ -2174,6 +2185,7 @@ export type EntityProvenance = {
   approvedAt: Date | null;
   lastChangeTitle: string;
   lastChangeSource: ChangeSource;
+  lastChangeModel: string | null;
   changeCount: number;
 };
 
@@ -2223,15 +2235,24 @@ export async function getEntityProvenance(
   const label = (u: { name: string | null; email: string } | null) =>
     u?.name || u?.email || null;
 
+  // The "Model" row should reflect the most recent change that actually ran a
+  // model — typically an AI flesh-out — not the (usually null) origin model of a
+  // DM-created entity. Otherwise an AI contribution is invisible in provenance.
+  const latestModel = ops.reduce<string | null>(
+    (acc, op) => op.changeSet.model ?? acc,
+    null,
+  );
+
   return {
     source: origin.source,
     authorLabel: label(origin.actor),
     createdAt: origin.createdAt,
-    model: origin.model,
+    model: latestModel,
     approvedByLabel: label(origin.reviewer),
     approvedAt: origin.reviewedAt,
     lastChangeTitle: last.title,
     lastChangeSource: last.source,
+    lastChangeModel: last.model,
     changeCount: ops.length,
   };
 }

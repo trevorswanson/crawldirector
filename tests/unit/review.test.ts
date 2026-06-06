@@ -691,6 +691,41 @@ describe("review service — getEntityProvenance", () => {
     expect(provenance?.approvedByLabel).toBe("Owner DM");
     expect(provenance?.lastChangeSource).toBe("AI");
   });
+
+  it("keeps the DM creation as origin but surfaces a later AI change's model", async () => {
+    const { dmId, campaignId } = await seed();
+    // DM-created entity: origin is the DM, with no model.
+    const entityId = await createEntity(dmId, campaignId, "Fleshed");
+    const baseVersion = await versionOf(entityId);
+
+    const set = await createPendingEntityChangeSet(dmId, campaignId, {
+      source: "AI",
+      title: "Flesh out Fleshed",
+      model: "claude-opus-4-8",
+      providerId: "anthropic",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: entityId,
+          patch: {
+            _baseVersion: { to: baseVersion },
+            summary: { to: "An AI-enriched hook." },
+          },
+        },
+      ],
+    });
+    await acceptAllOperations(set.id);
+    await approveChangeSet(dmId, campaignId, set.id);
+
+    const provenance = await getEntityProvenance(dmId, campaignId, entityId);
+    // Origin is still the DM creation (no model)…
+    expect(provenance?.source).toBe("DM");
+    // …but the panel-facing model reflects the most recent model-bearing change.
+    expect(provenance?.model).toBe("claude-opus-4-8");
+    expect(provenance?.lastChangeSource).toBe("AI");
+    expect(provenance?.lastChangeModel).toBe("claude-opus-4-8");
+    expect(provenance?.lastChangeTitle).toBe("Flesh out Fleshed");
+  });
 });
 
 describe("review service — rejectChangeSet (single)", () => {

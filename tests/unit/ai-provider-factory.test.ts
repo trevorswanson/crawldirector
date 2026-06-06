@@ -16,7 +16,7 @@ vi.mock("@/server/services/ai-keys", () => ({ assertCampaignDm, getAiKeyConfig }
 vi.mock("@/server/ai/anthropic", () => ({ createAnthropicProvider }));
 vi.mock("@/server/ai/openai", () => ({ createOpenAiProvider }));
 
-import { getCampaignProvider, testAiConnection } from "@/server/ai";
+import { getCampaignProvider, resolveCampaignProvider, testAiConnection } from "@/server/ai";
 
 function fakeProvider(over: Partial<{ model: string; generateStructured: ReturnType<typeof vi.fn> }> = {}) {
   return {
@@ -72,6 +72,31 @@ describe("getCampaignProvider", () => {
       baseUrl: "http://localhost:11434/v1",
       model: "llama3.1",
     });
+  });
+});
+
+describe("resolveCampaignProvider", () => {
+  it("returns the first provider with a usable key (registry order)", async () => {
+    // anthropic + openai unconfigured, openai-compatible configured.
+    getAiKeyConfig
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ apiKey: "", baseUrl: "http://x/v1", model: "llama3.1" });
+    const provider = await resolveCampaignProvider("c1");
+    expect(provider).not.toBeNull();
+    expect(createOpenAiProvider).toHaveBeenCalledTimes(1);
+  });
+
+  it("prefers anthropic when it is configured", async () => {
+    getAiKeyConfig.mockResolvedValue({ apiKey: "sk-ant", baseUrl: null, model: null });
+    const provider = await resolveCampaignProvider("c1");
+    expect(provider?.model).toBe("claude-opus-4-8");
+    expect(createAnthropicProvider).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns null when no provider is configured", async () => {
+    getAiKeyConfig.mockResolvedValue(null);
+    expect(await resolveCampaignProvider("c1")).toBeNull();
   });
 });
 

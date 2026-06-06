@@ -13,6 +13,7 @@ const {
   listKnowledgeOfEntity,
   listKnowledgeHeldByEntity,
   getEntityProvenance,
+  listAiKeys,
   notFound,
 } = vi.hoisted(() => ({
   requireUser: vi.fn(),
@@ -25,6 +26,7 @@ const {
   listKnowledgeOfEntity: vi.fn(),
   listKnowledgeHeldByEntity: vi.fn(),
   getEntityProvenance: vi.fn(),
+  listAiKeys: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
@@ -40,9 +42,15 @@ vi.mock("@/server/services/entities", () => ({
 vi.mock("@/server/services/relationships", () => ({ listConnectionsForEntity }));
 vi.mock("@/server/services/events", () => ({ listEventsForEntity }));
 vi.mock("@/server/services/review", () => ({ getEntityProvenance }));
+vi.mock("@/server/services/ai-keys", () => ({ listAiKeys }));
 vi.mock("@/server/services/knowledge", () => ({
   listKnowledgeOfEntity,
   listKnowledgeHeldByEntity,
+}));
+vi.mock("@/components/entities/generate-panel", () => ({
+  GeneratePanel: ({ locked }: { locked: boolean }) => (
+    <div>Generate panel{locked ? " (locked)" : ""}</div>
+  ),
 }));
 vi.mock("@/components/entities/knowledge-panel", () => ({
   KnowledgePanel: ({
@@ -124,6 +132,7 @@ const crawlerProvenance = {
   approvedAt: new Date("2026-05-01"),
   lastChangeTitle: "Update Carl",
   lastChangeSource: "DM",
+  lastChangeModel: null,
   changeCount: 2,
 };
 
@@ -145,6 +154,7 @@ beforeEach(() => {
   listEventsForEntity.mockResolvedValue([]);
   listKnowledgeOfEntity.mockResolvedValue([]);
   listKnowledgeHeldByEntity.mockResolvedValue([]);
+  listAiKeys.mockResolvedValue([]);
 });
 
 afterEach(cleanup);
@@ -251,6 +261,75 @@ describe("EntityPage", () => {
     await renderPage();
 
     expect(screen.queryByText(/Knowledge panel/)).toBeNull();
+  });
+
+  it("shows the AI generation panel to a DM when a provider key is configured", async () => {
+    getEntityForUser.mockResolvedValue(crawler());
+    listAiKeys.mockResolvedValue([{ providerId: "anthropic" }]);
+
+    await renderPage();
+
+    expect(screen.getByText("Generate panel")).toBeDefined();
+  });
+
+  it("hides the AI generation panel when no provider key is configured", async () => {
+    getEntityForUser.mockResolvedValue(crawler());
+    listAiKeys.mockResolvedValue([]);
+
+    await renderPage();
+
+    expect(screen.queryByText("Generate panel")).toBeNull();
+  });
+
+  it("hides the AI generation panel from a player viewer", async () => {
+    getEntityForUser.mockResolvedValue(crawler());
+    listEntitiesForUser.mockResolvedValue({ entities: [], role: "PLAYER" });
+    listAiKeys.mockResolvedValue([{ providerId: "anthropic" }]);
+
+    await renderPage();
+
+    expect(screen.queryByText("Generate panel")).toBeNull();
+  });
+
+  it("offers lock toggles for summary and description in the read view", async () => {
+    getEntityForUser.mockResolvedValue(crawler());
+
+    await renderPage();
+
+    // Both narrative fields expose an unlocked "Click to lock this field" toggle
+    // (alongside the structured-field toggles).
+    expect(screen.getAllByTitle("Click to lock this field").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("reflects a locked summary/description as locked toggles", async () => {
+    getEntityForUser.mockResolvedValue(
+      crawler({ lockedFields: ["summary", "description"] }),
+    );
+
+    await renderPage();
+
+    // summary + description both render as locked toggles.
+    expect(
+      screen.getAllByTitle("Locked field — click to unlock").length,
+    ).toBeGreaterThanOrEqual(2);
+  });
+
+  it("surfaces an AI last-change in provenance (source badge + model)", async () => {
+    getEntityForUser.mockResolvedValue(crawler());
+    getEntityProvenance.mockResolvedValue({
+      ...crawlerProvenance,
+      source: "DM",
+      model: "claude-opus-4-8",
+      lastChangeTitle: "Flesh out Carl",
+      lastChangeSource: "AI",
+      lastChangeModel: "claude-opus-4-8",
+    });
+
+    await renderPage();
+
+    expect(screen.getByText("Flesh out Carl")).toBeDefined();
+    // Shown in both the Model row and the Last-change row.
+    expect(screen.getAllByText(/claude-opus-4-8/).length).toBeGreaterThanOrEqual(1);
   });
 
   it("renders entity tags as links that filter the World Browser", async () => {

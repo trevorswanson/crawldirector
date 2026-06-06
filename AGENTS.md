@@ -106,10 +106,19 @@ that serves OpenAI itself **and any OpenAI-compatible endpoint** — a self-host
 model (Ollama/LM Studio/vLLM) or third-party proxy, configured by a non-secret
 `baseUrl` + `model` on `AiKey` (key optional for local servers).
 `generateStructured` derives a JSON Schema from Zod, validates, and repairs once
-before erroring. `getCampaignProvider` is the single seam generators will call;
+before erroring. `getCampaignProvider` is the single seam generators call;
 a DM-only **connection test** on the Settings page verifies a key/endpoint/model
 with a tiny live call. See [ADR 0007](./docs/adr/0007-provider-abstraction-and-openai-compatible.md).
-No generators yet — the app stays fully usable with no key configured.
+The **first generator** then landed (M4 slice 3): an **entity-fleshing**
+generator (`src/server/ai/generators/flesh-entity.ts` — pure prompt/schema/patch
+logic) wired through `fleshOutEntity` (`src/server/services/generation.ts`). A
+DM-only **GeneratePanel** ("Flesh out") on the entity detail rail (shown only
+when a provider key is configured) expands a thin/stub entity's summary/
+description/tags into a **PENDING `UPDATE_ENTITY` proposal** in the Review Queue —
+never canon (invariant #1), with locked fields excluded (invariant #2) and AI
+provenance (provider/model/prompt) recorded on approval (invariant #3).
+`resolveCampaignProvider` picks whichever provider the campaign has a key for.
+The app stays fully usable with no key configured.
 See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
 ## Start here, every session

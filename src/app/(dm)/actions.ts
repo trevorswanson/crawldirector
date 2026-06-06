@@ -56,6 +56,7 @@ import {
   grantEntityKnowledge,
   revokeKnowledge,
 } from "@/server/services/knowledge";
+import { fleshOutEntity } from "@/server/services/generation";
 import {
   approveChangeSet,
   approveChangeSetRun,
@@ -377,6 +378,37 @@ export async function restoreEntityAction(
   revalidatePath(`/campaigns/${campaignId}`);
   revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
   redirect(`/campaigns/${campaignId}/entities/${entityId}`);
+}
+
+export type GenerateActionState =
+  | { error?: string; success?: string; changeSetId?: string; timestamp?: number }
+  | undefined;
+
+// Flesh out an entity with AI. The result lands as a PENDING proposal in the
+// Review Queue (never canon — invariant #1); we return a link to it. DM/co-DM
+// only (the service enforces the role). Errors are safe messages (no key/raw
+// provider text — invariant #6).
+export async function fleshOutEntityAction(
+  campaignId: string,
+  entityId: string,
+  _prev: GenerateActionState,
+  _formData: FormData,
+): Promise<GenerateActionState> {
+  const user = await requireUser();
+  try {
+    const result = await fleshOutEntity(user.id, campaignId, entityId);
+    revalidatePath(`/campaigns/${campaignId}/review`);
+    revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
+    return {
+      success: `Draft proposed (${result.model}). Review it in the queue.`,
+      changeSetId: result.changeSetId,
+      timestamp: Date.now(),
+    };
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    console.error("Flesh out entity action failed:", error);
+    return { error: "Generation failed. Please try again.", timestamp: Date.now() };
+  }
 }
 
 export async function approveChangeSetAction(

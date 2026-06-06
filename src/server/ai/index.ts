@@ -1,7 +1,12 @@
 import { z } from "zod";
 
 import { ServiceError } from "@/lib/errors";
-import { getAiProvider, isAiProviderId, resolveAiModel } from "@/lib/ai/providers";
+import {
+  AI_PROVIDERS,
+  getAiProvider,
+  isAiProviderId,
+  resolveAiModel,
+} from "@/lib/ai/providers";
 import { assertCampaignDm, getAiKeyConfig } from "@/server/services/ai-keys";
 import { createAnthropicProvider } from "./anthropic";
 import { createOpenAiProvider } from "./openai";
@@ -44,6 +49,20 @@ export async function getCampaignProvider(
   return createOpenAiProvider({ providerId, apiKey, baseUrl: config.baseUrl, model });
 }
 
+// Resolve *whichever* provider a campaign has a usable key for, preferring the
+// registry order (Anthropic first). Generators don't ask the DM to pick a vendor
+// per run — they use the one configured key. Returns null when none is usable so
+// callers degrade gracefully (AI is additive; everything works with no key).
+export async function resolveCampaignProvider(
+  campaignId: string,
+): Promise<LLMProvider | null> {
+  for (const provider of AI_PROVIDERS) {
+    const ready = await getCampaignProvider(campaignId, provider.id);
+    if (ready) return ready;
+  }
+  return null;
+}
+
 const pingSchema = z.object({ ok: z.boolean() });
 
 export type AiConnectionResult = {
@@ -58,7 +77,7 @@ export type AiConnectionResult = {
 // OpenAI-compatible endpoint that text comes from an arbitrary proxy/local
 // server and could echo headers or other key-bearing config (invariant #6).
 // Only the numeric HTTP status (safe) is ever surfaced.
-function describeProviderError(error: unknown): string {
+export function describeProviderError(error: unknown): string {
   const status =
     typeof error === "object" && error !== null
       ? (error as { status?: number }).status
