@@ -156,6 +156,62 @@ describe("event service", () => {
     expect(donutTimeline[0].others[0].name).toBe("Carl");
   });
 
+  it("stores effects declared while logging a new event as unapplied", async () => {
+    const owner = await makeUser("owner-fx@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeCrawler(owner.id, campaign.id, "Carl");
+
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Carl finds 100 gold",
+      summary: "",
+      floor: 1,
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+      effects: [
+        { kind: "ADJUST_STAT", targetEntityId: carl.id, stat: "gold", delta: 100 },
+      ],
+    });
+
+    const row = await prisma.event.findUnique({ where: { id: event.id } });
+    const stored = row?.effects as Array<Record<string, unknown>>;
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({
+      kind: "ADJUST_STAT",
+      targetEntityId: carl.id,
+      stat: "gold",
+      delta: 100,
+      applied: false,
+    });
+    // Declared, not yet applied — no entity state mutated and no APPLY change set.
+    expect(stored[0].reviewStatus ?? null).toBeNull();
+    const crawler = await prisma.crawler.findUnique({ where: { id: carl.id } });
+    expect(crawler?.gold).toBe(0);
+
+    // Projected onto the DM timeline as an unapplied effect.
+    const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    expect(timeline[0].effects).toHaveLength(1);
+    expect(timeline[0].effects[0].applied).toBe(false);
+  });
+
+  it("rejects a logged effect whose target is not a crawler", async () => {
+    const owner = await makeUser("owner-fx-bad@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const npc = await makeEntity(owner.id, campaign.id, "Mordecai");
+
+    await expect(
+      createEvent(owner.id, campaign.id, {
+        title: "Bad effect",
+        summary: "",
+        floor: 1,
+        secret: false,
+        participants: [{ entityId: npc.id, role: "ACTOR" }],
+        effects: [
+          { kind: "ADJUST_STAT", targetEntityId: npc.id, stat: "gold", delta: 10 },
+        ],
+      }),
+    ).rejects.toThrow(ServiceError);
+  });
+
   it("orders an entity's timeline by in-game floor, newest first", async () => {
     const owner = await makeUser("owner-order@test.com");
     const campaign = await createCampaign(owner.id, { name: "Dungeon" });

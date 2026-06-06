@@ -184,11 +184,13 @@ function effectStatusLabel(effect: EventEffectView) {
 function NewEventForm({
   campaignId,
   candidates,
+  crawlerCandidates,
   anchorCandidates,
   onClose,
 }: {
   campaignId: string;
   candidates: EntityCandidate[];
+  crawlerCandidates: EntityCandidate[];
   anchorCandidates: { id: string; title: string }[];
   onClose: () => void;
 }) {
@@ -305,7 +307,11 @@ function NewEventForm({
             </select>
             <button
               type="button"
-              title="Remove participant row"
+              title={
+                rows.length === 1
+                  ? "An event needs at least one participant"
+                  : "Remove participant row"
+              }
               onClick={() => removeRow(row.key)}
               disabled={rows.length === 1}
               className="inline-flex h-[34px] items-center justify-center border border-[var(--line)] px-[8px] text-[var(--ink-faint)] hover:text-[var(--no)] disabled:opacity-40"
@@ -314,7 +320,14 @@ function NewEventForm({
             </button>
           </div>
         ))}
+        {rows.length === 1 && (
+          <p className="text-[10.5px] text-[var(--ink-faint)]">
+            An event needs at least one participant. Add another to remove this one.
+          </p>
+        )}
       </div>
+
+      <EffectRows candidates={crawlerCandidates} />
 
       {error && (
         <p role="alert" className="text-[11px] text-[var(--no)]">
@@ -1423,6 +1436,7 @@ export function CampaignTimeline({
                 <NewEventForm
                   campaignId={campaignId}
                   candidates={candidates}
+                  crawlerCandidates={crawlerCandidates}
                   anchorCandidates={anchorCandidates}
                   onClose={() => setOpen(false)}
                 />

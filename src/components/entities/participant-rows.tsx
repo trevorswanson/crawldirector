@@ -96,7 +96,11 @@ export function ParticipantRows({
           </select>
           <button
             type="button"
-            title="Remove participant row"
+            title={
+              rows.length === 1
+                ? "An event needs at least one participant"
+                : "Remove participant row"
+            }
             onClick={() => removeRow(row.key)}
             disabled={rows.length === 1}
             className="inline-flex h-[34px] items-center justify-center border border-[var(--line)] px-[8px] text-[var(--ink-faint)] hover:text-[var(--no)] disabled:opacity-40"
@@ -105,6 +109,11 @@ export function ParticipantRows({
           </button>
         </div>
       ))}
+      {rows.length === 1 && (
+        <p className="text-[10.5px] text-[var(--ink-faint)]">
+          An event needs at least one participant. Add another to remove this one.
+        </p>
+      )}
     </div>
   );
 }

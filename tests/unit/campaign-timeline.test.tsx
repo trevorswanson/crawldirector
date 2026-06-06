@@ -369,6 +369,53 @@ describe("CampaignTimeline", () => {
     expect(submitted.get("participantRole_1")).toBe("TARGET");
   });
 
+  it("explains the participant minimum and offers effects in the log form", () => {
+    renderTimeline({ events: [] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Log event" }));
+
+    // The single starting row can't be removed; the form says why (issue #1).
+    expect(
+      screen.getByText(/an event needs at least one participant/i),
+    ).toBeDefined();
+    // The new-event form exposes effects, matching the edit form (issue #5).
+    expect(screen.getByRole("button", { name: /add effect/i })).toBeDefined();
+  });
+
+  it("logs a new event with a declared effect", async () => {
+    createCampaignEventAction.mockResolvedValue(undefined);
+    renderTimeline({ events: [] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Log event" }));
+    fireEvent.change(screen.getByPlaceholderText("What happened?"), {
+      target: { value: "Carl finds gold" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Search participant..."), {
+      target: { value: "Carl" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Carl/ }));
+
+    // Add and fill an effect row (target via the crawler typeahead).
+    fireEvent.click(screen.getByRole("button", { name: /add effect/i }));
+    fireEvent.change(screen.getByPlaceholderText("Search crawler..."), {
+      target: { value: "Carl" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Carl/ }));
+    fireEvent.change(screen.getByPlaceholderText("± amount"), {
+      target: { value: "100" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Log event/ }));
+
+    await waitFor(() => expect(createCampaignEventAction).toHaveBeenCalledTimes(1));
+    const [, , submitted] = createCampaignEventAction.mock.calls[0];
+    expect(submitted.get("effectCount")).toBe("1");
+    expect(submitted.get("effectKind_0")).toBe("ADJUST_STAT");
+    expect(submitted.get("effectTarget_0")).toBe("e1");
+    expect(submitted.get("effectStat_0")).toBe("gold");
+    expect(submitted.get("effectDelta_0")).toBe("100");
+  });
+
   it("surfaces action errors and lets the DM cancel", async () => {
     createCampaignEventAction.mockResolvedValue({ error: "Choose at least one participant." });
     renderTimeline({ events: [] });

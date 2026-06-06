@@ -362,6 +362,22 @@ export async function createEvent(
       })),
     },
   };
+  if (parsed.effects && parsed.effects.length > 0) {
+    // Declared unapplied effects; applyCreateEvent validates each target is a
+    // crawler. The DM applies them later from the timeline (parity with edit).
+    patch.effects = {
+      to: parsed.effects.map((effect) => ({
+        ...(effect.id ? { id: effect.id } : {}),
+        kind: effect.kind,
+        targetEntityId: effect.targetEntityId,
+        ...(effect.stat ? { stat: effect.stat } : {}),
+        ...(typeof effect.delta === "number" ? { delta: effect.delta } : {}),
+        ...(typeof effect.valueNumber === "number" ? { valueNumber: effect.valueNumber } : {}),
+        ...(typeof effect.value === "boolean" ? { value: effect.value } : {}),
+        ...(effect.note ? { note: effect.note } : {}),
+      })),
+    };
+  }
 
   const result = await applyAutoApprovedEventChangeSet(userId, campaignId, {
     title: "Log event",

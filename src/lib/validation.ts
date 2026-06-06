@@ -527,6 +527,9 @@ export const createEventSchema = z.object({
     .array(eventParticipantSchema)
     .min(1, "An event needs at least one participant.")
     .max(20, "Too many participants."),
+  // Effects declared while logging the event. Stored unapplied (the DM applies
+  // them to entity state later via the Review Queue), mirroring the edit path.
+  effects: z.array(eventEffectSchema).max(20, "Too many effects.").optional(),
 });
 export type CreateEventInput = z.infer<typeof createEventSchema>;
 

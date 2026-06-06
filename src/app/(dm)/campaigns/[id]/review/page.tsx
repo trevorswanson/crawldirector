@@ -162,31 +162,10 @@ export default async function ReviewQueuePage({
     return qs ? `/campaigns/${id}/review?${qs}` : `/campaigns/${id}/review`;
   };
 
-  if (changeSets.length === 0 && !doneSummary && !reopenedChangeSet) {
-    return (
-      <div className="grid h-full place-items-center bg-[var(--bg)] px-6">
-        <div className="panel bracket max-w-xl p-6">
-          <Kicker noLead>Review Queue</Kicker>
-          <div className="mt-3 flex gap-2">
-            <Link href={`/campaigns/${id}/review`}>
-              <Button variant={showClosed ? "ghost" : "outline"}>Pending</Button>
-            </Link>
-            <Link href={`/campaigns/${id}/review?show=closed`}>
-              <Button variant={showClosed ? "outline" : "ghost"}>Closed</Button>
-            </Link>
-          </div>
-          <h1 className="mt-3 font-display text-[22px] font-semibold">
-            {showClosed ? "No closed proposals" : "No pending proposals"}
-          </h1>
-          <p className="mt-2 text-sm leading-6 text-[var(--ink-dim)]">
-            {showClosed
-              ? "Approved, rejected, and superseded queue proposals will appear here."
-              : "Direct DM edits are auto-approved with provenance. AI, import, and player-suggestion proposals will appear here."}
-          </p>
-        </div>
-      </div>
-    );
-  }
+  // An empty queue keeps the persistent layout (the filter/queue rail stays
+  // visible); the "no proposals" message renders in the detail column instead of
+  // replacing the whole page with a centered box.
+  const queueIsEmpty = changeSets.length === 0 && !doneSummary && !reopenedChangeSet;
 
   return (
     <div className="grid h-full grid-cols-1 overflow-hidden bg-[var(--bg)] lg:grid-cols-[324px_minmax(0,1fr)]">
@@ -337,6 +316,20 @@ export default async function ReviewQueuePage({
             readOnly={showClosed || Boolean(reopenedChangeSet)}
             backHref={`/campaigns/${id}/review${showClosed ? "?show=closed" : ""}`}
           />
+        ) : queueIsEmpty ? (
+          <div className="grid h-full place-items-center bg-[var(--bg)] px-6">
+            <div className="panel bracket max-w-xl p-6">
+              <Kicker noLead>Review Queue</Kicker>
+              <h1 className="mt-3 font-display text-[22px] font-semibold">
+                {showClosed ? "No closed proposals" : "No pending proposals"}
+              </h1>
+              <p className="mt-2 text-sm leading-6 text-[var(--ink-dim)]">
+                {showClosed
+                  ? "Approved, rejected, and superseded queue proposals will appear here."
+                  : "Direct DM edits are auto-approved with provenance. AI, import, and player-suggestion proposals will appear here."}
+              </p>
+            </div>
+          </div>
         ) : (
           <div className="grid h-full place-items-center px-6 text-sm text-[var(--ink-faint)]">
             Select a proposal to review.

@@ -4,6 +4,48 @@ Running checklist of milestones/tasks, newest first. See
 [`11-roadmap.md`](./11-roadmap.md) for the full plan and
 [`12-working-sessions.md`](./12-working-sessions.md) for how to pick up work.
 
+## M3 — Timeline/review quick fixes + floor-model ADR (2026-06-06)
+
+DM-reported polish on the M3 event/timeline + review surfaces, plus a written
+plan for the deeper floor cleanup.
+
+- [x] **Review Queue stays a 3-pane layout when empty** (issue #3). Removed the
+      early `return` in
+      [`review/page.tsx`](../src/app/(dm)/campaigns/[id]/review/page.tsx) that
+      replaced the whole page with a centered box; the persistent filter/queue
+      rail (Pending/Closed toggle + source facets) now always renders, and the
+      "No pending/closed proposals" message shows in the detail column.
+- [x] **Effects can be declared while logging a new event** (issue #5), at
+      parity with the edit path. `createEventSchema` accepts `effects`;
+      `createEvent` carries them in the `CREATE_EVENT` patch (the apply path
+      `applyCreateEvent` already persisted declared effects); both create actions
+      (`createCampaignEventAction`, `createEventAction`) parse the effect rows;
+      and `EffectRows` now renders in both the campaign-timeline `NewEventForm`
+      and the entity-panel log form. Effects start **unapplied** — the DM applies
+      them via the Review Queue afterward (same as editing).
+- [x] **The participant-minimum rule is explained, not silent** (issue #1).
+      Removing the *last* participant is intentionally blocked (an event needs
+      ≥1 participant); the UI now says so — a dynamic tooltip plus a visible hint
+      ("An event needs at least one participant. Add another to remove this one.")
+      in the shared `ParticipantRows` and the timeline new-event form. No logic
+      change; this was a UX/discoverability gap, not a bug.
+- [x] **Tests:** empty-queue rail visibility + closed empty state
+      (`review-queue-page`); log-with-effect submission + participant-minimum hint
+      (`campaign-timeline`); `createEvent` stores declared effects unapplied +
+      rejects a non-crawler effect target (`events`). lint (0 errors), typecheck,
+      and the full coverage gate green (912 tests; statements 95.4%, branches
+      88.22%, functions 97.44%, lines 97.24%). Browser-verified all three on a
+      fresh seed.
+- [ ] **Floors (issues #2 + #4) — planned, not yet built.**
+      [ADR 0008](./adr/0008-floor-model-unification-and-time-inference.md)
+      (*proposed*) unifies the five floor representations (FLOOR entity /
+      `orderKey` / `timeRef.floor` / `Crawler.currentFloor` / `currentFloorId` /
+      `LOCATED_ON`) around a campaign-unique floor number, and adds floor time
+      anchors (`data.startDay`/`data.collapseDay`) + an absolute-day resolver so
+      inferred floor day-ranges fill in (e.g. "2 days after Event A" resolves).
+      DM confirmed: keep `Crawler.currentFloor` (not the `LOCATED_ON`-edge model).
+      Delivery is the ADR's 3 slices; **slice 1 (anchors + inference) is next.**
+
 ## M4 — First generator: entity fleshing → PENDING proposal (slice 3) ✅ (2026-06-06)
 
 **Goal:** the first real generator. A DM with their own key fleshes a thin/stub
