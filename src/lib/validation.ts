@@ -150,11 +150,16 @@ const entityCoreSchema = z.object({
   unique: z.preprocess((val) => (val === undefined || val === null || val === "" ? undefined : val === "true" || val === true || val === "on"), z.boolean().optional()),
   fleeting: z.preprocess((val) => (val === undefined || val === null || val === "" ? undefined : val === "true" || val === true || val === "on"), z.boolean().optional()),
   aiDescription: optionalText(10000).nullable(),
-  // FLOOR-entity attributes, stored in Entity.data (docs/adr/0005). floorNumber
-  // links a FLOOR entity to the events on that floor (Event.orderKey); theme is
-  // the one-line flavour shown under the timeline's floor-band header.
+  // FLOOR-entity attributes, stored in Entity.data (docs/adr/0005, 0008).
+  // floorNumber links a FLOOR entity to the events on that floor
+  // (Event.orderKey); theme is the one-line flavour shown under the timeline's
+  // floor-band header. startDay/collapseDay are the absolute days-since-collapse
+  // the floor opened / collapses — the anchors that let FLOOR_START /
+  // FLOOR_COLLAPSE event times resolve to absolute days (ADR 0008).
   floorNumber: optionalInt("Floor number", 1),
   theme: optionalText(160),
+  startDay: optionalInt("Floor start day"),
+  collapseDay: optionalInt("Floor collapse day"),
 });
 
 export const createGenericEntitySchema = entityCoreSchema.extend({
@@ -218,7 +223,7 @@ export const crawlerOnlyKeys = Object.keys(createCrawlerSchema.shape).filter(
 
 export const itemKeys = ["itemTypeId", "divine", "unique", "fleeting", "aiDescription"];
 
-export const floorKeys = ["floorNumber", "theme"];
+export const floorKeys = ["floorNumber", "theme", "startDay", "collapseDay"];
 
 // Keys persisted into Entity.data (type-specific attributes), used by the lock
 // validator and the data.* patch builders in src/server/services/entities.ts.

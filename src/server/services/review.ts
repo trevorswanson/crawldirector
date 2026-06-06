@@ -109,6 +109,8 @@ const dataFields = new Set([
   "data.aiDescription",
   "data.floorNumber",
   "data.theme",
+  "data.startDay",
+  "data.collapseDay",
 ]);
 
 async function getMembership(userId: string, campaignId: string) {
@@ -1130,7 +1132,9 @@ function currentEntityValue(
     case "data.fleeting":
     case "data.aiDescription":
     case "data.floorNumber":
-    case "data.theme": {
+    case "data.theme":
+    case "data.startDay":
+    case "data.collapseDay": {
       const metadata = entity.data as {
         itemTypeId?: string | null;
         divine?: boolean;
@@ -1139,6 +1143,8 @@ function currentEntityValue(
         aiDescription?: string | null;
         floorNumber?: number | null;
         theme?: string | null;
+        startDay?: number | null;
+        collapseDay?: number | null;
       } | null;
       if (field === "data.itemTypeId") return metadata?.itemTypeId ?? null;
       if (field === "data.divine") return metadata?.divine ?? false;
@@ -1147,6 +1153,8 @@ function currentEntityValue(
       if (field === "data.aiDescription") return metadata?.aiDescription ?? null;
       if (field === "data.floorNumber") return metadata?.floorNumber ?? null;
       if (field === "data.theme") return metadata?.theme ?? null;
+      if (field === "data.startDay") return metadata?.startDay ?? null;
+      if (field === "data.collapseDay") return metadata?.collapseDay ?? null;
       return undefined;
     }
   }
@@ -2314,6 +2322,8 @@ async function applyCreateEntity(
           ? {
               floorNumber: optionalNumber(readTo(patch, "data.floorNumber")) ?? null,
               theme: nullableString(readTo(patch, "data.theme")),
+              startDay: optionalNumber(readTo(patch, "data.startDay")) ?? null,
+              collapseDay: optionalNumber(readTo(patch, "data.collapseDay")) ?? null,
             }
           : {}),
       } as Prisma.InputJsonValue,
@@ -2568,6 +2578,8 @@ function entityUpdateData(patch: ReviewPatch, type: EntityType, existingData?: u
       aiDescription?: string | null;
       floorNumber?: number | null;
       theme?: string | null;
+      startDay?: number | null;
+      collapseDay?: number | null;
     };
     if ("data.itemTypeId" in patch) {
       currentData.itemTypeId = nullableString(readTo(patch, "data.itemTypeId"));
@@ -2589,6 +2601,12 @@ function entityUpdateData(patch: ReviewPatch, type: EntityType, existingData?: u
     }
     if ("data.theme" in patch) {
       currentData.theme = nullableString(readTo(patch, "data.theme"));
+    }
+    if ("data.startDay" in patch) {
+      currentData.startDay = optionalNumber(readTo(patch, "data.startDay")) ?? null;
+    }
+    if ("data.collapseDay" in patch) {
+      currentData.collapseDay = optionalNumber(readTo(patch, "data.collapseDay")) ?? null;
     }
     data.data = currentData;
   }

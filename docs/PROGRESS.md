@@ -36,15 +36,30 @@ plan for the deeper floor cleanup.
       and the full coverage gate green (912 tests; statements 95.4%, branches
       88.22%, functions 97.44%, lines 97.24%). Browser-verified all three on a
       fresh seed.
-- [ ] **Floors (issues #2 + #4) — planned, not yet built.**
+- [x] **Floors (issue #4) — slice 1: time anchors + absolute-day inference.**
       [ADR 0008](./adr/0008-floor-model-unification-and-time-inference.md)
-      (*proposed*) unifies the five floor representations (FLOOR entity /
-      `orderKey` / `timeRef.floor` / `Crawler.currentFloor` / `currentFloorId` /
-      `LOCATED_ON`) around a campaign-unique floor number, and adds floor time
-      anchors (`data.startDay`/`data.collapseDay`) + an absolute-day resolver so
-      inferred floor day-ranges fill in (e.g. "2 days after Event A" resolves).
-      DM confirmed: keep `Crawler.currentFloor` (not the `LOCATED_ON`-edge model).
-      Delivery is the ADR's 3 slices; **slice 1 (anchors + inference) is next.**
+      (*accepted*). FLOOR entities gain `data.startDay`/`data.collapseDay`
+      ("Opens on day" / "Collapses on day" on the form), plumbed through
+      validation → `entities` patch builders → the `review` `dataFields` registry
+      + appliers (reviewable, lockable, provenance-tracked) and surfaced per floor
+      by `listCampaignFloors`. New pure `src/lib/time-resolve.ts`:
+      `resolveAbsoluteDay` walks the bases (ABSOLUTE_DAY/COLLAPSE direct, EVENT
+      recursive + cycle-guarded, FLOOR_START/FLOOR_COLLAPSE via anchors) and
+      `computeFloorDayRanges` unions per floor, bounding each close at the next
+      floor's open day. The campaign timeline's `dayRangeByFloor` uses it, so an
+      `EVENT`-relative time ("2 days after Event A") now resolves and the
+      floor-1→N chain fills in. Tests: full `time-resolve` unit suite (each basis,
+      EVENT chains + cycle/missing-anchor, sub-day units, range + next-floor
+      bound + empty-floor), FLOOR anchor persistence + `listCampaignFloors`
+      surfacing (`events`), and a real-component timeline render asserting the
+      DM's "Day 0 – 2" case. Browser-verified the FLOOR form anchors round-trip
+      through the pipeline. 927 tests; coverage above floors. **DM confirmed: keep
+      `Crawler.currentFloor`** (not the `LOCATED_ON`-edge model).
+- [ ] **Floors (issue #2) — slices 2 + 3 pending.** Slice 2: enforce
+      campaign-unique `data.floorNumber` + a `resolveFloorEntity` helper, render
+      resolved FLOOR-entity links wherever a bare number shows. Slice 3: retire
+      the duplicate floor paths (FLOOR-as-event-participant, crawler
+      `LOCATED_ON`→FLOOR; surface `Crawler.currentFloor` as a resolved link).
 
 ## M4 — First generator: entity fleshing → PENDING proposal (slice 3) ✅ (2026-06-06)
 

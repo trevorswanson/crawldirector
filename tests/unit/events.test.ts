@@ -2079,6 +2079,38 @@ describe("campaign floor metadata", () => {
     expect(meta.floorEntities.map((floor) => floor.floorNumber)).toEqual([8, 9]);
   });
 
+  it("persists and surfaces floor open/collapse anchors (ADR 0008)", async () => {
+    const owner = await makeUser("owner-floor-anchors@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const floor = await createGenericEntity(owner.id, campaign.id, {
+      type: "FLOOR",
+      name: "Larracos",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+      floorNumber: 9,
+      theme: "Castle siege",
+      startDay: 40,
+      collapseDay: 47,
+    });
+
+    const stored = (
+      await prisma.entity.findUnique({ where: { id: floor.id }, select: { data: true } })
+    )?.data as { startDay?: number; collapseDay?: number };
+    expect(stored.startDay).toBe(40);
+    expect(stored.collapseDay).toBe(47);
+
+    const meta = await listCampaignFloors(owner.id, campaign.id);
+    expect(meta.byNumber[9]).toMatchObject({ startDay: 40, collapseDay: 47 });
+
+    // A floor without anchors surfaces nulls (the default).
+    await makeFloor(owner.id, campaign.id, "The Bone Market", 8);
+    const meta2 = await listCampaignFloors(owner.id, campaign.id);
+    expect(meta2.byNumber[8]).toMatchObject({ startDay: null, collapseDay: null });
+  });
+
   it("hides secret events and DM-only floors from players", async () => {
     const owner = await makeUser("owner-floor-vis@test.com");
     const player = await makeUser("player-floor-vis@test.com");

@@ -125,6 +125,8 @@ export async function createGenericEntityAction(
     aiDescription: formData.get("aiDescription"),
     floorNumber: formData.get("floorNumber"),
     theme: formData.get("theme"),
+    startDay: formData.get("startDay"),
+    collapseDay: formData.get("collapseDay"),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -269,6 +271,8 @@ export async function updateEntityAction(
     aiDescription: formData.get("aiDescription")?.toString() ?? "",
     floorNumber: formData.get("floorNumber") ? Number(formData.get("floorNumber")) : undefined,
     theme: formData.get("theme")?.toString() ?? "",
+    startDay: formData.get("startDay") ? Number(formData.get("startDay")) : undefined,
+    collapseDay: formData.get("collapseDay") ? Number(formData.get("collapseDay")) : undefined,
   };
 
   const parsed = updateEntitySchema.safeParse({
@@ -297,6 +301,8 @@ export async function updateEntityAction(
     aiDescription: formData.get("aiDescription"),
     floorNumber: formData.get("floorNumber"),
     theme: formData.get("theme"),
+    startDay: formData.get("startDay"),
+    collapseDay: formData.get("collapseDay"),
   });
   if (!parsed.success) {
     return {

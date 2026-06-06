@@ -56,6 +56,10 @@ import { orderFromCausality } from "@/lib/causality-order";
 import { provenanceMeta } from "@/lib/entities";
 import { describeEffect } from "@/lib/event-effects";
 import { floorRelativeSortKey } from "@/lib/time-ref";
+import {
+  computeFloorDayRanges,
+  type FloorAnchors,
+} from "@/lib/time-resolve";
 import { eventParticipantRoleValues } from "@/lib/validation";
 import type {
   CampaignFloorMeta,
@@ -137,19 +141,6 @@ function filterLabel(filter: TimelineFilter): string {
   if (filter === "PLAYER") return "PLR";
   if (filter === "IMPORT") return "IMP";
   return filter;
-}
-
-// The absolute day-since-collapse of an event, when it can be placed on the
-// absolute axis on its own (a COLLAPSE "Day N since collapse" or ABSOLUTE_DAY
-// coordinate). Floor-relative anchors (FLOOR_START / FLOOR_COLLAPSE) can't be
-// converted to absolute days without per-floor start/collapse anchors we don't
-// model yet (ADR 0004), so they don't contribute to inferred ranges — a floor
-// with no absolute-dated events simply shows no range (it fills in as the DM
-// dates more of the crawl). See docs/adr/0005.
-function resolveAbsoluteDay(time: CampaignTimelineEvent["time"]): number | null {
-  if (typeof time.offset !== "number") return null;
-  if (time.basis === "COLLAPSE" || time.basis === "ABSOLUTE_DAY") return time.offset;
-  return null;
 }
 
 function formatDayRange(range: { min: number; max: number }): string {
@@ -825,19 +816,25 @@ export function CampaignTimeline({
     title: event.title,
   }));
 
-  // Inferred absolute day-range per floor, from every event that can be placed
-  // on the absolute axis (computed over the full set, not the filtered view).
-  const dayRangeByFloor = new Map<number, { min: number; max: number }>();
-  for (const event of events) {
-    const day = resolveAbsoluteDay(event.time);
-    if (day === null) continue;
-    const current = dayRangeByFloor.get(event.orderKey);
-    if (!current) dayRangeByFloor.set(event.orderKey, { min: day, max: day });
-    else {
-      current.min = Math.min(current.min, day);
-      current.max = Math.max(current.max, day);
-    }
+  // Inferred absolute day-range per floor (ADR 0008): resolve each event to a
+  // day-since-collapse — walking EVENT anchors and per-floor open/collapse
+  // anchors — and union per floor, bounding each floor's close at the next
+  // floor's open day. Computed over the full set, not the filtered view.
+  const floorAnchorsByNumber = new Map<number, FloorAnchors>();
+  for (const descriptor of Object.values(floors.byNumber)) {
+    floorAnchorsByNumber.set(descriptor.number, {
+      startDay: descriptor.startDay,
+      collapseDay: descriptor.collapseDay,
+    });
   }
+  const dayRangeByFloor = computeFloorDayRanges(
+    events.map((event) => ({
+      id: event.id,
+      floor: event.orderKey,
+      time: event.time,
+    })),
+    floorAnchorsByNumber,
+  );
 
   const liveEvents = removedEventId
     ? events.filter((event) => event.id !== removedEventId)

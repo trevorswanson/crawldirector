@@ -1,6 +1,8 @@
 # ADR 0008 — Floor model unification and absolute-day time inference
 
-- **Status:** proposed (awaiting DM review)
+- **Status:** accepted — slice 1 (floor time anchors + absolute-day inference)
+  delivered 2026-06-06; slices 2 (floor-number key) and 3 (retire duplicate
+  paths) pending
 - **Date:** 2026-06-06
 - **Milestone:** M3 (events, timeline, causality) — cleanup + follow-up to
   [ADR 0004](./0004-event-time-model-and-ordering.md) and
@@ -206,9 +208,17 @@ floor anchors from `listCampaignFloors`.
 ### Phased delivery (each a shippable, tested slice)
 
 1. **Floor anchors + inference (issue #4, highest user value, lowest risk).**
-   Add `data.startDay`/`data.collapseDay` plumbing + FLOOR form fields; add
-   `src/lib/time-resolve.ts` with the resolver; rewrite `resolveAbsoluteDay` /
-   `dayRangeByFloor` to use it. No behavior removed.
+   ✅ **Delivered (2026-06-06).** `data.startDay`/`data.collapseDay` are plumbed
+   through validation → `entities` patch builders → the `review` `dataFields`
+   registry + create/update appliers, with "Opens on day" / "Collapses on day"
+   fields on the FLOOR entity form (reviewable, lockable, provenance-tracked).
+   `listCampaignFloors` surfaces the anchors per floor (`FloorDescriptor`).
+   `src/lib/time-resolve.ts` resolves any event to an absolute day-since-collapse
+   (ABSOLUTE_DAY/COLLAPSE direct, EVENT recursive + cycle-guarded, FLOOR_START/
+   FLOOR_COLLAPSE via the anchors) and `computeFloorDayRanges` unions per floor,
+   bounding each close at the next floor's open day. The campaign timeline's
+   `dayRangeByFloor` now uses it, so an `EVENT`-relative time ("2 days after
+   Event A") resolves and the floor-1→N chain fills in. No behavior removed.
 2. **Floor-number key (issue #2a).** Enforce per-campaign `floorNumber`
    uniqueness in the appliers; add `resolveFloorEntity`; render resolved
    FLOOR-entity links wherever a bare number shows.
