@@ -2,20 +2,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ServiceError } from "@/lib/errors";
 
-const { requireUser, setAiKey, deleteAiKey, revalidatePath } = vi.hoisted(() => ({
-  requireUser: vi.fn(),
-  setAiKey: vi.fn(),
-  deleteAiKey: vi.fn(),
-  revalidatePath: vi.fn(),
-}));
+const { requireUser, setAiKey, deleteAiKey, testAiConnection, revalidatePath } = vi.hoisted(
+  () => ({
+    requireUser: vi.fn(),
+    setAiKey: vi.fn(),
+    deleteAiKey: vi.fn(),
+    testAiConnection: vi.fn(),
+    revalidatePath: vi.fn(),
+  }),
+);
 
 vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/ai-keys", () => ({ setAiKey, deleteAiKey }));
+vi.mock("@/server/ai", () => ({ testAiConnection }));
 vi.mock("next/cache", () => ({ revalidatePath }));
 
 import {
   deleteAiKeyAction,
   setAiKeyAction,
+  testAiConnectionAction,
 } from "@/app/(dm)/campaigns/[id]/settings/actions";
 
 function formData(entries: Record<string, string>) {
@@ -40,17 +45,41 @@ describe("setAiKeyAction", () => {
     expect(setAiKey).toHaveBeenCalledWith("dm1", "camp1", {
       providerId: "anthropic",
       apiKey: "sk-ant-secret-9999",
+      baseUrl: "",
+      model: "",
     });
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/camp1/settings");
     expect(result?.success).toContain("9999");
     expect(result?.error).toBeUndefined();
   });
 
+  it("passes the endpoint URL and model through for an OpenAI-compatible provider", async () => {
+    setAiKey.mockResolvedValue({ providerId: "openai-compatible", label: "OpenAI-compatible", lastFour: "" });
+    const result = await setAiKeyAction(
+      "camp1",
+      undefined,
+      formData({
+        providerId: "openai-compatible",
+        apiKey: "",
+        baseUrl: "http://localhost:11434/v1",
+        model: "llama3.1",
+      }),
+    );
+    expect(setAiKey).toHaveBeenCalledWith("dm1", "camp1", {
+      providerId: "openai-compatible",
+      apiKey: "",
+      baseUrl: "http://localhost:11434/v1",
+      model: "llama3.1",
+    });
+    // No last-four hint when the key is blank — the message omits it cleanly.
+    expect(result?.success).toMatch(/Saved OpenAI-compatible\./);
+  });
+
   it("returns a validation error without calling the service", async () => {
     const result = await setAiKeyAction(
       "camp1",
       undefined,
-      formData({ providerId: "anthropic", apiKey: "x" }),
+      formData({ providerId: "", apiKey: "sk-whatever" }),
     );
     expect(setAiKey).not.toHaveBeenCalled();
     expect(result?.error).toBeTruthy();
@@ -89,5 +118,32 @@ describe("deleteAiKeyAction", () => {
     deleteAiKey.mockRejectedValue(new ServiceError("No key is configured for that provider."));
     await expect(deleteAiKeyAction("camp1", "openai")).resolves.toBeUndefined();
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/camp1/settings");
+  });
+});
+
+describe("testAiConnectionAction", () => {
+  it("reports a successful connection with model + latency", async () => {
+    testAiConnection.mockResolvedValue({
+      ok: true,
+      providerId: "anthropic",
+      model: "claude-opus-4-8",
+      latencyMs: 321,
+    });
+    const result = await testAiConnectionAction("camp1", "anthropic", undefined, new FormData());
+    expect(testAiConnection).toHaveBeenCalledWith("dm1", "camp1", "anthropic");
+    expect(result?.success).toContain("claude-opus-4-8");
+    expect(result?.success).toContain("321");
+  });
+
+  it("surfaces a ServiceError message from the provider call", async () => {
+    testAiConnection.mockRejectedValue(new ServiceError("The provider rejected the key (authentication failed)."));
+    const result = await testAiConnectionAction("camp1", "openai", undefined, new FormData());
+    expect(result?.error).toMatch(/authentication failed/);
+  });
+
+  it("returns a generic error for an unexpected failure", async () => {
+    testAiConnection.mockRejectedValue(new Error("network down"));
+    const result = await testAiConnectionAction("camp1", "openai", undefined, new FormData());
+    expect(result?.error).toMatch(/Could not reach/);
   });
 });

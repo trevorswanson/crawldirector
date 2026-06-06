@@ -6,6 +6,7 @@ import { requireUser } from "@/server/auth/session";
 import { ServiceError } from "@/lib/errors";
 import { setAiKeySchema } from "@/lib/validation";
 import { deleteAiKey, setAiKey } from "@/server/services/ai-keys";
+import { testAiConnection } from "@/server/ai";
 
 export type SettingsActionState =
   | { error?: string; success?: string; timestamp?: number }
@@ -23,7 +24,11 @@ export async function setAiKeyAction(
 
   const parsed = setAiKeySchema.safeParse({
     providerId: formData.get("providerId"),
-    apiKey: formData.get("apiKey"),
+    // Coerce missing optional fields (FormData.get → null) to undefined so the
+    // schema defaults apply.
+    apiKey: formData.get("apiKey") ?? undefined,
+    baseUrl: formData.get("baseUrl") ?? undefined,
+    model: formData.get("model") ?? undefined,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input.", timestamp: Date.now() };
@@ -32,11 +37,35 @@ export async function setAiKeyAction(
   try {
     const key = await setAiKey(user.id, campaignId, parsed.data);
     revalidatePath(`/campaigns/${campaignId}/settings`);
-    return { success: `Saved ${key.label} key ending ••${key.lastFour}.`, timestamp: Date.now() };
+    const hint = key.lastFour ? ` ending ••${key.lastFour}` : "";
+    return { success: `Saved ${key.label}${hint}.`, timestamp: Date.now() };
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
     console.error("Set AI key action failed:", error);
     return { error: "Could not save the key. Please try again.", timestamp: Date.now() };
+  }
+}
+
+// Verify a configured provider key/endpoint/model with a tiny live call. Returns
+// a success/error message only — never the key. DM/co-DM only (the service
+// enforces the role).
+export async function testAiConnectionAction(
+  campaignId: string,
+  providerId: string,
+  _prev: SettingsActionState,
+  _formData: FormData,
+): Promise<SettingsActionState> {
+  const user = await requireUser();
+  try {
+    const result = await testAiConnection(user.id, campaignId, providerId);
+    return {
+      success: `Connected to ${result.model} in ${result.latencyMs} ms.`,
+      timestamp: Date.now(),
+    };
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    console.error("Test AI connection action failed:", error);
+    return { error: "Could not reach the provider. Please try again.", timestamp: Date.now() };
   }
 }
 

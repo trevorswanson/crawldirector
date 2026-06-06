@@ -2,11 +2,12 @@
 
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
-import { KeyRound, ShieldCheck, Trash2 } from "lucide-react";
+import { KeyRound, ShieldCheck, Trash2, Zap } from "lucide-react";
 
 import {
   deleteAiKeyAction,
   setAiKeyAction,
+  testAiConnectionAction,
   type SettingsActionState,
 } from "@/app/(dm)/campaigns/[id]/settings/actions";
 import { AI_PROVIDERS, type AiProviderInfo } from "@/lib/ai/providers";
@@ -18,14 +19,26 @@ import { Panel, PanelHeader } from "@/components/ui/panel";
 
 // The campaign's BYO AI-key settings (M4). DMs add their own provider key per
 // campaign; keys are encrypted at rest and never rendered back — only a
-// last-four hint is shown. The app stays fully usable with no key configured
-// (AI is additive), so this panel never blocks anything.
+// last-four hint is shown. OpenAI-compatible providers (self-hosted / proxy)
+// also capture a base URL + model. A Test button verifies the configured
+// key/endpoint/model with a tiny live call. The app stays fully usable with no
+// key configured (AI is additive), so this panel never blocks anything.
 
 function SaveButton({ label }: { label: string }) {
   const { pending } = useFormStatus();
   return (
     <Button type="submit" size="sm" disabled={pending}>
       {pending ? "Saving…" : label}
+    </Button>
+  );
+}
+
+function TestButton() {
+  const { pending } = useFormStatus();
+  return (
+    <Button type="submit" variant="outline" size="sm" disabled={pending}>
+      <Zap aria-hidden size={13} />
+      {pending ? "Testing…" : "Test"}
     </Button>
   );
 }
@@ -43,6 +56,10 @@ function ProviderRow({
     setAiKeyAction.bind(null, campaignId),
     undefined,
   );
+  const [testState, testAction] = useActionState<SettingsActionState, FormData>(
+    testAiConnectionAction.bind(null, campaignId, provider.id),
+    undefined,
+  );
   const deleteAction = deleteAiKeyAction.bind(null, campaignId, provider.id);
 
   return (
@@ -57,7 +74,9 @@ function ProviderRow({
           </div>
           {configured ? (
             <p className="mt-1 font-mono text-[11px] text-[var(--ink-faint)]">
-              Key set · ends ••{configured.lastFour} · updated{" "}
+              {configured.lastFour ? `Key set · ends ••${configured.lastFour}` : "Configured"}
+              {configured.model ? ` · ${configured.model}` : ""}
+              {configured.baseUrl ? ` · ${configured.baseUrl}` : ""} · updated{" "}
               {configured.updatedAt.toLocaleDateString()}
             </p>
           ) : (
@@ -69,36 +88,65 @@ function ProviderRow({
                 rel="noreferrer"
                 className="text-[var(--ink-dim)] underline hover:text-[var(--ink)]"
               >
-                Get one ↗
+                {provider.requiresBaseUrl ? "Learn more ↗" : "Get one ↗"}
               </a>
             </p>
           )}
         </div>
         {configured && (
-          <form action={deleteAction}>
-            <Button type="submit" variant="destructive" size="sm">
-              <Trash2 aria-hidden size={13} />
-              Remove
-            </Button>
-          </form>
+          <div className="flex items-center gap-2">
+            <form action={testAction}>
+              <TestButton />
+            </form>
+            <form action={deleteAction}>
+              <Button type="submit" variant="destructive" size="sm">
+                <Trash2 aria-hidden size={13} />
+                Remove
+              </Button>
+            </form>
+          </div>
         )}
       </div>
 
-      <form action={formAction} className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+      <form action={formAction} className="mt-3 flex flex-col gap-2">
         <input type="hidden" name="providerId" value={provider.id} />
-        <Input
-          type="password"
-          name="apiKey"
-          autoComplete="off"
-          placeholder={
-            configured
-              ? `Replace key (${provider.keyPrefix}…)`
-              : `Paste key (${provider.keyPrefix}…)`
-          }
-          aria-label={`${provider.label} API key`}
-          className="sm:flex-1"
-        />
-        <SaveButton label={configured ? "Replace" : "Save key"} />
+        {provider.requiresBaseUrl && (
+          <Input
+            type="url"
+            name="baseUrl"
+            autoComplete="off"
+            defaultValue={configured?.baseUrl ?? ""}
+            placeholder="Endpoint URL (e.g. http://localhost:11434/v1)"
+            aria-label={`${provider.label} endpoint URL`}
+          />
+        )}
+        {provider.requiresModel && (
+          <Input
+            type="text"
+            name="model"
+            autoComplete="off"
+            defaultValue={configured?.model ?? ""}
+            placeholder="Model name (e.g. llama3.1)"
+            aria-label={`${provider.label} model`}
+          />
+        )}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Input
+            type="password"
+            name="apiKey"
+            autoComplete="off"
+            placeholder={
+              provider.keyOptional
+                ? "API key (optional for local servers)"
+                : configured
+                  ? `Replace key (${provider.keyPrefix}…)`
+                  : `Paste key (${provider.keyPrefix}…)`
+            }
+            aria-label={`${provider.label} API key`}
+            className="sm:flex-1"
+          />
+          <SaveButton label={configured ? "Replace" : "Save"} />
+        </div>
       </form>
 
       {state?.error && (
@@ -108,6 +156,14 @@ function ProviderRow({
       )}
       {state?.success && (
         <p className="mt-2 text-[11px] text-[var(--ok)]">{state.success}</p>
+      )}
+      {testState?.error && (
+        <p role="alert" className="mt-2 text-[11px] text-[var(--no)]">
+          {testState.error}
+        </p>
+      )}
+      {testState?.success && (
+        <p className="mt-2 text-[11px] text-[var(--ok)]">{testState.success}</p>
       )}
     </div>
   );
@@ -127,7 +183,7 @@ export function AiKeysPanel({
       <PanelHeader
         kicker="AI providers"
         title="Bring your own key"
-        sub="Your API keys are encrypted at rest and never shared with players or shown again. The app works fully without a key — AI generation (M4) is additive."
+        sub="Your API keys are encrypted at rest and never shared with players or shown again. Anthropic, OpenAI, or any OpenAI-compatible endpoint (a self-hosted model or proxy). The app works fully without a key — AI generation (M4) is additive."
       />
       <div className="flex items-center gap-2 border-b border-[var(--line)] bg-[var(--bg-2)] px-[18px] py-[10px]">
         <ShieldCheck aria-hidden size={14} className="text-[var(--ok)]" />

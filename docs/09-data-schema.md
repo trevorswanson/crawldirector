@@ -360,12 +360,14 @@ model AuditLog {
 }
 
 // ───────────── AI config & jobs ─────────────
-model AiKey {            // encrypted at rest — see docs/adr/0006
+model AiKey {            // encrypted at rest — see docs/adr/0006 + adr/0007
   id          String @id @default(cuid())
   campaignId  String
   providerId  String   // matches src/lib/ai/providers.ts (e.g. "anthropic")
   ciphertext  String   // AES-256-GCM envelope-encrypted key material (server-only)
   lastFour    String   // non-secret display hint: the key's last 4 chars
+  baseUrl     String?  // OpenAI-compatible endpoint (self-hosted / proxy); non-secret
+  model       String?  // optional per-key model override (falls back to provider default)
   createdById String   // who configured it
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
