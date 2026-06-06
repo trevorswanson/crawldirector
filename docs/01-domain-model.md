@@ -45,7 +45,8 @@ Every modeled noun is an `Entity`. Shared attributes:
     players can view entities as standard lore wiki pages; the crawler interface
     (player-facing console) displays a parallel in-fiction system console UI
     for these entities.
-- `tags[]`, `customFields` (JSON), `attachments[]`
+- `imageUrl`: optional main portrait, map, or illustration URL.
+- `tags[]`, `customFields` (JSON), `attachments[]` (additional images or files).
 - timestamps, `createdBy`, `lastReviewedBy`
 
 First-class types add their own structured columns/relations on top.

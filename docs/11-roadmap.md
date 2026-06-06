@@ -36,7 +36,7 @@ decomposition, not a frozen spec — refine at the start of each session
 - Entity CRUD through the **service layer** (not yet routed through the pipeline
   — but written so M2 can slot the pipeline underneath).
 - World browser (list/search incl. basic keyword/full-text) + entity detail
-  (fields + markdown).
+  (fields + markdown + image/avatar support).
 - **Done when:** a DM can create/edit/browse crawlers and generic entities in a
   campaign, scoped by tenancy.
 
@@ -253,8 +253,7 @@ that produces its data:
 - **Live broadcast ticker** (scrolling world events: siege timers, faction
   standings, viral clips, pending persona drift) → **M8 (live session mode)**: a
   feed of live session events + reveals. Captured in `PROGRESS.md`'s open backlog.
-- **In-game clock HUD** ("Floor N · Day D") → needs an in-game time/calendar
-  model: data with **M3** (events carry in-game time), live display with **M8**.
+- **In-game clock HUD** ("Floor N · Day D") → Displays the campaign's current floor and inferred day (from the most recent event's absolute day using `resolveAbsoluteDay`) globally in the top-right header on all pages. Built as an M3 follow-up.
 - **Fame / audience-rating tickers** (views/followers/favorites trends, sponsor-
   stock moves) → the `Crawler` model already tracks views/followers/favorites;
   trends + fan-economy modeling are **M12 (broadcast/fan-economy)**. Captured in

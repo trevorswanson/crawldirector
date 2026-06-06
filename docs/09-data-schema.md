@@ -106,6 +106,7 @@ model Entity {
   description  String?     // markdown
   status       CanonStatus @default(PENDING)
   visibility   Visibility  @default(DM_ONLY)
+  imageUrl     String?
   data         Json        @default("{}")   // type-specific structured fields
   customFields Json        @default("{}")   // DM/AI ad-hoc fields
   tags         String[]

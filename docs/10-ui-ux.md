@@ -21,7 +21,7 @@ Two distinct surfaces share one app and one data layer but feel different:
 
 ### Information architecture
 
-- **Campaign switcher** (a DM may own/co-DM several).
+- **Global Header** — Persists at the top of every page. Contains the **Campaign switcher**, global search bar (M5), and an in-game clock HUD in the top-right displaying the current campaign floor (resolved via `Campaign.currentFloorId`) and the inferred current day (derived from the most recent event's absolute day using `resolveAbsoluteDay`, e.g., `Floor 9 · Day 4`).
 - **Review Queue** — the home base. Pending Change Sets grouped by source and
   run, with diff views and batch actions. This should be the most polished
   screen; it is where the product's promise is felt. (See pipeline doc.)
@@ -33,7 +33,7 @@ Two distinct surfaces share one app and one data layer but feel different:
   and a natural-language Q&A that answers from canon with **citations** linking to
   the source entities/events. Read-only; never writes canon. See
   [`07-search-retrieval.md`](./07-search-retrieval.md).
-- **Entity detail** — structured fields + markdown description, the
+- **Entity detail** — Main image/avatar header (portrait for characters, card/illustration layout for items/locations/floors; renders if `imageUrl` is set), structured fields + markdown description, the
   **connections panel** (in/out relationships), a **timeline** of events the
   entity participated in, provenance ("authored by you" vs "AI-generated, model
   X, approved by you on …"), lock controls, and an **entity history / audit trail panel**

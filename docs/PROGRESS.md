@@ -27,6 +27,10 @@ keyword-scanning every doc.
 
 ### Follow-ups captured from delivered slices
 
+- [ ] **Entity image support (M1 follow-up).** Support uploading or linking a main image (`imageUrl`) for any entity:
+      - Add `imageUrl String?` to the `Entity` database model and validate on writes.
+      - Add image upload/input to `EntityForm` (fully reviewable, lockable, and provenance-tracked).
+      - Render the image/avatar in the entity detail header (avatar size for characters, card/illustration style for items/locations/floors).
 - [ ] **Knowledge / reveal grants.** Extend beyond ENTITY→ENTITY to
       field/relationship/event/FACT targets and MEMBERSHIP recipients; wire the
       M7 player "known world" projection and M11 agent fog-of-war context; add a
@@ -40,10 +44,10 @@ keyword-scanning every doc.
 - [ ] **Scale refinements for pickers and graph labels.** Revisit connection /
       timeline target lists with M5 search/typeahead, and revisit relationship
       graph label crowding with M12 graph analytics.
+- [ ] **Global current floor & day HUD.** Render the current campaign floor (from `Campaign.currentFloorId`) in the top-right of the global header on all pages (matching the mockup design). If a current day can be inferred (the absolute day of the most recent event using `resolveAbsoluteDay`), render it next to the floor (e.g., "Floor 9 · Day 12").
 - [ ] **M8/M12 broadcast HUD chrome.** Add a live broadcast ticker with session
-      events/reveals in M8, an in-game clock HUD once live session display exists,
-      and at-a-glance audience-rating tickers with M12 broadcast/fan-economy
-      modeling.
+      events/reveals in M8, and at-a-glance audience-rating tickers with M12
+      broadcast/fan-economy modeling.
 
 ### Deferred design options, not current blockers
 
