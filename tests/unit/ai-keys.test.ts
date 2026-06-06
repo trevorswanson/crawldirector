@@ -221,6 +221,34 @@ describe("OpenAI-compatible providers", () => {
     expect(await prisma.aiKey.count()).toBe(0);
   });
 
+  it("preserves an existing key when an edit submits a blank key (key-optional provider)", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+
+    // Configure a compatible endpoint WITH a real proxy key.
+    await setAiKey(dm.id, campaign.id, {
+      providerId: "openai-compatible",
+      apiKey: "proxy-secret-7777",
+      baseUrl: "http://localhost:11434/v1",
+      model: "llama3.1",
+    });
+    expect((await getAiKeyConfig(campaign.id, "openai-compatible"))?.apiKey).toBe("proxy-secret-7777");
+
+    // Re-save with only the model changed and a blank key (password fields render
+    // blank on edit) — the stored key must survive.
+    const view = await setAiKey(dm.id, campaign.id, {
+      providerId: "openai-compatible",
+      apiKey: "",
+      baseUrl: "http://localhost:11434/v1",
+      model: "llama3.2",
+    });
+    expect(view.model).toBe("llama3.2");
+    expect(view.lastFour).toBe("7777");
+    const config = await getAiKeyConfig(campaign.id, "openai-compatible");
+    expect(config?.apiKey).toBe("proxy-secret-7777");
+    expect(config?.model).toBe("llama3.2");
+  });
+
   it("getAiKeyConfig returns null when nothing is configured", async () => {
     const dm = await makeUser("dm@test.com");
     const campaign = await createCampaign(dm.id, { name: "Crawl" });

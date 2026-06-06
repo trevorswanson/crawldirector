@@ -100,13 +100,28 @@ export async function setAiKey(
   }
   if (rawModel) model = rawModel;
 
-  const ciphertext = encryptSecret(apiKey);
-  const lastFour = apiKey.length >= 4 ? apiKey.slice(-4) : "";
-
   const existing = await prisma.aiKey.findUnique({
     where: { campaignId_providerId: { campaignId, providerId } },
-    select: { id: true },
+    select: { id: true, ciphertext: true, lastFour: true },
   });
+
+  // Password inputs render blank on edit, so a keyOptional provider's form can
+  // submit a blank key when the DM only meant to change the endpoint/model.
+  // Preserve the stored key in that case rather than silently overwriting a real
+  // secret with an empty one. A new keyless config (no existing row) stores an
+  // encrypted empty string, which the factory treats as "no auth needed".
+  let ciphertext: string;
+  let lastFour: string;
+  if (apiKey.length > 0) {
+    ciphertext = encryptSecret(apiKey);
+    lastFour = apiKey.length >= 4 ? apiKey.slice(-4) : "";
+  } else if (existing) {
+    ciphertext = existing.ciphertext;
+    lastFour = existing.lastFour;
+  } else {
+    ciphertext = encryptSecret("");
+    lastFour = "";
+  }
 
   const saved = await prisma.$transaction(async (tx) => {
     const row = await tx.aiKey.upsert({

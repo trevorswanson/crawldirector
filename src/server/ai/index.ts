@@ -54,18 +54,23 @@ export type AiConnectionResult = {
 };
 
 // Turn an unknown provider/SDK error into a short, key-safe message for the DM.
-// Vendor SDK errors carry a status + message but never the API key.
+// We deliberately do NOT reflect the provider's free-text `message`: for an
+// OpenAI-compatible endpoint that text comes from an arbitrary proxy/local
+// server and could echo headers or other key-bearing config (invariant #6).
+// Only the numeric HTTP status (safe) is ever surfaced.
 function describeProviderError(error: unknown): string {
-  if (typeof error === "object" && error !== null) {
-    const status = (error as { status?: number }).status;
-    const message = (error as { message?: string }).message;
-    if (status === 401 || status === 403) {
-      return "The provider rejected the key (authentication failed).";
-    }
-    if (status === 404) {
-      return "The model or endpoint was not found — check the model name and URL.";
-    }
-    if (message) return `Connection failed: ${message}`;
+  const status =
+    typeof error === "object" && error !== null
+      ? (error as { status?: number }).status
+      : undefined;
+  if (status === 401 || status === 403) {
+    return "The provider rejected the key (authentication failed).";
+  }
+  if (status === 404) {
+    return "The model or endpoint was not found — check the model name and URL.";
+  }
+  if (typeof status === "number") {
+    return `The provider returned an error (HTTP ${status}). Check the endpoint and model.`;
   }
   return "Connection failed. Check the key, endpoint, and model, then try again.";
 }

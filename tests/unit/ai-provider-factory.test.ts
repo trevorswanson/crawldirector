@@ -106,7 +106,7 @@ describe("testAiConnection", () => {
     expect(err.message).not.toContain("secret-leak");
   });
 
-  it("maps a 404 to a model/endpoint hint and a bare error to a generic message", async () => {
+  it("maps statuses to safe hints and never reflects a raw provider message", async () => {
     getAiKeyConfig.mockResolvedValue({ apiKey: "x", baseUrl: "http://x/v1", model: "m" });
 
     createOpenAiProvider.mockReturnValueOnce(
@@ -114,10 +114,24 @@ describe("testAiConnection", () => {
     );
     await expect(testAiConnection("dm1", "c1", "openai-compatible")).rejects.toThrow(/not found/i);
 
+    // A non-auth status surfaces the numeric code only (safe), not free text.
     createOpenAiProvider.mockReturnValueOnce(
-      fakeProvider({ generateStructured: vi.fn().mockRejectedValue({ message: "timeout" }) }),
+      fakeProvider({
+        generateStructured: vi.fn().mockRejectedValue({ status: 500, message: "x-api-key: sk-leak" }),
+      }),
     );
-    await expect(testAiConnection("dm1", "c1", "openai-compatible")).rejects.toThrow(/timeout/);
+    const httpErr = await testAiConnection("dm1", "c1", "openai-compatible").catch((e) => e);
+    expect(httpErr.message).toMatch(/HTTP 500/);
+    expect(httpErr.message).not.toContain("sk-leak");
+
+    // A message-only error (no status) is replaced by a generic message — the
+    // provider's free text (which could echo key-bearing config) is never shown.
+    createOpenAiProvider.mockReturnValueOnce(
+      fakeProvider({ generateStructured: vi.fn().mockRejectedValue({ message: "Authorization: Bearer sk-leak" }) }),
+    );
+    const bareErr = await testAiConnection("dm1", "c1", "openai-compatible").catch((e) => e);
+    expect(bareErr.message).toMatch(/Connection failed/);
+    expect(bareErr.message).not.toContain("sk-leak");
 
     createOpenAiProvider.mockReturnValueOnce(
       fakeProvider({ generateStructured: vi.fn().mockRejectedValue("just a string") }),
