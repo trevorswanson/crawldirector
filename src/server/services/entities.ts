@@ -170,7 +170,7 @@ function entityCreatePatch(
   type: EntityType,
   input: Pick<
     CreateGenericEntityInput,
-    "name" | "summary" | "description" | "visibility" | "tags" | "isStub" | "itemTypeId" | "divine" | "unique" | "fleeting" | "aiDescription" | "floorNumber" | "theme"
+    "name" | "summary" | "description" | "visibility" | "tags" | "isStub" | "itemTypeId" | "divine" | "unique" | "fleeting" | "aiDescription" | "floorNumber" | "theme" | "startDay" | "collapseDay"
   >,
 ) {
   const core = entityCoreData(userId, campaignId, input);
@@ -194,6 +194,8 @@ function entityCreatePatch(
       ? {
           "data.floorNumber": { to: input.floorNumber ?? null },
           "data.theme": { to: nullIfEmpty(input.theme) },
+          "data.startDay": { to: input.startDay ?? null },
+          "data.collapseDay": { to: input.collapseDay ?? null },
         }
       : {}),
   } satisfies ReviewPatch;
@@ -503,6 +505,8 @@ export async function updateEntity(
     aiDescription?: string | null;
     floorNumber?: number | null;
     theme?: string | null;
+    startDay?: number | null;
+    collapseDay?: number | null;
   }) || {};
   addPatch(patch, "data.itemTypeId", existingData.itemTypeId ?? null, parsed.itemTypeId ?? null);
   addPatch(patch, "data.divine", existingData.divine ?? false, parsed.divine ?? false);
@@ -512,6 +516,8 @@ export async function updateEntity(
   if (existing.type === EntityType.FLOOR) {
     addPatch(patch, "data.floorNumber", existingData.floorNumber ?? null, parsed.floorNumber ?? null);
     addPatch(patch, "data.theme", existingData.theme ?? null, nullIfEmpty(parsed.theme));
+    addPatch(patch, "data.startDay", existingData.startDay ?? null, parsed.startDay ?? null);
+    addPatch(patch, "data.collapseDay", existingData.collapseDay ?? null, parsed.collapseDay ?? null);
   }
 
   if (existing.type === EntityType.CRAWLER && existing.crawler) {

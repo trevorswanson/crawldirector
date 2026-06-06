@@ -802,6 +802,7 @@ export function TimelinePanel({
               </div>
             </div>
           )}
+          <EffectRows candidates={crawlerCandidates} />
           <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
             <input type="checkbox" name="secret" value="true" />
             DM-only (secret)

@@ -104,6 +104,39 @@ describe("ReviewQueuePage", () => {
     expect(listPendingChangeSetsForUser).toHaveBeenCalledWith("u1", "c1");
   });
 
+  it("keeps the persistent filter/queue rail visible when the queue is empty", async () => {
+    // An empty queue must not collapse the whole page into a centered box; the
+    // filter rail (source facets) stays, and the "no proposals" message renders
+    // in the detail column. Source facets only exist in the persistent layout
+    // (never in the old early-return box), so their presence proves the rail.
+    render(await ReviewQueuePage({ params: Promise.resolve({ id: "c1" }) }));
+
+    // Facets render in both the desktop rail and the mobile header — either way,
+    // their presence proves the persistent layout rendered (not the old box).
+    for (const facet of ["ALL", "AI", "PLAYER", "IMPORT"]) {
+      expect(screen.getAllByRole("link", { name: facet }).length).toBeGreaterThan(0);
+    }
+    expect(screen.getAllByText(/No pending all proposals\./i).length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("heading", { name: "No pending proposals" }),
+    ).toBeDefined();
+  });
+
+  it("shows the closed empty state with the rail intact", async () => {
+    render(
+      await ReviewQueuePage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({ show: "closed" }),
+      }),
+    );
+
+    expect(screen.getAllByRole("link", { name: "IMPORT" }).length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("heading", { name: "No closed proposals" }),
+    ).toBeDefined();
+    expect(listClosedChangeSetsForUser).toHaveBeenCalledWith("u1", "c1");
+  });
+
   it("renders pending change set metadata and operation diffs", async () => {
     listPendingChangeSetsForUser.mockResolvedValue([
       {

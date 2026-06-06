@@ -4,6 +4,63 @@ Running checklist of milestones/tasks, newest first. See
 [`11-roadmap.md`](./11-roadmap.md) for the full plan and
 [`12-working-sessions.md`](./12-working-sessions.md) for how to pick up work.
 
+## M3 — Timeline/review quick fixes + floor-model ADR (2026-06-06)
+
+DM-reported polish on the M3 event/timeline + review surfaces, plus a written
+plan for the deeper floor cleanup.
+
+- [x] **Review Queue stays a 3-pane layout when empty** (issue #3). Removed the
+      early `return` in
+      [`review/page.tsx`](../src/app/(dm)/campaigns/[id]/review/page.tsx) that
+      replaced the whole page with a centered box; the persistent filter/queue
+      rail (Pending/Closed toggle + source facets) now always renders, and the
+      "No pending/closed proposals" message shows in the detail column.
+- [x] **Effects can be declared while logging a new event** (issue #5), at
+      parity with the edit path. `createEventSchema` accepts `effects`;
+      `createEvent` carries them in the `CREATE_EVENT` patch (the apply path
+      `applyCreateEvent` already persisted declared effects); both create actions
+      (`createCampaignEventAction`, `createEventAction`) parse the effect rows;
+      and `EffectRows` now renders in both the campaign-timeline `NewEventForm`
+      and the entity-panel log form. Effects start **unapplied** — the DM applies
+      them via the Review Queue afterward (same as editing).
+- [x] **The participant-minimum rule is explained, not silent** (issue #1).
+      Removing the *last* participant is intentionally blocked (an event needs
+      ≥1 participant); the UI now says so — a dynamic tooltip plus a visible hint
+      ("An event needs at least one participant. Add another to remove this one.")
+      in the shared `ParticipantRows` and the timeline new-event form. No logic
+      change; this was a UX/discoverability gap, not a bug.
+- [x] **Tests:** empty-queue rail visibility + closed empty state
+      (`review-queue-page`); log-with-effect submission + participant-minimum hint
+      (`campaign-timeline`); `createEvent` stores declared effects unapplied +
+      rejects a non-crawler effect target (`events`). lint (0 errors), typecheck,
+      and the full coverage gate green (912 tests; statements 95.4%, branches
+      88.22%, functions 97.44%, lines 97.24%). Browser-verified all three on a
+      fresh seed.
+- [x] **Floors (issue #4) — slice 1: time anchors + absolute-day inference.**
+      [ADR 0008](./adr/0008-floor-model-unification-and-time-inference.md)
+      (*accepted*). FLOOR entities gain `data.startDay`/`data.collapseDay`
+      ("Opens on day" / "Collapses on day" on the form), plumbed through
+      validation → `entities` patch builders → the `review` `dataFields` registry
+      + appliers (reviewable, lockable, provenance-tracked) and surfaced per floor
+      by `listCampaignFloors`. New pure `src/lib/time-resolve.ts`:
+      `resolveAbsoluteDay` walks the bases (ABSOLUTE_DAY/COLLAPSE direct, EVENT
+      recursive + cycle-guarded, FLOOR_START/FLOOR_COLLAPSE via anchors) and
+      `computeFloorDayRanges` unions per floor, bounding each close at the next
+      floor's open day. The campaign timeline's `dayRangeByFloor` uses it, so an
+      `EVENT`-relative time ("2 days after Event A") now resolves and the
+      floor-1→N chain fills in. Tests: full `time-resolve` unit suite (each basis,
+      EVENT chains + cycle/missing-anchor, sub-day units, range + next-floor
+      bound + empty-floor), FLOOR anchor persistence + `listCampaignFloors`
+      surfacing (`events`), and a real-component timeline render asserting the
+      DM's "Day 0 – 2" case. Browser-verified the FLOOR form anchors round-trip
+      through the pipeline. 927 tests; coverage above floors. **DM confirmed: keep
+      `Crawler.currentFloor`** (not the `LOCATED_ON`-edge model).
+- [ ] **Floors (issue #2) — slices 2 + 3 pending.** Slice 2: enforce
+      campaign-unique `data.floorNumber` + a `resolveFloorEntity` helper, render
+      resolved FLOOR-entity links wherever a bare number shows. Slice 3: retire
+      the duplicate floor paths (FLOOR-as-event-participant, crawler
+      `LOCATED_ON`→FLOOR; surface `Crawler.currentFloor` as a resolved link).
+
 ## M4 — First generator: entity fleshing → PENDING proposal (slice 3) ✅ (2026-06-06)
 
 **Goal:** the first real generator. A DM with their own key fleshes a thin/stub

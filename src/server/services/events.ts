@@ -362,6 +362,22 @@ export async function createEvent(
       })),
     },
   };
+  if (parsed.effects && parsed.effects.length > 0) {
+    // Declared unapplied effects; applyCreateEvent validates each target is a
+    // crawler. The DM applies them later from the timeline (parity with edit).
+    patch.effects = {
+      to: parsed.effects.map((effect) => ({
+        ...(effect.id ? { id: effect.id } : {}),
+        kind: effect.kind,
+        targetEntityId: effect.targetEntityId,
+        ...(effect.stat ? { stat: effect.stat } : {}),
+        ...(typeof effect.delta === "number" ? { delta: effect.delta } : {}),
+        ...(typeof effect.valueNumber === "number" ? { valueNumber: effect.valueNumber } : {}),
+        ...(typeof effect.value === "boolean" ? { value: effect.value } : {}),
+        ...(effect.note ? { note: effect.note } : {}),
+      })),
+    };
+  }
 
   const result = await applyAutoApprovedEventChangeSet(userId, campaignId, {
     title: "Log event",
@@ -733,6 +749,11 @@ export type FloorDescriptor = {
   name: string | null;
   theme: string | null;
   entityId: string | null;
+  // Absolute days-since-collapse the floor opened / collapses (docs/adr/0008).
+  // Anchors that let FLOOR_START / FLOOR_COLLAPSE event times resolve to
+  // absolute days, and bound the floor's inferred day-range.
+  startDay: number | null;
+  collapseDay: number | null;
 };
 
 export type LadderFloor = {
@@ -757,14 +778,21 @@ export type CampaignFloorMeta = {
   floorEntities: { id: string; name: string; floorNumber: number | null }[];
 };
 
-function readFloorData(value: unknown): { floorNumber: number | null; theme: string | null } {
+function readFloorData(value: unknown): {
+  floorNumber: number | null;
+  theme: string | null;
+  startDay: number | null;
+  collapseDay: number | null;
+} {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { floorNumber: null, theme: null };
+    return { floorNumber: null, theme: null, startDay: null, collapseDay: null };
   }
   const record = value as Record<string, unknown>;
   return {
     floorNumber: typeof record.floorNumber === "number" ? record.floorNumber : null,
     theme: typeof record.theme === "string" && record.theme.length > 0 ? record.theme : null,
+    startDay: typeof record.startDay === "number" ? record.startDay : null,
+    collapseDay: typeof record.collapseDay === "number" ? record.collapseDay : null,
   };
 }
 
@@ -850,7 +878,7 @@ export async function listCampaignFloors(
   const byNumber: Record<number, FloorDescriptor> = {};
   const floorEntities: CampaignFloorMeta["floorEntities"] = [];
   for (const row of floorRows) {
-    const { floorNumber, theme } = readFloorData(row.data);
+    const { floorNumber, theme, startDay, collapseDay } = readFloorData(row.data);
     floorEntities.push({ id: row.id, name: row.name, floorNumber });
     if (floorNumber != null && byNumber[floorNumber] === undefined) {
       byNumber[floorNumber] = {
@@ -858,6 +886,8 @@ export async function listCampaignFloors(
         name: row.name,
         theme,
         entityId: row.id,
+        startDay,
+        collapseDay,
       };
     }
   }

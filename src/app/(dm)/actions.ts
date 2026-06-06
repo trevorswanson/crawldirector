@@ -125,6 +125,8 @@ export async function createGenericEntityAction(
     aiDescription: formData.get("aiDescription"),
     floorNumber: formData.get("floorNumber"),
     theme: formData.get("theme"),
+    startDay: formData.get("startDay"),
+    collapseDay: formData.get("collapseDay"),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -269,6 +271,8 @@ export async function updateEntityAction(
     aiDescription: formData.get("aiDescription")?.toString() ?? "",
     floorNumber: formData.get("floorNumber") ? Number(formData.get("floorNumber")) : undefined,
     theme: formData.get("theme")?.toString() ?? "",
+    startDay: formData.get("startDay") ? Number(formData.get("startDay")) : undefined,
+    collapseDay: formData.get("collapseDay") ? Number(formData.get("collapseDay")) : undefined,
   };
 
   const parsed = updateEntitySchema.safeParse({
@@ -297,6 +301,8 @@ export async function updateEntityAction(
     aiDescription: formData.get("aiDescription"),
     floorNumber: formData.get("floorNumber"),
     theme: formData.get("theme"),
+    startDay: formData.get("startDay"),
+    collapseDay: formData.get("collapseDay"),
   });
   if (!parsed.success) {
     return {
@@ -858,6 +864,7 @@ export async function createEventAction(
     });
   }
 
+  const effects = parseEffectRows(formData);
   const parsed = createEventSchema.safeParse({
     title: formData.get("title"),
     summary: formData.get("summary"),
@@ -869,6 +876,7 @@ export async function createEventAction(
     timeLabel: formData.get("timeLabel"),
     secret: formData.get("secret"),
     participants,
+    ...(effects ? { effects } : {}),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -885,6 +893,9 @@ export async function createEventAction(
   revalidatePath(`/campaigns/${campaignId}/timeline`);
   if (otherId) {
     revalidatePath(`/campaigns/${campaignId}/entities/${otherId}`);
+  }
+  for (const effect of parsed.data.effects ?? []) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${effect.targetEntityId}`);
   }
   return undefined;
 }
@@ -998,6 +1009,7 @@ export async function createCampaignEventAction(
     return { error: "Choose at least one participant." };
   }
 
+  const effects = parseEffectRows(formData);
   const parsed = createEventSchema.safeParse({
     title: formData.get("title"),
     summary: formData.get("summary"),
@@ -1009,6 +1021,7 @@ export async function createCampaignEventAction(
     timeLabel: formData.get("timeLabel"),
     secret: formData.get("secret"),
     participants,
+    ...(effects ? { effects } : {}),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -1024,6 +1037,9 @@ export async function createCampaignEventAction(
   revalidatePath(`/campaigns/${campaignId}/timeline`);
   for (const participant of parsed.data.participants) {
     revalidatePath(`/campaigns/${campaignId}/entities/${participant.entityId}`);
+  }
+  for (const effect of parsed.data.effects ?? []) {
+    revalidatePath(`/campaigns/${campaignId}/entities/${effect.targetEntityId}`);
   }
   return undefined;
 }
