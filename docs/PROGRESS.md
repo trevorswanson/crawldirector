@@ -4,6 +4,57 @@ Running checklist of milestones/tasks, newest first. See
 [`11-roadmap.md`](./11-roadmap.md) for the full plan and
 [`12-working-sessions.md`](./12-working-sessions.md) for how to pick up work.
 
+## M4 — BYO AI key storage + settings (slice 1) ✅ (2026-06-06)
+
+**Goal:** lay the M4 foundation — let a DM store their own provider API key per
+campaign, encrypted at rest, as the substrate every generator (later slices)
+calls. No generation yet; the app stays fully usable with no key. See
+[ADR 0006](./adr/0006-ai-key-encryption-at-rest.md) and
+[`04-ai-integration.md`](./04-ai-integration.md).
+
+- [x] **Schema:** `AiKey { campaignId, providerId, ciphertext, lastFour,
+      createdById, createdAt, updatedAt }`, unique on `(campaignId, providerId)`,
+      Campaign/User back-relations (migration `20260606015105_m4_ai_keys`). Updated
+      [`09-data-schema.md`](./09-data-schema.md) to match (the doc's minimal sketch
+      gained `lastFour`/`createdById`/`updatedAt`).
+- [x] **Crypto** (`src/server/crypto.ts`): AES-256-GCM envelope encryption with a
+      per-message random IV + GCM auth tag; the 32-byte data key is `scrypt`-derived
+      from a new `AI_KEYS_SECRET` env var (added to `.env.example`). Opaque versioned
+      format `v1:<iv>:<tag>:<ciphertext>`. Rotating the secret invalidates stored
+      keys by design; decrypt failure = "no usable key", never plaintext.
+- [x] **Provider registry** (`src/lib/ai/providers.ts`): pure, secret-free source of
+      truth for valid `providerId`s + labels (Anthropic, OpenAI), shared by the
+      settings UI and the service. `keyPrefix` is a soft UI hint, not validation.
+- [x] **Service** (`src/server/services/ai-keys.ts`): `setAiKey` (encrypts, stores a
+      last-four hint, upserts one row per provider), `deleteAiKey`, and the safe,
+      secret-free `listAiKeys` projection (DM-only; `[]` for players) — never returns
+      ciphertext/plaintext. Set/remove are deliberate, audited DM actions (`AuditLog`
+      `SET_AI_KEY`/`DELETE_AI_KEY`; detail carries only `providerId`+`lastFour`, never
+      the key) — not change sets. Internal server-only `getDecryptedAiKey` is the
+      single seam later generators call (invariant #6).
+- [x] **UI:** `/campaigns/[id]/settings` (DM/co-DM only — players 404) with an
+      `AiKeysPanel`: per-provider masked status (`ends ••NNNN`), `type="password"`
+      add/replace input, and Remove. A real **Settings** nav link is added between
+      Timeline and the Planned items.
+- [x] **Tests:** crypto unit (round-trip, random IV, tamper/auth-tag, malformed,
+      wrong-secret, missing-secret); DB-backed service (encrypt-at-rest + audit, no
+      plaintext in ciphertext/audit, replace, player/non-member denial, unknown
+      provider + short key, safe-view shape, delete + audit, decrypt round-trip +
+      null); action (validation/ServiceError/generic + revalidation); component
+      (masked vs. prompt states, password inputs, error/success); page (DM render,
+      404 for missing campaign + player). lint, typecheck, build, and the full
+      coverage gate green (statements 95.31%, branches 88.08%, functions 97.41%).
+- [x] **Verified in-browser** against the seeded Demo Campaign: saved an Anthropic
+      key → stored ciphertext contains no plaintext, `getDecryptedAiKey` round-trips
+      exactly, `SET_AI_KEY` audit detail holds only the `••4242` hint; OpenAI stayed
+      unconfigured; Remove deleted the row + wrote a `DELETE_AI_KEY` audit. All
+      action POSTs returned 200.
+- [ ] **Next M4 slices:** provider abstraction (`LLMProvider` + Anthropic/OpenAI
+      adapters, structured output + Zod, prompt caching), first generators
+      (entity-fleshing, bulk-stub scaffolding, relationship inference) landing as
+      PENDING proposals, generation panel → Review Queue, `Job` table + worker for
+      bulk/async runs, usage/cost tracking + spend caps.
+
 ## M3 — Time-bounded membership ✅ (2026-06-05)
 
 **Goal:** finish the M3 group-hierarchy follow-up: membership edges preserve

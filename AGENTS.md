@@ -14,7 +14,7 @@ pitch and [`docs/`](./docs) for the full plan.
 
 ## Current status
 
-🚧 **M0 + M1 + M2 complete; M3 (relationships & events graph) in progress.** The app is scaffolded
+🚧 **M0 + M1 + M2 + M3 + M3.5 complete; M4 (AI generation, BYO-key) underway.** The app is scaffolded
 and runnable: Next.js 16 (App Router, TS, Tailwind) + Postgres/Prisma 7 +
 Auth.js, with sign-up → create campaign working, and CI (lint, typecheck, build,
 unit, e2e, coverage) plus security/quality gates (CodeQL, dependency review,
@@ -90,6 +90,16 @@ underway: the service layer (campaign tag list, tag filtering, tag-aware search)
 plus the UI — a tag-selection input with campaign autocomplete on the entity
 form, a Tags facet in the World Browser sidebar, and clickable tag badges — are
 in; tags are still a `String[]` on `Entity` (no normalized `Tag` table yet).
+**M4 (AI generation, BYO-key) has started** with its storage foundation: a DM
+stores their own provider API key per campaign on a new **Settings** page
+(`/campaigns/[id]/settings`), encrypted at rest (AES-256-GCM envelope encryption,
+`src/server/crypto.ts`, keyed off a new `AI_KEYS_SECRET` env var). The `ai-keys`
+service set/remove/list keeps secrets server-side only (never ciphertext/plaintext
+to the client; audited `SET_AI_KEY`/`DELETE_AI_KEY` carry only a last-four hint);
+`getDecryptedAiKey` is the single server-only seam the upcoming provider
+abstraction + generators will call (invariant #6). The provider registry lives in
+`src/lib/ai/providers.ts`. See [ADR 0006](./docs/adr/0006-ai-key-encryption-at-rest.md).
+No generation yet — the app stays fully usable with no key configured.
 See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
 ## Start here, every session
@@ -201,6 +211,10 @@ Notes:
   `AUTH_OIDC_ISSUER`/`AUTH_OIDC_ID`/`AUTH_OIDC_SECRET` are set — e.g. a
   self-hosted Authentik. Callback URL: `/api/auth/callback/oidc`.
 - Generate an `AUTH_SECRET` with `npx auth secret` or `openssl rand -base64 32`.
+- **`AI_KEYS_SECRET`** (M4) encrypts DMs' BYO provider API keys at rest
+  (`src/server/crypto.ts`, ADR 0006). Generate with `openssl rand -base64 32`;
+  keep it **stable** — rotating it invalidates every stored key (re-entry
+  required). Tests pick it up from `.env` via `dotenv/config`.
 
 Environment: copy `.env.example` to `.env`. Never commit secrets (`.env` is
 gitignored; `.env.example` is the committed template).

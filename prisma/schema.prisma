@@ -188,6 +188,7 @@ model User {
   reviewedChangeSets ChangeSet[]  @relation("ReviewedChangeSets")
   provenanceRows     Provenance[] @relation("ActorProvenance")
   auditLogs          AuditLog[]   @relation("ActorAuditLogs")
+  createdAiKeys      AiKey[]      @relation("CreatedAiKeys")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -257,6 +258,7 @@ model Campaign {
   provenance       Provenance[]
   auditLogs        AuditLog[]
   knowledgeGrants  KnowledgeGrant[]
+  aiKeys           AiKey[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -600,4 +602,30 @@ model KnowledgeGrant {
 
   @@index([campaignId, recipientType, recipientId])
   @@index([campaignId, targetType, targetId])
+}
+
+// ───────────── AI config ─────────────
+// A DM's bring-your-own provider API key, encrypted at rest (M4 — docs/04-ai-
+// integration.md). `ciphertext` is AES-256-GCM envelope-encrypted key material
+// (src/server/crypto.ts) and is NEVER returned to the client, logged, or placed
+// in provenance (invariant #6); it is decrypted only at the server-side provider
+// call. `lastFour` is a non-secret display hint (the key's last four characters,
+// like a card) so the DM can tell which key is configured without revealing it.
+// One key per (campaign, provider).
+model AiKey {
+  id          String @id @default(cuid())
+  campaignId  String
+  providerId  String // matches an id in src/lib/ai/providers.ts (e.g. "anthropic")
+  ciphertext  String // AES-256-GCM envelope-encrypted API key — never leaves the server
+  lastFour    String // non-secret hint: the key's last 4 chars
+  createdById String
+
+  campaign  Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  createdBy User     @relation("CreatedAiKeys", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([campaignId, providerId])
+  @@index([campaignId])
 }

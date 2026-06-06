@@ -1,0 +1,166 @@
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
+
+import { Role } from "@/generated/prisma/client";
+import { ServiceError } from "@/lib/errors";
+import { prisma } from "@/server/db";
+import { createCampaign } from "@/server/services/campaigns";
+import {
+  deleteAiKey,
+  getDecryptedAiKey,
+  listAiKeys,
+  setAiKey,
+} from "@/server/services/ai-keys";
+
+function makeUser(email: string) {
+  return prisma.user.create({ data: { email } });
+}
+
+beforeEach(async () => {
+  await prisma.aiKey.deleteMany();
+  await prisma.auditLog.deleteMany();
+  await prisma.membership.deleteMany();
+  await prisma.campaign.deleteMany();
+  await prisma.user.deleteMany();
+});
+
+afterAll(async () => {
+  await prisma.$disconnect();
+});
+
+describe("setAiKey", () => {
+  it("encrypts the key at rest, stores a last-four hint, and writes a SET_AI_KEY audit row", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+
+    const view = await setAiKey(dm.id, campaign.id, {
+      providerId: "anthropic",
+      apiKey: "sk-ant-secret-key-9999",
+    });
+    expect(view.providerId).toBe("anthropic");
+    expect(view.label).toBe("Anthropic (Claude)");
+    expect(view.lastFour).toBe("9999");
+
+    const row = await prisma.aiKey.findFirstOrThrow();
+    // Never stored in the clear.
+    expect(row.ciphertext).not.toContain("sk-ant-secret-key-9999");
+    expect(row.lastFour).toBe("9999");
+    expect(row.createdById).toBe(dm.id);
+
+    const audit = await prisma.auditLog.findFirstOrThrow();
+    expect(audit.action).toBe("SET_AI_KEY");
+    expect(audit.targetType).toBe("AI_KEY");
+    expect(audit.targetId).toBe("anthropic");
+    // The audit detail must never contain the key — only the hint.
+    expect(JSON.stringify(audit.detail)).not.toContain("sk-ant-secret-key-9999");
+    expect((audit.detail as { lastFour?: string }).lastFour).toBe("9999");
+    expect((audit.detail as { replaced?: boolean }).replaced).toBe(false);
+  });
+
+  it("replaces an existing key in place (one row per provider) and records replaced=true", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+
+    await setAiKey(dm.id, campaign.id, { providerId: "anthropic", apiKey: "sk-ant-old-key-1111" });
+    await setAiKey(dm.id, campaign.id, { providerId: "anthropic", apiKey: "sk-ant-new-key-2222" });
+
+    const rows = await prisma.aiKey.findMany();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].lastFour).toBe("2222");
+    expect(await getDecryptedAiKey(campaign.id, "anthropic")).toBe("sk-ant-new-key-2222");
+
+    const replaceAudit = await prisma.auditLog.findFirst({
+      where: { action: "SET_AI_KEY" },
+      orderBy: { createdAt: "desc" },
+    });
+    expect((replaceAudit!.detail as { replaced?: boolean }).replaced).toBe(true);
+  });
+
+  it("rejects an unknown provider and an obviously invalid key", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+
+    await expect(
+      setAiKey(dm.id, campaign.id, { providerId: "wizard-ai", apiKey: "sk-valid-enough" }),
+    ).rejects.toBeInstanceOf(ServiceError);
+    await expect(
+      setAiKey(dm.id, campaign.id, { providerId: "openai", apiKey: "short" }),
+    ).rejects.toBeInstanceOf(ServiceError);
+  });
+
+  it("denies a player and a non-member", async () => {
+    const dm = await makeUser("dm@test.com");
+    const player = await makeUser("player@test.com");
+    const stranger = await makeUser("stranger@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+
+    await expect(
+      setAiKey(player.id, campaign.id, { providerId: "openai", apiKey: "sk-player-key" }),
+    ).rejects.toBeInstanceOf(ServiceError);
+    await expect(
+      setAiKey(stranger.id, campaign.id, { providerId: "openai", apiKey: "sk-stranger-key" }),
+    ).rejects.toBeInstanceOf(ServiceError);
+    expect(await prisma.aiKey.count()).toBe(0);
+  });
+});
+
+describe("listAiKeys", () => {
+  it("returns safe views without ciphertext, and [] for a player", async () => {
+    const dm = await makeUser("dm@test.com");
+    const player = await makeUser("player@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    await setAiKey(dm.id, campaign.id, { providerId: "openai", apiKey: "sk-openai-key-3333" });
+
+    const views = await listAiKeys(dm.id, campaign.id);
+    expect(views).toHaveLength(1);
+    expect(views[0]).toMatchObject({ providerId: "openai", label: "OpenAI", lastFour: "3333" });
+    expect(views[0]).not.toHaveProperty("ciphertext");
+
+    expect(await listAiKeys(player.id, campaign.id)).toEqual([]);
+  });
+});
+
+describe("deleteAiKey", () => {
+  it("removes the key and writes a DELETE_AI_KEY audit row", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    await setAiKey(dm.id, campaign.id, { providerId: "anthropic", apiKey: "sk-ant-delete-4444" });
+
+    await deleteAiKey(dm.id, campaign.id, "anthropic");
+    expect(await prisma.aiKey.count()).toBe(0);
+
+    const audit = await prisma.auditLog.findFirst({ where: { action: "DELETE_AI_KEY" } });
+    expect(audit!.targetId).toBe("anthropic");
+    expect((audit!.detail as { lastFour?: string }).lastFour).toBe("4444");
+  });
+
+  it("throws when no key is configured, and denies a player", async () => {
+    const dm = await makeUser("dm@test.com");
+    const player = await makeUser("player@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+
+    await expect(deleteAiKey(dm.id, campaign.id, "anthropic")).rejects.toBeInstanceOf(ServiceError);
+    await expect(deleteAiKey(player.id, campaign.id, "anthropic")).rejects.toBeInstanceOf(
+      ServiceError,
+    );
+  });
+});
+
+describe("getDecryptedAiKey", () => {
+  it("decrypts a stored key and returns null when none is configured", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    await setAiKey(dm.id, campaign.id, { providerId: "anthropic", apiKey: "sk-ant-roundtrip-5555" });
+
+    expect(await getDecryptedAiKey(campaign.id, "anthropic")).toBe("sk-ant-roundtrip-5555");
+    expect(await getDecryptedAiKey(campaign.id, "openai")).toBeNull();
+  });
+});
