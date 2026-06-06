@@ -23,6 +23,13 @@ const IV_LEN = 12; // GCM standard nonce length
 // env var; the salt only domain-separates this derivation.
 const KDF_SALT = "crawldirector:ai-keys:v1";
 
+// The committed `.env.example` placeholder(s). A deployment that copies the
+// template but forgets to set a real value would otherwise encrypt every key
+// with a value anyone can read from the repo — defeating at-rest protection. We
+// reject these outright so misconfiguration fails loudly instead of silently
+// producing repo-readable ciphertext.
+const REJECTED_SECRETS = new Set(["replace-me-with-a-random-secret"]);
+
 let cachedKey: Buffer | null = null;
 let cachedSecret: string | null = null;
 
@@ -31,6 +38,11 @@ function dataKey(): Buffer {
   if (!secret || secret.length < 16) {
     throw new Error(
       "AI_KEYS_SECRET is not set (or too short). Set a strong value in your environment to store AI keys.",
+    );
+  }
+  if (REJECTED_SECRETS.has(secret)) {
+    throw new Error(
+      "AI_KEYS_SECRET is still the .env.example placeholder. Generate a real secret (openssl rand -base64 32) before storing AI keys.",
     );
   }
   // Cache the derived key, but re-derive if the env var changed (tests).

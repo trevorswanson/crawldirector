@@ -61,6 +61,11 @@ describe("encryptSecret / decryptSecret", () => {
     process.env.AI_KEYS_SECRET = "short";
     expect(() => encryptSecret("x")).toThrow(/AI_KEYS_SECRET/);
   });
+
+  it("rejects the committed .env.example placeholder", () => {
+    process.env.AI_KEYS_SECRET = "replace-me-with-a-random-secret";
+    expect(() => encryptSecret("x")).toThrow(/placeholder/);
+  });
 });
 
 describe("secretsEqual", () => {
