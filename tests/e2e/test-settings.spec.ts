@@ -82,7 +82,6 @@ test("inspect settings page buttons when configured", async ({ page }) => {
     const text = await btn.innerText();
     const disabled = await btn.getAttribute("disabled");
     const className = await btn.getAttribute("class");
-    const parentHtml = await btn.evaluate(el => el.parentElement?.outerHTML);
     const computedStyle = await btn.evaluate(el => {
       const style = window.getComputedStyle(el);
       return {
