@@ -382,6 +382,25 @@ describe("CampaignTimeline", () => {
     expect(screen.queryByRole("button", { name: /order from causality/i })).toBeNull();
   });
 
+  it("does not offer FLOOR entities as event participants (ADR 0008 §3)", () => {
+    renderTimeline({
+      events: [],
+      candidates: [
+        ...candidates,
+        { id: "f9", name: "Gloomdeep", type: "FLOOR" },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Log event" }));
+    fireEvent.change(screen.getByPlaceholderText("Search participant..."), {
+      target: { value: "Gloomdeep" },
+    });
+    // The floor is filtered out of the participant pool — searching it surfaces
+    // nothing (its floor is set via the time picker instead).
+    expect(screen.queryByRole("button", { name: /Gloomdeep/ })).toBeNull();
+    expect(screen.getByText("No matching entities.")).toBeDefined();
+  });
+
   it("submits a multi-participant event", async () => {
     createCampaignEventAction.mockResolvedValue(undefined);
     renderTimeline({ events: [] });

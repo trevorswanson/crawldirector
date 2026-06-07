@@ -26,7 +26,7 @@ overwritten). Per-field accept/edit/reject and `supersede` (a DM retires a stale
 or replaced proposal) work too. Batch review actions let DMs bulk approve/reject
 pending generator runs while blocked/stale proposals remain held for manual
 review. **M3's main relationship/event graph scope is complete; ADR 0008 floor
-cleanup still has follow-up slices.** Typed any-to-any `Relationship` edges,
+cleanup is fully delivered (slices 1–3).** Typed any-to-any `Relationship` edges,
 `Event`s (with participants), and `EventCausality` cause→effect links route
 through the
 pipeline (auto-approved DM path with provenance); the entity detail page's

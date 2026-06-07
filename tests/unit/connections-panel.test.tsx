@@ -251,6 +251,31 @@ describe("ConnectionsPanel", () => {
     await waitFor(() => expect(screen.queryByLabelText("Relationship type")).toBeNull());
   });
 
+  it("keeps an existing crawler→FLOOR LOCATED_ON type selectable when editing (ADR 0008 §3)", () => {
+    render(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="e1"
+        sourceType="CRAWLER"
+        connections={[
+          connection({
+            type: "LOCATED_ON",
+            other: { id: "f1", name: "Larracos", type: "FLOOR" },
+          }),
+        ]}
+        candidates={candidates}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit connection" }));
+
+    // The retired pairing is still the selected value (not silently rewritten)
+    // and its option is present in the picker.
+    const typeSelect = screen.getByLabelText("Relationship type") as HTMLSelectElement;
+    expect(typeSelect.value).toBe("LOCATED_ON");
+    expect(screen.getByRole("option", { name: "Located On" })).toBeDefined();
+  });
+
   it("prefills membership day bounds when editing a membership edge", () => {
     render(
       <ConnectionsPanel
@@ -400,6 +425,36 @@ describe("ConnectionsPanel", () => {
     // cancel hides it again
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByText("DM-only (secret)")).toBeNull();
+  });
+
+  it("never offers crawler→FLOOR LOCATED_ON, even under 'Show all' (ADR 0008 §3)", () => {
+    render(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="e1"
+        sourceType="CRAWLER"
+        connections={[]}
+        candidates={[
+          ...candidates,
+          { id: "f1", name: "Larracos", type: "FLOOR" },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Add connection/ }));
+    fireEvent.change(
+      screen.getByPlaceholderText("Search entity to connect…"),
+      { target: { value: "Larr" } },
+    );
+    fireEvent.click(screen.getByText("Larracos"));
+
+    // Not suggested...
+    expect(screen.queryByRole("option", { name: "Located On" })).toBeNull();
+    // ...and not reachable even after expanding the full list.
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "__SHOW_ALL_TYPES__" },
+    });
+    expect(screen.queryByRole("option", { name: "Located On" })).toBeNull();
   });
 
   it("submits a new connection and closes the add form on success", async () => {

@@ -16,6 +16,7 @@ import {
   EntityTypeahead,
   type EntityCandidate,
 } from "@/components/entities/entity-typeahead";
+import { withoutFloorCandidates } from "@/components/entities/participant-rows";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -579,6 +580,8 @@ function ParticipantsReviewInput({
     seed.map((row, index) => ({ key: index, ...row })),
   );
   const [nextKey, setNextKey] = useState(seed.length);
+  // Floors are set via the time picker, not as participants (ADR 0008 §3).
+  const pickable = withoutFloorCandidates(candidates);
   const update = (
     next: { key: number; entity: EntityCandidate | null; role: ParticipantRole }[],
   ) => {
@@ -605,7 +608,7 @@ function ParticipantsReviewInput({
           type="button"
           size="sm"
           variant="outline"
-          disabled={rows.length >= 20 || candidates.length === 0}
+          disabled={rows.length >= 20 || pickable.length === 0}
           onClick={() => {
             update([...rows, { key: nextKey, entity: null, role: "ACTOR" }]);
             setNextKey((current) => current + 1);
@@ -622,7 +625,7 @@ function ParticipantsReviewInput({
         >
           <EntityTypeahead
             name={`participant:${field}:${row.key}`}
-            candidates={candidates}
+            candidates={pickable}
             value={row.entity}
             onChange={(entity) =>
               update(

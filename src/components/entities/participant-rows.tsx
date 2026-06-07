@@ -14,6 +14,19 @@ type Role = (typeof eventParticipantRoleValues)[number];
 export type ParticipantRowValue = { entity: EntityCandidate | null; role: Role };
 
 /**
+ * Drop FLOOR entities from a participant candidate pool (ADR 0008 §3): an event's
+ * floor is its `timeRef.floor` (the time picker), never a FLOOR participant, so
+ * floors are no longer offered in participant typeaheads. Any FLOOR already
+ * attached to a legacy event still renders (its row carries the resolved value);
+ * it just can't be re-picked.
+ */
+export function withoutFloorCandidates<T extends { type: string }>(
+  candidates: T[],
+): T[] {
+  return candidates.filter((candidate) => candidate.type !== "FLOOR");
+}
+
+/**
  * Shared participant editor used by every multi-participant event form (logging
  * and editing). Emits indexed `participantId_N` / `participantRole_N` fields
  * counted by a hidden `participantCount`, which the event actions parse via
@@ -30,6 +43,8 @@ export function ParticipantRows({
     initial && initial.length > 0 ? initial : [{ entity: null, role: "ACTOR" }];
   const [rows, setRows] = useState(seed.map((row, index) => ({ key: index, ...row })));
   const [nextKey, setNextKey] = useState(seed.length);
+  // Floors are set via the time picker, not as participants (ADR 0008 §3).
+  const pickable = withoutFloorCandidates(candidates);
 
   const addRow = () => {
     if (rows.length >= 20) return;
@@ -51,7 +66,7 @@ export function ParticipantRows({
         <button
           type="button"
           onClick={addRow}
-          disabled={rows.length >= 20 || candidates.length === 0}
+          disabled={rows.length >= 20 || pickable.length === 0}
           className="inline-flex items-center gap-[6px] border border-[var(--line)] px-[8px] py-[5px] font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:text-[var(--ink-dim)] disabled:opacity-50"
         >
           <Plus aria-hidden size={11} />
@@ -62,7 +77,7 @@ export function ParticipantRows({
         <div key={row.key} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_140px_auto]">
           <EntityTypeahead
             name={`participantId_${index}`}
-            candidates={candidates}
+            candidates={pickable}
             value={row.entity}
             onChange={(entity) =>
               setRows((current) =>

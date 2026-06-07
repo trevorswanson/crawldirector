@@ -1,8 +1,9 @@
 # ADR 0008 — Floor model unification and absolute-day time inference
 
-- **Status:** accepted — slice 1 (floor time anchors + absolute-day inference)
-  and slice 2 (floor-number key + resolved FLOOR links) delivered 2026-06-06;
-  slice 3 (retire duplicate paths) pending
+- **Status:** accepted — fully delivered. Slice 1 (floor time anchors +
+  absolute-day inference) and slice 2 (floor-number key + resolved FLOOR links)
+  delivered 2026-06-06; slice 3 (retire duplicate paths — FLOOR-as-participant and
+  crawler `LOCATED_ON`→FLOOR) delivered 2026-06-07
 - **Date:** 2026-06-06
 - **Milestone:** M3 (events, timeline, causality) — cleanup + follow-up to
   [ADR 0004](./0004-event-time-model-and-ordering.md) and
@@ -256,9 +257,17 @@ floor anchors from `listCampaignFloors`.
    FLOOR entity, and a crawler's `currentFloor` resolves to "Floor N · Name" on
    the entity detail page (linked) and the World Browser roster card (inline,
    since the card is itself a link).
-3. **Retire duplicate floor paths (issue #2b).** Stop offering FLOOR entities in
-   the event participant typeahead; stop offering crawler `LOCATED_ON` FLOOR;
-   surface `Crawler.currentFloor` as a resolved entity link.
+3. **Retire duplicate floor paths (issue #2b).** ✅ **Delivered (2026-06-07).**
+   FLOOR entities are no longer offered in any event participant typeahead (a
+   shared `withoutFloorCandidates` helper filters them out of the entity-panel,
+   campaign-timeline, and Review Queue participant pickers); floor selection is
+   steered entirely to `timeRef.floor` via the time picker. Crawler
+   `LOCATED_ON`→FLOOR is removed from the relationship create UI (a new
+   `isDiscouragedRelationship` excludes it from both the suggested list and the
+   "Show all" categories), while `LOCATED_ON` stays valid and suggested for
+   non-crawler spatial edges. `Crawler.currentFloor` surfacing as a resolved entity
+   link landed early with slice 2. Soft UI/suggestion guards only — the DB stays
+   any-to-any (invariant #7).
 
 ## Consequences
 

@@ -669,6 +669,30 @@ describe("TimelinePanel", () => {
     expect(screen.queryByText("DM-only (secret)")).toBeNull();
   });
 
+  it("does not offer FLOOR entities as event participants (ADR 0008 §3)", () => {
+    render(
+      <TimelinePanel
+        campaignId="c1"
+        entityId="e1"
+        entityName="Carl"
+        entityType="CRAWLER"
+        events={[]}
+        candidates={[
+          ...candidates,
+          { id: "f9", name: "Gloomdeep", type: "FLOOR" },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Log event/ }));
+    fireEvent.change(screen.getByPlaceholderText("Search entity to add…"), {
+      target: { value: "Gloomdeep" },
+    });
+    // The floor is filtered out of the participant pool; a real crawler still is.
+    expect(screen.queryByRole("button", { name: /Gloomdeep/ })).toBeNull();
+    expect(screen.getByText("No matching entities.")).toBeDefined();
+  });
+
   it("falls back to the floor when no time label is set", () => {
     render(
       <TimelinePanel
