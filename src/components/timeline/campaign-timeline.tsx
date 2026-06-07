@@ -45,6 +45,7 @@ import {
 import { EventTimeFields } from "@/components/entities/event-time-fields";
 import {
   ParticipantRows,
+  withoutFloorCandidates,
   type ParticipantRowValue,
 } from "@/components/entities/participant-rows";
 import { HudTag } from "@/components/ui/hud-tag";
@@ -190,6 +191,8 @@ function NewEventForm({
     { key: 0, entity: null, role: "ACTOR" },
   ]);
   const [nextKey, setNextKey] = useState(1);
+  // Floors are set via the time picker, not as participants (ADR 0008 §3).
+  const pickable = withoutFloorCandidates(candidates);
 
   const addRow = () => {
     if (rows.length >= 20) return;
@@ -248,7 +251,7 @@ function NewEventForm({
           <button
             type="button"
             onClick={addRow}
-            disabled={rows.length >= 20 || candidates.length === 0}
+            disabled={rows.length >= 20 || pickable.length === 0}
             className="inline-flex items-center gap-[6px] border border-[var(--line)] px-[8px] py-[5px] font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:text-[var(--ink-dim)] disabled:opacity-50"
           >
             <Plus aria-hidden size={11} />
@@ -259,7 +262,7 @@ function NewEventForm({
           <div key={row.key} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_140px_auto]">
             <EntityTypeahead
               name={`participantId_${index}`}
-              candidates={candidates}
+              candidates={pickable}
               value={row.entity}
               onChange={(entity) =>
                 setRows((current) =>

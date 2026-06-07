@@ -13,12 +13,6 @@ keyword-scanning every doc.
 
 ### Active next slices
 
-- [ ] **M3 floor cleanup — ADR 0008 slice 3.** (Slice 2 shipped 2026-06-06 —
-      see the dated entry below.) Retire duplicate floor paths by steering event
-      floor selection to `timeRef.floor` (not FLOOR participants) and steering
-      crawler floor state to `Crawler.currentFloor` (not crawler
-      `LOCATED_ON`→FLOOR). The "surface `Crawler.currentFloor` as a resolved
-      FLOOR link" part of slice 3 landed early with slice 2.
 - [ ] **M4 generator expansion.** Add bulk-stub scaffolding and relationship
       inference generators, a generation panel for bulk runs, a `Job` table +
       worker for bulk/async runs, and usage/cost tracking with spend caps.
@@ -75,6 +69,55 @@ keyword-scanning every doc.
       - **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
+
+## M3 — Retire duplicate floor authoring paths (ADR 0008 slice 3) ✅ (2026-06-07)
+
+**Goal:** finish [ADR 0008](./adr/0008-floor-model-unification-and-time-inference.md)
+§3 — one source of truth per floor concept. Slices 1–2 delivered the time anchors,
+inference, the campaign-unique floor-number key, and resolved FLOOR links. This
+slice retires the two *redundant* authoring paths the DM flagged: a floor attached
+to an event as a participant (redundant with `timeRef.floor`), and a crawler's
+floor expressed as a `LOCATED_ON`→FLOOR edge (redundant with `Crawler.currentFloor`).
+Both are soft, UI/suggestion-level guards — the DB stays any-to-any (invariant #7).
+
+- [x] **Events no longer offer FLOOR entities as participants.** An event's floor
+      is its `timeRef.floor` (set via the time picker, `EventTimeFields`), never a
+      FLOOR participant. A shared pure helper `withoutFloorCandidates`
+      ([`participant-rows.tsx`](../src/components/entities/participant-rows.tsx))
+      drops FLOOR-type candidates from every participant typeahead: the shared
+      `ParticipantRows` (entity panel edit form + campaign-timeline edit form), the
+      campaign-timeline `NewEventForm`'s local participant editor, the entity
+      panel's quick-log "Add participant (optional)" picker (whose section now also
+      hides when floors are the only candidates), and the Review Queue's
+      `ParticipantsReviewInput`
+      ([`operation-diff-editor.tsx`](../src/components/review/operation-diff-editor.tsx)).
+      A FLOOR already attached to a legacy event still renders (its row carries the
+      resolved value) — it just can't be re-picked. Relationship source/target
+      pickers are deliberately untouched (a BOSS/LOCATION `LOCATED_ON` FLOOR stays
+      valid).
+- [x] **The relationship create UI no longer offers crawler `LOCATED_ON`→FLOOR.**
+      A new `isDiscouragedRelationship`
+      ([`relationship-types.ts`](../src/lib/relationship-types.ts)) flags exactly
+      `CRAWLER —LOCATED_ON→ FLOOR`; `relationshipPickerOptions` excludes discouraged
+      types from both the suggested list *and* the "Show all" categories, and
+      `rankedSuggestedTypes`/`defaultRelationshipType` never surface it. "Where is
+      this crawler" is `Crawler.currentFloor`, resolved to its FLOOR entity link
+      (landed with slice 2). `LOCATED_ON` stays in the schema and is still suggested
+      for non-crawler spatial edges (BOSS/LOCATION/NEIGHBORHOOD/NPC/MOB_TYPE → FLOOR).
+- [x] **Tests:** new `relationship-types` unit suite (discouraged predicate scoping;
+      crawler→FLOOR omits LOCATED_ON everywhere incl. "Show all"; BOSS→FLOOR still
+      suggests it; default never LOCATED_ON); FLOOR-exclusion assertions added to the
+      connections-panel, campaign-timeline, timeline-panel, and operation-diff-editor
+      component suites (searching a floor in a participant/relationship picker surfaces
+      nothing). lint (0 errors), typecheck, build, and the full coverage gate green
+      (971 tests; statements 95.32%, branches 87.97%, functions 97.52%, lines 97.29%).
+- [x] **Verification boundary:** this is a pure UI/suggestion steer with no schema,
+      service, or migration change. It's covered by the real-component tests above
+      (each renders the actual picker with a FLOOR candidate and asserts it isn't
+      offered); in-browser spot-check deferred under the usual port-3000 constraint.
+- [x] **ADR 0008 is now fully delivered (slices 1–3).** No floor-cleanup follow-up
+      remains; Option B (`LOCATED_ON` as the crawler-position model) stays an
+      explicitly deferred future design.
 
 ## M3 — Floor-number key + resolved FLOOR links (ADR 0008 slice 2) ✅ (2026-06-06)
 

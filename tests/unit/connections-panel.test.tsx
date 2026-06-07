@@ -402,6 +402,36 @@ describe("ConnectionsPanel", () => {
     expect(screen.queryByText("DM-only (secret)")).toBeNull();
   });
 
+  it("never offers crawler→FLOOR LOCATED_ON, even under 'Show all' (ADR 0008 §3)", () => {
+    render(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="e1"
+        sourceType="CRAWLER"
+        connections={[]}
+        candidates={[
+          ...candidates,
+          { id: "f1", name: "Larracos", type: "FLOOR" },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Add connection/ }));
+    fireEvent.change(
+      screen.getByPlaceholderText("Search entity to connect…"),
+      { target: { value: "Larr" } },
+    );
+    fireEvent.click(screen.getByText("Larracos"));
+
+    // Not suggested...
+    expect(screen.queryByRole("option", { name: "Located On" })).toBeNull();
+    // ...and not reachable even after expanding the full list.
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "__SHOW_ALL_TYPES__" },
+    });
+    expect(screen.queryByRole("option", { name: "Located On" })).toBeNull();
+  });
+
   it("submits a new connection and closes the add form on success", async () => {
     createRelationshipAction.mockResolvedValue(undefined);
     render(

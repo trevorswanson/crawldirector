@@ -335,4 +335,30 @@ describe("OperationDiffEditor", () => {
       JSON.stringify([{ entityId: "entity-carl", role: "ACTOR" }]),
     );
   });
+
+  it("does not offer FLOOR entities as event participants (ADR 0008 §3)", () => {
+    renderWithCapture(
+      [
+        field({
+          field: "participants",
+          kind: "json",
+          toText: "No participants",
+          draft: "[]",
+          structured: { kind: "participants", value: [] },
+        }),
+      ],
+      false,
+      [
+        { id: "entity-carl", name: "Carl", type: "CRAWLER" },
+        { id: "floor-9", name: "Gloomdeep", type: "FLOOR" },
+      ],
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit participants" }));
+    fireEvent.change(screen.getByPlaceholderText("Search entity…"), {
+      target: { value: "Gloomdeep" },
+    });
+    expect(screen.queryByRole("button", { name: /Gloomdeep/ })).toBeNull();
+    expect(screen.getByText("No matching entities.")).toBeDefined();
+  });
 });

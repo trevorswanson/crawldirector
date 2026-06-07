@@ -29,6 +29,7 @@ import { EventEffectsSection } from "@/components/entities/event-effects-section
 import { EventTimeFields } from "@/components/entities/event-time-fields";
 import {
   ParticipantRows,
+  withoutFloorCandidates,
   type ParticipantRowValue,
 } from "@/components/entities/participant-rows";
 import { Kicker } from "@/components/ui/kicker";
@@ -384,6 +385,8 @@ export function TimelinePanel({
   const crawlerCandidates = [self, ...candidates].filter(
     (candidate) => candidate.type === "CRAWLER",
   );
+  // Floors are set via the time picker, not as participants (ADR 0008 §3).
+  const participantCandidates = withoutFloorCandidates(candidates);
   const nameById = new Map(
     [self, ...candidates].map((candidate) => [candidate.id, candidate.name] as const),
   );
@@ -772,7 +775,7 @@ export function TimelinePanel({
               ))}
             </select>
           </label>
-          {candidates.length > 0 && (
+          {participantCandidates.length > 0 && (
             <div className="flex flex-col gap-1">
               <span className="font-mono text-[9.5px] uppercase tracking-[.06em] text-[var(--ink-faint)]">
                 Add participant (optional)
@@ -781,7 +784,7 @@ export function TimelinePanel({
                 <div className="min-w-0 flex-1">
                   <EntityTypeahead
                     name="otherId"
-                    candidates={candidates}
+                    candidates={participantCandidates}
                     value={participant}
                     onChange={setParticipant}
                     placeholder="Search entity to add…"

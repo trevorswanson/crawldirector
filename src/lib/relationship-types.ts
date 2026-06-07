@@ -356,6 +356,25 @@ export function relationshipOptionLabel(type: RelationshipTypeValue): string {
 }
 
 /**
+ * Pairings actively steered *out* of the create UI (ADR 0008 §3). A crawler's
+ * floor is `Crawler.currentFloor` (resolved to its FLOOR entity), not a second
+ * `LOCATED_ON` edge — so we stop offering crawler→FLOOR `LOCATED_ON` entirely
+ * (not even under "Show all"), retiring the duplicate path. This is UI/suggestion
+ * suppression only: the DB stays any-to-any (invariant #7), and a direct service
+ * call can still create the edge for non-crawler spatial uses (a BOSS/LOCATION on
+ * a floor still suggests `LOCATED_ON`).
+ */
+export function isDiscouragedRelationship(
+  type: RelationshipTypeValue,
+  sourceType: EntityTypeValue,
+  targetType: EntityTypeValue,
+): boolean {
+  return (
+    type === "LOCATED_ON" && sourceType === "CRAWLER" && targetType === "FLOOR"
+  );
+}
+
+/**
  * Soft applicability: is `type` a sensible edge from `sourceType` to
  * `targetType`? An empty source/target list means "any". This only ranks the
  * picker — it never gates submission (docs/01-domain-model.md: any-to-any).
@@ -401,7 +420,11 @@ function rankedSuggestedTypes(
   targetType: EntityTypeValue,
 ): RelationshipTypeValue[] {
   return relationshipTypeValues
-    .filter((type) => isSuggestedRelationship(type, sourceType, targetType))
+    .filter(
+      (type) =>
+        isSuggestedRelationship(type, sourceType, targetType) &&
+        !isDiscouragedRelationship(type, sourceType, targetType),
+    )
     .map((type, index) => ({
       type,
       index,
@@ -440,7 +463,9 @@ export function relationshipPickerOptions(
   for (const group of relationshipGroupOrder) {
     const types = relationshipTypeValues.filter(
       (type) =>
-        relationshipTypeMeta[type].group === group && !suggestedSet.has(type),
+        relationshipTypeMeta[type].group === group &&
+        !suggestedSet.has(type) &&
+        !isDiscouragedRelationship(type, sourceType, targetType),
     );
     if (types.length > 0) {
       categories.push({ group, label: relationshipGroupLabels[group], types });
