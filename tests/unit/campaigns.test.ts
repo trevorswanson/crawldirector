@@ -11,6 +11,7 @@ import {
   CanonStatus,
   ChangeSource,
   EntityType,
+  Role,
   Visibility,
 } from "@/generated/prisma/client";
 
@@ -122,6 +123,19 @@ describe("getCampaignCanonIntegrity", () => {
 
     await expect(getCampaignCanonIntegrity(outsider.id, campaign.id)).rejects.toThrow(
       "You do not have access to this campaign."
+    );
+  });
+
+  it("rejects a player member — canon integrity is a DM-only metric", async () => {
+    const owner = await makeUser("owner@test.com");
+    const player = await makeUser("player@test.com");
+    const campaign = await createCampaign(owner.id, { name: "World" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+
+    await expect(getCampaignCanonIntegrity(player.id, campaign.id)).rejects.toThrow(
+      "Only the DM can view canon integrity."
     );
   });
 

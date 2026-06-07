@@ -12,6 +12,7 @@ import {
   type StructuredRequest,
   type StructuredResult,
 } from "./types";
+import { createSafeFetch } from "./ssrf";
 import { toJsonSchema, withRepair } from "./structured";
 
 // OpenAI (and OpenAI-compatible) adapter (M4 — docs/04-ai-integration.md).
@@ -59,6 +60,8 @@ function readUsage(usage: OpenAI.CompletionUsage | undefined): LLMUsage {
 export function createOpenAiProvider(opts: OpenAiAdapterOptions): LLMProvider {
   const client = new OpenAI({
     apiKey: opts.apiKey,
+    // Enforce the SSRF egress policy on every request, including a custom baseURL.
+    fetch: createSafeFetch(),
     ...(opts.baseUrl ? { baseURL: opts.baseUrl } : {}),
   });
   const { model, providerId } = opts;

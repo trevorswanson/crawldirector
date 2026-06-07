@@ -12,6 +12,7 @@ import {
   type StructuredRequest,
   type StructuredResult,
 } from "./types";
+import { createSafeFetch } from "./ssrf";
 import { toJsonSchema, withRepair } from "./structured";
 
 // Anthropic adapter (M4 — docs/04-ai-integration.md). Server-only. Structured
@@ -66,6 +67,8 @@ function readUsage(usage: Anthropic.Usage | undefined): LLMUsage {
 export function createAnthropicProvider(opts: AnthropicAdapterOptions): LLMProvider {
   const client = new Anthropic({
     apiKey: opts.apiKey,
+    // Enforce the SSRF egress policy on every request, including a custom baseURL.
+    fetch: createSafeFetch(),
     ...(opts.baseUrl ? { baseURL: opts.baseUrl } : {}),
   });
   const { model, providerId } = opts;
