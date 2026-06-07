@@ -2463,6 +2463,45 @@ async function applyUpdateEntity(
     select: { id: true },
   });
   await writeEntityProvenance(tx, changeSet, entityId, patch);
+
+  // A FLOOR's open/collapse anchors place FLOOR_START / FLOOR_COLLAPSE event times
+  // (and their EVENT-basis dependents) on the absolute-day axis (ADR 0008), keyed
+  // by the floor's number. An anchor edit re-orders that floor; a number edit
+  // re-keys the anchor map for *both* the old and new number (the old number's
+  // events lose their anchor, the new number's gain it). Re-derive every affected
+  // floor — the floor analogue of the event-time re-rank above. Skip when nothing
+  // actually moved.
+  if (
+    entity.type === EntityType.FLOOR &&
+    ("data.startDay" in patch ||
+      "data.collapseDay" in patch ||
+      "data.floorNumber" in patch)
+  ) {
+    const before = readFloorData(entity.data);
+    const afterFloorNumber =
+      "data.floorNumber" in patch
+        ? optionalNumber(readTo(patch, "data.floorNumber"))
+        : before.floorNumber;
+    const afterStartDay =
+      "data.startDay" in patch
+        ? optionalNumber(readTo(patch, "data.startDay"))
+        : before.startDay;
+    const afterCollapseDay =
+      "data.collapseDay" in patch
+        ? optionalNumber(readTo(patch, "data.collapseDay"))
+        : before.collapseDay;
+    const numberMoved = afterFloorNumber !== before.floorNumber;
+    const anchorsMoved =
+      afterStartDay !== before.startDay || afterCollapseDay !== before.collapseDay;
+    if (numberMoved || anchorsMoved) {
+      const affectedFloors = new Set<number>();
+      if (before.floorNumber != null) affectedFloors.add(before.floorNumber);
+      if (afterFloorNumber != null) affectedFloors.add(afterFloorNumber);
+      for (const floorNumber of affectedFloors) {
+        await rerankFloor(tx, changeSet.campaignId, floorNumber);
+      }
+    }
+  }
   await tx.auditLog.create({
     data: {
       campaignId: changeSet.campaignId,
@@ -3501,20 +3540,26 @@ async function rankForEvent(
   return derived ?? nextRankForFloor(tx, campaignId, orderKey, excludeEventId);
 }
 
-// When an event's in-game time changes, the resolved day of every event anchored
-// to it (directly or transitively, via EVENT basis) shifts too. Those dependents
-// are placed on the absolute-day axis (ADR 0008), so their stored `rank` is now
-// stale and must be re-derived against the post-edit state — otherwise e.g.
-// moving "A" later leaves "5 days after A" sorted by its old day. Call this after
-// the anchor's new time is committed. Dependents are recomputed in dependency
-// order (an anchor before the events that point at it) so each sees its
-// neighbours' fresh ranks; unresolvable / manual-ranked dependents (a null
-// derivation) are left untouched. Cycles are inert — they resolve to no day and
-// fall through to the manual rank.
-async function rerankAnchorDependents(
+// Re-derive ranks after some events' resolved day has shifted. A day move ripples:
+// any event anchored (directly or transitively, via EVENT basis) to a moved event
+// shifts too, and all of them are placed on the absolute-day axis (ADR 0008), so
+// their stored `rank` is stale. Two callers seed this: an event time edit moves
+// the edited event, and a floor-anchor edit moves every event on that floor.
+//
+// `includeSeeds` says whether the seeds themselves are re-derived: false when the
+// caller already re-ranked the seed inline (the time-edit path sets the edited
+// event's rank before calling this, so only its dependents are stale); true when
+// the seeds moved implicitly and nobody re-ranked them yet (a floor-anchor edit).
+//
+// Recomputed in dependency order (an anchor before anything that points at it) so
+// each event sees its neighbours' fresh ranks. Unresolvable / manual-ranked
+// events (a null derivation) are left untouched; cycles are inert — they resolve
+// to no day and fall through to the manual rank.
+async function rerankMovedEvents(
   tx: Prisma.TransactionClient,
   campaignId: string,
-  anchorEventId: string,
+  seedEventIds: Iterable<string>,
+  includeSeeds: boolean,
 ): Promise<void> {
   const events = await tx.event.findMany({
     where: { campaignId, status: { not: CanonStatus.ARCHIVED } },
@@ -3534,22 +3579,58 @@ async function rerankAnchorDependents(
     }
   }
 
-  // BFS out from the moved anchor: dependency order, so an anchor is re-ranked
-  // before anything that points at it.
-  const ordered: string[] = [];
-  const seen = new Set<string>([anchorEventId]);
-  const queue = [...(dependentsByAnchor.get(anchorEventId) ?? [])];
+  // The seeds, plus every event reachable from them along anchor→dependent edges.
+  const seeds = new Set<string>();
+  const affected = new Set<string>();
+  const queue: string[] = [];
+  for (const id of seedEventIds) {
+    if (!byId.has(id)) continue;
+    seeds.add(id);
+    if (!affected.has(id)) {
+      affected.add(id);
+      queue.push(id);
+    }
+  }
   while (queue.length > 0) {
     const id = queue.shift()!;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    ordered.push(id);
     for (const dependent of dependentsByAnchor.get(id) ?? []) {
-      if (!seen.has(dependent)) queue.push(dependent);
+      if (!affected.has(dependent)) {
+        affected.add(dependent);
+        queue.push(dependent);
+      }
     }
   }
 
+  // Topologically order the affected subgraph so an event's EVENT-basis anchor is
+  // re-ranked before the event (Kahn's algorithm). A seed that is itself a
+  // dependent of another seed is ordered correctly this way too. Any residual
+  // cycle is appended in discovery order (those events resolve to no day anyway).
+  const indegree = new Map<string, number>();
+  for (const id of affected) indegree.set(id, 0);
+  for (const id of affected) {
+    const ref = readTimeRef(byId.get(id)!.inGameTime);
+    if (ref.basis === "EVENT" && ref.anchorEventId && affected.has(ref.anchorEventId)) {
+      indegree.set(id, indegree.get(id)! + 1);
+    }
+  }
+  const ready = [...affected].filter((id) => indegree.get(id) === 0);
+  const ordered: string[] = [];
+  const placed = new Set<string>();
+  while (ready.length > 0) {
+    const id = ready.shift()!;
+    ordered.push(id);
+    placed.add(id);
+    for (const dependent of dependentsByAnchor.get(id) ?? []) {
+      if (!affected.has(dependent)) continue;
+      const next = indegree.get(dependent)! - 1;
+      indegree.set(dependent, next);
+      if (next === 0) ready.push(dependent);
+    }
+  }
+  for (const id of affected) if (!placed.has(id)) ordered.push(id);
+
   for (const id of ordered) {
+    if (!includeSeeds && seeds.has(id)) continue;
     const event = byId.get(id)!;
     const rank = await deriveRankForFloor(
       tx,
@@ -3562,6 +3643,35 @@ async function rerankAnchorDependents(
       await tx.event.update({ where: { id }, data: { rank } });
     }
   }
+}
+
+// A floor-anchor edit (FLOOR entity `startDay` / `collapseDay`) shifts the
+// resolved day of every FLOOR_START / FLOOR_COLLAPSE event on that floor, and of
+// every EVENT-basis event transitively anchored to them (ADR 0008) — so their
+// stored intra-floor `rank` is stale, the floor analogue of an event time edit.
+// An event's floor is its `orderKey` (ADR 0004), so the floor's events are the
+// seeds; they and their dependents are re-derived. Call after the new anchors are
+// committed so the rebuilt resolve context reads them.
+async function rerankFloor(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  floorNumber: number,
+): Promise<void> {
+  const floorEvents = await tx.event.findMany({
+    where: {
+      campaignId,
+      orderKey: floorNumber,
+      status: { not: CanonStatus.ARCHIVED },
+    },
+    select: { id: true },
+  });
+  if (floorEvents.length === 0) return;
+  await rerankMovedEvents(
+    tx,
+    campaignId,
+    floorEvents.map((event) => event.id),
+    true,
+  );
 }
 
 async function applyEventOperation(
@@ -3818,9 +3928,10 @@ async function applyUpdateEvent(
   await tx.event.update({ where: { id: eventId }, data, select: { id: true } });
 
   // A time change shifts the resolved day of any event anchored to this one, so
-  // re-derive their ranks now that the new time is committed (ADR 0008).
+  // re-derive their ranks now that the new time is committed (ADR 0008). The
+  // edited event's own rank was set above, so only its dependents are seeded.
   if ("inGameTime" in patch) {
-    await rerankAnchorDependents(tx, changeSet.campaignId, eventId);
+    await rerankMovedEvents(tx, changeSet.campaignId, [eventId], false);
   }
 
   // Participant editing: when the patch carries a participant list, reconcile it
