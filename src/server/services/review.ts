@@ -12,7 +12,13 @@ import {
   Visibility,
 } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
+import { readFloorData } from "@/lib/floor";
 import { generateRankBetween } from "@/lib/rank";
+import {
+  resolveAbsoluteDay,
+  type FloorAnchors,
+  type ResolveContext,
+} from "@/lib/time-resolve";
 import { floorRelativeSortKey, readTimeRef } from "@/lib/time-ref";
 import { prisma } from "@/server/db";
 
@@ -3330,50 +3336,60 @@ async function nextRankForFloor(
   return generateRankBetween(last?.rank ?? null, null);
 }
 
-// Derive an event's intra-floor `rank` from its time anchor when the basis is
-// floor-relative (ADR 0004 slice 2). The new event is positioned among its
-// floor siblings that share the same floor-relative basis by their offset, so a
-// concrete time yields a deterministic order without a manual drag. Siblings of
-// a different basis (or with no concrete offset) are ignored — mixing the two
-// floor axes needs floor-duration data we don't model — and float at their
-// manual rank. Falls back to `nextRankForFloor` (append on top) when there is no
-// comparable sibling or the existing ranks can't bracket the new position.
-async function deriveRankForFloor(
+// A `ResolveContext` (src/lib/time-resolve.ts) over the whole campaign, so an
+// event's in-fiction time can be placed on the absolute days-since-collapse axis
+// (ADR 0008): EVENT-basis times walk to their anchor's day, and FLOOR_START /
+// FLOOR_COLLAPSE times resolve against the floor's open/collapse anchors. Built
+// from committed DB state inside the apply transaction; the event being applied
+// resolves against this even though it isn't in the map yet (it never anchors to
+// itself).
+async function buildResolveContext(
   tx: Prisma.TransactionClient,
   campaignId: string,
-  orderKey: number,
-  sortKey: { basis: "FLOOR_START" | "FLOOR_COLLAPSE"; position: number },
-  excludeEventId?: string,
-): Promise<string> {
-  const siblings = await tx.event.findMany({
+): Promise<ResolveContext> {
+  const events = await tx.event.findMany({
+    where: { campaignId, status: { not: CanonStatus.ARCHIVED } },
+    select: { id: true, inGameTime: true },
+  });
+  const timeById = new Map<string, ReturnType<typeof readTimeRef>>();
+  for (const event of events) timeById.set(event.id, readTimeRef(event.inGameTime));
+
+  const floorRows = await tx.entity.findMany({
     where: {
       campaignId,
-      orderKey,
+      type: EntityType.FLOOR,
       status: { not: CanonStatus.ARCHIVED },
-      ...(excludeEventId ? { id: { not: excludeEventId } } : {}),
     },
-    select: { rank: true, inGameTime: true },
+    select: { data: true },
   });
-
-  // Comparable siblings: same floor-relative basis, with a concrete position.
-  const comparable: { rank: string; position: number }[] = [];
-  for (const sibling of siblings) {
-    const key = floorRelativeSortKey(readTimeRef(sibling.inGameTime));
-    if (key && key.basis === sortKey.basis) {
-      comparable.push({ rank: sibling.rank, position: key.position });
+  const anchorsByFloor = new Map<number, FloorAnchors>();
+  for (const row of floorRows) {
+    const { floorNumber, startDay, collapseDay } = readFloorData(row.data);
+    if (floorNumber != null && !anchorsByFloor.has(floorNumber)) {
+      anchorsByFloor.set(floorNumber, { startDay, collapseDay });
     }
   }
-  if (comparable.length === 0) {
-    return nextRankForFloor(tx, campaignId, orderKey, excludeEventId);
-  }
 
-  // Higher position sorts later in fiction => higher rank (the timeline shows
-  // later-first). Bracket the new position between the closest sibling above
-  // (smallest position strictly greater) and below (largest position ≤ ours).
+  return {
+    eventTimeById: (id) => timeById.get(id),
+    floorAnchors: (floor) => anchorsByFloor.get(floor),
+  };
+}
+
+// Mint a rank for an event at `position` among its comparable siblings, where a
+// higher position sorts later in fiction => higher rank (the timeline shows
+// later-first). Brackets between the tightest sibling above (smallest position
+// strictly greater) and below (largest position ≤ ours). Returns null when the
+// chosen neighbours' ranks can't bracket a new value — the caller decides the
+// fallback (keep the existing rank on an edit, or append on a create).
+function rankBetweenSiblings(
+  comparable: { rank: string; position: number }[],
+  position: number,
+): string | null {
   let above: { rank: string; position: number } | null = null;
   let below: { rank: string; position: number } | null = null;
   for (const candidate of comparable) {
-    if (candidate.position > sortKey.position) {
+    if (candidate.position > position) {
       // Tightest sibling above us: smallest position, then lowest rank.
       if (
         !above ||
@@ -3391,16 +3407,83 @@ async function deriveRankForFloor(
       below = candidate;
     }
   }
-
   try {
     return generateRankBetween(below?.rank ?? null, above?.rank ?? null);
   } catch {
-    return nextRankForFloor(tx, campaignId, orderKey, excludeEventId);
+    return null;
   }
 }
 
-// Resolve a freshly applied event's `rank`: derived from the anchor when the
-// time is floor-relative + concrete, otherwise appended on top for manual order.
+// Derive an event's intra-floor `rank` from its in-fiction time, or null when the
+// time gives no position relative to existing floor siblings (so the caller keeps
+// the manual order). Two axes, tried in order (ADR 0004 + 0008):
+//
+//   1. Absolute day-since-collapse. Any basis that resolves to a concrete day —
+//      including EVENT-anchored times like "14 days after Event A" — is placed on
+//      one shared axis against the siblings that also resolve. This is what makes
+//      a time-anchored event sort by *when it happens*, not when it was logged.
+//   2. Floor-relative offset, for floors without day anchors: FLOOR_START /
+//      FLOOR_COLLAPSE siblings of the same basis share the floor as a common
+//      clock, so their raw offsets order them even with no absolute days known.
+//
+// Siblings that resolve on neither axis (UNSCHEDULED / unresolvable EVENT) keep
+// their manual rank and are simply not used as brackets.
+async function deriveRankForFloor(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  orderKey: number,
+  inGameTime: JsonValue | undefined,
+  excludeEventId?: string,
+): Promise<string | null> {
+  const siblings = await tx.event.findMany({
+    where: {
+      campaignId,
+      orderKey,
+      status: { not: CanonStatus.ARCHIVED },
+      ...(excludeEventId ? { id: { not: excludeEventId } } : {}),
+    },
+    select: { rank: true, inGameTime: true },
+  });
+  if (siblings.length === 0) return null;
+
+  const ref = readTimeRef(inGameTime);
+
+  // Axis 1: absolute day-since-collapse.
+  const ctx = await buildResolveContext(tx, campaignId);
+  const day = resolveAbsoluteDay(ref, ctx);
+  if (day != null) {
+    const comparable: { rank: string; position: number }[] = [];
+    for (const sibling of siblings) {
+      const siblingDay = resolveAbsoluteDay(readTimeRef(sibling.inGameTime), ctx);
+      if (siblingDay != null) comparable.push({ rank: sibling.rank, position: siblingDay });
+    }
+    if (comparable.length > 0) {
+      const rank = rankBetweenSiblings(comparable, day);
+      if (rank != null) return rank;
+    }
+  }
+
+  // Axis 2: same-basis floor-relative offset (floors with no day anchors).
+  const sortKey = floorRelativeSortKey(ref);
+  if (sortKey) {
+    const comparable: { rank: string; position: number }[] = [];
+    for (const sibling of siblings) {
+      const key = floorRelativeSortKey(readTimeRef(sibling.inGameTime));
+      if (key && key.basis === sortKey.basis) {
+        comparable.push({ rank: sibling.rank, position: key.position });
+      }
+    }
+    if (comparable.length > 0) {
+      const rank = rankBetweenSiblings(comparable, sortKey.position);
+      if (rank != null) return rank;
+    }
+  }
+
+  return null;
+}
+
+// Resolve a freshly applied (or floor-moved) event's `rank`: derived from its
+// time when that yields a position, otherwise appended on top for manual order.
 async function rankForEvent(
   tx: Prisma.TransactionClient,
   campaignId: string,
@@ -3408,10 +3491,77 @@ async function rankForEvent(
   inGameTime: JsonValue | undefined,
   excludeEventId?: string,
 ): Promise<string> {
-  const sortKey = floorRelativeSortKey(readTimeRef(inGameTime));
-  return sortKey
-    ? deriveRankForFloor(tx, campaignId, orderKey, sortKey, excludeEventId)
-    : nextRankForFloor(tx, campaignId, orderKey, excludeEventId);
+  const derived = await deriveRankForFloor(
+    tx,
+    campaignId,
+    orderKey,
+    inGameTime,
+    excludeEventId,
+  );
+  return derived ?? nextRankForFloor(tx, campaignId, orderKey, excludeEventId);
+}
+
+// When an event's in-game time changes, the resolved day of every event anchored
+// to it (directly or transitively, via EVENT basis) shifts too. Those dependents
+// are placed on the absolute-day axis (ADR 0008), so their stored `rank` is now
+// stale and must be re-derived against the post-edit state — otherwise e.g.
+// moving "A" later leaves "5 days after A" sorted by its old day. Call this after
+// the anchor's new time is committed. Dependents are recomputed in dependency
+// order (an anchor before the events that point at it) so each sees its
+// neighbours' fresh ranks; unresolvable / manual-ranked dependents (a null
+// derivation) are left untouched. Cycles are inert — they resolve to no day and
+// fall through to the manual rank.
+async function rerankAnchorDependents(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  anchorEventId: string,
+): Promise<void> {
+  const events = await tx.event.findMany({
+    where: { campaignId, status: { not: CanonStatus.ARCHIVED } },
+    select: { id: true, orderKey: true, rank: true, inGameTime: true },
+  });
+
+  // anchor id → events whose EVENT-basis time points at it.
+  const dependentsByAnchor = new Map<string, string[]>();
+  const byId = new Map<string, (typeof events)[number]>();
+  for (const event of events) {
+    byId.set(event.id, event);
+    const ref = readTimeRef(event.inGameTime);
+    if (ref.basis === "EVENT" && ref.anchorEventId) {
+      const list = dependentsByAnchor.get(ref.anchorEventId);
+      if (list) list.push(event.id);
+      else dependentsByAnchor.set(ref.anchorEventId, [event.id]);
+    }
+  }
+
+  // BFS out from the moved anchor: dependency order, so an anchor is re-ranked
+  // before anything that points at it.
+  const ordered: string[] = [];
+  const seen = new Set<string>([anchorEventId]);
+  const queue = [...(dependentsByAnchor.get(anchorEventId) ?? [])];
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    ordered.push(id);
+    for (const dependent of dependentsByAnchor.get(id) ?? []) {
+      if (!seen.has(dependent)) queue.push(dependent);
+    }
+  }
+
+  for (const id of ordered) {
+    const event = byId.get(id)!;
+    const rank = await deriveRankForFloor(
+      tx,
+      campaignId,
+      event.orderKey,
+      event.inGameTime as JsonValue,
+      id,
+    );
+    if (rank != null && rank !== event.rank) {
+      await tx.event.update({ where: { id }, data: { rank } });
+    }
+  }
 }
 
 async function applyEventOperation(
@@ -3616,11 +3766,10 @@ async function applyUpdateEvent(
     data.inGameTime = jsonObject(inGameTime);
     // Order is re-derived from the anchor, never taken from the patch (ADR 0004).
     // A floor change moves clocks, so the event is re-placed in its new floor.
-    // Within a floor, a concrete floor-relative anchor re-derives the rank from
-    // its offset; a non-concrete (UNSCHEDULED / label-only) edit preserves the
-    // event's existing manual drag order.
+    // Within a floor, a time that yields a position (an absolute day or a
+    // floor-relative offset) re-derives the rank; a non-positional (UNSCHEDULED /
+    // label-only) edit preserves the event's existing manual drag order.
     const nextOrderKey = orderKeyFromInGameTime(inGameTime);
-    const sortKey = floorRelativeSortKey(readTimeRef(inGameTime));
     if (nextOrderKey !== event.orderKey) {
       data.orderKey = nextOrderKey;
       data.rank = await rankForEvent(
@@ -3630,14 +3779,15 @@ async function applyUpdateEvent(
         inGameTime,
         eventId,
       );
-    } else if (sortKey) {
-      data.rank = await deriveRankForFloor(
+    } else {
+      const derived = await deriveRankForFloor(
         tx,
         changeSet.campaignId,
         nextOrderKey,
-        sortKey,
+        inGameTime,
         eventId,
       );
+      if (derived != null) data.rank = derived;
     }
   }
   if ("secret" in patch) data.secret = booleanWithDefault(readTo(patch, "secret"), false);
@@ -3666,6 +3816,12 @@ async function applyUpdateEvent(
   }
 
   await tx.event.update({ where: { id: eventId }, data, select: { id: true } });
+
+  // A time change shifts the resolved day of any event anchored to this one, so
+  // re-derive their ranks now that the new time is committed (ADR 0008).
+  if ("inGameTime" in patch) {
+    await rerankAnchorDependents(tx, changeSet.campaignId, eventId);
+  }
 
   // Participant editing: when the patch carries a participant list, reconcile it
   // against the live rows — add new (entity, role) pairs, drop removed ones, and

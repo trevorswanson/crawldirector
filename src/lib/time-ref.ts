@@ -191,11 +191,14 @@ export function phraseTimeRef(
 // (and the timeline shows later-in-fiction first). FLOOR_START counts up from
 // the floor opening; FLOOR_COLLAPSE counts down to collapse, so a larger
 // "time remaining" is *earlier* and gets a smaller position. Every other basis
-// (absolute/collapse offsets need cross-floor reconciliation — deferred; EVENT
-// is settled by causality in slice 3; UNSCHEDULED is manual) returns null and
-// falls back to the manual drag-rank. The `basis` tag lets the caller compare
-// only same-basis siblings (mixing the two axes needs floor-duration data we
-// don't model).
+// returns null here and is ordered another way: COLLAPSE / ABSOLUTE_DAY / EVENT
+// times that resolve to a concrete day are placed on the absolute-day axis
+// (src/lib/time-resolve.ts, ADR 0008), causally-linked events fall back to "order
+// from causality" (slice 3), and UNSCHEDULED is manual. This same-basis offset
+// path is the fallback for floors with no day anchors, where absolute days are
+// unknown but same-basis siblings still share the floor as a common clock. The
+// `basis` tag lets the caller compare only same-basis siblings (mixing the two
+// floor axes needs floor-duration data we don't model).
 export function floorRelativeSortKey(
   ref: TimeRef,
 ): { basis: "FLOOR_START" | "FLOOR_COLLAPSE"; position: number } | null {

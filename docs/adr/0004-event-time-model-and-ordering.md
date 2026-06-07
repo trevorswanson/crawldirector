@@ -5,6 +5,13 @@
 - **Date:** 2026-06-04
 - **Milestone:** M3 (events, timeline, causality)
 
+> **Amended by [ADR 0008](./0008-floor-model-unification-and-time-inference.md)
+> (2026-06-07).** "Derived rank where the time is concrete" (below) originally
+> covered only floor-relative bases, and EVENT-basis order was left to causality.
+> Intra-floor `rank` now also derives from a resolved **absolute day** when one is
+> known (ADR 0008), so an `EVENT`-anchored time sorts by its resolved day even
+> without a causal link. Cross-floor reconciliation stays deferred.
+
 ## Context
 
 DCC has no calendar. In-fiction time is expressed in several irregular,

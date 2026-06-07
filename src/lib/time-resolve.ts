@@ -2,8 +2,12 @@
 // when enough anchors exist we can place an event on a single "days since the
 // collapse" axis and infer per-floor day-ranges for the timeline. This is a pure
 // module: it takes event time references plus per-floor open/collapse anchors and
-// computes absolute days. It is used for *display ranges and inference only* —
-// never for the timeline sort order, which stays floor-derived (ADR 0004).
+// computes absolute days. It powers two things: the inferred per-floor day-ranges
+// shown on the timeline, and — when an event resolves to a concrete day — its
+// intra-floor `rank` derivation (review.ts), so a time-anchored event sorts by
+// *when it happens*, not when it was logged. The coarse order (the floor /
+// `orderKey`) stays floor-derived (ADR 0004); this only refines the within-floor
+// order, and an event that can't be placed keeps its manual rank.
 //
 // Resolution walks the basis graph:
 //   ABSOLUTE_DAY / COLLAPSE  → the offset is the day directly

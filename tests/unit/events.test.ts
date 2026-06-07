@@ -1947,6 +1947,142 @@ describe("typed timeRef (ADR 0004 slice 2)", () => {
     expect(timeline.map((event) => event.title)).toEqual(["Early", "Mid"]);
   });
 
+  it("orders an EVENT-anchored time by its resolved day, not its log order (ADR 0008)", async () => {
+    // Regression: an EVENT-basis time ("14 days after A") used to be appended on
+    // top by log recency and ignored by the floor-relative siblings' ordering, so
+    // it sorted above a later FLOOR_START event instead of by its resolved day.
+    const owner = await makeUser("timeref-event-day-order@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    // Floor 8 runs days 61–82, so FLOOR_START / EVENT times resolve to a day.
+    await createGenericEntity(owner.id, campaign.id, {
+      type: "FLOOR",
+      name: "The Bone Market",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+      floorNumber: 8,
+      theme: "",
+      startDay: 61,
+      collapseDay: 82,
+    });
+
+    const eventA = await createEvent(owner.id, campaign.id, {
+      title: "Event A",
+      basis: "FLOOR_START",
+      floor: 8,
+      offset: 0,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    // C (day 77) logged before B so the old log-recency bug would sink it below B.
+    await createEvent(owner.id, campaign.id, {
+      title: "Event C",
+      basis: "FLOOR_START",
+      floor: 8,
+      offset: 16,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    // B is "14 days after Event A" → day 75, between A (61) and C (77).
+    await createEvent(owner.id, campaign.id, {
+      title: "Event B",
+      basis: "EVENT",
+      floor: 8,
+      anchorEventId: eventA.id,
+      offset: 14,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual([
+      "Event C",
+      "Event B",
+      "Event A",
+    ]);
+  });
+
+  it("re-ranks EVENT-anchored dependents when their anchor's time moves (ADR 0008)", async () => {
+    const owner = await makeUser("timeref-anchor-move@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    await createGenericEntity(owner.id, campaign.id, {
+      type: "FLOOR",
+      name: "The Bone Market",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+      floorNumber: 8,
+      theme: "",
+      startDay: 61,
+      collapseDay: 82,
+    });
+
+    const anchor = await createEvent(owner.id, campaign.id, {
+      title: "Anchor",
+      basis: "FLOOR_START",
+      floor: 8,
+      offset: 0,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    // Dependent is "5 days after Anchor" → day 66 initially.
+    await createEvent(owner.id, campaign.id, {
+      title: "Dependent",
+      basis: "EVENT",
+      floor: 8,
+      anchorEventId: anchor.id,
+      offset: 5,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await createEvent(owner.id, campaign.id, {
+      title: "Marker",
+      basis: "FLOOR_START",
+      floor: 8,
+      offset: 10,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    // Initially: Marker (71), Dependent (66), Anchor (61).
+    let timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual([
+      "Marker",
+      "Dependent",
+      "Anchor",
+    ]);
+
+    // Move the anchor to day 76; Dependent ("5 days after") now resolves to 81 and
+    // must climb above both Anchor (76) and Marker (71).
+    await updateEvent(owner.id, campaign.id, anchor.id, {
+      title: "Anchor",
+      basis: "FLOOR_START",
+      floor: 8,
+      offset: 15,
+      unit: "DAY",
+      secret: false,
+    });
+
+    timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual([
+      "Dependent",
+      "Anchor",
+      "Marker",
+    ]);
+  });
+
   it("resolves the anchor title for EVENT-basis phrasing and validates the anchor", async () => {
     const owner = await makeUser("timeref-anchor@test.com");
     const campaign = await createCampaign(owner.id, { name: "Dungeon" });
