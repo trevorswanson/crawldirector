@@ -450,11 +450,16 @@ export type RelationshipPickerOptions = {
 /**
  * Build the grouped option model for the type picker given a chosen pairing.
  * Suggested types float to a leading group; the rest stay reachable under their
- * category. Nothing is hidden.
+ * category. Discouraged pairings (ADR 0008 §3) are dropped — *except* `keep`,
+ * the edge's existing type, which is always kept selectable so the **edit** form
+ * doesn't silently rewrite a service-created discouraged edge (e.g. an existing
+ * crawler→FLOOR `LOCATED_ON`) to whatever option happens to render first. The
+ * create form passes no `keep`, so discouraged types stay hidden there.
  */
 export function relationshipPickerOptions(
   sourceType: EntityTypeValue,
   targetType: EntityTypeValue,
+  { keep }: { keep?: RelationshipTypeValue } = {},
 ): RelationshipPickerOptions {
   const suggested = rankedSuggestedTypes(sourceType, targetType);
   const suggestedSet = new Set<RelationshipTypeValue>(suggested);
@@ -465,7 +470,8 @@ export function relationshipPickerOptions(
       (type) =>
         relationshipTypeMeta[type].group === group &&
         !suggestedSet.has(type) &&
-        !isDiscouragedRelationship(type, sourceType, targetType),
+        (type === keep ||
+          !isDiscouragedRelationship(type, sourceType, targetType)),
     );
     if (types.length > 0) {
       categories.push({ group, label: relationshipGroupLabels[group], types });

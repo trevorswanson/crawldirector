@@ -49,4 +49,21 @@ describe("relationship-types — discouraged crawler→FLOOR LOCATED_ON (ADR 000
   it("never defaults a crawler→FLOOR pairing to LOCATED_ON", () => {
     expect(defaultRelationshipType("CRAWLER", "FLOOR")).not.toBe("LOCATED_ON");
   });
+
+  it("keeps a discouraged current type selectable for the edit form via `keep`", () => {
+    // The create path hides crawler→FLOOR LOCATED_ON...
+    const create = relationshipPickerOptions("CRAWLER", "FLOOR");
+    expect(
+      create.categories.flatMap((category) => category.types),
+    ).not.toContain("LOCATED_ON");
+
+    // ...but editing a service-created edge of that type must keep it offered,
+    // so an unrelated edit can't silently rewrite the relationship type.
+    const edit = relationshipPickerOptions("CRAWLER", "FLOOR", {
+      keep: "LOCATED_ON",
+    });
+    expect(
+      edit.categories.flatMap((category) => category.types),
+    ).toContain("LOCATED_ON");
+  });
 });

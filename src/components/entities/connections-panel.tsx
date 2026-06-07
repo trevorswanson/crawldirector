@@ -257,9 +257,15 @@ function EditConnectionForm({
   const edgeTargetType = (
     connection.direction === "out" ? connection.other.type : viewerType
   ) as EntityTypeValue;
+  // Keep the edge's current type selectable even if it's now a discouraged
+  // pairing (ADR 0008 §3) — otherwise the controlled <select> would have no
+  // matching option and an unrelated edit could silently rewrite the type.
   const options = useMemo(
-    () => relationshipPickerOptions(edgeSourceType, edgeTargetType),
-    [edgeSourceType, edgeTargetType],
+    () =>
+      relationshipPickerOptions(edgeSourceType, edgeTargetType, {
+        keep: connection.type,
+      }),
+    [edgeSourceType, edgeTargetType, connection.type],
   );
   const [type, setType] = useState<RelationshipTypeValue>(connection.type);
 

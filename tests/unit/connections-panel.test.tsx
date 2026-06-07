@@ -251,6 +251,31 @@ describe("ConnectionsPanel", () => {
     await waitFor(() => expect(screen.queryByLabelText("Relationship type")).toBeNull());
   });
 
+  it("keeps an existing crawler→FLOOR LOCATED_ON type selectable when editing (ADR 0008 §3)", () => {
+    render(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="e1"
+        sourceType="CRAWLER"
+        connections={[
+          connection({
+            type: "LOCATED_ON",
+            other: { id: "f1", name: "Larracos", type: "FLOOR" },
+          }),
+        ]}
+        candidates={candidates}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit connection" }));
+
+    // The retired pairing is still the selected value (not silently rewritten)
+    // and its option is present in the picker.
+    const typeSelect = screen.getByLabelText("Relationship type") as HTMLSelectElement;
+    expect(typeSelect.value).toBe("LOCATED_ON");
+    expect(screen.getByRole("option", { name: "Located On" })).toBeDefined();
+  });
+
   it("prefills membership day bounds when editing a membership edge", () => {
     render(
       <ConnectionsPanel
