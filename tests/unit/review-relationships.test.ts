@@ -15,6 +15,7 @@ import {
   listPendingChangeSetsForUser,
   rejectChangeSet,
   setChangeOperationDecision,
+  setEntityLock,
 } from "@/server/services/review";
 
 function makeUser(email: string, name?: string) {
@@ -157,6 +158,37 @@ describe("pending relationship proposals", () => {
     });
     expect(op.blockedByLock).toBe(false);
     expect(op.isStale).toBe(false);
+  });
+
+  it("marks AI relationship creates blocked when either endpoint entity is locked", async () => {
+    const { dmId, campaignId, carlId, donutId } = await seed();
+    await setEntityLock(dmId, campaignId, donutId, { locked: true });
+
+    const set = await createPendingRelationshipChangeSet(dmId, campaignId, {
+      source: "AI",
+      title: "AI inferred locked endpoint",
+      operations: [
+        {
+          op: "CREATE_RELATIONSHIP",
+          patch: {
+            type: { to: "ALLY_OF" },
+            sourceId: { to: carlId },
+            targetId: { to: donutId },
+            secret: { to: false },
+          },
+        },
+      ],
+    });
+
+    const op = await prisma.changeOperation.findFirstOrThrow({ where: { changeSetId: set.id } });
+    expect(op.blockedByLock).toBe(true);
+
+    await prisma.changeOperation.update({
+      where: { id: op.id },
+      data: { decision: "ACCEPTED" },
+    });
+    await expect(approveChangeSet(dmId, campaignId, set.id)).rejects.toThrow(/locked/i);
+    expect(await prisma.relationship.count()).toBe(0);
   });
 
   it("falls back to the edge type for a CREATE label when an endpoint can't be resolved", async () => {

@@ -325,6 +325,96 @@ describe("inferRelationshipsForEntity", () => {
     expect(user).toContain(`${entityId} --MENTOR_OF--> ${other.id}`);
   });
 
+  it("refuses a locked target entity before calling the provider", async () => {
+    const { dmId, campaignId, entityId } = await seed();
+    await setEntityLock(dmId, campaignId, entityId, { locked: true });
+    resolveCampaignProvider.mockResolvedValue(fakeProvider({ summary: "x", description: "y", tags: [] }));
+
+    await expect(inferRelationshipsForEntity(dmId, campaignId, entityId)).rejects.toThrow(/locked/i);
+    expect(resolveCampaignProvider).not.toHaveBeenCalled();
+  });
+
+  it("does not offer locked candidate endpoints to the model", async () => {
+    const { dmId, campaignId, entityId } = await seed();
+    const locked = await createGenericEntity(dmId, campaignId, {
+      type: "NPC",
+      name: "Locked NPC",
+      summary: "Should stay out of AI proposals.",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const open = await createGenericEntity(dmId, campaignId, {
+      type: "NPC",
+      name: "Open NPC",
+      summary: "Available endpoint.",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    await setEntityLock(dmId, campaignId, locked.id, { locked: true });
+    const provider = fakeProvider({ summary: "unused", description: "unused", tags: [] });
+    provider.generateStructured.mockResolvedValue({ data: { relationships: [] } });
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    await expect(inferRelationshipsForEntity(dmId, campaignId, entityId)).rejects.toThrow(/relationships/i);
+
+    const user = provider.generateStructured.mock.calls[0][0].messages[0].content;
+    expect(user).not.toContain("Locked NPC");
+    expect(user).not.toContain(locked.id);
+    expect(user).toContain("Open NPC");
+    expect(user).toContain(open.id);
+  });
+
+  it("suppresses relationship proposals that duplicate pending relationship creates", async () => {
+    const { dmId, campaignId, entityId } = await seed();
+    const other = await createGenericEntity(dmId, campaignId, {
+      type: "NPC",
+      name: "Princess Donut",
+      summary: "A fellow guide.",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    await prisma.changeSet.create({
+      data: {
+        campaignId,
+        source: "AI",
+        title: "Existing pending relationship",
+        actorUserId: dmId,
+        operations: {
+          create: {
+            op: "CREATE_RELATIONSHIP",
+            targetType: "RELATIONSHIP",
+            patch: {
+              type: { to: "MENTOR_OF" },
+              sourceId: { to: entityId },
+              targetId: { to: other.id },
+              secret: { to: false },
+            },
+          },
+        },
+      },
+    });
+    resolveCampaignProvider.mockResolvedValue({
+      id: "anthropic",
+      model: "claude-opus-4-8",
+      generate: vi.fn(),
+      generateStructured: vi.fn().mockResolvedValue({
+        data: {
+          relationships: [
+            { sourceEntityId: entityId, targetEntityId: other.id, type: "MENTOR_OF", secret: false },
+          ],
+        },
+      }),
+    });
+
+    await expect(inferRelationshipsForEntity(dmId, campaignId, entityId)).rejects.toThrow(
+      /relationships/i,
+    );
+    expect(await prisma.changeSet.count({ where: { title: `Infer relationships for Mordecai` } })).toBe(0);
+  });
+
   it("refuses a model result with no usable relationship proposals", async () => {
     const { dmId, campaignId, entityId } = await seed();
     resolveCampaignProvider.mockResolvedValue({

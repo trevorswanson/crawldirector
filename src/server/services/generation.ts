@@ -196,11 +196,15 @@ export async function inferRelationshipsForEntity(
         summary: true,
         description: true,
         tags: true,
+        locked: true,
       },
     }),
   ]);
   if (!campaign) throw new ServiceError("Campaign not found.");
   if (!target) throw new ServiceError("Entity not found.");
+  if (target.locked) {
+    throw new ServiceError("This entity is locked. Unlock it before generating.");
+  }
 
   const provider = await resolveCampaignProvider(campaignId);
   if (!provider) {
@@ -209,11 +213,12 @@ export async function inferRelationshipsForEntity(
     );
   }
 
-  const [candidates, existing] = await Promise.all([
+  const [candidates, existing, pendingCreates] = await Promise.all([
     prisma.entity.findMany({
       where: {
         campaignId,
         status: CanonStatus.CANON,
+        locked: false,
         id: { not: entityId },
       },
       orderBy: [{ name: "asc" }],
@@ -241,26 +246,63 @@ export async function inferRelationshipsForEntity(
         targetEntity: { select: { name: true } },
       },
     }),
+    prisma.changeOperation.findMany({
+      where: {
+        targetType: "RELATIONSHIP",
+        op: "CREATE_RELATIONSHIP",
+        decision: { not: "REJECTED" },
+        changeSet: {
+          campaignId,
+          status: "PENDING",
+        },
+      },
+      select: {
+        patch: true,
+        editedPatch: true,
+        decision: true,
+      },
+    }),
   ]);
 
   if (candidates.length === 0) {
     throw new ServiceError("Add at least one other canon entity before inferring relationships.");
   }
 
+  const entityNameById = new Map([
+    [target.id, target.name],
+    ...candidates.map((candidate) => [candidate.id, candidate.name] as const),
+  ]);
+  const pendingExisting = pendingCreates
+    .map((operation) =>
+      relationshipCreatePatchToExistingEdge(
+        operation.decision === "EDITED" && operation.editedPatch
+          ? operation.editedPatch
+          : operation.patch,
+        entityNameById,
+      ),
+    )
+    .filter((edge): edge is InferRelationshipExistingEdge => {
+      if (!edge) return false;
+      return edge.sourceId === entityId || edge.targetId === entityId;
+    });
+
   const context = {
     campaignName: campaign.name,
     styleGuide: campaign.styleGuide,
     target,
     candidates,
-    existingRelationships: existing.map(
-      (edge): InferRelationshipExistingEdge => ({
-        sourceId: edge.sourceId,
-        sourceName: edge.sourceEntity.name,
-        targetId: edge.targetId,
-        targetName: edge.targetEntity.name,
-        type: edge.type,
-      }),
-    ),
+    existingRelationships: [
+      ...existing.map(
+        (edge): InferRelationshipExistingEdge => ({
+          sourceId: edge.sourceId,
+          sourceName: edge.sourceEntity.name,
+          targetId: edge.targetId,
+          targetName: edge.targetEntity.name,
+          type: edge.type,
+        }),
+      ),
+      ...pendingExisting,
+    ],
   };
   const { system, messages } = buildInferRelationshipsPrompt(context);
 
@@ -301,5 +343,31 @@ export async function inferRelationshipsForEntity(
     providerId: provider.id,
     model: provider.model,
     operationCount: operations.length,
+  };
+}
+
+function relationshipCreatePatchToExistingEdge(
+  rawPatch: unknown,
+  entityNameById: Map<string, string>,
+): InferRelationshipExistingEdge | null {
+  if (!rawPatch || typeof rawPatch !== "object" || Array.isArray(rawPatch)) return null;
+  const patch = rawPatch as Record<string, { to?: unknown }>;
+  const sourceId = patch.sourceId?.to;
+  const targetId = patch.targetId?.to;
+  const type = patch.type?.to;
+  if (typeof sourceId !== "string" || typeof targetId !== "string" || typeof type !== "string") {
+    return null;
+  }
+
+  const sourceName = entityNameById.get(sourceId);
+  const targetName = entityNameById.get(targetId);
+  if (!sourceName || !targetName) return null;
+
+  return {
+    sourceId,
+    sourceName,
+    targetId,
+    targetName,
+    type: type as InferRelationshipExistingEdge["type"],
   };
 }
