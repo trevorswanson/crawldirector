@@ -8,6 +8,23 @@
   [ADR 0004](./0004-event-time-model-and-ordering.md) and
   [ADR 0005](./0005-campaign-current-floor.md)
 
+> **Amendment (2026-06-07) — absolute days now refine intra-floor `rank`.** The
+> original decision (below) scoped absolute-day resolution to *display ranges
+> only* and left **all** intra-floor ordering to ADR 0004's floor-relative offset
+> + causality. That left a gap: an `EVENT`-anchored time ("14 days after Event
+> A") resolves to a concrete day but is neither a floor-relative offset nor a
+> causal link, so it fell through to log-recency append and sorted incorrectly
+> (e.g. above a later `FLOOR_START` event). We now use `resolveAbsoluteDay`
+> ([`time-resolve.ts`](../../src/lib/time-resolve.ts)) in `rank` derivation
+> ([`review.ts`](../../src/server/services/review.ts)): when an event and its
+> same-floor siblings resolve to concrete days, the `rank` is bracketed on that
+> single day axis. The floor-relative offset path is retained as the fallback for
+> floors with no day anchors, and unresolvable events still keep their manual
+> rank. This refines only the **within-floor** order; **cross-floor** ordering by
+> wall-clock remains deferred (ADR 0004). The lines below marked "ranges only" /
+> "ordering is untouched" are superseded by this amendment for the within-floor
+> case.
+
 ## Context
 
 "Floor" is the macro-clock of a DCC crawl, and it accreted **five** disconnected

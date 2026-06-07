@@ -10,6 +10,7 @@ import {
 } from "@/generated/prisma/client";
 import { orderFromCausality } from "@/lib/causality-order";
 import { ServiceError } from "@/lib/errors";
+import { readFloorData } from "@/lib/floor";
 import { generateRankBetween } from "@/lib/rank";
 import {
   buildTimeRef,
@@ -777,24 +778,6 @@ export type CampaignFloorMeta = {
   // FLOOR entities (visible to the viewer) for the current-floor picker.
   floorEntities: { id: string; name: string; floorNumber: number | null }[];
 };
-
-function readFloorData(value: unknown): {
-  floorNumber: number | null;
-  theme: string | null;
-  startDay: number | null;
-  collapseDay: number | null;
-} {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { floorNumber: null, theme: null, startDay: null, collapseDay: null };
-  }
-  const record = value as Record<string, unknown>;
-  return {
-    floorNumber: typeof record.floorNumber === "number" ? record.floorNumber : null,
-    theme: typeof record.theme === "string" && record.theme.length > 0 ? record.theme : null,
-    startDay: typeof record.startDay === "number" ? record.startDay : null,
-    collapseDay: typeof record.collapseDay === "number" ? record.collapseDay : null,
-  };
-}
 
 export type FloorRef = { id: string; name: string; floorNumber: number };
 
