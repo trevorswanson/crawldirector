@@ -1,6 +1,7 @@
 import { Role } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { aiProviderLabel, getAiProvider } from "@/lib/ai/providers";
+import { assertPublicEndpoint } from "@/server/ai/ssrf";
 import { decryptSecret, encryptSecret } from "@/server/crypto";
 import { prisma } from "@/server/db";
 
@@ -45,19 +46,13 @@ export type AiKeyView = {
   updatedAt: Date;
 };
 
-// Validate a custom endpoint URL: http/https only, parseable. Rejects junk so a
-// typo fails loudly at store time rather than at the provider call.
-function normalizeBaseUrl(raw: string): string {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new ServiceError("Enter a valid endpoint URL (e.g. http://localhost:11434/v1).");
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new ServiceError("The endpoint URL must use http or https.");
-  }
-  return url.toString().replace(/\/$/, "");
+// Validate a custom endpoint URL: http/https only, parseable, and — unless this
+// deployment opts into private endpoints — not pointed at a loopback/private/
+// metadata address. `assertPublicEndpoint` is the SSRF egress policy (CWE-918);
+// rejecting here fails loudly at store time rather than at the provider call.
+async function normalizeBaseUrl(raw: string): Promise<string> {
+  await assertPublicEndpoint(raw);
+  return new URL(raw).toString().replace(/\/$/, "");
 }
 
 // Store (or replace) the DM's key for a provider. The plaintext key is encrypted
@@ -88,9 +83,9 @@ export async function setAiKey(
     if (!rawBaseUrl) {
       throw new ServiceError("Enter the endpoint URL for this provider.");
     }
-    baseUrl = normalizeBaseUrl(rawBaseUrl);
+    baseUrl = await normalizeBaseUrl(rawBaseUrl);
   } else if (rawBaseUrl) {
-    baseUrl = normalizeBaseUrl(rawBaseUrl);
+    baseUrl = await normalizeBaseUrl(rawBaseUrl);
   }
 
   let model: string | null = null;

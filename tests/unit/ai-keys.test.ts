@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Role } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
@@ -167,6 +167,40 @@ describe("getDecryptedAiKey", () => {
 });
 
 describe("OpenAI-compatible providers", () => {
+  // These exercise the self-hosted/local endpoint feature (Ollama on localhost),
+  // which the SSRF egress policy gates behind an explicit opt-in. Enable it so the
+  // local-endpoint paths are reachable; the default-deny behaviour is covered
+  // separately below.
+  beforeEach(() => {
+    vi.stubEnv("AI_ALLOW_PRIVATE_ENDPOINTS", "1");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("rejects a private/loopback endpoint by default (SSRF egress policy)", async () => {
+    vi.stubEnv("AI_ALLOW_PRIVATE_ENDPOINTS", "");
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+
+    // Loopback, link-local cloud-metadata, and private LAN literals are all blocked.
+    for (const baseUrl of [
+      "http://127.0.0.1:11434/v1",
+      "http://169.254.169.254/latest/meta-data",
+      "http://192.168.1.10:8080/v1",
+    ]) {
+      await expect(
+        setAiKey(dm.id, campaign.id, {
+          providerId: "openai-compatible",
+          apiKey: "",
+          baseUrl,
+          model: "llama3.1",
+        }),
+      ).rejects.toBeInstanceOf(ServiceError);
+    }
+    expect(await prisma.aiKey.count()).toBe(0);
+  });
+
   it("stores a base URL + model, allows a blank key, and projects them in the safe view", async () => {
     const dm = await makeUser("dm@test.com");
     const campaign = await createCampaign(dm.id, { name: "Crawl" });
