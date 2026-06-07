@@ -27,6 +27,7 @@ import {
   updateEvent,
 } from "@/server/services/events";
 import {
+  applyAutoApprovedEntityChangeSet,
   applyAutoApprovedEventChangeSet,
   approveChangeSet,
 } from "@/server/services/review";
@@ -2080,6 +2081,131 @@ describe("typed timeRef (ADR 0004 slice 2)", () => {
       "Dependent",
       "Anchor",
       "Marker",
+    ]);
+  });
+
+  it("re-ranks a floor's events when its startDay anchor moves (ADR 0008)", async () => {
+    // The floor-anchor analogue of the event-time re-rank above: editing a FLOOR
+    // entity's startDay shifts the resolved day of every FLOOR_START event on it
+    // (and of EVENT-basis events transitively anchored to them on other floors),
+    // so their stored intra-floor rank must be re-derived.
+    const owner = await makeUser("timeref-floor-anchor-move@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    // Floor 8 runs days 61–82; floor 9 runs days 100–130. Anchors let FLOOR_START
+    // / FLOOR_COLLAPSE / EVENT times resolve to concrete days.
+    const floor8 = await createGenericEntity(owner.id, campaign.id, {
+      type: "FLOOR",
+      name: "The Bone Market",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+      floorNumber: 8,
+      theme: "",
+      startDay: 61,
+      collapseDay: 82,
+    });
+    await createGenericEntity(owner.id, campaign.id, {
+      type: "FLOOR",
+      name: "The Iron Tangle",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+      floorNumber: 9,
+      theme: "",
+      startDay: 100,
+      collapseDay: 130,
+    });
+
+    // Floor 8: a fixed FLOOR_COLLAPSE (day 82) and a FLOOR_START that tracks the
+    // floor's open day (day 61, moves with startDay).
+    await createEvent(owner.id, campaign.id, {
+      title: "F8 Collapse",
+      basis: "FLOOR_COLLAPSE",
+      floor: 8,
+      offset: 0,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    const f8Start = await createEvent(owner.id, campaign.id, {
+      title: "F8 Start",
+      basis: "FLOOR_START",
+      floor: 8,
+      offset: 0,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    // Floor 9: two fixed events, plus an EVENT-basis dependent anchored to the
+    // floor-8 start. It lives on floor 9, so it is reached only transitively (not
+    // as a floor-8 seed), and tracks F8 Start's day (61, moves with startDay).
+    await createEvent(owner.id, campaign.id, {
+      title: "F9 Marker",
+      basis: "FLOOR_COLLAPSE",
+      floor: 9,
+      offset: 0,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await createEvent(owner.id, campaign.id, {
+      title: "F9 Low",
+      basis: "FLOOR_START",
+      floor: 9,
+      offset: 0,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await createEvent(owner.id, campaign.id, {
+      title: "F9 After",
+      basis: "EVENT",
+      floor: 9,
+      anchorEventId: f8Start.id,
+      offset: 0,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    // Initially: floor 9 [Marker 130, Low 100, After 61], floor 8 [Collapse 82,
+    // Start 61]. Timeline is floor-desc, then later-in-fiction first.
+    let timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual([
+      "F9 Marker",
+      "F9 Low",
+      "F9 After",
+      "F8 Collapse",
+      "F8 Start",
+    ]);
+
+    // Move floor 8's open day 61 → 115 through the entity-update path. F8 Start now
+    // resolves to 115 (climbing above the fixed F8 Collapse at 82), and the
+    // transitively anchored F9 After climbs to 115 too (between F9 Low at 100 and
+    // F9 Marker at 130).
+    await applyAutoApprovedEntityChangeSet(owner.id, campaign.id, {
+      title: "Shift floor 8 open day",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: floor8.id,
+          patch: { "data.startDay": { from: 61, to: 115 } },
+        },
+      ],
+    });
+
+    timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual([
+      "F9 Marker",
+      "F9 After",
+      "F9 Low",
+      "F8 Start",
+      "F8 Collapse",
     ]);
   });
 

@@ -24,6 +24,14 @@
 > wall-clock remains deferred (ADR 0004). The lines below marked "ranges only" /
 > "ordering is untouched" are superseded by this amendment for the within-floor
 > case.
+>
+> A day-anchored `rank` is now also kept fresh when an anchor *moves*, in
+> [`review.ts`](../../src/server/services/review.ts): editing an `Event`'s time
+> re-derives every event transitively anchored to it (`EVENT` basis), and editing
+> a FLOOR entity's `data.startDay` / `data.collapseDay` re-derives every
+> `FLOOR_START` / `FLOOR_COLLAPSE` event on that floor plus their transitive
+> `EVENT`-basis dependents — otherwise a stale `rank` would keep showing the
+> pre-edit order.
 
 ## Context
 
