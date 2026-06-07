@@ -6,7 +6,7 @@ import {
   Role,
   Visibility,
 } from "@/generated/prisma/client";
-import { dataKeysFor } from "@/lib/entity-kinds";
+import { dataKeysFor, kindDataDefaults } from "@/lib/entity-kinds";
 import { ServiceError } from "@/lib/errors";
 import {
   createCrawlerSchema,
@@ -171,8 +171,9 @@ function entityCreatePatch(
   type: EntityType,
   input: Pick<
     CreateGenericEntityInput,
-    "name" | "summary" | "description" | "visibility" | "tags" | "isStub" | "itemTypeId" | "divine" | "unique" | "fleeting" | "aiDescription" | "floorNumber" | "theme" | "startDay" | "collapseDay"
-  >,
+    "name" | "summary" | "description" | "visibility" | "tags" | "isStub"
+  > &
+    Record<string, unknown>,
 ) {
   const core = entityCoreData(userId, campaignId, input);
   return {
@@ -186,31 +187,26 @@ function entityCreatePatch(
     tags: { to: core.tags },
     status: { to: core.status },
     ...(input.isStub !== undefined ? { isStub: { to: input.isStub } } : {}),
-    "data.itemTypeId": { to: input.itemTypeId ?? null },
-    "data.divine": { to: input.divine ?? false },
-    "data.unique": { to: input.unique ?? false },
-    "data.fleeting": { to: input.fleeting ?? false },
-    "data.aiDescription": { to: input.aiDescription ?? null },
-    // Bespoke `data.*` fields are derived from the type's entity-kind descriptor
-    // (ADR 0009) instead of a per-type `if (type === …)` block. A type with no
-    // kind contributes nothing here.
+    // All bespoke `data.*` fields are derived from the type's entity-kind
+    // descriptor (ADR 0009) instead of per-type `data.*` lines / an
+    // `if (type === …)` block. A type with no kind contributes nothing here.
     ...kindDataCreatePatch(type, input),
   } satisfies ReviewPatch;
 }
 
 // Build the `data.*` create-patch entries for a type's bespoke kind fields.
-// Empty string / absent normalizes to null (matching the previous per-field
-// nullIfEmpty / `?? null` handling for FLOOR's text + numeric fields).
+// Empty string / absent normalizes to the field's default (booleans → false,
+// everything else → null), matching the prior `?? false` / `?? null` handling.
 function kindDataCreatePatch(
   type: EntityType,
   input: Record<string, unknown>,
 ): ReviewPatch {
   const patch: ReviewPatch = {};
+  const defaults = kindDataDefaults(type);
   for (const key of dataKeysFor(type)) {
     const raw = input[key];
-    patch[`data.${key}`] = {
-      to: (raw === undefined || raw === "" ? null : raw) as ReviewPatch[string]["to"],
-    };
+    const value = raw === undefined || raw === "" ? defaults[key] ?? null : raw;
+    patch[`data.${key}`] = { to: value as ReviewPatch[string]["to"] };
   }
   return patch;
 }
@@ -511,34 +507,20 @@ export async function updateEntity(
     addPatch(patch, "isStub", true, false);
   }
 
-  const existingData = (existing.data as {
-    itemTypeId?: string | null;
-    divine?: boolean;
-    unique?: boolean;
-    fleeting?: boolean;
-    aiDescription?: string | null;
-    floorNumber?: number | null;
-    theme?: string | null;
-    startDay?: number | null;
-    collapseDay?: number | null;
-  }) || {};
-  addPatch(patch, "data.itemTypeId", existingData.itemTypeId ?? null, parsed.itemTypeId ?? null);
-  addPatch(patch, "data.divine", existingData.divine ?? false, parsed.divine ?? false);
-  addPatch(patch, "data.unique", existingData.unique ?? false, parsed.unique ?? false);
-  addPatch(patch, "data.fleeting", existingData.fleeting ?? false, parsed.fleeting ?? false);
-  addPatch(patch, "data.aiDescription", existingData.aiDescription ?? null, parsed.aiDescription ?? null);
-  // Bespoke `data.*` fields derive from the type's entity-kind descriptor
-  // (ADR 0009): one data-driven pass replaces the per-type FLOOR block. Empty
-  // string / absent normalizes to null (matching the prior nullIfEmpty/`?? null`).
+  // All bespoke `data.*` fields derive from the type's entity-kind descriptor
+  // (ADR 0009 slice 2): one data-driven pass replaces the per-type ITEM/FLOOR
+  // blocks. Empty string / absent normalizes to the field default (booleans →
+  // false, everything else → null), matching the prior `?? false` / `?? null`.
   const parsedData = parsed as Record<string, unknown>;
-  const existingDataRecord = existingData as Record<string, unknown>;
+  const existingDataRecord = (existing.data as Record<string, unknown>) || {};
+  const dataDefaults = kindDataDefaults(existing.type);
   for (const key of dataKeysFor(existing.type)) {
     const raw = parsedData[key];
     addPatch(
       patch,
       `data.${key}`,
-      existingDataRecord[key] ?? null,
-      raw === undefined || raw === "" ? null : raw,
+      existingDataRecord[key] ?? dataDefaults[key] ?? null,
+      raw === undefined || raw === "" ? dataDefaults[key] ?? null : raw,
     );
   }
 

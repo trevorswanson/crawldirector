@@ -1,7 +1,6 @@
 import { z } from "zod";
 
-import { dataKeysFor } from "@/lib/entity-kinds";
-import { floorDataSchema } from "@/lib/entity-kinds/floor";
+import { allKindDataKeys, allKindDataShape, dataKeysFor } from "@/lib/entity-kinds";
 import { optionalInt, optionalText } from "@/lib/zod-field-helpers";
 
 // Shared Zod schemas. Per docs/02-architecture.md every Server Action validates
@@ -128,6 +127,10 @@ const tagsSchema = z
       .slice(0, 20);
   });
 
+// Genuinely shared entity fields (ADR 0009 slice 2). Bespoke per-type `data.*`
+// fields (FLOOR, ITEM, …) live in their entity-kind descriptors and are spread
+// into the create/update *write* schemas via allKindDataShape() — not into the
+// core schema, so this validates only fields every entity has.
 const entityCoreSchema = z.object({
   name: z.string().trim().min(1, "Entity name is required").max(160),
   summary: optionalText(500),
@@ -135,19 +138,16 @@ const entityCoreSchema = z.object({
   visibility: z.enum(visibilityValues).default("DM_ONLY"),
   tags: tagsSchema,
   isStub: z.boolean().optional(),
-  itemTypeId: optionalText(100).nullable(),
-  divine: z.preprocess((val) => (val === undefined || val === null || val === "" ? undefined : val === "true" || val === true || val === "on"), z.boolean().optional()),
-  unique: z.preprocess((val) => (val === undefined || val === null || val === "" ? undefined : val === "true" || val === true || val === "on"), z.boolean().optional()),
-  fleeting: z.preprocess((val) => (val === undefined || val === null || val === "" ? undefined : val === "true" || val === true || val === "on"), z.boolean().optional()),
-  aiDescription: optionalText(10000).nullable(),
-  // FLOOR-entity bespoke fields come from the entity-kind registry (ADR 0009),
-  // their single source of truth. Still spread into the core schema for now so
-  // the shared create/update forms validate them; slice 2 moves them to
-  // kind-scoped validation and shrinks this schema back to genuinely core fields.
-  ...floorDataSchema.shape,
 });
 
+// The bespoke `data.*` fields of every registered kind, for the write schemas.
+// A static schema can't know the entity type at parse time, so the write schema
+// accepts the union of all kinds' fields; the patch builders persist only the
+// fields belonging to the actual type (dataKeysFor), so off-type fields are
+// validated-then-ignored — exactly the prior behavior, just derived from the
+// registry instead of flattened into entityCoreSchema.
 export const createGenericEntitySchema = entityCoreSchema.extend({
+  ...allKindDataShape(),
   type: z.enum(genericEntityTypeValues),
 });
 export type CreateGenericEntityInput = z.infer<
@@ -173,6 +173,7 @@ export const createCrawlerSchema = entityCoreSchema.extend({
 export type CreateCrawlerInput = z.infer<typeof createCrawlerSchema>;
 
 export const updateEntitySchema = entityCoreSchema.extend({
+  ...allKindDataShape(),
   type: z.enum(entityTypeValues),
   realName: optionalText(160),
   crawlerNo: optionalText(80),
@@ -206,15 +207,15 @@ export const crawlerOnlyKeys = Object.keys(createCrawlerSchema.shape).filter(
   (k) => !Object.keys(entityCoreSchema.shape).includes(k)
 );
 
-export const itemKeys = ["itemTypeId", "divine", "unique", "fleeting", "aiDescription"];
-
-// Derived from the FLOOR entity-kind descriptor (ADR 0009) so the data-key list
-// can no longer drift from the schema.
+// Per-type bespoke `data.*` key lists, derived from the entity-kind descriptors
+// (ADR 0009) so they can no longer drift from the schemas.
+export const itemKeys = dataKeysFor("ITEM");
 export const floorKeys = dataKeysFor("FLOOR");
 
 // Keys persisted into Entity.data (type-specific attributes), used by the lock
 // validator and the data.* patch builders in src/server/services/entities.ts.
-export const dataKeys = [...itemKeys, ...floorKeys];
+// Derived from the union of every registered kind's fields.
+export const dataKeys = allKindDataKeys();
 
 export const lockableFields = [
   ...lockableEntityFields,
