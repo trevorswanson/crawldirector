@@ -2209,6 +2209,80 @@ describe("typed timeRef (ADR 0004 slice 2)", () => {
     ]);
   });
 
+  it("re-ranks a floor's events when the floor's number moves (ADR 0008)", async () => {
+    // Moving a FLOOR entity to a different number re-keys the anchor map: events
+    // on the new number gain its open/collapse anchors, so their resolved days —
+    // and intra-floor rank — must be re-derived. Here a FLOOR_START and a
+    // FLOOR_COLLAPSE event on floor 9 don't compare while floor 9 is anchorless
+    // (different bases, no absolute day), so they keep log order; once the floor
+    // gains anchors they land on one day axis and reorder.
+    const owner = await makeUser("timeref-floor-number-move@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    // The floor entity is number 8 (anchors 61–82); floor 9 has no entity yet, so
+    // its events resolve to no absolute day.
+    const floor = await createGenericEntity(owner.id, campaign.id, {
+      type: "FLOOR",
+      name: "The Bone Market",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+      floorNumber: 8,
+      theme: "",
+      startDay: 61,
+      collapseDay: 82,
+    });
+
+    // On floor 9: a FLOOR_START at +30 (would be day 91) and a FLOOR_COLLAPSE at
+    // −30 (would be day 52). Logged in this order; while floor 9 is anchorless
+    // they keep newest-first log order.
+    await createEvent(owner.id, campaign.id, {
+      title: "Late start",
+      basis: "FLOOR_START",
+      floor: 9,
+      offset: 30,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await createEvent(owner.id, campaign.id, {
+      title: "Early collapse",
+      basis: "FLOOR_COLLAPSE",
+      floor: 9,
+      offset: 30,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    let timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual([
+      "Early collapse",
+      "Late start",
+    ]);
+
+    // Move the floor from 8 → 9. Floor 9's events now resolve against 61–82:
+    // Late start → 91, Early collapse → 52, so Late start sorts on top.
+    await applyAutoApprovedEntityChangeSet(owner.id, campaign.id, {
+      title: "Renumber floor to 9",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: floor.id,
+          patch: { "data.floorNumber": { from: 8, to: 9 } },
+        },
+      ],
+    });
+
+    timeline = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual([
+      "Late start",
+      "Early collapse",
+    ]);
+  });
+
   it("resolves the anchor title for EVENT-basis phrasing and validates the anchor", async () => {
     const owner = await makeUser("timeref-anchor@test.com");
     const campaign = await createCampaign(owner.id, { name: "Dungeon" });

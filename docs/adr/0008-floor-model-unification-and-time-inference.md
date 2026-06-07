@@ -28,10 +28,11 @@
 > A day-anchored `rank` is now also kept fresh when an anchor *moves*, in
 > [`review.ts`](../../src/server/services/review.ts): editing an `Event`'s time
 > re-derives every event transitively anchored to it (`EVENT` basis), and editing
-> a FLOOR entity's `data.startDay` / `data.collapseDay` re-derives every
-> `FLOOR_START` / `FLOOR_COLLAPSE` event on that floor plus their transitive
-> `EVENT`-basis dependents — otherwise a stale `rank` would keep showing the
-> pre-edit order.
+> a FLOOR entity's `data.startDay` / `data.collapseDay` (or its
+> `data.floorNumber`, which re-keys the anchor map for both the old and new
+> number) re-derives every `FLOOR_START` / `FLOOR_COLLAPSE` event on the affected
+> floors plus their transitive `EVENT`-basis dependents — otherwise a stale `rank`
+> would keep showing the pre-edit order.
 
 ## Context
 

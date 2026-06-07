@@ -2465,14 +2465,23 @@ async function applyUpdateEntity(
   await writeEntityProvenance(tx, changeSet, entityId, patch);
 
   // A FLOOR's open/collapse anchors place FLOOR_START / FLOOR_COLLAPSE event times
-  // (and their EVENT-basis dependents) on the absolute-day axis (ADR 0008), so an
-  // anchor edit re-orders the floor — re-derive those ranks, the floor analogue of
-  // the event-time re-rank above. Skip when neither anchor's value actually moved.
+  // (and their EVENT-basis dependents) on the absolute-day axis (ADR 0008), keyed
+  // by the floor's number. An anchor edit re-orders that floor; a number edit
+  // re-keys the anchor map for *both* the old and new number (the old number's
+  // events lose their anchor, the new number's gain it). Re-derive every affected
+  // floor — the floor analogue of the event-time re-rank above. Skip when nothing
+  // actually moved.
   if (
     entity.type === EntityType.FLOOR &&
-    ("data.startDay" in patch || "data.collapseDay" in patch)
+    ("data.startDay" in patch ||
+      "data.collapseDay" in patch ||
+      "data.floorNumber" in patch)
   ) {
     const before = readFloorData(entity.data);
+    const afterFloorNumber =
+      "data.floorNumber" in patch
+        ? optionalNumber(readTo(patch, "data.floorNumber"))
+        : before.floorNumber;
     const afterStartDay =
       "data.startDay" in patch
         ? optionalNumber(readTo(patch, "data.startDay"))
@@ -2481,10 +2490,16 @@ async function applyUpdateEntity(
       "data.collapseDay" in patch
         ? optionalNumber(readTo(patch, "data.collapseDay"))
         : before.collapseDay;
-    const anchorMoved =
+    const numberMoved = afterFloorNumber !== before.floorNumber;
+    const anchorsMoved =
       afterStartDay !== before.startDay || afterCollapseDay !== before.collapseDay;
-    if (anchorMoved && before.floorNumber != null) {
-      await rerankFloor(tx, changeSet.campaignId, before.floorNumber);
+    if (numberMoved || anchorsMoved) {
+      const affectedFloors = new Set<number>();
+      if (before.floorNumber != null) affectedFloors.add(before.floorNumber);
+      if (afterFloorNumber != null) affectedFloors.add(afterFloorNumber);
+      for (const floorNumber of affectedFloors) {
+        await rerankFloor(tx, changeSet.campaignId, floorNumber);
+      }
     }
   }
   await tx.auditLog.create({
