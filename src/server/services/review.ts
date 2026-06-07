@@ -3501,6 +3501,69 @@ async function rankForEvent(
   return derived ?? nextRankForFloor(tx, campaignId, orderKey, excludeEventId);
 }
 
+// When an event's in-game time changes, the resolved day of every event anchored
+// to it (directly or transitively, via EVENT basis) shifts too. Those dependents
+// are placed on the absolute-day axis (ADR 0008), so their stored `rank` is now
+// stale and must be re-derived against the post-edit state — otherwise e.g.
+// moving "A" later leaves "5 days after A" sorted by its old day. Call this after
+// the anchor's new time is committed. Dependents are recomputed in dependency
+// order (an anchor before the events that point at it) so each sees its
+// neighbours' fresh ranks; unresolvable / manual-ranked dependents (a null
+// derivation) are left untouched. Cycles are inert — they resolve to no day and
+// fall through to the manual rank.
+async function rerankAnchorDependents(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  anchorEventId: string,
+): Promise<void> {
+  const events = await tx.event.findMany({
+    where: { campaignId, status: { not: CanonStatus.ARCHIVED } },
+    select: { id: true, orderKey: true, rank: true, inGameTime: true },
+  });
+
+  // anchor id → events whose EVENT-basis time points at it.
+  const dependentsByAnchor = new Map<string, string[]>();
+  const byId = new Map<string, (typeof events)[number]>();
+  for (const event of events) {
+    byId.set(event.id, event);
+    const ref = readTimeRef(event.inGameTime);
+    if (ref.basis === "EVENT" && ref.anchorEventId) {
+      const list = dependentsByAnchor.get(ref.anchorEventId);
+      if (list) list.push(event.id);
+      else dependentsByAnchor.set(ref.anchorEventId, [event.id]);
+    }
+  }
+
+  // BFS out from the moved anchor: dependency order, so an anchor is re-ranked
+  // before anything that points at it.
+  const ordered: string[] = [];
+  const seen = new Set<string>([anchorEventId]);
+  const queue = [...(dependentsByAnchor.get(anchorEventId) ?? [])];
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    ordered.push(id);
+    for (const dependent of dependentsByAnchor.get(id) ?? []) {
+      if (!seen.has(dependent)) queue.push(dependent);
+    }
+  }
+
+  for (const id of ordered) {
+    const event = byId.get(id)!;
+    const rank = await deriveRankForFloor(
+      tx,
+      campaignId,
+      event.orderKey,
+      event.inGameTime as JsonValue,
+      id,
+    );
+    if (rank != null && rank !== event.rank) {
+      await tx.event.update({ where: { id }, data: { rank } });
+    }
+  }
+}
+
 async function applyEventOperation(
   tx: Prisma.TransactionClient,
   changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
@@ -3753,6 +3816,12 @@ async function applyUpdateEvent(
   }
 
   await tx.event.update({ where: { id: eventId }, data, select: { id: true } });
+
+  // A time change shifts the resolved day of any event anchored to this one, so
+  // re-derive their ranks now that the new time is committed (ADR 0008).
+  if ("inGameTime" in patch) {
+    await rerankAnchorDependents(tx, changeSet.campaignId, eventId);
+  }
 
   // Participant editing: when the patch carries a participant list, reconcile it
   // against the live rows — add new (entity, role) pairs, drop removed ones, and
