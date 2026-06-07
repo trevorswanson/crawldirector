@@ -1259,7 +1259,7 @@ describe("entity locking", () => {
         select: { field: true },
       })
     ).map((p) => p.field);
-    expect(npcProvFields.some((f) => f.startsWith("data."))).toBe(false);
+    expect(npcProvFields.some((f) => (f ?? "").startsWith("data."))).toBe(false);
   });
 });
 
