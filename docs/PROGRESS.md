@@ -13,6 +13,26 @@ keyword-scanning every doc.
 
 ### Active next slices
 
+- [ ] **Entity-kind registry ([ADR 0009](./adr/0009-entity-kind-registry.md),
+      accepted).** Consolidate per-type bespoke `data.*` fields into one
+      `EntityKind` descriptor per type and derive validation, data-key lists, the
+      reviewable/lockable field set, the form, and the detail display from it —
+      retiring the `type === "X"` branches in `validation.ts`, `entities.ts`,
+      `review.ts`, the entity form, and the detail page. Pure app-layer refactor;
+      **no schema change / migration** (bespoke fields already live in
+      `Entity.data`). Phased, each behavior-preserving:
+      - [ ] **Slice 1 — registry scaffold + FLOOR.** Add `EntityKind` / `kindFor`,
+            port FLOOR's four `data.*` fields into `FLOOR_KIND.dataSchema`, derive
+            `floorKeys` and the FLOOR slice of `dataFields` from it, and route the
+            FLOOR form block + the create/update patch entries through the
+            descriptor. Delete the inline FLOOR branches.
+      - [ ] **Slice 2 — ITEM + derive the reviewable-field set wholesale.** Port
+            ITEM's fields, make `dataFields` (review.ts) a derivation over all
+            registered descriptors, and shrink `entityCoreSchema` back to genuinely
+            shared fields.
+      - [ ] **Slice 3 — display slot + next bespoke type as proof.** Add the
+            `DisplayPanel` slot, move FLOOR's special display into it, and onboard
+            the next bespoke type entirely through a new descriptor file.
 - [ ] **M4 generator expansion.** Add bulk-stub scaffolding, a generation panel
       for bulk runs, a `Job` table + worker for bulk/async runs, and usage/cost
       tracking with spend caps.

@@ -1,6 +1,8 @@
 # ADR 0009 — Per-type entity-kind registry (consolidate bespoke type fields)
 
-- **Status:** proposed — tracked for later implementation (no code yet)
+- **Status:** accepted — on the roadmap (see [`11-roadmap.md`](../11-roadmap.md))
+  and tracked in [`PROGRESS.md`](../PROGRESS.md); delivered in phases (slice 1,
+  registry scaffold + FLOOR, underway).
 - **Date:** 2026-06-07
 - **Milestone:** Cross-cutting (entity layer). Surfaced during M3/M4 as FLOOR and
   ITEM grew bespoke fields; should land before the catalog types (BOX, SKILL,
