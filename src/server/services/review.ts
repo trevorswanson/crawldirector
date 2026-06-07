@@ -108,17 +108,13 @@ const crawlerFields = new Set([
   "crawler.currentFloor",
 ]);
 
-// Reviewable/lockable type-specific fields. ITEM's fields are still listed by
-// hand (slice 2 ports them); every registered entity-kind's bespoke fields
-// (ADR 0009) are derived from the registry so they can't drift from the schema.
-const dataFields = new Set([
-  "data.itemTypeId",
-  "data.divine",
-  "data.unique",
-  "data.fleeting",
-  "data.aiDescription",
-  ...allKindDataKeys().map((key) => `data.${key}`),
-]);
+// Reviewable/lockable type-specific fields, derived wholesale from the
+// entity-kind registry (ADR 0009 slice 2): every registered kind's bespoke
+// `data.*` fields are reviewable/lockable, so the set can no longer drift from
+// the schemas and a new field is never silently un-reviewable.
+const dataFields = new Set(
+  allKindDataKeys().map((key) => `data.${key}`),
+);
 
 async function getMembership(userId: string, campaignId: string) {
   return prisma.membership.findUnique({

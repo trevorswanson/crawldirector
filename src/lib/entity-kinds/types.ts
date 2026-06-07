@@ -18,4 +18,11 @@ export interface EntityKind {
   readonly type: string;
   /** The bespoke `data.*` fields for this type, as a Zod object schema. */
   readonly dataSchema: z.ZodObject<z.ZodRawShape>;
+  /**
+   * The normalized value stored when a bespoke field is empty/absent. Defaults
+   * to `null` for any key not listed here; declare a field (e.g. a boolean flag)
+   * whose empty value is something other than `null` — the patch builders read
+   * this so an unset flag persists as `false`, not `null`. Optional.
+   */
+  readonly dataDefaults?: Readonly<Record<string, unknown>>;
 }

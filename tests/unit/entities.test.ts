@@ -1202,6 +1202,65 @@ describe("entity locking", () => {
     const finalData = (finalItem?.data as Record<string, unknown>) || {};
     expect(finalData["unique"]).toBe(false);
   });
+
+  it("scopes bespoke data.* provenance to the type's entity-kind (ADR 0009)", async () => {
+    const owner = await makeUser("kind-data@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    // An ITEM created without flags stores a concrete `false` (descriptor
+    // default), not null — preserving the prior `?? false` behavior — and its
+    // bespoke fields route through the patch, so they get data.* provenance.
+    const item = await createGenericEntity(owner.id, campaign.id, {
+      type: "ITEM",
+      name: "Plain Dagger",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const itemData =
+      ((await getEntityForUser(owner.id, campaign.id, item.id))
+        ?.data as Record<string, unknown>) || {};
+    expect(itemData["divine"]).toBe(false);
+    expect(itemData["unique"]).toBe(false);
+    expect(itemData["fleeting"]).toBe(false);
+    expect(itemData["itemTypeId"]).toBeNull();
+    expect(itemData["aiDescription"]).toBeNull();
+
+    const itemProvFields = (
+      await prisma.provenance.findMany({
+        where: { entityId: item.id },
+        select: { field: true },
+      })
+    ).map((p) => p.field);
+    expect(itemProvFields).toEqual(
+      expect.arrayContaining([
+        "data.itemTypeId",
+        "data.divine",
+        "data.unique",
+        "data.fleeting",
+        "data.aiDescription",
+      ]),
+    );
+
+    // A type with no entity-kind descriptor contributes no bespoke fields to the
+    // create patch, so it records no data.* provenance (no more spurious rows).
+    const npc = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Mordecai",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const npcProvFields = (
+      await prisma.provenance.findMany({
+        where: { entityId: npc.id },
+        select: { field: true },
+      })
+    ).map((p) => p.field);
+    expect(npcProvFields.some((f) => (f ?? "").startsWith("data."))).toBe(false);
+  });
 });
 
 describe("world-browser facets", () => {

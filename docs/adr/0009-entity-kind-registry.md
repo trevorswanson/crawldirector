@@ -1,8 +1,9 @@
 # ADR 0009 — Per-type entity-kind registry (consolidate bespoke type fields)
 
 - **Status:** accepted — on the roadmap (see [`11-roadmap.md`](../11-roadmap.md))
-  and tracked in [`PROGRESS.md`](../PROGRESS.md); delivered in phases (slice 1,
-  registry scaffold + FLOOR, underway).
+  and tracked in [`PROGRESS.md`](../PROGRESS.md); delivered in phases (slices 1–2
+  done: registry scaffold + FLOOR, then ITEM + reviewable-set derivation; slice 3,
+  the display/form slot + a registry-driven apply-path `data` builder, remains).
 - **Date:** 2026-06-07
 - **Milestone:** Cross-cutting (entity layer). Surfaced during M3/M4 as FLOOR and
   ITEM grew bespoke fields; should land before the catalog types (BOX, SKILL,
@@ -133,19 +134,27 @@ required by this ADR.
 
 ### Phased delivery (each shippable, behavior-preserving)
 
-1. **Registry scaffold + FLOOR.** Add `EntityKind` / `kindFor`, port FLOOR's
+1. **Registry scaffold + FLOOR.** ✅ Add `EntityKind` / `kindFor`, port FLOOR's
    four `data.*` fields into `FLOOR_KIND.dataSchema`, derive `floorKeys` and the
    FLOOR slice of `dataFields` from it, and route the FLOOR form block + the
    create/update patch entries through the descriptor. Delete the inline FLOOR
    branches. ITEM and everything else untouched.
-2. **ITEM + derive the reviewable-field set wholesale.** Port ITEM's fields,
+2. **ITEM + derive the reviewable-field set wholesale.** ✅ Port ITEM's fields,
    then make `dataFields` (review.ts) a *derivation* over all registered
    descriptors so no field is hand-registered. `entityCoreSchema` drops its
-   FLOOR/ITEM slices and is genuinely core again.
+   FLOOR/ITEM slices and is genuinely core again. (Note: a static Zod schema
+   can't know the type at parse time, so the *write* schema accepts the union of
+   all kinds' fields and the patch builders persist only the type's own — the
+   key/reviewable sets still can't drift.)
 3. **Display slot + the next bespoke type as proof.** Add the `DisplayPanel`
    slot, move FLOOR's special display into `FloorPanel`, and onboard the next
    type that needs bespoke fields (e.g. BOX or a catalog type) entirely through a
-   new descriptor file — confirming "one file, no scattered branches."
+   new descriptor file — confirming "one file, no scattered branches." This slice
+   also retires the **last** hardcoded `type === …` `data.*` lists discovered
+   during slices 1–2: the canonical apply-path data assembly in
+   [`review.ts`](../../src/server/services/review.ts) (`applyCreateEntity`, the
+   update `buildEntityData`, and `getCurrentValue`) — replaced by a
+   registry-driven `data` builder — plus the ITEM form and detail display.
 
 ## Consequences
 

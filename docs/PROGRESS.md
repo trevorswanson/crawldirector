@@ -23,13 +23,18 @@ keyword-scanning every doc.
       `Entity.data`). Phased, each behavior-preserving:
       - [x] **Slice 1 — registry scaffold + FLOOR.** ✅ (2026-06-07) — see the
             section below.
-      - [ ] **Slice 2 — ITEM + derive the reviewable-field set wholesale.** Port
-            ITEM's fields, make `dataFields` (review.ts) a derivation over all
-            registered descriptors, and shrink `entityCoreSchema` back to genuinely
-            shared fields.
+      - [x] **Slice 2 — ITEM + derive the reviewable-field set wholesale.** ✅
+            (2026-06-07) — see the section below.
       - [ ] **Slice 3 — display slot + next bespoke type as proof.** Add the
             `DisplayPanel` slot, move FLOOR's special display into it, and onboard
-            the next bespoke type entirely through a new descriptor file.
+            the next bespoke type entirely through a new descriptor file. **Also
+            fold in the apply-path data assembly** still hardcoded in
+            [`review.ts`](../src/server/services/review.ts) (`applyCreateEntity`,
+            the update `buildEntityData`, and `getCurrentValue`'s `data.*` switch),
+            plus the ITEM form (`ItemFields` + the `aiDescription` block in
+            `CoreFields`) and the entity-detail ITEM display — the remaining
+            hardcoded `type === "ITEM"/"FLOOR"` lists, once a `DisplayPanel`/form
+            slot + a registry-driven `data` builder exist.
 - [ ] **M4 generator expansion.** Add bulk-stub scaffolding, a generation panel
       for bulk runs, a `Job` table + worker for bulk/async runs, and usage/cost
       tracking with spend caps.
@@ -86,6 +91,80 @@ keyword-scanning every doc.
       - **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
+
+## Entity-kind registry — ITEM + derive the reviewable set (ADR 0009 slice 2) ✅ (2026-06-07)
+
+**Goal:** continue [ADR 0009](./adr/0009-entity-kind-registry.md) (accepted) —
+port the ITEM type's bespoke `data.*` fields into the registry, **derive the
+reviewable/lockable field set wholesale** from all registered descriptors, and
+shrink `entityCoreSchema` back to genuinely shared fields. Pure application-layer
+refactor: **no schema change, no migration**, behavior preserved (the same fields
+validate, persist, review, lock, and render).
+
+- [x] **ITEM descriptor** (`src/lib/entity-kinds/item.ts`): `itemDataSchema` +
+      `ITEM_KIND` hold ITEM's five `data.*` fields (`itemTypeId`/`divine`/`unique`/
+      `fleeting`/`aiDescription`) once. The boolean flags stay `.optional()` (so the
+      input key stays optional — `.default(false)` flips the inferred key to
+      *required*); instead the descriptor declares `dataDefaults:
+      { divine:false, unique:false, fleeting:false }`, the new optional
+      `EntityKind.dataDefaults` slot that tells the patch builders an unset flag
+      persists as `false` (everything else defaults to `null`), preserving the
+      prior `?? false` / `?? null` handling.
+- [x] **Registry** (`src/lib/entity-kinds/index.ts`): registered `ITEM` (before
+      `FLOOR`, to match the historical `dataKeys` order). Added `allKindDataShape()`
+      (the merged Zod shape for the write schemas) and `kindDataDefaults(type)` (the
+      per-field empty-value map). `allKindDataKeys`/`dataKeysFor` unchanged.
+- [x] **`entityCoreSchema` is core again** (`validation.ts`): dropped the ITEM
+      fields *and* the `...floorDataSchema.shape` spread — it now validates only
+      `name`/`summary`/`description`/`visibility`/`tags`/`isStub`. The bespoke
+      fields are spread into the **write** schemas
+      (`createGenericEntitySchema`/`updateEntitySchema`) via `allKindDataShape()`.
+      `itemKeys`/`floorKeys` are now `dataKeysFor("ITEM"|"FLOOR")` and `dataKeys` is
+      `allKindDataKeys()` — every key list derives from the descriptors.
+- [x] **Deviation from the ADR's "validate for its type only" sketch (noted):** a
+      static Zod schema can't know the entity type at parse time, so the write
+      schema accepts the *union* of all kinds' fields; the patch builders persist
+      only `dataKeysFor(type)`, so off-type fields are validated-then-ignored (the
+      exact prior behavior). The ADR's core win — `entityCoreSchema` no longer
+      carries every type's attributes, and the key/reviewable sets can't drift —
+      holds. The union shape is spread explicitly (`...itemDataSchema.shape,
+      ...floorDataSchema.shape`) rather than iterated over the type-erased registry
+      so the inferred input types keep each field's precise type.
+- [x] **Patch builders fully data-driven** (`entities.ts`): deleted the hardcoded
+      ITEM `data.*` lines from the create patch and the ITEM `addPatch` lines from
+      the update patch. Both now iterate `dataKeysFor(type)` with
+      `kindDataDefaults(type)` for the empty value (booleans → `false`, else
+      `null`), so a non-kind type contributes no `data.*` patch entries.
+- [x] **Reviewable-field set derived wholesale** (`review.ts`): `dataFields` is now
+      just `new Set(allKindDataKeys().map((k) => \`data.${k}\`))` — the hand-listed
+      ITEM keys are gone, so a registered kind's fields are automatically
+      reviewable/lockable and can't drift from the schema.
+- [x] **Behavior preserved; one intentional cleanup.** Stored `data` is unchanged
+      (the canonical writer `applyCreateEntity` still composes the JSON). The one
+      observable change: a **non-kind** entity (e.g. NPC) no longer records the five
+      spurious `data.*` provenance rows on create (its patch carries no `data.*`
+      keys) — strictly more correct. ITEM/FLOOR create/update/lock/provenance are
+      byte-identical, and the ITEM form DOM is untouched.
+- [x] **Tests:** extended `entity-kinds` (ITEM descriptor resolve, per-type +
+      unioned data keys, `allKindDataShape`, `kindDataDefaults`, ITEM flag/text
+      parse); new `entities` DB-backed case asserting ITEM omitted-flags persist as
+      `false` + ITEM records `data.*` provenance while a non-kind NPC records none.
+      Existing `entities`/`review`/`events`/`generation`/`entity-forms`/
+      `entity-page`/`dm-actions`/`validation` suites pass unchanged. lint (0 errors;
+      2 pre-existing settings warnings), typecheck, build, and the full coverage
+      gate green (1007 tests; statements 95.27%, branches 88.2%, functions 97.65%,
+      lines 97.27%).
+- [x] **Verification boundary:** pure, behavior-preserving refactor (no schema/
+      migration, untouched form DOM, identical stored data), covered by the
+      DB-backed `entities`/`review`/`events` suites and the real-component form/page
+      suites (same precedent + port-3000 constraint as prior slices).
+- [x] **Remaining (folded into slice 3 / open backlog):** the canonical
+      apply-path `data` assembly is still hardcoded in `review.ts`
+      (`applyCreateEntity`, the update `buildEntityData`, `getCurrentValue`'s
+      `data.*` switch), as is the ITEM form (`ItemFields` + the `aiDescription`
+      block) and the entity-detail ITEM display. Slice 3 adds the `DisplayPanel`/
+      form slot + a registry-driven `data` builder and retires these last
+      hardcoded `type === …` lists.
 
 ## Entity-kind registry — registry scaffold + FLOOR (ADR 0009 slice 1) ✅ (2026-06-07)
 
