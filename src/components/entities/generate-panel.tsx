@@ -5,7 +5,11 @@ import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 import { Sparkles } from "lucide-react";
 
-import { fleshOutEntityAction, type GenerateActionState } from "@/app/(dm)/actions";
+import {
+  fleshOutEntityAction,
+  inferRelationshipsForEntityAction,
+  type GenerateActionState,
+} from "@/app/(dm)/actions";
 import { Kicker } from "@/components/ui/kicker";
 
 // AI generation panel on the entity detail rail (M4 — docs/04-ai-integration.md).
@@ -15,7 +19,17 @@ import { Kicker } from "@/components/ui/kicker";
 // Field-level locks are respected by the generator (invariant #2); a fully
 // locked entity is rejected with a safe message.
 
-function FleshButton({ locked }: { locked: boolean }) {
+function GenerateButton({
+  locked,
+  idleLabel,
+  pendingLabel,
+  title,
+}: {
+  locked: boolean;
+  idleLabel: string;
+  pendingLabel: string;
+  title: string;
+}) {
   const { pending } = useFormStatus();
   return (
     <button
@@ -24,7 +38,7 @@ function FleshButton({ locked }: { locked: boolean }) {
       title={
         locked
           ? "Entity is locked — unlock it to generate"
-          : "Generate a richer summary, description, and tags as a review proposal"
+          : title
       }
       className="inline-flex items-center gap-[6px] border px-[10px] py-[5px] font-mono text-[10px] uppercase tracking-[.08em] transition-[filter,color] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
       style={{
@@ -34,8 +48,27 @@ function FleshButton({ locked }: { locked: boolean }) {
       }}
     >
       <Sparkles aria-hidden size={12} />
-      {pending ? "Generating…" : "Flesh out"}
+      {pending ? pendingLabel : idleLabel}
     </button>
+  );
+}
+
+function ReviewQueueLink({
+  campaignId,
+  changeSetId,
+  label = "Open Review Queue ↗",
+}: {
+  campaignId: string;
+  changeSetId?: string;
+  label?: string;
+}) {
+  return (
+    <Link
+      href={`/campaigns/${campaignId}/review${changeSetId ? `?selected=${changeSetId}` : ""}`}
+      className="underline hover:text-[var(--ink)]"
+    >
+      {label}
+    </Link>
   );
 }
 
@@ -48,8 +81,12 @@ export function GeneratePanel({
   entityId: string;
   locked: boolean;
 }) {
-  const [state, formAction] = useActionState<GenerateActionState, FormData>(
+  const [fleshState, fleshFormAction] = useActionState<GenerateActionState, FormData>(
     fleshOutEntityAction.bind(null, campaignId, entityId),
+    undefined,
+  );
+  const [relationshipState, relationshipFormAction] = useActionState<GenerateActionState, FormData>(
+    inferRelationshipsForEntityAction.bind(null, campaignId, entityId),
     undefined,
   );
 
@@ -62,23 +99,48 @@ export function GeneratePanel({
         Draft a richer summary, description, and tags. The result lands in the
         Review Queue as a proposal — nothing becomes canon until you approve it.
       </p>
-      <form action={formAction}>
-        <FleshButton locked={locked} />
-      </form>
-      {state?.error && (
+      <div className="flex flex-wrap gap-2">
+        <form action={fleshFormAction}>
+          <GenerateButton
+            locked={locked}
+            idleLabel="Flesh out"
+            pendingLabel="Generating…"
+            title="Generate a richer summary, description, and tags as a review proposal"
+          />
+        </form>
+        <form action={relationshipFormAction}>
+          <GenerateButton
+            locked={locked}
+            idleLabel="Infer relationships"
+            pendingLabel="Inferring…"
+            title="Propose likely relationships involving this entity"
+          />
+        </form>
+      </div>
+      {fleshState?.error && (
         <p role="alert" className="mt-2 text-[11px] text-[var(--no)]">
-          {state.error}
+          {fleshState.error}
         </p>
       )}
-      {state?.success && (
+      {fleshState?.success && (
         <p className="mt-2 text-[11px] text-[var(--ok)]">
-          {state.success}{" "}
-          <Link
-            href={`/campaigns/${campaignId}/review${state.changeSetId ? `?selected=${state.changeSetId}` : ""}`}
-            className="underline hover:text-[var(--ink)]"
-          >
-            Open Review Queue ↗
-          </Link>
+          {fleshState.success}{" "}
+          <ReviewQueueLink campaignId={campaignId} changeSetId={fleshState.changeSetId} />
+        </p>
+      )}
+      {relationshipState?.error && (
+        <p role="alert" className="mt-2 text-[11px] text-[var(--no)]">
+          {relationshipState.error}
+        </p>
+      )}
+      {relationshipState?.success && (
+        <p className="mt-2 text-[11px] text-[var(--ok)]">
+          {relationshipState.success}{" "}
+          <ReviewQueueLink
+            campaignId={campaignId}
+            changeSetId={relationshipState.changeSetId}
+            label="Open relationship proposals ↗"
+          />
         </p>
       )}
     </div>

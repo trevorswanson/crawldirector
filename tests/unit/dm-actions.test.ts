@@ -39,6 +39,7 @@ const {
   grantEntityKnowledge,
   revokeKnowledge,
   fleshOutEntity,
+  inferRelationshipsForEntity,
   signOut,
   redirect,
   revalidatePath,
@@ -81,6 +82,7 @@ const {
   grantEntityKnowledge: vi.fn(),
   revokeKnowledge: vi.fn(),
   fleshOutEntity: vi.fn(),
+  inferRelationshipsForEntity: vi.fn(),
   signOut: vi.fn(),
   redirect: vi.fn(() => {
     throw new Error("NEXT_REDIRECT");
@@ -137,7 +139,7 @@ vi.mock("@/server/services/knowledge", () => ({
   grantEntityKnowledge,
   revokeKnowledge,
 }));
-vi.mock("@/server/services/generation", () => ({ fleshOutEntity }));
+vi.mock("@/server/services/generation", () => ({ fleshOutEntity, inferRelationshipsForEntity }));
 vi.mock("@/server/auth", () => ({ signOut }));
 vi.mock("next/navigation", () => ({ redirect }));
 vi.mock("next/cache", () => ({ revalidatePath }));
@@ -194,6 +196,7 @@ import {
   grantEntityKnowsAboutAction,
   revokeKnowledgeAction,
   fleshOutEntityAction,
+  inferRelationshipsForEntityAction,
 } from "@/app/(dm)/actions";
 
 import { ServiceError } from "@/lib/errors";
@@ -2015,6 +2018,39 @@ describe("fleshOutEntityAction", () => {
 
     fleshOutEntity.mockRejectedValueOnce(new Error("boom"));
     expect((await fleshOutEntityAction("c1", "e1", undefined, form({})))?.error).toBe(
+      "Generation failed. Please try again.",
+    );
+  });
+});
+
+describe("inferRelationshipsForEntityAction", () => {
+  it("files relationship proposals and returns a success message + link, revalidating queue + entity", async () => {
+    inferRelationshipsForEntity.mockResolvedValue({
+      changeSetId: "cs2",
+      providerId: "anthropic",
+      model: "claude-opus-4-8",
+      operationCount: 2,
+    });
+
+    const result = await inferRelationshipsForEntityAction("c1", "e1", undefined, form({}));
+
+    expect(inferRelationshipsForEntity).toHaveBeenCalledWith("u1", "c1", "e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(result?.success).toContain("2 relationship");
+    expect(result?.success).toContain("claude-opus-4-8");
+    expect(result?.changeSetId).toBe("cs2");
+    expect(result?.error).toBeUndefined();
+  });
+
+  it("surfaces a ServiceError message and a generic fallback", async () => {
+    inferRelationshipsForEntity.mockRejectedValueOnce(new ServiceError("No usable relationships."));
+    expect((await inferRelationshipsForEntityAction("c1", "e1", undefined, form({})))?.error).toBe(
+      "No usable relationships.",
+    );
+
+    inferRelationshipsForEntity.mockRejectedValueOnce(new Error("boom"));
+    expect((await inferRelationshipsForEntityAction("c1", "e1", undefined, form({})))?.error).toBe(
       "Generation failed. Please try again.",
     );
   });

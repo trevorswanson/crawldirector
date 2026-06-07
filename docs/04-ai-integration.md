@@ -78,14 +78,29 @@ prompt id+version recorded so approval writes complete provenance). A DM-only
 triggers it; the result links straight to the Review Queue. Nothing becomes canon
 without DM approval.
 
+**Status (M4 slice 4, delivered):** **relationship inference** is live for one
+target entity at a time. The pure generator lives in
+[`src/server/ai/generators/infer-relationships.ts`](../../src/server/ai/generators/infer-relationships.ts):
+it frames the target, candidate canon entities, existing target relationships,
+and valid relationship types, then filters the structured model output down to
+usable `CREATE_RELATIONSHIP` review operations (dropping unknown/self/non-target
+edges, duplicates, and discouraged duplicate floor-position paths). The
+orchestration is `inferRelationshipsForEntity`
+([`src/server/services/generation.ts`](../../src/server/services/generation.ts)),
+which files the output as a **PENDING relationship Change Set** with AI
+provider/model/prompt provenance. The entity detail rail's **Infer
+relationships** action links the created proposal set straight to the Review
+Queue.
+
 Planned generator families (build incrementally — see roadmap):
 
 - **Entity fleshing:** expand a stub into a full entity ("flesh out Floor 7",
   "detail this faction"). **(Delivered — see status above.)**
+- **Relationship inference:** propose edges among existing entities ("who would
+  realistically ally/rival here?"). **(Delivered for one target entity at a
+  time — see status above.)**
 - **Bulk scaffolding:** generate N stubs ("10 mob types for the ice floor",
   "the nine Faction-Wars armies").
-- **Relationship inference:** propose edges among existing entities ("who would
-  realistically ally/rival here?").
 - **Event & consequence generation:** "given this event, propose downstream
   effects and causal links" — directly feeds the causality graph.
 - **Crawler-interface flavor:** in-fiction System messages, achievement text,

@@ -56,7 +56,7 @@ import {
   grantEntityKnowledge,
   revokeKnowledge,
 } from "@/server/services/knowledge";
-import { fleshOutEntity } from "@/server/services/generation";
+import { fleshOutEntity, inferRelationshipsForEntity } from "@/server/services/generation";
 import {
   approveChangeSet,
   approveChangeSetRun,
@@ -400,6 +400,8 @@ export async function fleshOutEntityAction(
   _prev: GenerateActionState,
   _formData: FormData,
 ): Promise<GenerateActionState> {
+  void _prev;
+  void _formData;
   const user = await requireUser();
   try {
     const result = await fleshOutEntity(user.id, campaignId, entityId);
@@ -413,6 +415,32 @@ export async function fleshOutEntityAction(
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
     console.error("Flesh out entity action failed:", error);
+    return { error: "Generation failed. Please try again.", timestamp: Date.now() };
+  }
+}
+
+export async function inferRelationshipsForEntityAction(
+  campaignId: string,
+  entityId: string,
+  _prev: GenerateActionState,
+  _formData: FormData,
+): Promise<GenerateActionState> {
+  void _prev;
+  void _formData;
+  const user = await requireUser();
+  try {
+    const result = await inferRelationshipsForEntity(user.id, campaignId, entityId);
+    revalidatePath(`/campaigns/${campaignId}/review`);
+    revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
+    const noun = result.operationCount === 1 ? "relationship" : "relationships";
+    return {
+      success: `${result.operationCount} ${noun} proposed (${result.model}). Review ${result.operationCount === 1 ? "it" : "them"} in the queue.`,
+      changeSetId: result.changeSetId,
+      timestamp: Date.now(),
+    };
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    console.error("Infer relationships action failed:", error);
     return { error: "Generation failed. Please try again.", timestamp: Date.now() };
   }
 }

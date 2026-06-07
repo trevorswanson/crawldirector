@@ -431,17 +431,42 @@ function isRelationshipReviewOp(
 }
 
 // Lock/staleness flags for a pending relationship operation, mirroring
-// evaluateEntityOperationFlags. CREATE has no target, so it is never blocked or
-// stale. Edges carry a whole-edge lock (no per-field locks), so any edit/remove
-// of a locked edge is blocked. Staleness compares the captured base version
-// against the live edge version.
+// evaluateEntityOperationFlags. AI/import/player CREATE proposals are blocked if
+// either endpoint entity is locked; DM-authored creates stay ergonomic. Edges
+// carry a whole-edge lock (no per-field locks), so any edit/remove of a locked
+// edge is blocked. Staleness compares the captured base version against the live
+// edge version.
 async function evaluateRelationshipOperationFlags(
   tx: Prisma.TransactionClient,
   operation: { op: OpKind; targetId?: string; patch: ReviewPatch },
   campaignId: string,
   baseVersions: Record<string, number>,
+  source: ChangeSource,
 ) {
-  if (operation.op === OpKind.CREATE_RELATIONSHIP || !operation.targetId) {
+  if (operation.op === OpKind.CREATE_RELATIONSHIP) {
+    if (source === ChangeSource.DM) return { blockedByLock: false, isStale: false };
+
+    const sourceId = readTo(operation.patch, "sourceId");
+    const targetId = readTo(operation.patch, "targetId");
+    if (typeof sourceId !== "string" || typeof targetId !== "string") {
+      return { blockedByLock: false, isStale: false };
+    }
+
+    const endpoints = await tx.entity.findMany({
+      where: {
+        campaignId,
+        id: { in: [sourceId, targetId] },
+        status: CanonStatus.CANON,
+      },
+      select: { locked: true },
+    });
+    return {
+      blockedByLock: endpoints.some((endpoint) => endpoint.locked),
+      isStale: false,
+    };
+  }
+
+  if (!operation.targetId) {
     return { blockedByLock: false, isStale: false };
   }
 
@@ -684,6 +709,12 @@ export async function createPendingRelationshipChangeSet(
     title: string;
     summary?: string;
     runId?: string;
+    // AI provenance (M4 generators): persisted on the ChangeSet so approval can
+    // copy it onto relationship Provenance rows. Secret-free; never includes keys.
+    providerId?: string;
+    model?: string;
+    promptId?: string;
+    promptVersion?: string;
     operations: RelationshipReviewOperationInput[];
   },
 ) {
@@ -700,6 +731,7 @@ export async function createPendingRelationshipChangeSet(
           operation,
           campaignId,
           baseVersions,
+          input.source ?? ChangeSource.DM,
         )),
       });
     }
@@ -711,6 +743,10 @@ export async function createPendingRelationshipChangeSet(
         title: input.title,
         summary: input.summary,
         runId: input.runId,
+        providerId: input.providerId,
+        model: input.model,
+        promptId: input.promptId,
+        promptVersion: input.promptVersion,
         actorUserId: userId,
         baseVersions,
         operations: {
@@ -1281,6 +1317,7 @@ export async function setChangeOperationDecision(
               },
               campaignId,
               baseVersionsObject(changeSet.baseVersions),
+              changeSet.source,
             )
           : await evaluateEntityOperationFlags(
               tx,
@@ -1396,6 +1433,7 @@ export async function setChangeOperationFieldDecision(
               },
               campaignId,
               baseVersionsObject(changeSet.baseVersions),
+              changeSet.source,
             )
           : await evaluateEntityOperationFlags(
               tx,
@@ -1721,6 +1759,7 @@ async function refreshPendingOperationFlags(
             },
             campaignId,
             baseVersions,
+            changeSet.source,
           );
           await tx.changeOperation.update({
             where: { id: operation.id },
@@ -1753,6 +1792,7 @@ async function evaluateRelationshipFlagsForRefresh(
   operation: { op: OpKind; targetId?: string; patch: ReviewPatch },
   campaignId: string,
   baseVersions: Record<string, number>,
+  source: ChangeSource,
 ) {
   try {
     return await evaluateRelationshipOperationFlags(
@@ -1760,6 +1800,7 @@ async function evaluateRelationshipFlagsForRefresh(
       operation,
       campaignId,
       baseVersions,
+      source,
     );
   } catch (error) {
     if (error instanceof ServiceError && error.message === "Relationship not found.") {
