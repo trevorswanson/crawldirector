@@ -338,6 +338,52 @@ describe("event service", () => {
     ]);
   });
 
+  it("does not leak a hidden anchor event's title through a player's time phrasing", async () => {
+    const owner = await makeUser("anchor-leak-owner@test.com");
+    const player = await makeUser("anchor-leak-player@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const publicEntity = await makeEntity(
+      owner.id,
+      campaign.id,
+      "Public crawler",
+      "SHARED_WITH_PLAYERS",
+    );
+
+    // A secret event the player must never learn about.
+    const hidden = await createEvent(owner.id, campaign.id, {
+      title: "The Royal Heir Is Murdered",
+      floor: 3,
+      secret: true,
+      participants: [{ entityId: publicEntity.id, role: "WITNESS" }],
+    });
+
+    // A player-visible event whose in-game time is anchored to the secret event.
+    await createEvent(owner.id, campaign.id, {
+      title: "Public scene",
+      floor: 4,
+      secret: false,
+      basis: "EVENT",
+      anchorEventId: hidden.id,
+      offset: 1,
+      unit: "DAY",
+      participants: [{ entityId: publicEntity.id, role: "ACTOR" }],
+    });
+
+    const playerTimeline = await listCampaignTimeline(player.id, campaign.id);
+    const playerScene = playerTimeline.find((e) => e.title === "Public scene");
+    // The hidden title must not appear; phrasing falls back to a neutral anchor.
+    expect(playerScene?.time.phrase).not.toContain("Royal Heir");
+    expect(playerScene?.time.phrase).toBe("1 day after another event");
+
+    // The DM still sees the real anchor title.
+    const dmTimeline = await listCampaignTimeline(owner.id, campaign.id);
+    const dmScene = dmTimeline.find((e) => e.title === "Public scene");
+    expect(dmScene?.time.phrase).toBe("1 day after The Royal Heir Is Murdered");
+  });
+
   it("dedupes repeated (entity, role) participants", async () => {
     const owner = await makeUser("owner-dupe@test.com");
     const campaign = await createCampaign(owner.id, { name: "Dungeon" });

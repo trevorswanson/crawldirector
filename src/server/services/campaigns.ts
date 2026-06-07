@@ -156,6 +156,13 @@ export async function getCampaignCanonIntegrity(
   if (!membership) {
     throw new ServiceError("You do not have access to this campaign.");
   }
+  // Canon-integrity aggregates span all non-archived canon, including DM-only and
+  // secret records, so this is a DM/co-DM metric. Enforce the role here, not only
+  // in UI callers (CWE-862): a player must not infer hidden canon size, lock
+  // density, or provenance mix from the totals.
+  if (membership.role === Role.PLAYER) {
+    throw new ServiceError("Only the DM can view canon integrity.");
+  }
 
   const entities = await prisma.entity.findMany({
     where: {

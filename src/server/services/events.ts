@@ -269,9 +269,16 @@ function readTimeInfo(
 // Titles for every EVENT-basis anchor referenced by a fetched event set, so the
 // generated phrasing can name the anchor. One extra query keeps the timeline
 // queries flat; anchors outside the visible set still resolve by id.
+//
+// For a player read this resolver is visibility-scoped: a visible event may
+// anchor its time to a secret/hidden event, and naming that anchor in the derived
+// time phrase would leak DM-only canon (CWE-200). We therefore only return titles
+// for anchors the player could see directly; an unresolved anchor falls back to
+// neutral "another event" phrasing in `phraseTimeRef`.
 async function loadAnchorTitles(
   campaignId: string,
   events: { inGameTime: unknown }[],
+  isPlayer: boolean,
 ): Promise<Map<string, string>> {
   const anchorIds = new Set<string>();
   for (const event of events) {
@@ -281,9 +288,21 @@ async function loadAnchorTitles(
   if (anchorIds.size === 0) return new Map();
   const rows = await prisma.event.findMany({
     where: { campaignId, id: { in: [...anchorIds] } },
-    select: { id: true, title: true },
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      secret: true,
+      participants: {
+        select: { entity: { select: otherEntitySelect } },
+      },
+    },
   });
-  return new Map(rows.map((row) => [row.id, row.title]));
+  return new Map(
+    rows
+      .filter((row) => isPlayerVisibleEvent(row, isPlayer))
+      .map((row) => [row.id, row.title]),
+  );
 }
 
 // Validate an EVENT-basis anchor: it must reference a live event in this
@@ -564,7 +583,7 @@ export async function listEventsForEntity(
     },
   });
 
-  const anchorTitles = await loadAnchorTitles(campaignId, events);
+  const anchorTitles = await loadAnchorTitles(campaignId, events, isPlayer);
   const timeline: EntityEvent[] = [];
   for (const event of events) {
     const selfParticipations = event.participants.filter(
@@ -695,7 +714,7 @@ export async function listCampaignTimeline(
     },
   });
 
-  const anchorTitles = await loadAnchorTitles(campaignId, events);
+  const anchorTitles = await loadAnchorTitles(campaignId, events, isPlayer);
   const timeline: CampaignTimelineEvent[] = [];
   for (const event of events) {
     const participants = event.participants
