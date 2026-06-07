@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+import { dataKeysFor } from "@/lib/entity-kinds";
+import { floorDataSchema } from "@/lib/entity-kinds/floor";
+import { optionalInt, optionalText } from "@/lib/zod-field-helpers";
+
 // Shared Zod schemas. Per docs/02-architecture.md every Server Action validates
 // its input at the boundary with one of these.
 
@@ -81,22 +85,8 @@ export const visibilityValues = [
   "PLAYER_FACING",
 ] as const;
 
-const optionalText = (max: number) =>
-  z.preprocess(
-    (value) => (value === null ? undefined : value),
-    z.string().trim().max(max).optional().or(z.literal("")),
-  );
-
-const optionalInt = (label: string, min = 0) =>
-  z.preprocess(
-    (value) => (value === "" || value === null ? undefined : value),
-    z.coerce
-      .number()
-      .refine((value) => Number.isFinite(value), `${label} must be a number.`)
-      .int(`${label} must be a whole number.`)
-      .min(min)
-      .optional(),
-  );
+// optionalText / optionalInt moved to src/lib/zod-field-helpers.ts so the
+// entity-kind descriptors can reuse them without a circular import.
 
 const postgresBigIntMax = BigInt("9223372036854775807");
 
@@ -150,16 +140,11 @@ const entityCoreSchema = z.object({
   unique: z.preprocess((val) => (val === undefined || val === null || val === "" ? undefined : val === "true" || val === true || val === "on"), z.boolean().optional()),
   fleeting: z.preprocess((val) => (val === undefined || val === null || val === "" ? undefined : val === "true" || val === true || val === "on"), z.boolean().optional()),
   aiDescription: optionalText(10000).nullable(),
-  // FLOOR-entity attributes, stored in Entity.data (docs/adr/0005, 0008).
-  // floorNumber links a FLOOR entity to the events on that floor
-  // (Event.orderKey); theme is the one-line flavour shown under the timeline's
-  // floor-band header. startDay/collapseDay are the absolute days-since-collapse
-  // the floor opened / collapses — the anchors that let FLOOR_START /
-  // FLOOR_COLLAPSE event times resolve to absolute days (ADR 0008).
-  floorNumber: optionalInt("Floor number", 1),
-  theme: optionalText(160),
-  startDay: optionalInt("Floor start day"),
-  collapseDay: optionalInt("Floor collapse day"),
+  // FLOOR-entity bespoke fields come from the entity-kind registry (ADR 0009),
+  // their single source of truth. Still spread into the core schema for now so
+  // the shared create/update forms validate them; slice 2 moves them to
+  // kind-scoped validation and shrinks this schema back to genuinely core fields.
+  ...floorDataSchema.shape,
 });
 
 export const createGenericEntitySchema = entityCoreSchema.extend({
@@ -223,7 +208,9 @@ export const crawlerOnlyKeys = Object.keys(createCrawlerSchema.shape).filter(
 
 export const itemKeys = ["itemTypeId", "divine", "unique", "fleeting", "aiDescription"];
 
-export const floorKeys = ["floorNumber", "theme", "startDay", "collapseDay"];
+// Derived from the FLOOR entity-kind descriptor (ADR 0009) so the data-key list
+// can no longer drift from the schema.
+export const floorKeys = dataKeysFor("FLOOR");
 
 // Keys persisted into Entity.data (type-specific attributes), used by the lock
 // validator and the data.* patch builders in src/server/services/entities.ts.

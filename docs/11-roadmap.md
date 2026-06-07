@@ -216,6 +216,26 @@ and agent (M11) *designs* live in docs 05–06 alongside the other feature desig
 but the agent runtime is sequenced late because it is the heaviest feature and
 pairs with M10's consequence generator.
 
+## Cross-cutting refinements (ADR-driven)
+
+These are not new milestones but cross-cutting refactors recorded as ADRs and
+scheduled into the flow of milestone work. Track active slices in
+[`PROGRESS.md`](./PROGRESS.md).
+
+- **Entity-kind registry ([ADR 0009](./adr/0009-entity-kind-registry.md), accepted).**
+  Consolidate each entity type's bespoke `data.*` fields into one per-type
+  `EntityKind` descriptor and derive validation, the data-key lists, the
+  reviewable/lockable field set, the form fields, and the detail display from it —
+  replacing the `type === "X"` branches scattered across `validation.ts`,
+  `entities.ts`, `review.ts`, the entity form, and the detail page. Pure
+  application-layer refactor: the hybrid `Entity` + `data` JSON + `Crawler`
+  satellite + typed-graph **data model is untouched** (no migration). Delivered in
+  three behavior-preserving phases — (1) registry scaffold + FLOOR, (2) ITEM +
+  derive the reviewable-field set wholesale, (3) the display slot + the next
+  bespoke type as proof. **Should land before the catalog types (BOX, SKILL,
+  SPELL, ACHIEVEMENT, TITLE, …) gain their own fields** and multiply the inline
+  pattern — i.e. ahead of the M7 game-progression types.
+
 ## Design-driven refinements (proposals, 2026-05-29)
 
 Building the [design language](./13-design-language.md) from the
