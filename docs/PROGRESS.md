@@ -13,9 +13,9 @@ keyword-scanning every doc.
 
 ### Active next slices
 
-- [ ] **M4 generator expansion.** Add bulk-stub scaffolding and relationship
-      inference generators, a generation panel for bulk runs, a `Job` table +
-      worker for bulk/async runs, and usage/cost tracking with spend caps.
+- [ ] **M4 generator expansion.** Add bulk-stub scaffolding, a generation panel
+      for bulk runs, a `Job` table + worker for bulk/async runs, and usage/cost
+      tracking with spend caps.
 - [ ] **Visibility model simplification.** Refactor the visibility enum throughout the codebase (Prisma schema, type validation, forms, and visibility projections) from the three-state model (`DM_ONLY`, `SHARED_WITH_PLAYERS`, `PLAYER_FACING`) to a clean binary model (`DM_ONLY`, `PLAYER_VISIBLE`), mapping any subset access strictly to dynamic `KnowledgeGrant` (fog of war).
 
 ### Follow-ups captured from delivered slices
@@ -69,6 +69,52 @@ keyword-scanning every doc.
       - **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
+
+## M4 — Relationship inference generator (slice 4) ✅ (2026-06-07)
+
+**Goal:** add the second concrete generator family from
+[`04-ai-integration.md`](./04-ai-integration.md): infer likely typed
+relationships involving one existing entity and route them to the Review Queue
+as **PENDING `CREATE_RELATIONSHIP` proposals**. Nothing becomes canon until the
+DM approves it (invariant #1), and approved relationship fields retain AI
+provider/model/prompt provenance (invariant #3).
+
+- [x] **Generator** (`src/server/ai/generators/infer-relationships.ts`): pure
+      prompt/schema/operation logic. `buildInferRelationshipsPrompt` scopes the
+      task to one target entity, lists candidate canon entities and existing
+      target relationships, and tells the model to use only listed ids. The Zod
+      output schema bounds proposals to at most 8 relationships with valid
+      `RelationshipType`, optional disposition, notes, and secret flag.
+      `inferenceToRelationshipOperations` filters unknown/self/non-target edges,
+      exact or symmetric duplicates, and the ADR 0008 discouraged
+      `CRAWLER —LOCATED_ON→ FLOOR` path before building
+      `CREATE_RELATIONSHIP` review operations.
+- [x] **Service + provenance:** `inferRelationshipsForEntity`
+      (`src/server/services/generation.ts`) is DM/co-DM only, loads the target,
+      up to 40 live canon candidates, current target relationships, and the
+      campaign style guide; resolves the configured provider; calls structured
+      output; refuses no-op/empty usable proposals; and files the results through
+      `createPendingRelationshipChangeSet` with `source: AI` plus
+      provider/model/prompt metadata. The relationship pending-change-set helper
+      now persists those metadata fields so approval copies them onto
+      `Provenance` rows for each relationship field.
+- [x] **Action + UI:** the entity detail rail's `GeneratePanel` now offers
+      **Infer relationships** next to **Flesh out** when the existing provider-key
+      gating shows the panel. The action returns a safe success/error state,
+      revalidates the entity + Review Queue, and links directly to the created
+      proposal set.
+- [x] **Tests / verification:** new pure generator suite; DB-backed generation
+      suite for pending proposal creation, prompt context, no usable proposal
+      refusal, player denial, and AI provenance after approval; action and
+      `GeneratePanel` component coverage. Focused generator/action/panel suite
+      green (142 tests). lint (0 errors; 2 pre-existing settings-action warnings),
+      typecheck, build, and the full coverage gate green (988 tests; statements
+      95.3%, branches 87.89%, functions 97.54%, lines 97.27%).
+- [x] **Remaining M4 expansion:** bulk-stub scaffolding, bulk-run UX, async
+      `Job` worker, and usage/cost tracking with spend caps remain in the open
+      backlog. A live provider call still depends on the DM's own BYO key/spend,
+      so this slice is verified through mocked-provider service coverage rather
+      than a live generation run.
 
 ## M3 — Retire duplicate floor authoring paths (ADR 0008 slice 3) ✅ (2026-06-07)
 

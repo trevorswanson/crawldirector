@@ -19,7 +19,7 @@ vi.mock("@/server/ai", () => ({
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
 import { createGenericEntity } from "@/server/services/entities";
-import { fleshOutEntity } from "@/server/services/generation";
+import { fleshOutEntity, inferRelationshipsForEntity } from "@/server/services/generation";
 import { approveChangeSet, setEntityLock } from "@/server/services/review";
 
 function fakeProvider(
@@ -231,5 +231,166 @@ describe("fleshOutEntity", () => {
 
     const entity = await prisma.entity.findUnique({ where: { id: entityId } });
     expect(entity?.summary).toBe("A grizzled guide.");
+  });
+});
+
+describe("inferRelationshipsForEntity", () => {
+  it("files a PENDING AI relationship proposal carrying provider/model/prompt metadata", async () => {
+    const { dmId, campaignId, entityId } = await seed();
+    const other = await createGenericEntity(dmId, campaignId, {
+      type: "NPC",
+      name: "Princess Donut",
+      summary: "A fellow guide.",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: ["guide"],
+    });
+    resolveCampaignProvider.mockResolvedValue({
+      id: "anthropic",
+      model: "claude-opus-4-8",
+      generate: vi.fn(),
+      generateStructured: vi.fn().mockResolvedValue({
+        data: {
+          relationships: [
+            {
+              sourceEntityId: entityId,
+              targetEntityId: other.id,
+              type: "MENTOR_OF",
+              disposition: 60,
+              notes: "Mordecai guides Donut through early crawler politics.",
+              secret: false,
+            },
+          ],
+        },
+      }),
+    });
+
+    const result = await inferRelationshipsForEntity(dmId, campaignId, entityId);
+
+    expect(result).toMatchObject({
+      providerId: "anthropic",
+      model: "claude-opus-4-8",
+      operationCount: 1,
+    });
+    expect(await prisma.relationship.count()).toBe(0);
+
+    const changeSet = await prisma.changeSet.findUnique({
+      where: { id: result.changeSetId },
+      include: { operations: true },
+    });
+    expect(changeSet?.status).toBe("PENDING");
+    expect(changeSet?.source).toBe("AI");
+    expect(changeSet?.providerId).toBe("anthropic");
+    expect(changeSet?.model).toBe("claude-opus-4-8");
+    expect(changeSet?.promptId).toBe("infer-relationships");
+    expect(changeSet?.promptVersion).toBe("1");
+    expect(changeSet?.operations).toHaveLength(1);
+    const op = changeSet!.operations[0];
+    expect(op.op).toBe("CREATE_RELATIONSHIP");
+    const patch = op.patch as Record<string, { to: unknown }>;
+    expect(patch.sourceId.to).toBe(entityId);
+    expect(patch.targetId.to).toBe(other.id);
+    expect(patch.type.to).toBe("MENTOR_OF");
+    expect(patch.notes.to).toContain("Mordecai guides Donut");
+  });
+
+  it("passes candidate entities and existing target relationships into the prompt", async () => {
+    const { dmId, campaignId, entityId } = await seed();
+    const other = await createGenericEntity(dmId, campaignId, {
+      type: "NPC",
+      name: "Princess Donut",
+      summary: "A fellow guide.",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: ["guide"],
+    });
+    await prisma.relationship.create({
+      data: {
+        campaignId,
+        sourceId: entityId,
+        targetId: other.id,
+        type: "MENTOR_OF",
+        status: "CANON",
+      },
+    });
+    const provider = fakeProvider({ summary: "unused", description: "unused", tags: [] });
+    provider.generateStructured.mockResolvedValue({ data: { relationships: [] } });
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    await expect(inferRelationshipsForEntity(dmId, campaignId, entityId)).rejects.toThrow(/relationships/i);
+
+    const req = provider.generateStructured.mock.calls[0][0];
+    const user = req.messages[0].content;
+    expect(user).toContain("Princess Donut");
+    expect(user).toContain(`${entityId} --MENTOR_OF--> ${other.id}`);
+  });
+
+  it("refuses a model result with no usable relationship proposals", async () => {
+    const { dmId, campaignId, entityId } = await seed();
+    resolveCampaignProvider.mockResolvedValue({
+      id: "anthropic",
+      model: "claude-opus-4-8",
+      generate: vi.fn(),
+      generateStructured: vi.fn().mockResolvedValue({
+        data: {
+          relationships: [
+            { sourceEntityId: entityId, targetEntityId: entityId, type: "RIVAL_OF", secret: false },
+          ],
+        },
+      }),
+    });
+
+    await expect(inferRelationshipsForEntity(dmId, campaignId, entityId)).rejects.toThrow(
+      /relationships/i,
+    );
+    expect(await prisma.changeSet.count({ where: { source: "AI" } })).toBe(0);
+  });
+
+  it("records AI provenance on relationship fields after approval", async () => {
+    const { dmId, campaignId, entityId } = await seed();
+    const other = await createGenericEntity(dmId, campaignId, {
+      type: "NPC",
+      name: "Princess Donut",
+      summary: "A fellow guide.",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    resolveCampaignProvider.mockResolvedValue({
+      id: "anthropic",
+      model: "claude-opus-4-8",
+      generate: vi.fn(),
+      generateStructured: vi.fn().mockResolvedValue({
+        data: {
+          relationships: [
+            { sourceEntityId: entityId, targetEntityId: other.id, type: "MENTOR_OF", secret: false },
+          ],
+        },
+      }),
+    });
+
+    const { changeSetId } = await inferRelationshipsForEntity(dmId, campaignId, entityId);
+    await prisma.changeOperation.updateMany({
+      where: { changeSetId, decision: "PENDING" },
+      data: { decision: "ACCEPTED" },
+    });
+    await approveChangeSet(dmId, campaignId, changeSetId);
+
+    const edge = await prisma.relationship.findFirstOrThrow({ where: { campaignId } });
+    const provenance = await prisma.provenance.findMany({ where: { relationshipId: edge.id } });
+    expect(provenance.length).toBeGreaterThan(0);
+    expect(provenance.every((p) => p.source === "AI")).toBe(true);
+    expect(provenance.every((p) => p.model === "claude-opus-4-8")).toBe(true);
+    expect(provenance.map((p) => p.promptId)).toContain("infer-relationships");
+  });
+
+  it("denies a player without calling the provider", async () => {
+    const { playerId, campaignId, entityId } = await seed();
+    resolveCampaignProvider.mockResolvedValue(fakeProvider({ summary: "x", description: "y", tags: [] }));
+
+    await expect(inferRelationshipsForEntity(playerId, campaignId, entityId)).rejects.toBeInstanceOf(
+      ServiceError,
+    );
+    expect(resolveCampaignProvider).not.toHaveBeenCalled();
   });
 });

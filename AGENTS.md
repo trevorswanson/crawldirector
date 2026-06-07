@@ -121,6 +121,11 @@ never canon (invariant #1), with locked fields excluded (invariant #2) and AI
 provenance (provider/model/prompt) recorded on approval (invariant #3).
 `resolveCampaignProvider` picks whichever provider the campaign has a key for.
 The app stays fully usable with no key configured. The visibility model is transitioning to a clean binary model (`DM_ONLY` and `PLAYER_VISIBLE`) per user decision — see `docs/PROGRESS.md` backlog to implement the database and codebase refactoring.
+The **relationship inference** generator (M4 slice 4) is also in: the entity
+detail rail's **Infer relationships** action proposes typed edges involving the
+current entity, files them as **PENDING `CREATE_RELATIONSHIP` proposals**, and
+records AI provider/model/prompt provenance on approval. Remaining M4 expansion
+work is bulk-stub scaffolding, bulk/async jobs, and usage/cost controls.
 See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
 ## Start here, every session

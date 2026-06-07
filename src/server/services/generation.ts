@@ -11,7 +11,17 @@ import {
   fleshEntityToPatch,
   patchHasChanges,
 } from "@/server/ai/generators/flesh-entity";
-import { createPendingEntityChangeSet } from "@/server/services/review";
+import {
+  INFER_RELATIONSHIPS_GENERATOR,
+  buildInferRelationshipsPrompt,
+  inferRelationshipOutputSchema,
+  inferenceToRelationshipOperations,
+  type InferRelationshipExistingEdge,
+} from "@/server/ai/generators/infer-relationships";
+import {
+  createPendingEntityChangeSet,
+  createPendingRelationshipChangeSet,
+} from "@/server/services/review";
 
 // AI generation orchestration (M4 — docs/04-ai-integration.md). This is the seam
 // between a generator (pure prompt/schema/patch logic in `src/server/ai/
@@ -36,6 +46,13 @@ export type FleshOutEntityResult = {
   changeSetId: string;
   providerId: string;
   model: string;
+};
+
+export type InferRelationshipsResult = {
+  changeSetId: string;
+  providerId: string;
+  model: string;
+  operationCount: number;
 };
 
 // Flesh out an entity into a fuller summary/description/tags, filed as a PENDING
@@ -153,4 +170,136 @@ export async function fleshOutEntity(
   });
 
   return { changeSetId: changeSet.id, providerId: provider.id, model: provider.model };
+}
+
+// Infer new relationships involving one existing entity and file them as a
+// PENDING `CREATE_RELATIONSHIP` proposal set. This synchronous slice is scoped
+// to the entity detail rail; bulk/async jobs remain a later M4 slice.
+export async function inferRelationshipsForEntity(
+  userId: string,
+  campaignId: string,
+  entityId: string,
+): Promise<InferRelationshipsResult> {
+  await assertCampaignDm(userId, campaignId);
+
+  const [campaign, target] = await Promise.all([
+    prisma.campaign.findUnique({
+      where: { id: campaignId },
+      select: { name: true, styleGuide: true },
+    }),
+    prisma.entity.findFirst({
+      where: { id: entityId, campaignId, status: CanonStatus.CANON },
+      select: {
+        id: true,
+        type: true,
+        name: true,
+        summary: true,
+        description: true,
+        tags: true,
+      },
+    }),
+  ]);
+  if (!campaign) throw new ServiceError("Campaign not found.");
+  if (!target) throw new ServiceError("Entity not found.");
+
+  const provider = await resolveCampaignProvider(campaignId);
+  if (!provider) {
+    throw new ServiceError(
+      "No AI provider is configured. Add a provider key in campaign Settings first.",
+    );
+  }
+
+  const [candidates, existing] = await Promise.all([
+    prisma.entity.findMany({
+      where: {
+        campaignId,
+        status: CanonStatus.CANON,
+        id: { not: entityId },
+      },
+      orderBy: [{ name: "asc" }],
+      take: 40,
+      select: {
+        id: true,
+        type: true,
+        name: true,
+        summary: true,
+        description: true,
+        tags: true,
+      },
+    }),
+    prisma.relationship.findMany({
+      where: {
+        campaignId,
+        status: { not: CanonStatus.ARCHIVED },
+        OR: [{ sourceId: entityId }, { targetId: entityId }],
+      },
+      select: {
+        type: true,
+        sourceId: true,
+        targetId: true,
+        sourceEntity: { select: { name: true } },
+        targetEntity: { select: { name: true } },
+      },
+    }),
+  ]);
+
+  if (candidates.length === 0) {
+    throw new ServiceError("Add at least one other canon entity before inferring relationships.");
+  }
+
+  const context = {
+    campaignName: campaign.name,
+    styleGuide: campaign.styleGuide,
+    target,
+    candidates,
+    existingRelationships: existing.map(
+      (edge): InferRelationshipExistingEdge => ({
+        sourceId: edge.sourceId,
+        sourceName: edge.sourceEntity.name,
+        targetId: edge.targetId,
+        targetName: edge.targetEntity.name,
+        type: edge.type,
+      }),
+    ),
+  };
+  const { system, messages } = buildInferRelationshipsPrompt(context);
+
+  let output;
+  try {
+    const result = await provider.generateStructured({
+      schemaName: "infer_relationships",
+      schema: inferRelationshipOutputSchema,
+      system,
+      messages,
+      maxTokens: 2048,
+    });
+    output = result.data;
+  } catch (error) {
+    const message =
+      error instanceof ProviderError ? error.message : describeProviderError(error);
+    throw new ServiceError(message);
+  }
+
+  const operations = inferenceToRelationshipOperations(context, output);
+  if (operations.length === 0) {
+    throw new ServiceError("The model did not propose any usable relationships.");
+  }
+
+  const changeSet = await createPendingRelationshipChangeSet(userId, campaignId, {
+    source: ChangeSource.AI,
+    title: `Infer relationships for ${target.name}`,
+    summary: `AI-inferred relationship proposals (${provider.model}) — review before they become canon.`,
+    providerId: provider.id,
+    model: provider.model,
+    promptId: INFER_RELATIONSHIPS_GENERATOR.id,
+    promptVersion: INFER_RELATIONSHIPS_GENERATOR.version,
+    operations,
+  });
+
+  return {
+    changeSetId: changeSet.id,
+    providerId: provider.id,
+    model: provider.model,
+    operationCount: operations.length,
+  };
 }

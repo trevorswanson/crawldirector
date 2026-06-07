@@ -684,6 +684,12 @@ export async function createPendingRelationshipChangeSet(
     title: string;
     summary?: string;
     runId?: string;
+    // AI provenance (M4 generators): persisted on the ChangeSet so approval can
+    // copy it onto relationship Provenance rows. Secret-free; never includes keys.
+    providerId?: string;
+    model?: string;
+    promptId?: string;
+    promptVersion?: string;
     operations: RelationshipReviewOperationInput[];
   },
 ) {
@@ -711,6 +717,10 @@ export async function createPendingRelationshipChangeSet(
         title: input.title,
         summary: input.summary,
         runId: input.runId,
+        providerId: input.providerId,
+        model: input.model,
+        promptId: input.promptId,
+        promptVersion: input.promptVersion,
         actorUserId: userId,
         baseVersions,
         operations: {
