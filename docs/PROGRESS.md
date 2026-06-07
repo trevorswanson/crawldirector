@@ -21,11 +21,8 @@ keyword-scanning every doc.
       `review.ts`, the entity form, and the detail page. Pure app-layer refactor;
       **no schema change / migration** (bespoke fields already live in
       `Entity.data`). Phased, each behavior-preserving:
-      - [ ] **Slice 1 — registry scaffold + FLOOR.** Add `EntityKind` / `kindFor`,
-            port FLOOR's four `data.*` fields into `FLOOR_KIND.dataSchema`, derive
-            `floorKeys` and the FLOOR slice of `dataFields` from it, and route the
-            FLOOR form block + the create/update patch entries through the
-            descriptor. Delete the inline FLOOR branches.
+      - [x] **Slice 1 — registry scaffold + FLOOR.** ✅ (2026-06-07) — see the
+            section below.
       - [ ] **Slice 2 — ITEM + derive the reviewable-field set wholesale.** Port
             ITEM's fields, make `dataFields` (review.ts) a derivation over all
             registered descriptors, and shrink `entityCoreSchema` back to genuinely
@@ -89,6 +86,65 @@ keyword-scanning every doc.
       - **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
+
+## Entity-kind registry — registry scaffold + FLOOR (ADR 0009 slice 1) ✅ (2026-06-07)
+
+**Goal:** start [ADR 0009](./adr/0009-entity-kind-registry.md) (accepted) — stand
+up a per-type `EntityKind` registry as the single source of truth for a type's
+bespoke `data.*` fields, and route FLOOR through it, deleting the scattered
+`type === "FLOOR"` branches. Pure application-layer refactor: **no schema change,
+no migration**, behavior unchanged (FLOOR's fields validate, persist, review,
+lock, and render exactly as before).
+
+- [x] **Pure registry** (`src/lib/entity-kinds/`): `EntityKind` descriptor
+      (`types.ts`), `FLOOR_KIND` + `floorDataSchema` (`floor.ts`), and the
+      registry (`index.ts`: `kindFor`, `dataKeysFor`, `allKindDataKeys`). The
+      descriptor is Zod/TS-only (no React) so server validation/patch/review can
+      import it. FLOOR's four fields (`floorNumber`/`theme`/`startDay`/
+      `collapseDay`) now live once in `floorDataSchema`.
+- [x] **Shared Zod helpers extracted** (`src/lib/zod-field-helpers.ts`):
+      `optionalText` / `optionalInt` moved out of `validation.ts` so the
+      descriptor reuses the exact field shapes without a circular import.
+- [x] **Validation derives from the descriptor** (`validation.ts`):
+      `entityCoreSchema` spreads `...floorDataSchema.shape` (one definition; slice
+      2 removes it from core), and `floorKeys` is now `dataKeysFor("FLOOR")` so the
+      key list can't drift from the schema.
+- [x] **Patch builders data-driven** (`entities.ts`): the create + update
+      `data.*` builders iterate `dataKeysFor(type)` (`kindDataCreatePatch` +
+      an update loop) instead of a duplicated `if (type === FLOOR)` block.
+      Empty/absent normalizes to `null`, matching the prior
+      `nullIfEmpty` / `?? null` handling.
+- [x] **Reviewable-field set derived** (`review.ts`): the FLOOR slice of
+      `dataFields` is now `...allKindDataKeys().map((k) => \`data.${k}\`)` (ITEM
+      still hand-listed until slice 2), so a registered kind's fields are
+      automatically reviewable/lockable.
+- [x] **Form routed through the registry**: a client companion
+      (`src/components/entities/kind-fields.tsx`, `kindFormFields`) holds the
+      per-type `FormFields` (`FloorFields`) keyed by EntityType; `entity-forms.tsx`
+      renders `kindFormFields(entity.type)` instead of the inline FLOOR IIFE. The
+      rendered DOM (ids/names/locked hidden mirrors) is byte-identical.
+- [x] **Deviation from the ADR sketch (noted):** the ADR co-locates `FormFields`
+      on the descriptor object. To respect the RSC server/client boundary (server
+      validation/patch/review must not import client components), `FormFields`
+      lives in a client companion registry keyed by the same EntityType rather
+      than on the pure descriptor. `DisplayPanel` (slice 3) will follow the same
+      split. The "one logical place per type, no scattered `type ===` branches"
+      goal is preserved.
+- [x] **Tests:** new `entity-kinds` unit suite (`kindFor`/`dataKeysFor`/
+      `allKindDataKeys`, undefined + empty branches, `floorDataSchema` parse +
+      reject) and `kind-fields` component suite (FLOOR inputs, locked read-only +
+      hidden mirrors, null-data tolerance, undefined for non-kind types). Existing
+      `entities`, `review`, `entity-page`, and `entity-forms` suites pass
+      unchanged. lint (0 errors; 2 pre-existing settings warnings), typecheck,
+      build, and the full coverage gate green (1003 tests; statements 95.26%,
+      branches 88.22%, functions 97.65%, lines 97.27%; new files fully covered).
+- [x] **Verification boundary:** pure, behavior-preserving refactor with
+      byte-identical form DOM, covered by the real-component `kind-fields` /
+      `entity-forms` suites and the DB-backed `entities`/`review` suites (same
+      precedent + port-3000 constraint as prior slices).
+- [x] **Remaining:** slices 2 (ITEM + derive the reviewable set wholesale, shrink
+      `entityCoreSchema`) and 3 (`DisplayPanel` slot + next bespoke type) stay in
+      the open backlog.
 
 ## M4 — Relationship inference generator (slice 4) ✅ (2026-06-07)
 

@@ -6,6 +6,7 @@ import {
   Role,
   Visibility,
 } from "@/generated/prisma/client";
+import { dataKeysFor } from "@/lib/entity-kinds";
 import { ServiceError } from "@/lib/errors";
 import {
   createCrawlerSchema,
@@ -190,15 +191,28 @@ function entityCreatePatch(
     "data.unique": { to: input.unique ?? false },
     "data.fleeting": { to: input.fleeting ?? false },
     "data.aiDescription": { to: input.aiDescription ?? null },
-    ...(type === EntityType.FLOOR
-      ? {
-          "data.floorNumber": { to: input.floorNumber ?? null },
-          "data.theme": { to: nullIfEmpty(input.theme) },
-          "data.startDay": { to: input.startDay ?? null },
-          "data.collapseDay": { to: input.collapseDay ?? null },
-        }
-      : {}),
+    // Bespoke `data.*` fields are derived from the type's entity-kind descriptor
+    // (ADR 0009) instead of a per-type `if (type === …)` block. A type with no
+    // kind contributes nothing here.
+    ...kindDataCreatePatch(type, input),
   } satisfies ReviewPatch;
+}
+
+// Build the `data.*` create-patch entries for a type's bespoke kind fields.
+// Empty string / absent normalizes to null (matching the previous per-field
+// nullIfEmpty / `?? null` handling for FLOOR's text + numeric fields).
+function kindDataCreatePatch(
+  type: EntityType,
+  input: Record<string, unknown>,
+): ReviewPatch {
+  const patch: ReviewPatch = {};
+  for (const key of dataKeysFor(type)) {
+    const raw = input[key];
+    patch[`data.${key}`] = {
+      to: (raw === undefined || raw === "" ? null : raw) as ReviewPatch[string]["to"],
+    };
+  }
+  return patch;
 }
 
 async function entityResult(entityId: string) {
@@ -513,11 +527,19 @@ export async function updateEntity(
   addPatch(patch, "data.unique", existingData.unique ?? false, parsed.unique ?? false);
   addPatch(patch, "data.fleeting", existingData.fleeting ?? false, parsed.fleeting ?? false);
   addPatch(patch, "data.aiDescription", existingData.aiDescription ?? null, parsed.aiDescription ?? null);
-  if (existing.type === EntityType.FLOOR) {
-    addPatch(patch, "data.floorNumber", existingData.floorNumber ?? null, parsed.floorNumber ?? null);
-    addPatch(patch, "data.theme", existingData.theme ?? null, nullIfEmpty(parsed.theme));
-    addPatch(patch, "data.startDay", existingData.startDay ?? null, parsed.startDay ?? null);
-    addPatch(patch, "data.collapseDay", existingData.collapseDay ?? null, parsed.collapseDay ?? null);
+  // Bespoke `data.*` fields derive from the type's entity-kind descriptor
+  // (ADR 0009): one data-driven pass replaces the per-type FLOOR block. Empty
+  // string / absent normalizes to null (matching the prior nullIfEmpty/`?? null`).
+  const parsedData = parsed as Record<string, unknown>;
+  const existingDataRecord = existingData as Record<string, unknown>;
+  for (const key of dataKeysFor(existing.type)) {
+    const raw = parsedData[key];
+    addPatch(
+      patch,
+      `data.${key}`,
+      existingDataRecord[key] ?? null,
+      raw === undefined || raw === "" ? null : raw,
+    );
   }
 
   if (existing.type === EntityType.CRAWLER && existing.crawler) {

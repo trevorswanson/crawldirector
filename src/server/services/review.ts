@@ -11,6 +11,7 @@ import {
   Role,
   Visibility,
 } from "@/generated/prisma/client";
+import { allKindDataKeys } from "@/lib/entity-kinds";
 import { ServiceError } from "@/lib/errors";
 import { readFloorData } from "@/lib/floor";
 import { generateRankBetween } from "@/lib/rank";
@@ -107,16 +108,16 @@ const crawlerFields = new Set([
   "crawler.currentFloor",
 ]);
 
+// Reviewable/lockable type-specific fields. ITEM's fields are still listed by
+// hand (slice 2 ports them); every registered entity-kind's bespoke fields
+// (ADR 0009) are derived from the registry so they can't drift from the schema.
 const dataFields = new Set([
   "data.itemTypeId",
   "data.divine",
   "data.unique",
   "data.fleeting",
   "data.aiDescription",
-  "data.floorNumber",
-  "data.theme",
-  "data.startDay",
-  "data.collapseDay",
+  ...allKindDataKeys().map((key) => `data.${key}`),
 ]);
 
 async function getMembership(userId: string, campaignId: string) {
