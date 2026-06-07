@@ -62,10 +62,30 @@ function isBlockedIpv4(ip: string): boolean {
   );
 }
 
+// Decode the IPv4 embedded in an IPv4-mapped IPv6 literal. The suffix after
+// `::ffff:` can be dotted-decimal (`169.254.169.254`) or — as the WHATWG URL
+// parser serializes it — two hex groups (`a9fe:a9fe`); decode both so the
+// embedded address still gets judged by the IPv4 rules.
+function mappedIpv4(suffix: string): string | null {
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(suffix)) return suffix;
+  const groups = suffix.split(":");
+  if (groups.length === 2) {
+    const hi = Number.parseInt(groups[0], 16);
+    const lo = Number.parseInt(groups[1], 16);
+    if (Number.isNaN(hi) || Number.isNaN(lo)) return null;
+    return [(hi >> 8) & 0xff, hi & 0xff, (lo >> 8) & 0xff, lo & 0xff].join(".");
+  }
+  return null;
+}
+
 function isBlockedIpv6(ip: string): boolean {
   const addr = ip.toLowerCase().split("%")[0]; // strip any zone id
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(addr);
-  if (mapped) return isBlockedIpv4(mapped[1]); // IPv4-mapped — judge the embedded v4
+  const mapped = /^::ffff:([0-9a-f.:]+)$/.exec(addr); // IPv4-mapped (dotted or hex)
+  if (mapped) {
+    const embedded = mappedIpv4(mapped[1]);
+    if (embedded) return isBlockedIpv4(embedded); // judge the embedded v4
+    return true; // unparseable mapped form — fail closed
+  }
   if (addr === "::" || addr === "::1") return true; //   unspecified / loopback
   if (addr.startsWith("fc") || addr.startsWith("fd")) return true; // unique-local fc00::/7
   if (/^fe[89ab]/.test(addr)) return true; //            link-local fe80::/10

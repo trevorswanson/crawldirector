@@ -29,7 +29,9 @@ describe("isBlockedAddress", () => {
       "::",
       "fe80::1", // IPv6 link-local
       "fd00::1", // IPv6 unique-local
-      "::ffff:127.0.0.1", // IPv4-mapped loopback
+      "::ffff:127.0.0.1", // IPv4-mapped loopback (dotted)
+      "::ffff:a9fe:a9fe", // IPv4-mapped 169.254.169.254 in hex (WHATWG URL form)
+      "::ffff:c0a8:0101", // IPv4-mapped 192.168.1.1 in hex
     ]) {
       expect(isBlockedAddress(ip), ip).toBe(true);
     }
@@ -70,6 +72,10 @@ describe("assertPublicEndpoint", () => {
     await expect(assertPublicEndpoint("http://[::1]/v1")).rejects.toBeInstanceOf(ServiceError);
     await expect(
       assertPublicEndpoint("http://169.254.169.254/latest/meta-data"),
+    ).rejects.toBeInstanceOf(ServiceError);
+    // IPv4-mapped IPv6 literal — WHATWG URL normalizes the host to hex form.
+    await expect(
+      assertPublicEndpoint("http://[::ffff:169.254.169.254]/latest/meta-data"),
     ).rejects.toBeInstanceOf(ServiceError);
     // localhost resolves offline to 127.0.0.1 — also blocked.
     await expect(assertPublicEndpoint("http://localhost:11434/v1")).rejects.toBeInstanceOf(
