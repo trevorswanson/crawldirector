@@ -1,11 +1,13 @@
 # ADR 0009 — Per-type entity-kind registry (consolidate bespoke type fields)
 
-- **Status:** accepted — on the roadmap (see [`11-roadmap.md`](../11-roadmap.md))
-  and tracked in [`PROGRESS.md`](../PROGRESS.md); delivered in phases (slices 1–2
-  done: registry scaffold + FLOOR, then ITEM + reviewable-set derivation; slice 3a
-  done: the registry-driven apply-path `data` builder. Slice 3b — the
-  `DisplayPanel`/form client slots, with the new-type "proof" deferred to M7's BOX
-  — remains).
+- **Status:** accepted — **fully delivered** (slices 1–3b), tracked in
+  [`PROGRESS.md`](../PROGRESS.md). Slices 1–2: registry scaffold + FLOOR, then
+  ITEM + reviewable-set derivation; slice 3a: the registry-driven apply-path
+  `data` builder; slice 3b: the form/display client slots (ITEM's form moved to
+  the `kind-fields.tsx` companion, its read-view display to a new `kind-display.tsx`
+  `<KindDisplay>` dispatcher), retiring the last `type === "ITEM"/"FLOOR"` branches
+  in the form and detail page. The brand-new-type "proof" lands with M7's BOX (one
+  descriptor file), as planned.
 - **Date:** 2026-06-07
 - **Milestone:** Cross-cutting (entity layer). Surfaced during M3/M4 as FLOOR and
   ITEM grew bespoke fields; should land before the catalog types (BOX, SKILL,
@@ -157,14 +159,20 @@ required by this ADR.
      replaced by a registry-driven `data` builder (`buildKindData` /
      `normalizeKindFieldValue`) derived from the descriptors. As a side effect each
      entity now stores only its own kind's `data.*` fields.
-   - **3b (remaining).** Add the `DisplayPanel` slot and move the entity-detail
-     **ITEM display** (the `data.*` field rows + the AI-description blockquote) into
-     it, and move the **ITEM form** (`ItemFields` + the `aiDescription` block) into
-     the `kind-fields.tsx` client companion — retiring the last
-     `type === "ITEM"/"FLOOR"` branches in the form and detail page. The brand-new
-     bespoke-type "proof" is deferred to **M7's BOX** (which then lands as a single
-     descriptor file, confirming "one file, no scattered branches"), rather than
-     inventing a stub type now.
+   - **3b (done).** Added the display slot as a `<KindDisplay>` client dispatcher
+     (`kind-display.tsx`) the server detail page renders — the lookup runs on the
+     client, since a server component can't call a function exported from a
+     `"use client"` module. Moved the entity-detail **ITEM display** (the `data.*`
+     field rows + the AI-description blockquote) into `ItemDisplayPanel`, and the
+     **ITEM form** (`ItemFields` + the `aiDescription` block) into the
+     `kind-fields.tsx` companion, retiring the last `type === "ITEM"/"FLOOR"`
+     branches in the form and detail page. Reference fields (ITEM's `itemTypeId` →
+     ITEM_TYPE name) became a registry-driven `EntityKind.referenceFields` map so
+     the page resolves display names without a `type === "X"` branch. A shared
+     `FieldLockToggle` was extracted for reuse. The brand-new bespoke-type "proof"
+     is deferred to **M7's BOX** (which then lands as a single descriptor file,
+     confirming "one file, no scattered branches"), rather than inventing a stub
+     type now.
 
 ## Consequences
 

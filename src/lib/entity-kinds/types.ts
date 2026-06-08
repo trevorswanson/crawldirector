@@ -25,4 +25,12 @@ export interface EntityKind {
    * this so an unset flag persists as `false`, not `null`. Optional.
    */
   readonly dataDefaults?: Readonly<Record<string, unknown>>;
+  /**
+   * Bespoke `data.*` fields that hold a reference to another entity (by id),
+   * mapped to the EntityType they point at (e.g. ITEM's `itemTypeId` → an
+   * `ITEM_TYPE` entity). The detail page resolves these to display names for the
+   * read-view DisplayPanel, registry-driven so a new reference field needs no
+   * `type === "X"` branch. Keyed by the bare field name (not the `data.` prefix).
+   */
+  readonly referenceFields?: Readonly<Record<string, string>>;
 }

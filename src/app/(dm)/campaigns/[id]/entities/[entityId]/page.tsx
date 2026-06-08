@@ -17,6 +17,8 @@ import {
 import { RosterPanel } from "@/components/entities/roster-panel";
 import { KnowledgePanel } from "@/components/entities/knowledge-panel";
 import { GeneratePanel } from "@/components/entities/generate-panel";
+import { FieldLockToggle } from "@/components/entities/field-lock-toggle";
+import { KindDisplay } from "@/components/entities/kind-display";
 import {
   ArchiveEntityForm,
   EditEntityForm,
@@ -31,6 +33,7 @@ import { SourceBadge } from "@/components/ui/source-badge";
 import { StatusPill } from "@/components/ui/status-pill";
 import { TypeDot } from "@/components/ui/type-dot";
 import { formatEntityType } from "@/lib/entities";
+import { kindFor } from "@/lib/entity-kinds";
 import { cn } from "@/lib/utils";
 import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
@@ -113,15 +116,8 @@ export default async function EntityPage({
     entity.type === "CRAWLER" && entity.crawler?.currentFloor != null
       ? await resolveFloorEntity(user.id, id, entity.crawler.currentFloor)
       : null;
-  const fields = entityFields(entity, candidateList.entities, currentFloor);
+  const fields = entityFields(entity, currentFloor);
   const detailHref = `/campaigns/${id}/entities/${entityId}`;
-  const existingData = (entity.data as {
-    itemTypeId?: string | null;
-    divine?: boolean;
-    unique?: boolean;
-    fleeting?: boolean;
-    aiDescription?: string | null;
-  }) || {};
 
   const renderedDescription = entity.description || "";
   // Whether the narrative fields are protected from edits/AI. Drives the
@@ -130,14 +126,22 @@ export default async function EntityPage({
   const summaryLocked = entity.locked || entity.lockedFields.includes("summary");
   const descriptionLocked =
     entity.locked || entity.lockedFields.includes("description");
-  let renderedAiDescription = "";
-  if (entity.type === "ITEM") {
-    let prefix = "";
-    if (existingData.divine) prefix += "This is a divine item.\n";
-    if (existingData.unique) prefix += "This is a unique item.\n";
-    if (existingData.fleeting) prefix += "This is a fleeting item.\n";
-    if (prefix || existingData.aiDescription) {
-      renderedAiDescription = prefix + (prefix && existingData.aiDescription ? "\n" : "") + (existingData.aiDescription || "");
+
+  // Bespoke per-type read-view display comes from the entity-kind registry
+  // (ADR 0009) instead of inline `type === "ITEM"` branches. The panel is a
+  // client component, so the page resolves any reference fields the descriptor
+  // declares (ITEM's `itemTypeId` → its ITEM_TYPE entity name) to display
+  // strings here.
+  const kind = kindFor(entity.type);
+  const resolvedNames: Record<string, string | null> = {};
+  if (kind?.referenceFields) {
+    const entityData = (entity.data as Record<string, unknown>) || {};
+    for (const [field, targetType] of Object.entries(kind.referenceFields)) {
+      const refId = entityData[field];
+      resolvedNames[`data.${field}`] =
+        candidateList.entities.find(
+          (e) => e.id === refId && e.type === targetType,
+        )?.name ?? null;
     }
   }
 
@@ -197,59 +201,17 @@ export default async function EntityPage({
             </div>
           )}
 
-          {!editing && entity.type === "ITEM" && (renderedAiDescription || entity.lockedFields.includes("data.aiDescription")) && (() => {
-            const fieldLocked = entity.locked || entity.lockedFields.includes("data.aiDescription");
-            return (
-              <div className="mt-4 flex items-start justify-between gap-4">
-                <blockquote
-                  className="border-l-2 pl-4 text-[var(--ink-dim)] font-mono flex-1 min-h-[24px]"
-                  style={{ borderLeftColor: "var(--accent)" }}
-                >
-                  {renderedAiDescription ? (
-                    <Markdown content={renderedAiDescription} />
-                  ) : (
-                    <span className="text-[var(--ink-faint)] italic">Empty AI description (locked)</span>
-                  )}
-                </blockquote>
-                <form
-                  action={toggleEntityFieldLockAction.bind(
-                    null,
-                    id,
-                    entityId,
-                  )}
-                  className="shrink-0 self-start"
-                >
-                  <input type="hidden" name="field" value="data.aiDescription" />
-                  <button
-                    type="submit"
-                    disabled={entity.locked}
-                    title={
-                      entity.locked
-                        ? "Whole entity is locked"
-                        : fieldLocked
-                          ? "Locked field — click to unlock"
-                          : "Click to lock this field"
-                    }
-                    className="inline-flex items-center border px-[5px] py-[3px] transition-colors disabled:opacity-50 cursor-pointer"
-                    style={{
-                      borderColor: fieldLocked
-                        ? "var(--sys)"
-                        : "var(--line)",
-                      color: fieldLocked
-                        ? "var(--sys)"
-                        : "var(--ink-faint)",
-                    }}
-                  >
-                    {fieldLocked ? (
-                      <Lock aria-hidden size={11} />
-                    ) : (
-                      <Unlock aria-hidden size={11} />
-                    )}
-                  </button>
-                </form>
-              </div>
-            );
-          })()}
+          {/* Bespoke per-type read-view display from the entity-kind registry
+              (ADR 0009); the client dispatcher renders the type's panel or
+              nothing (a type with no descriptor falls back to generic display). */}
+          {!editing && (
+            <KindDisplay
+              campaignId={id}
+              entityId={entityId}
+              entity={entity}
+              resolvedNames={resolvedNames}
+            />
+          )}
 
           {editing ? (
             <section className="mt-7">
@@ -621,29 +583,11 @@ type FieldRow = { key: string; label: string; value: string; href?: string };
 // Name/summary/description live in the header/description, not here (per mockup).
 function entityFields(
   entity: EntityDetail,
-  allEntities: Array<{ id: string; name: string; type: string }>,
   currentFloor: { id: string; name: string; floorNumber: number } | null,
 ): FieldRow[] {
   const rows: FieldRow[] = [];
-  const existingData = (entity.data as {
-    itemTypeId?: string | null;
-    divine?: boolean;
-    unique?: boolean;
-    fleeting?: boolean;
-    aiDescription?: string | null;
-  }) || {};
-
-  if (entity.type === "ITEM") {
-    const itemTypeEntity = allEntities.find(
-      (e) => e.id === existingData.itemTypeId && e.type === "ITEM_TYPE",
-    );
-    rows.push(
-      { key: "data.itemTypeId", label: "Item Type", value: itemTypeEntity?.name ?? "—" },
-      { key: "data.divine", label: "Divine", value: existingData.divine ? "Yes" : "No" },
-      { key: "data.unique", label: "Unique", value: existingData.unique ? "Yes" : "No" },
-      { key: "data.fleeting", label: "Fleeting", value: existingData.fleeting ? "Yes" : "No" },
-    );
-  }
+  // ITEM's bespoke data.* rows render via the entity-kind DisplayPanel (ADR 0009);
+  // CRAWLER stays here as its own satellite-table path (not a registry entry).
   if (entity.type === "CRAWLER" && entity.crawler) {
     const c = entity.crawler;
     rows.push(
@@ -693,54 +637,6 @@ function entityFields(
     },
   );
   return rows;
-}
-
-// Per-field canon lock toggle for the read view (summary/description). Mirrors
-// the Fields-table toggles: locked fields can't be overwritten by edits or AI
-// generation. Disabled while the whole entity is locked.
-function FieldLockToggle({
-  campaignId,
-  entityId,
-  field,
-  fieldLocked,
-  entityLocked,
-}: {
-  campaignId: string;
-  entityId: string;
-  field: string;
-  fieldLocked: boolean;
-  entityLocked: boolean;
-}) {
-  return (
-    <form
-      action={toggleEntityFieldLockAction.bind(null, campaignId, entityId)}
-      className="shrink-0 self-start"
-    >
-      <input type="hidden" name="field" value={field} />
-      <button
-        type="submit"
-        disabled={entityLocked}
-        title={
-          entityLocked
-            ? "Whole entity is locked"
-            : fieldLocked
-              ? "Locked field — click to unlock"
-              : "Click to lock this field"
-        }
-        className="inline-flex cursor-pointer items-center border px-[5px] py-[3px] transition-colors disabled:opacity-50"
-        style={{
-          borderColor: fieldLocked ? "var(--sys)" : "var(--line)",
-          color: fieldLocked ? "var(--sys)" : "var(--ink-faint)",
-        }}
-      >
-        {fieldLocked ? (
-          <Lock aria-hidden size={11} />
-        ) : (
-          <Unlock aria-hidden size={11} />
-        )}
-      </button>
-    </form>
-  );
 }
 
 function ProvRow({ k, children }: { k: string; children: React.ReactNode }) {

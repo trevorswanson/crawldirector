@@ -116,10 +116,12 @@ function CoreFields({
   entity,
   values,
   campaignTags = [],
+  itemTypes = [],
 }: {
   entity?: EntityDetail;
   values?: Record<string, unknown>;
   campaignTags?: string[];
+  itemTypes?: Array<{ id: string; name: string }>;
 }) {
   const editCtx = useContext(EditFormContext);
   const visibility = editCtx?.visibility;
@@ -162,28 +164,23 @@ function CoreFields({
           placeholder="One useful sentence for search and scanning."
         />
       </div>
-      {entity?.type === "ITEM" && (() => {
-        const existingData = (entity.data as { aiDescription?: string | null }) || {};
-        return (
-          <div className="grid gap-2">
-            <Label htmlFor="aiDescription">AI Description</Label>
-            <Textarea
-              id="aiDescription"
-              name="aiDescription"
-              defaultValue={getVal("aiDescription", existingData.aiDescription ?? undefined) as string}
-              readOnly={isLocked("data.aiDescription")}
-              placeholder="Official system commentary / flavor text."
-            />
-          </div>
-        );
-      })()}
       {entity && (() => {
         // Bespoke per-type form fields come from the entity-kind registry
-        // (ADR 0009) instead of a `type === "X"` ladder. A type with no kind
-        // renders nothing extra and falls back to the generic core form.
+        // (ADR 0009) instead of a `type === "X"` ladder: FLOOR's anchors, ITEM's
+        // AI description + type + flags, etc. A type with no kind renders nothing
+        // extra and falls back to the generic core form. The reader is widened to
+        // `unknown` here because a kind field can be any primitive (ITEM's flags
+        // are booleans); each field casts to the shape its input needs.
         const KindFields = kindFormFields(entity.type);
+        const kindGetVal = (key: string, dbVal: unknown): unknown =>
+          values && key in values ? values[key] : dbVal;
         return KindFields ? (
-          <KindFields entity={entity} getVal={getVal} isLocked={isLocked} />
+          <KindFields
+            entity={entity}
+            getVal={kindGetVal}
+            isLocked={isLocked}
+            itemTypes={itemTypes}
+          />
         ) : null;
       })()}
       <div className="grid gap-2">
@@ -389,113 +386,6 @@ function CrawlerFields({
   );
 }
 
-function ItemFields({
-  entity,
-  itemTypes,
-  values,
-}: {
-  entity: EntityDetail;
-  itemTypes: Array<{ id: string; name: string }>;
-  values?: Record<string, unknown>;
-}) {
-  const isLocked = (fieldKey: string) => {
-    return entity.locked || entity.lockedFields.includes(fieldKey);
-  };
-
-  const getVal = (key: string, dbVal: unknown) => {
-    if (values && key in values) {
-      return values[key];
-    }
-    return dbVal;
-  };
-
-  const existingData = (entity.data as {
-    itemTypeId?: string | null;
-    divine?: boolean;
-    unique?: boolean;
-    fleeting?: boolean;
-    aiDescription?: string | null;
-  }) || {};
-
-  return (
-    <div className="grid gap-4 sm:grid-cols-2">
-      <div className="grid gap-2">
-        <Label htmlFor="itemTypeId">Item Type</Label>
-        <select
-          id="itemTypeId"
-          name="itemTypeId"
-          defaultValue={getVal("itemTypeId", existingData.itemTypeId ?? "") as string}
-          disabled={isLocked("data.itemTypeId")}
-          className="h-10 rounded-md border border-[var(--input)] bg-transparent px-3 text-sm disabled:opacity-60 disabled:bg-[var(--bg-3)] disabled:cursor-not-allowed"
-        >
-          <option value="">— None —</option>
-          {itemTypes.map((type) => (
-            <option key={type.id} value={type.id}>
-              {type.name}
-            </option>
-          ))}
-        </select>
-        {isLocked("data.itemTypeId") && (
-          <input type="hidden" name="itemTypeId" value={existingData.itemTypeId ?? ""} />
-        )}
-      </div>
-
-      <div className="grid gap-2">
-        <Label>Attributes</Label>
-        <div className="flex flex-wrap gap-4 py-2">
-          <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-            <input
-              type="checkbox"
-              id="divine"
-              name="divine"
-              value="true"
-              defaultChecked={getVal("divine", existingData.divine ?? false) as boolean}
-              disabled={isLocked("data.divine")}
-              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary disabled:opacity-50"
-            />
-            Divine
-          </label>
-          {isLocked("data.divine") && (
-            <input type="hidden" name="divine" value={existingData.divine ? "true" : "false"} />
-          )}
-
-          <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-            <input
-              type="checkbox"
-              id="unique"
-              name="unique"
-              value="true"
-              defaultChecked={getVal("unique", existingData.unique ?? false) as boolean}
-              disabled={isLocked("data.unique")}
-              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary disabled:opacity-50"
-            />
-            Unique
-          </label>
-          {isLocked("data.unique") && (
-            <input type="hidden" name="unique" value={existingData.unique ? "true" : "false"} />
-          )}
-
-          <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-            <input
-              type="checkbox"
-              id="fleeting"
-              name="fleeting"
-              value="true"
-              defaultChecked={getVal("fleeting", existingData.fleeting ?? false) as boolean}
-              disabled={isLocked("data.fleeting")}
-              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary disabled:opacity-50"
-            />
-            Fleeting
-          </label>
-          {isLocked("data.fleeting") && (
-            <input type="hidden" name="fleeting" value={existingData.fleeting ? "true" : "false"} />
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function CreateCrawlerForm({
   campaignId,
   campaignTags = [],
@@ -593,9 +483,16 @@ export function EditEntityForm({
   return (
     <form id="edit-entity-form" key={state?.timestamp} action={action} className="grid gap-4">
       <input type="hidden" name="type" value={entity.type} />
-      <CoreFields entity={entity} values={state?.values} campaignTags={campaignTags} />
+      <CoreFields
+        entity={entity}
+        values={state?.values}
+        campaignTags={campaignTags}
+        itemTypes={itemTypes}
+      />
+      {/* CRAWLER keeps its own satellite-table field block (not an entity-kind
+          registry entry — ADR 0009); ITEM/FLOOR bespoke data.* fields render via
+          the registry inside CoreFields. */}
       {entity.type === "CRAWLER" && <CrawlerFields entity={entity} values={state?.values} />}
-      {entity.type === "ITEM" && <ItemFields entity={entity} itemTypes={itemTypes} values={state?.values} />}
       <StateMessage state={state} />
     </form>
   );

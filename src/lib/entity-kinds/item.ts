@@ -37,4 +37,7 @@ export const ITEM_KIND: EntityKind = {
   // The flags persist as a concrete `false` when unchecked/absent (the rest of
   // the fields default to null).
   dataDefaults: { divine: false, unique: false, fleeting: false },
+  // itemTypeId references an ITEM_TYPE entity; the detail page resolves it to a
+  // display name for the read-view panel.
+  referenceFields: { itemTypeId: "ITEM_TYPE" },
 };

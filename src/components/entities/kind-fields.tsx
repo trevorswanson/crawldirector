@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import type { EntityDetail } from "@/server/services/entities";
 
 // Client companion to the entity-kind registry (ADR 0009): per-type bespoke
@@ -15,11 +16,16 @@ import type { EntityDetail } from "@/server/services/entities";
 
 export interface KindFieldsProps {
   entity: EntityDetail;
-  getVal: (
-    key: string,
-    dbVal: string | number | undefined,
-  ) => string | number | undefined;
+  // Bespoke fields persist as any primitive (text/number/boolean), so the form
+  // value reader is intentionally untyped — each field casts to the shape its
+  // input needs (FLOOR's numbers/strings, ITEM's checkbox booleans).
+  getVal: (key: string, dbVal: unknown) => unknown;
   isLocked: (fieldKey: string) => boolean;
+  /**
+   * Candidate ITEM_TYPE entities for the ITEM "Item Type" select. Unused by
+   * types without a reference field; the page passes it for every kind.
+   */
+  itemTypes?: Array<{ id: string; name: string }>;
 }
 
 function FloorFields({ entity, getVal, isLocked }: KindFieldsProps) {
@@ -103,8 +109,114 @@ function FloorFields({ entity, getVal, isLocked }: KindFieldsProps) {
   );
 }
 
+function ItemFields({ entity, itemTypes = [], getVal, isLocked }: KindFieldsProps) {
+  // ITEM bespoke fields (ADR 0009): aiDescription is the official system
+  // commentary / flavour text; itemTypeId links to an ITEM_TYPE entity; divine/
+  // unique/fleeting are DCC item flags. The detail page composes the flags +
+  // aiDescription into the read-view blockquote (see kind-display.tsx).
+  const existingData =
+    (entity.data as {
+      itemTypeId?: string | null;
+      divine?: boolean;
+      unique?: boolean;
+      fleeting?: boolean;
+      aiDescription?: string | null;
+    }) || {};
+
+  return (
+    <>
+      <div className="grid gap-2">
+        <Label htmlFor="aiDescription">AI Description</Label>
+        <Textarea
+          id="aiDescription"
+          name="aiDescription"
+          defaultValue={getVal("aiDescription", existingData.aiDescription ?? undefined) as string}
+          readOnly={isLocked("data.aiDescription")}
+          placeholder="Official system commentary / flavor text."
+        />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-2">
+          <Label htmlFor="itemTypeId">Item Type</Label>
+          <select
+            id="itemTypeId"
+            name="itemTypeId"
+            defaultValue={getVal("itemTypeId", existingData.itemTypeId ?? "") as string}
+            disabled={isLocked("data.itemTypeId")}
+            className="h-10 rounded-md border border-[var(--input)] bg-transparent px-3 text-sm disabled:opacity-60 disabled:bg-[var(--bg-3)] disabled:cursor-not-allowed"
+          >
+            <option value="">— None —</option>
+            {itemTypes.map((type) => (
+              <option key={type.id} value={type.id}>
+                {type.name}
+              </option>
+            ))}
+          </select>
+          {isLocked("data.itemTypeId") && (
+            <input type="hidden" name="itemTypeId" value={existingData.itemTypeId ?? ""} />
+          )}
+        </div>
+
+        <div className="grid gap-2">
+          <Label>Attributes</Label>
+          <div className="flex flex-wrap gap-4 py-2">
+            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+              <input
+                type="checkbox"
+                id="divine"
+                name="divine"
+                value="true"
+                defaultChecked={getVal("divine", existingData.divine ?? false) as boolean}
+                disabled={isLocked("data.divine")}
+                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary disabled:opacity-50"
+              />
+              Divine
+            </label>
+            {isLocked("data.divine") && (
+              <input type="hidden" name="divine" value={existingData.divine ? "true" : "false"} />
+            )}
+
+            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+              <input
+                type="checkbox"
+                id="unique"
+                name="unique"
+                value="true"
+                defaultChecked={getVal("unique", existingData.unique ?? false) as boolean}
+                disabled={isLocked("data.unique")}
+                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary disabled:opacity-50"
+              />
+              Unique
+            </label>
+            {isLocked("data.unique") && (
+              <input type="hidden" name="unique" value={existingData.unique ? "true" : "false"} />
+            )}
+
+            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+              <input
+                type="checkbox"
+                id="fleeting"
+                name="fleeting"
+                value="true"
+                defaultChecked={getVal("fleeting", existingData.fleeting ?? false) as boolean}
+                disabled={isLocked("data.fleeting")}
+                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary disabled:opacity-50"
+              />
+              Fleeting
+            </label>
+            {isLocked("data.fleeting") && (
+              <input type="hidden" name="fleeting" value={existingData.fleeting ? "true" : "false"} />
+            )}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 const KIND_FIELDS: Record<string, (props: KindFieldsProps) => ReactNode> = {
   FLOOR: FloorFields,
+  ITEM: ItemFields,
 };
 
 /** The bespoke form-fields component for a type, or undefined if it has none. */
