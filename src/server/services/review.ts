@@ -11,7 +11,11 @@ import {
   Role,
   Visibility,
 } from "@/generated/prisma/client";
-import { allKindDataKeys } from "@/lib/entity-kinds";
+import {
+  allKindDataKeys,
+  buildKindData,
+  normalizeKindFieldValue,
+} from "@/lib/entity-kinds";
 import { ServiceError } from "@/lib/errors";
 import { readFloorData } from "@/lib/floor";
 import { generateRankBetween } from "@/lib/rank";
@@ -1202,37 +1206,18 @@ function currentEntityValue(
       return entity.data;
     case "customFields":
       return entity.customFields;
-    case "data.itemTypeId":
-    case "data.divine":
-    case "data.unique":
-    case "data.fleeting":
-    case "data.aiDescription":
-    case "data.floorNumber":
-    case "data.theme":
-    case "data.startDay":
-    case "data.collapseDay": {
-      const metadata = entity.data as {
-        itemTypeId?: string | null;
-        divine?: boolean;
-        unique?: boolean;
-        fleeting?: boolean;
-        aiDescription?: string | null;
-        floorNumber?: number | null;
-        theme?: string | null;
-        startDay?: number | null;
-        collapseDay?: number | null;
-      } | null;
-      if (field === "data.itemTypeId") return metadata?.itemTypeId ?? null;
-      if (field === "data.divine") return metadata?.divine ?? false;
-      if (field === "data.unique") return metadata?.unique ?? false;
-      if (field === "data.fleeting") return metadata?.fleeting ?? false;
-      if (field === "data.aiDescription") return metadata?.aiDescription ?? null;
-      if (field === "data.floorNumber") return metadata?.floorNumber ?? null;
-      if (field === "data.theme") return metadata?.theme ?? null;
-      if (field === "data.startDay") return metadata?.startDay ?? null;
-      if (field === "data.collapseDay") return metadata?.collapseDay ?? null;
-      return undefined;
+  }
+
+  // Bespoke `data.*` fields: normalize the stored value by the field's
+  // entity-kind descriptor (ADR 0009) instead of a per-field switch. A `data.*`
+  // field no kind declares is unknown → undefined (as the prior switch returned).
+  if (field.startsWith("data.")) {
+    const key = field.slice("data.".length);
+    if (dataFields.has(field)) {
+      const metadata = entity.data as Record<string, unknown> | null;
+      return normalizeKindFieldValue(key, metadata?.[key]);
     }
+    return undefined;
   }
 
   if (!field.startsWith("crawler.") || !entity.crawler) return undefined;
@@ -2400,21 +2385,12 @@ async function applyCreateEntity(
       tags: stringArray(readTo(patch, "tags")),
       status: CanonStatus.CANON,
       isStub: Boolean(readTo(patch, "isStub") ?? false),
-      data: {
-        itemTypeId: nullableString(readTo(patch, "data.itemTypeId")),
-        divine: booleanWithDefault(readTo(patch, "data.divine"), false),
-        unique: booleanWithDefault(readTo(patch, "data.unique"), false),
-        fleeting: booleanWithDefault(readTo(patch, "data.fleeting"), false),
-        aiDescription: nullableString(readTo(patch, "data.aiDescription")),
-        ...(type === EntityType.FLOOR
-          ? {
-              floorNumber: optionalNumber(readTo(patch, "data.floorNumber")) ?? null,
-              theme: nullableString(readTo(patch, "data.theme")),
-              startDay: optionalNumber(readTo(patch, "data.startDay")) ?? null,
-              collapseDay: optionalNumber(readTo(patch, "data.collapseDay")) ?? null,
-            }
-          : {}),
-      } as Prisma.InputJsonValue,
+      // Bespoke `data.*` fields are composed from the type's entity-kind
+      // descriptor (ADR 0009) instead of a `type === "X"` switch — each entity
+      // stores only its own kind's fields.
+      data: buildKindData(type, (key) =>
+        readTo(patch, `data.${key}`),
+      ) as Prisma.InputJsonValue,
       ...(type === EntityType.CRAWLER
         ? {
             crawler: {
@@ -2704,45 +2680,20 @@ function entityUpdateData(patch: ReviewPatch, type: EntityType, existingData?: u
 
   const dataPatch = Object.keys(patch).some((field) => dataFields.has(field));
   if (dataPatch) {
-    const currentData = (existingData && typeof existingData === "object" ? { ...existingData } : {}) as {
-      itemTypeId?: string | null;
-      divine?: boolean;
-      unique?: boolean;
-      fleeting?: boolean;
-      aiDescription?: string | null;
-      floorNumber?: number | null;
-      theme?: string | null;
-      startDay?: number | null;
-      collapseDay?: number | null;
-    };
-    if ("data.itemTypeId" in patch) {
-      currentData.itemTypeId = nullableString(readTo(patch, "data.itemTypeId"));
+    // Merge each touched bespoke `data.*` field onto the existing data, each
+    // value normalized by its entity-kind descriptor (ADR 0009) — replacing the
+    // per-field `if ("data.X" in patch)` ladder. Keyed by field name (not type)
+    // so it stays faithful to the prior type-agnostic update behavior.
+    const currentData = (
+      existingData && typeof existingData === "object" ? { ...existingData } : {}
+    ) as Record<string, unknown>;
+    for (const key of allKindDataKeys()) {
+      const field = `data.${key}`;
+      if (field in patch) {
+        currentData[key] = normalizeKindFieldValue(key, readTo(patch, field));
+      }
     }
-    if ("data.divine" in patch) {
-      currentData.divine = booleanWithDefault(readTo(patch, "data.divine"), false);
-    }
-    if ("data.unique" in patch) {
-      currentData.unique = booleanWithDefault(readTo(patch, "data.unique"), false);
-    }
-    if ("data.fleeting" in patch) {
-      currentData.fleeting = booleanWithDefault(readTo(patch, "data.fleeting"), false);
-    }
-    if ("data.aiDescription" in patch) {
-      currentData.aiDescription = nullableString(readTo(patch, "data.aiDescription"));
-    }
-    if ("data.floorNumber" in patch) {
-      currentData.floorNumber = optionalNumber(readTo(patch, "data.floorNumber")) ?? null;
-    }
-    if ("data.theme" in patch) {
-      currentData.theme = nullableString(readTo(patch, "data.theme"));
-    }
-    if ("data.startDay" in patch) {
-      currentData.startDay = optionalNumber(readTo(patch, "data.startDay")) ?? null;
-    }
-    if ("data.collapseDay" in patch) {
-      currentData.collapseDay = optionalNumber(readTo(patch, "data.collapseDay")) ?? null;
-    }
-    data.data = currentData;
+    data.data = currentData as Prisma.InputJsonValue;
   }
 
   return data;

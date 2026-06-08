@@ -25,16 +25,25 @@ keyword-scanning every doc.
             section below.
       - [x] **Slice 2 — ITEM + derive the reviewable-field set wholesale.** ✅
             (2026-06-07) — see the section below.
-      - [ ] **Slice 3 — display slot + next bespoke type as proof.** Add the
-            `DisplayPanel` slot, move FLOOR's special display into it, and onboard
-            the next bespoke type entirely through a new descriptor file. **Also
-            fold in the apply-path data assembly** still hardcoded in
+      - [x] **Slice 3a — registry-driven apply-path `data` builder.** ✅
+            (2026-06-07) — retired the last three hardcoded `data.*` switches in
             [`review.ts`](../src/server/services/review.ts) (`applyCreateEntity`,
-            the update `buildEntityData`, and `getCurrentValue`'s `data.*` switch),
-            plus the ITEM form (`ItemFields` + the `aiDescription` block in
-            `CoreFields`) and the entity-detail ITEM display — the remaining
-            hardcoded `type === "ITEM"/"FLOOR"` lists, once a `DisplayPanel`/form
-            slot + a registry-driven `data` builder exist.
+            the update `buildEntityData`, and `currentEntityValue`/`getCurrentValue`)
+            in favour of `buildKindData` / `normalizeKindFieldValue` derived from
+            the descriptors. See the section below.
+      - [ ] **Slice 3b — display + form slots (the remaining client branches).**
+            Add the `DisplayPanel` detail-page slot and move the entity-detail
+            **ITEM display** (the `data.divine/unique/fleeting/itemTypeId` field
+            rows + the AI-description blockquote) into it; move the **ITEM form**
+            (`ItemFields` + the `aiDescription` block in `CoreFields`) into the
+            `kind-fields.tsx` companion (extending `KindFieldsProps` with the
+            `itemTypes` candidate list), retiring the last
+            `type === "ITEM"/"FLOOR"` branches in
+            [`entity-forms.tsx`](../src/components/entities/entity-forms.tsx) and
+            the [entity detail page](<../src/app/(dm)/campaigns/[id]/entities/[entityId]/page.tsx>).
+            **The brand-new-EntityType "proof" is deferred to M7's BOX** (it lands
+            as one descriptor file then) rather than inventing a stub type now
+            (project norm: no stub/filler features).
 - [ ] **M4 generator expansion.** Add bulk-stub scaffolding, a generation panel
       for bulk runs, a `Job` table + worker for bulk/async runs, and usage/cost
       tracking with spend caps.
@@ -91,6 +100,64 @@ keyword-scanning every doc.
       - **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
+
+## Entity-kind registry — registry-driven apply-path `data` builder (ADR 0009 slice 3a) ✅ (2026-06-07)
+
+**Goal:** continue [ADR 0009](./adr/0009-entity-kind-registry.md) (accepted) —
+retire the **last** hardcoded `type === …` / per-field `data.*` switches, the
+**canonical apply-path `data` assembly** in
+[`review.ts`](../src/server/services/review.ts). Slices 1–2 derived validation,
+the key lists, and the reviewable/lockable set from the descriptors; the review
+service still hand-composed the stored `Entity.data` JSON on three paths. This
+slice makes that composition registry-driven too. Pure application-layer
+refactor: **no schema change, no migration.** (Scoped down from the full slice 3
+in the backlog: the `DisplayPanel`/form client slots + a new-type proof are now
+**slice 3b**.)
+
+- [x] **Registry primitives** (`src/lib/entity-kinds/index.ts`): `buildKindData(type,
+      read)` composes the full `data` object for a create from the type's
+      descriptor (every declared field, normalized, empty→default), and
+      `normalizeKindFieldValue(key, raw)` normalizes one bespoke field looked up
+      globally by name (for the update-merge + current-value paths, which key off
+      the field name, not the type). A private `fieldValueType` reads each field's
+      primitive (string/number/boolean) from its Zod schema via `z.toJSONSchema`,
+      so the normalization mirrors the prior `nullableString` / `optionalNumber` /
+      `booleanWithDefault(false)` handling without a per-field switch — a new
+      bespoke field is composed and read back automatically.
+- [x] **`applyCreateEntity`** now builds `data: buildKindData(type, …)` instead of
+      the unconditional five ITEM fields + a `type === "FLOOR"` spread.
+- [x] **`entityUpdateData`** merges each touched `data.*` field via
+      `normalizeKindFieldValue`, iterating `allKindDataKeys()` (type-agnostic, only
+      keys present in the patch — faithful to the prior `if ("data.X" in patch)`
+      ladder) instead of nine hand-written field assignments.
+- [x] **`currentEntityValue`** reads a bespoke `data.*` field through
+      `normalizeKindFieldValue` (gated by the existing `dataFields` set) instead of
+      a nine-case switch.
+- [x] **One intentional, strictly-more-correct cleanup (documented):** the old
+      create path stored the five ITEM fields (`itemTypeId`/`divine`/`unique`/
+      `fleeting`/`aiDescription`) on **every** entity regardless of type (plus FLOOR
+      fields on FLOORs). The registry builder stores **only the type's own kind
+      fields**, so a FLOOR/NPC no longer carries spurious ITEM `data.*` keys — the
+      same class of cleanup slice 2 made for provenance rows. Reads already default
+      a missing field to its empty value (`?? null` / `?? false`), so display,
+      review, and locking are unchanged; existing rows are untouched (no
+      migration). ITEM create/update/lock/provenance and the stored ITEM `data`
+      shape are byte-identical.
+- [x] **Tests:** extended `entity-kinds` (string/number/boolean
+      `normalizeKindFieldValue`, unknown-key → null, `buildKindData` full ITEM
+      object, FLOOR-only fields with no spurious ITEM keys, no-kind type → `{}`);
+      new DB-backed `entities` assertions that a created FLOOR stores only its own
+      fields and a non-kind NPC stores no ITEM keys. Existing `entities`/`review`/
+      `events`/`generation`/`validation` suites pass unchanged. lint (0 errors; 2
+      pre-existing settings warnings), typecheck, build, and the full coverage gate
+      green (statements 95.52%, branches 88.94%, functions 97.66%, lines 97.42%).
+- [x] **Verification boundary:** pure, behavior-preserving server refactor (no
+      schema/migration, identical stored ITEM data, missing fields default on read),
+      covered by the DB-backed `entities`/`review`/`events` suites — same precedent
+      + port-3000 constraint as prior slices; not browser-observable.
+- [x] **Remaining:** slice 3b (the `DisplayPanel` detail-page slot + the ITEM
+      form/display client branches; new-type proof deferred to M7 BOX) stays in the
+      open backlog.
 
 ## Entity-kind registry — ITEM + derive the reviewable set (ADR 0009 slice 2) ✅ (2026-06-07)
 
