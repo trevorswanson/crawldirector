@@ -211,6 +211,25 @@ function kindDataCreatePatch(
   return patch;
 }
 
+// Build a CREATE_ENTITY patch for a thin stub (name + type + optional one-line
+// summary + tags), the canonical create-patch shape used by the bulk-stub
+// scaffolding generator (M4). Reuses `entityCreatePatch` so a scaffolded stub is
+// byte-identical to a manually quick-created one (visibility DM_ONLY, isStub).
+export function buildStubCreatePatch(
+  userId: string,
+  campaignId: string,
+  spec: { type: EntityType; name: string; summary: string | null; tags: string[] },
+): ReviewPatch {
+  return entityCreatePatch(userId, campaignId, spec.type, {
+    name: spec.name,
+    summary: spec.summary ?? "",
+    description: "",
+    visibility: Visibility.DM_ONLY,
+    tags: spec.tags,
+    isStub: true,
+  });
+}
+
 async function entityResult(entityId: string) {
   const entity = await prisma.entity.findUnique({
     where: { id: entityId },

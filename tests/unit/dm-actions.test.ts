@@ -40,6 +40,7 @@ const {
   revokeKnowledge,
   fleshOutEntity,
   inferRelationshipsForEntity,
+  scaffoldStubEntities,
   signOut,
   redirect,
   revalidatePath,
@@ -83,6 +84,7 @@ const {
   revokeKnowledge: vi.fn(),
   fleshOutEntity: vi.fn(),
   inferRelationshipsForEntity: vi.fn(),
+  scaffoldStubEntities: vi.fn(),
   signOut: vi.fn(),
   redirect: vi.fn(() => {
     throw new Error("NEXT_REDIRECT");
@@ -139,7 +141,11 @@ vi.mock("@/server/services/knowledge", () => ({
   grantEntityKnowledge,
   revokeKnowledge,
 }));
-vi.mock("@/server/services/generation", () => ({ fleshOutEntity, inferRelationshipsForEntity }));
+vi.mock("@/server/services/generation", () => ({
+  fleshOutEntity,
+  inferRelationshipsForEntity,
+  scaffoldStubEntities,
+}));
 vi.mock("@/server/auth", () => ({ signOut }));
 vi.mock("next/navigation", () => ({ redirect }));
 vi.mock("next/cache", () => ({ revalidatePath }));
@@ -197,6 +203,7 @@ import {
   revokeKnowledgeAction,
   fleshOutEntityAction,
   inferRelationshipsForEntityAction,
+  scaffoldStubsAction,
 } from "@/app/(dm)/actions";
 
 import { ServiceError } from "@/lib/errors";
@@ -2051,6 +2058,51 @@ describe("inferRelationshipsForEntityAction", () => {
 
     inferRelationshipsForEntity.mockRejectedValueOnce(new Error("boom"));
     expect((await inferRelationshipsForEntityAction("c1", "e1", undefined, form({})))?.error).toBe(
+      "Generation failed. Please try again.",
+    );
+  });
+});
+
+describe("scaffoldStubsAction", () => {
+  it("scaffolds stubs and returns a success message + link, revalidating queue + world", async () => {
+    scaffoldStubEntities.mockResolvedValue({
+      changeSetId: "cs3",
+      providerId: "anthropic",
+      model: "claude-opus-4-8",
+      stubCount: 3,
+    });
+
+    const result = await scaffoldStubsAction("c1", undefined, form({ instruction: "Bone Market." }));
+
+    expect(scaffoldStubEntities).toHaveBeenCalledWith("u1", "c1", "Bone Market.");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1");
+    expect(result?.success).toContain("3 stubs");
+    expect(result?.success).toContain("claude-opus-4-8");
+    expect(result?.changeSetId).toBe("cs3");
+    expect(result?.error).toBeUndefined();
+  });
+
+  it("uses the singular noun for a single stub", async () => {
+    scaffoldStubEntities.mockResolvedValue({
+      changeSetId: "cs4",
+      providerId: "anthropic",
+      model: "claude-opus-4-8",
+      stubCount: 1,
+    });
+    const result = await scaffoldStubsAction("c1", undefined, form({ instruction: "One thing." }));
+    expect(result?.success).toContain("1 stub proposed");
+    expect(result?.success).toContain("Review it in the queue");
+  });
+
+  it("surfaces a ServiceError message and a generic fallback", async () => {
+    scaffoldStubEntities.mockRejectedValueOnce(new ServiceError("No AI provider is configured."));
+    expect((await scaffoldStubsAction("c1", undefined, form({ instruction: "x" })))?.error).toBe(
+      "No AI provider is configured.",
+    );
+
+    scaffoldStubEntities.mockRejectedValueOnce(new Error("boom"));
+    expect((await scaffoldStubsAction("c1", undefined, form({ instruction: "x" })))?.error).toBe(
       "Generation failed. Please try again.",
     );
   });

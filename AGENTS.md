@@ -124,9 +124,13 @@ The app stays fully usable with no key configured. The visibility model is trans
 The **relationship inference** generator (M4 slice 4) is also in: the entity
 detail rail's **Infer relationships** action proposes typed edges involving the
 current entity, files them as **PENDING `CREATE_RELATIONSHIP` proposals**, and
-records AI provider/model/prompt provenance on approval. Remaining M4 expansion
-work is bulk-stub scaffolding, bulk/async jobs, and usage/cost controls.
-See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
+records AI provider/model/prompt provenance on approval. The **bulk-stub
+scaffolding** generator (M4 slice 5) is also in: a DM-only **Scaffold with AI**
+panel on the World Browser header turns a free-text instruction into a batch of
+thin stub entities, filed as one **PENDING `CREATE_ENTITY` change set** in the
+Review Queue (`src/server/ai/generators/scaffold-stubs.ts`). Remaining M4
+expansion work is a generation panel for bulk *multi-entity* runs, async jobs,
+and usage/cost controls. See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
 ## Start here, every session
 

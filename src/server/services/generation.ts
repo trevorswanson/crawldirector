@@ -19,6 +19,13 @@ import {
   type InferRelationshipExistingEdge,
 } from "@/server/ai/generators/infer-relationships";
 import {
+  SCAFFOLD_STUBS_GENERATOR,
+  buildScaffoldStubsPrompt,
+  scaffoldStubsOutputSchema,
+  scaffoldStubsToSpecs,
+} from "@/server/ai/generators/scaffold-stubs";
+import { buildStubCreatePatch } from "@/server/services/entities";
+import {
   createPendingEntityChangeSet,
   createPendingRelationshipChangeSet,
 } from "@/server/services/review";
@@ -54,6 +61,15 @@ export type InferRelationshipsResult = {
   model: string;
   operationCount: number;
 };
+
+export type ScaffoldStubsResult = {
+  changeSetId: string;
+  providerId: string;
+  model: string;
+  stubCount: number;
+};
+
+const MAX_SCAFFOLD_INSTRUCTION = 2000;
 
 // Flesh out an entity into a fuller summary/description/tags, filed as a PENDING
 // `UPDATE_ENTITY` proposal for the DM to review. DM/co-DM only. Throws a
@@ -343,6 +359,102 @@ export async function inferRelationshipsForEntity(
     providerId: provider.id,
     model: provider.model,
     operationCount: operations.length,
+  };
+}
+
+// Scaffold a batch of thin stub entities from a DM's free-text instruction,
+// filed as a single PENDING change set of `CREATE_ENTITY` proposals — never
+// canon (invariant #1). DM/co-DM only. Throws a ServiceError (safe message) when
+// the instruction is empty, no provider is configured, the provider call fails,
+// or the model proposes nothing usable.
+export async function scaffoldStubEntities(
+  userId: string,
+  campaignId: string,
+  instruction: string,
+): Promise<ScaffoldStubsResult> {
+  await assertCampaignDm(userId, campaignId);
+
+  const trimmed = instruction.trim();
+  if (!trimmed) {
+    throw new ServiceError("Describe what you'd like to scaffold first.");
+  }
+  if (trimmed.length > MAX_SCAFFOLD_INSTRUCTION) {
+    throw new ServiceError("That instruction is too long. Trim it and try again.");
+  }
+
+  const campaign = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+    select: { name: true, styleGuide: true },
+  });
+  if (!campaign) throw new ServiceError("Campaign not found.");
+
+  const provider = await resolveCampaignProvider(campaignId);
+  if (!provider) {
+    throw new ServiceError(
+      "No AI provider is configured. Add a provider key in campaign Settings first.",
+    );
+  }
+
+  // Existing entity names (to dedupe against) and campaign tags (to encourage
+  // reuse), scoped to live (non-archived) canon.
+  const existing = await prisma.entity.findMany({
+    where: { campaignId, status: { not: CanonStatus.ARCHIVED } },
+    select: { name: true, tags: true },
+    orderBy: { name: "asc" },
+  });
+  const existingNames = existing.map((e) => e.name);
+  const campaignTags = Array.from(new Set(existing.flatMap((e) => e.tags))).sort();
+
+  const context = {
+    campaignName: campaign.name,
+    styleGuide: campaign.styleGuide,
+    instruction: trimmed,
+    existingNames,
+    campaignTags,
+  };
+  const { system, messages } = buildScaffoldStubsPrompt(context);
+
+  let output;
+  try {
+    const result = await provider.generateStructured({
+      schemaName: "scaffold_stubs",
+      schema: scaffoldStubsOutputSchema,
+      system,
+      messages,
+      maxTokens: 2048,
+    });
+    output = result.data;
+  } catch (error) {
+    // Keep messages safe: never reflect a provider's raw free text (invariant #6).
+    const message =
+      error instanceof ProviderError ? error.message : describeProviderError(error);
+    throw new ServiceError(message);
+  }
+
+  const specs = scaffoldStubsToSpecs(context, output);
+  if (specs.length === 0) {
+    throw new ServiceError("The model did not propose any usable new entities.");
+  }
+
+  const changeSet = await createPendingEntityChangeSet(userId, campaignId, {
+    source: ChangeSource.AI,
+    title: `Scaffold ${specs.length} stub${specs.length === 1 ? "" : "s"}`,
+    summary: `AI-scaffolded stub entities (${provider.model}) — review before they become canon.`,
+    providerId: provider.id,
+    model: provider.model,
+    promptId: SCAFFOLD_STUBS_GENERATOR.id,
+    promptVersion: SCAFFOLD_STUBS_GENERATOR.version,
+    operations: specs.map((spec) => ({
+      op: OpKind.CREATE_ENTITY,
+      patch: buildStubCreatePatch(userId, campaignId, spec),
+    })),
+  });
+
+  return {
+    changeSetId: changeSet.id,
+    providerId: provider.id,
+    model: provider.model,
+    stubCount: specs.length,
   };
 }
 

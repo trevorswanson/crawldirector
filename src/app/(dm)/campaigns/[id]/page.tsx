@@ -21,6 +21,8 @@ import {
   RestoreEntityUndoForm,
 } from "@/components/entities/entity-forms";
 import { CampaignSearch } from "@/components/entities/campaign-search";
+import { ScaffoldStubsPanel } from "@/components/entities/scaffold-stubs-panel";
+import { listAiKeys } from "@/server/services/ai-keys";
 import { formatEntityType } from "@/lib/entities";
 import { cn } from "@/lib/utils";
 import { entityTypeValues } from "@/lib/validation";
@@ -84,7 +86,7 @@ export default async function CampaignPage({
         ? "ALL"
         : (activeSource as ChangeSource);
 
-  const [{ entities }, counts, campaignTags] = await Promise.all([
+  const [{ entities }, counts, campaignTags, aiKeys] = await Promise.all([
     listEntitiesForUser(user.id, id, {
       query: filters.q,
       tag: activeTag,
@@ -95,7 +97,11 @@ export default async function CampaignPage({
     }),
     getEntityTypeCounts(user.id, id),
     listCampaignTags(user.id, id),
+    listAiKeys(user.id, id),
   ]);
+  // `listAiKeys` is DM-only (returns [] for players), so a non-empty list gates
+  // the panel to DMs with a provider key configured — same as the entity rail.
+  const aiConfigured = aiKeys.length > 0;
   const total = Object.values(counts).reduce((sum, n) => sum + (n ?? 0), 0);
 
   // Resolve the floor numbers crawlers stand on to their FLOOR entities so each
@@ -298,6 +304,7 @@ export default async function CampaignPage({
             {entities.length} / {total}
           </span>
           <QuickCreateStub campaignId={id} />
+          {aiConfigured && <ScaffoldStubsPanel campaignId={id} />}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-[22px] py-[18px]">

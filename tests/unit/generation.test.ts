@@ -19,7 +19,11 @@ vi.mock("@/server/ai", () => ({
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
 import { createGenericEntity } from "@/server/services/entities";
-import { fleshOutEntity, inferRelationshipsForEntity } from "@/server/services/generation";
+import {
+  fleshOutEntity,
+  inferRelationshipsForEntity,
+  scaffoldStubEntities,
+} from "@/server/services/generation";
 import { approveChangeSet, setEntityLock } from "@/server/services/review";
 
 function fakeProvider(
@@ -482,5 +486,153 @@ describe("inferRelationshipsForEntity", () => {
       ServiceError,
     );
     expect(resolveCampaignProvider).not.toHaveBeenCalled();
+  });
+});
+
+type ScaffoldStub = { type: string; name: string; summary?: string; tags?: string[] };
+
+function fakeStubProvider(stubs: ScaffoldStub[], over: { id?: string; model?: string } = {}) {
+  return {
+    id: over.id ?? "anthropic",
+    model: over.model ?? "claude-opus-4-8",
+    generate: vi.fn(),
+    generateStructured: vi.fn().mockResolvedValue({ data: { stubs } }),
+  };
+}
+
+describe("scaffoldStubEntities", () => {
+  it("files a single PENDING change set of CREATE_ENTITY stub proposals with provenance", async () => {
+    const { dmId, campaignId } = await seed();
+    resolveCampaignProvider.mockResolvedValue(
+      fakeStubProvider([
+        { type: "NPC", name: "Grimm the Tailor", summary: "Sews cursed cloaks.", tags: ["vendor"] },
+        { type: "LOCATION", name: "Rag & Bone Stall", tags: [] },
+      ]),
+    );
+
+    const result = await scaffoldStubEntities(dmId, campaignId, "The Bone Market vendors.");
+
+    expect(result).toMatchObject({ providerId: "anthropic", model: "claude-opus-4-8", stubCount: 2 });
+    // Nothing becomes canon (invariant #1): no new live entities beyond the seed.
+    expect(await prisma.entity.count({ where: { campaignId, status: "CANON" } })).toBe(1);
+
+    const changeSet = await prisma.changeSet.findUnique({
+      where: { id: result.changeSetId },
+      include: { operations: true },
+    });
+    expect(changeSet?.status).toBe("PENDING");
+    expect(changeSet?.source).toBe("AI");
+    expect(changeSet?.promptId).toBe("scaffold-stubs");
+    expect(changeSet?.promptVersion).toBe("1");
+    expect(changeSet?.operations).toHaveLength(2);
+    expect(changeSet?.operations.every((o) => o.op === "CREATE_ENTITY")).toBe(true);
+    const patch = changeSet!.operations[0].patch as Record<string, { to: unknown }>;
+    expect(patch.name.to).toBe("Grimm the Tailor");
+    expect(patch.type.to).toBe("NPC");
+    expect(patch.isStub.to).toBe(true);
+    expect(patch.visibility.to).toBe("DM_ONLY");
+  });
+
+  it("passes the style guide, existing names, and tags into the prompt", async () => {
+    const { dmId, campaignId } = await seed();
+    const provider = fakeStubProvider([{ type: "NPC", name: "Fresh" }]);
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    await scaffoldStubEntities(dmId, campaignId, "More NPCs.");
+
+    const req = provider.generateStructured.mock.calls[0][0];
+    const systemText = (req.system as Array<{ text: string }>).map((b) => b.text).join("\n");
+    expect(systemText).toContain("Gritty and darkly funny.");
+    const user = req.messages[0].content;
+    expect(user).toContain("More NPCs.");
+    // The seeded "Mordecai" (tag "existing") is offered as a dup to avoid + tag to reuse.
+    expect(user).toContain("Mordecai");
+    expect(user).toContain("existing");
+  });
+
+  it("drops a stub whose name duplicates existing canon", async () => {
+    const { dmId, campaignId } = await seed();
+    resolveCampaignProvider.mockResolvedValue(
+      fakeStubProvider([
+        { type: "NPC", name: "mordecai" }, // dup of the seeded entity (case-insensitive)
+        { type: "NPC", name: "Brand New" },
+      ]),
+    );
+
+    const result = await scaffoldStubEntities(dmId, campaignId, "Townsfolk.");
+    expect(result.stubCount).toBe(1);
+    const ops = await prisma.changeOperation.findMany({ where: { changeSetId: result.changeSetId } });
+    expect((ops[0].patch as Record<string, { to: unknown }>).name.to).toBe("Brand New");
+  });
+
+  it("rejects an empty instruction without calling the provider", async () => {
+    const { dmId, campaignId } = await seed();
+    resolveCampaignProvider.mockResolvedValue(fakeStubProvider([{ type: "NPC", name: "X" }]));
+    await expect(scaffoldStubEntities(dmId, campaignId, "   ")).rejects.toThrow(/scaffold/i);
+    expect(resolveCampaignProvider).not.toHaveBeenCalled();
+  });
+
+  it("rejects an over-long instruction without calling the provider", async () => {
+    const { dmId, campaignId } = await seed();
+    resolveCampaignProvider.mockResolvedValue(fakeStubProvider([{ type: "NPC", name: "X" }]));
+    await expect(scaffoldStubEntities(dmId, campaignId, "x".repeat(2001))).rejects.toThrow(/too long/i);
+    expect(resolveCampaignProvider).not.toHaveBeenCalled();
+  });
+
+  it("errors when no provider is configured", async () => {
+    const { dmId, campaignId } = await seed();
+    resolveCampaignProvider.mockResolvedValue(null);
+    await expect(scaffoldStubEntities(dmId, campaignId, "Things.")).rejects.toThrow(/No AI provider/i);
+  });
+
+  it("errors when the model proposes nothing usable", async () => {
+    const { dmId, campaignId } = await seed();
+    resolveCampaignProvider.mockResolvedValue(fakeStubProvider([]));
+    await expect(scaffoldStubEntities(dmId, campaignId, "Things.")).rejects.toThrow(/usable/i);
+    expect(await prisma.changeSet.count({ where: { source: "AI" } })).toBe(0);
+  });
+
+  it("surfaces a ProviderError as a safe ServiceError without filing a proposal", async () => {
+    const { dmId, campaignId } = await seed();
+    const provider = fakeStubProvider([{ type: "NPC", name: "X" }]);
+    provider.generateStructured.mockRejectedValue(new ProviderError("schema mismatch"));
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    const err = await scaffoldStubEntities(dmId, campaignId, "Things.").catch((e) => e);
+    expect(err).toBeInstanceOf(ServiceError);
+    expect(err.message).toMatch(/schema mismatch/);
+    expect(await prisma.changeSet.count({ where: { source: "AI" } })).toBe(0);
+  });
+
+  it("denies a player without calling the provider", async () => {
+    const { playerId, campaignId } = await seed();
+    resolveCampaignProvider.mockResolvedValue(fakeStubProvider([{ type: "NPC", name: "X" }]));
+    await expect(scaffoldStubEntities(playerId, campaignId, "Things.")).rejects.toBeInstanceOf(
+      ServiceError,
+    );
+    expect(resolveCampaignProvider).not.toHaveBeenCalled();
+  });
+
+  it("creates the stubs as AI-sourced canon with provenance when approved", async () => {
+    const { dmId, campaignId } = await seed();
+    resolveCampaignProvider.mockResolvedValue(
+      fakeStubProvider([{ type: "NPC", name: "Grimm the Tailor", summary: "Sews cloaks.", tags: ["vendor"] }]),
+    );
+    const { changeSetId } = await scaffoldStubEntities(dmId, campaignId, "Vendors.");
+
+    await prisma.changeOperation.updateMany({
+      where: { changeSetId, decision: "PENDING" },
+      data: { decision: "ACCEPTED" },
+    });
+    await approveChangeSet(dmId, campaignId, changeSetId);
+
+    const created = await prisma.entity.findFirst({ where: { campaignId, name: "Grimm the Tailor" } });
+    expect(created).not.toBeNull();
+    expect(created?.source).toBe("AI");
+    expect(created?.isStub).toBe(true);
+    const prov = await prisma.provenance.findMany({ where: { entityId: created!.id, source: "AI" } });
+    expect(prov.length).toBeGreaterThan(0);
+    expect(prov.every((p) => p.model === "claude-opus-4-8")).toBe(true);
+    expect(prov.map((p) => p.promptId)).toContain("scaffold-stubs");
   });
 });

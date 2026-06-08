@@ -56,7 +56,11 @@ import {
   grantEntityKnowledge,
   revokeKnowledge,
 } from "@/server/services/knowledge";
-import { fleshOutEntity, inferRelationshipsForEntity } from "@/server/services/generation";
+import {
+  fleshOutEntity,
+  inferRelationshipsForEntity,
+  scaffoldStubEntities,
+} from "@/server/services/generation";
 import {
   approveChangeSet,
   approveChangeSetRun,
@@ -441,6 +445,35 @@ export async function inferRelationshipsForEntityAction(
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
     console.error("Infer relationships action failed:", error);
+    return { error: "Generation failed. Please try again.", timestamp: Date.now() };
+  }
+}
+
+// Scaffold a batch of stub entities from a DM's free-text instruction. The
+// stubs land as a single PENDING change set in the Review Queue (never canon —
+// invariant #1); we return a link to it. DM/co-DM only (the service enforces the
+// role). Errors are safe messages (invariant #6).
+export async function scaffoldStubsAction(
+  campaignId: string,
+  _prev: GenerateActionState,
+  formData: FormData,
+): Promise<GenerateActionState> {
+  void _prev;
+  const user = await requireUser();
+  const instruction = String(formData.get("instruction") ?? "");
+  try {
+    const result = await scaffoldStubEntities(user.id, campaignId, instruction);
+    revalidatePath(`/campaigns/${campaignId}/review`);
+    revalidatePath(`/campaigns/${campaignId}`);
+    const noun = result.stubCount === 1 ? "stub" : "stubs";
+    return {
+      success: `${result.stubCount} ${noun} proposed (${result.model}). Review ${result.stubCount === 1 ? "it" : "them"} in the queue.`,
+      changeSetId: result.changeSetId,
+      timestamp: Date.now(),
+    };
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    console.error("Scaffold stubs action failed:", error);
     return { error: "Generation failed. Please try again.", timestamp: Date.now() };
   }
 }
