@@ -11,7 +11,7 @@ function floorEntity(data: Record<string, unknown>): EntityDetail {
   return { type: "FLOOR", data } as unknown as EntityDetail;
 }
 
-const getVal = (_key: string, dbVal: string | number | undefined) => dbVal;
+const getVal = (_key: string, dbVal: unknown) => dbVal;
 
 describe("entity-kind form fields (ADR 0009)", () => {
   it("returns the FLOOR fields component and renders its inputs", () => {
@@ -60,5 +60,83 @@ describe("entity-kind form fields (ADR 0009)", () => {
   it("returns undefined for a type with no bespoke fields", () => {
     expect(kindFormFields("NPC")).toBeUndefined();
     expect(kindFormFields("CRAWLER")).toBeUndefined();
+  });
+
+  function itemEntity(
+    data: Record<string, unknown>,
+    lockedFields: string[] = [],
+  ): EntityDetail {
+    return { type: "ITEM", data, locked: false, lockedFields } as unknown as EntityDetail;
+  }
+
+  const itemTypes = [
+    { id: "it1", name: "Gourd Type" },
+    { id: "it2", name: "Sword Type" },
+  ];
+
+  it("returns the ITEM fields component and renders its inputs", () => {
+    const ItemFields = kindFormFields("ITEM");
+    expect(ItemFields).toBeTypeOf("function");
+    if (!ItemFields) throw new Error("expected ITEM fields component");
+
+    const entity = itemEntity({
+      itemTypeId: "it1",
+      divine: true,
+      unique: false,
+      fleeting: true,
+      aiDescription: "Official flavor text",
+    });
+    render(
+      <ItemFields
+        entity={entity}
+        getVal={getVal}
+        isLocked={() => false}
+        itemTypes={itemTypes}
+      />,
+    );
+
+    expect((screen.getByLabelText("AI Description") as HTMLTextAreaElement).value).toBe(
+      "Official flavor text",
+    );
+    expect((screen.getByLabelText("Item Type") as HTMLSelectElement).value).toBe("it1");
+    expect((screen.getByLabelText("Divine") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("Unique") as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByLabelText("Fleeting") as HTMLInputElement).checked).toBe(true);
+    expect(document.querySelectorAll('input[type="hidden"]').length).toBe(0);
+  });
+
+  it("renders disabled ITEM inputs + hidden mirrors when fields are locked", () => {
+    const ItemFields = kindFormFields("ITEM")!;
+    const entity = itemEntity(
+      { itemTypeId: "it1", divine: true, aiDescription: "x" },
+      ["data.itemTypeId", "data.divine", "data.unique", "data.fleeting", "data.aiDescription"],
+    );
+    render(
+      <ItemFields
+        entity={entity}
+        getVal={getVal}
+        isLocked={() => true}
+        itemTypes={itemTypes}
+      />,
+    );
+
+    expect((screen.getByLabelText("AI Description") as HTMLTextAreaElement).readOnly).toBe(true);
+    expect(screen.getByLabelText("Item Type").getAttribute("disabled")).not.toBeNull();
+    expect(screen.getByLabelText("Divine").getAttribute("disabled")).not.toBeNull();
+    // One hidden mirror per locked data.* field (itemTypeId/divine/unique/fleeting).
+    expect(document.querySelectorAll('input[type="hidden"]').length).toBe(4);
+  });
+
+  it("tolerates an ITEM entity with no data and no itemTypes", () => {
+    const ItemFields = kindFormFields("ITEM")!;
+    render(
+      <ItemFields
+        entity={{ type: "ITEM", data: null, locked: false, lockedFields: [] } as unknown as EntityDetail}
+        getVal={getVal}
+        isLocked={() => false}
+      />,
+    );
+    expect((screen.getByLabelText("Item Type") as HTMLSelectElement).value).toBe("");
+    expect((screen.getByLabelText("Divine") as HTMLInputElement).checked).toBe(false);
   });
 });

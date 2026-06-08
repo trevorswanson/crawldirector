@@ -31,19 +31,10 @@ keyword-scanning every doc.
             the update `buildEntityData`, and `currentEntityValue`/`getCurrentValue`)
             in favour of `buildKindData` / `normalizeKindFieldValue` derived from
             the descriptors. See the section below.
-      - [ ] **Slice 3b — display + form slots (the remaining client branches).**
-            Add the `DisplayPanel` detail-page slot and move the entity-detail
-            **ITEM display** (the `data.divine/unique/fleeting/itemTypeId` field
-            rows + the AI-description blockquote) into it; move the **ITEM form**
-            (`ItemFields` + the `aiDescription` block in `CoreFields`) into the
-            `kind-fields.tsx` companion (extending `KindFieldsProps` with the
-            `itemTypes` candidate list), retiring the last
-            `type === "ITEM"/"FLOOR"` branches in
-            [`entity-forms.tsx`](../src/components/entities/entity-forms.tsx) and
-            the [entity detail page](<../src/app/(dm)/campaigns/[id]/entities/[entityId]/page.tsx>).
-            **The brand-new-EntityType "proof" is deferred to M7's BOX** (it lands
-            as one descriptor file then) rather than inventing a stub type now
-            (project norm: no stub/filler features).
+      - [x] **Slice 3b — display + form slots (the remaining client branches).** ✅
+            (2026-06-08) — see the section below. ADR 0009 is now **fully
+            delivered**; the brand-new-EntityType "proof" remains deferred to M7's
+            BOX (one descriptor file then), per project norm (no stub features).
 - [ ] **M4 generator expansion.** Add bulk-stub scaffolding, a generation panel
       for bulk runs, a `Job` table + worker for bulk/async runs, and usage/cost
       tracking with spend caps.
@@ -100,6 +91,68 @@ keyword-scanning every doc.
       - **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
+
+## Entity-kind registry — display + form client slots (ADR 0009 slice 3b) ✅ (2026-06-08)
+
+**Goal:** finish [ADR 0009](./adr/0009-entity-kind-registry.md) (accepted) — move
+the **last** per-type UI branches (the ITEM read-view display + the ITEM form)
+into the entity-kind client companions, retiring the `type === "ITEM"/"FLOOR"`
+ladders in [`entity-forms.tsx`](../src/components/entities/entity-forms.tsx) and
+the [entity detail page](<../src/app/(dm)/campaigns/[id]/entities/[entityId]/page.tsx>).
+Pure application-layer refactor: **no schema change, no migration.** With this,
+ADR 0009 is fully delivered.
+
+- [x] **ITEM form → `kind-fields.tsx`.** Moved `ItemFields` (Item Type select +
+      divine/unique/fleeting attributes) **and** the `aiDescription` textarea
+      (previously a `type === "ITEM"` block in `CoreFields`) into the client
+      companion, registered as `KIND_FIELDS.ITEM`. `KindFieldsProps` gained an
+      optional `itemTypes` candidate list and its value reader (`getVal`) was
+      widened to `(key, dbVal: unknown) => unknown` (a bespoke field can be any
+      primitive — ITEM's flags are booleans). `EditEntityForm`/`CoreFields` now
+      render ITEM/FLOOR fields through the single registry slot;
+      [`entity-forms.tsx`](../src/components/entities/entity-forms.tsx) keeps only
+      the `CRAWLER` branch (its satellite-table path, not a registry entry). The
+      ITEM bespoke fields now render in the kind slot (between Summary and
+      Description) instead of after the form — a deliberate, minor reorder; all
+      fields still validate/persist/lock identically.
+- [x] **ITEM display → `kind-display.tsx` (new).** A `<KindDisplay>` **client
+      dispatcher** the server detail page renders unconditionally in read mode; it
+      does the `KIND_DISPLAY[type]` lookup on the client and renders the type's
+      panel or `null`. (A server component **cannot call** a function exported
+      from a `"use client"` module — the first cut exported a `kindDisplayPanel()`
+      lookup the page called on the server and Next.js threw at runtime; the
+      dispatcher pattern is the fix, caught in browser verification, not by the
+      jsdom unit tests.) `ItemDisplayPanel` renders the AI-description blockquote
+      (flags → "This is a divine/unique/fleeting item." + flavor text, with the
+      empty-locked placeholder) and the `data.itemTypeId/divine/unique/fleeting`
+      field rows with lock toggles. The ITEM branch was removed from the page's
+      `entityFields()` (CRAWLER + the universal `tags` row stay).
+- [x] **Registry-driven reference resolution.** Added optional
+      `EntityKind.referenceFields` (a `data` field → target `EntityType` map);
+      `ITEM_KIND` declares `{ itemTypeId: "ITEM_TYPE" }`. The page resolves the
+      display name from this map (no `type === "ITEM"` branch) and passes
+      `resolvedNames` to the panel (a client component without DB access).
+- [x] **Shared `FieldLockToggle`** extracted to
+      [`field-lock-toggle.tsx`](../src/components/entities/field-lock-toggle.tsx)
+      and reused by the detail page (summary/description) and the new display panel.
+- [x] **Tests:** extended `kind-fields` (ITEM form render/locked-mirrors/no-data);
+      new `kind-display` suite (dispatcher null for non-kind types, ITEM rows +
+      resolved item-type name, blockquote composition + not-italic, omitted when
+      empty, empty-locked placeholder + lock button, null-data tolerance). Existing
+      `entity-forms`/`entity-page` real-component suites pass unchanged. lint (0
+      errors; 2 pre-existing settings warnings), typecheck, build, and the full
+      coverage gate green (1024 tests; statements 95.54%, branches 89.09%,
+      functions 97.67%, lines 97.44%; the new `kind-display.tsx`/`field-lock-toggle.tsx`
+      fully covered).
+- [x] **Verified in-browser** against a seeded ITEM ("Gourd of Doom", an
+      ITEM_TYPE "Legendary Gourd"): the read view composes the flags + flavor into
+      the blockquote and shows the resolved **Item Type → Legendary Gourd** row +
+      Divine/Unique/Fleeting; the edit form renders AI Description / Item Type /
+      flags through the registry; toggling **Unique** and saving routed through the
+      pipeline (auto-approved DM change set; a `data.unique` `Provenance` row, no
+      bypass — invariant #1) and the read view updated. No runtime/console errors.
+- [x] **ADR 0009 fully delivered (slices 1–3b).** No registry follow-up remains;
+      the new-type "proof" lands with M7's BOX (one descriptor + companion entries).
 
 ## Entity-kind registry — registry-driven apply-path `data` builder (ADR 0009 slice 3a) ✅ (2026-06-07)
 
