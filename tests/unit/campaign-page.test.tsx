@@ -9,6 +9,7 @@ const {
   getEntityTypeCounts,
   listCampaignTags,
   resolveFloorEntities,
+  listAiKeys,
   notFound,
 } = vi.hoisted(() => ({
   requireUser: vi.fn(),
@@ -17,6 +18,7 @@ const {
   getEntityTypeCounts: vi.fn(),
   listCampaignTags: vi.fn(),
   resolveFloorEntities: vi.fn(),
+  listAiKeys: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
@@ -30,6 +32,12 @@ vi.mock("@/server/services/entities", () => ({
   listCampaignTags,
 }));
 vi.mock("@/server/services/events", () => ({ resolveFloorEntities }));
+vi.mock("@/server/services/ai-keys", () => ({ listAiKeys }));
+vi.mock("@/components/entities/scaffold-stubs-panel", () => ({
+  ScaffoldStubsPanel: ({ campaignId }: { campaignId: string }) => (
+    <div>Scaffold with AI {campaignId}</div>
+  ),
+}));
 vi.mock("next/navigation", () => ({
   notFound,
   useRouter: () => ({
@@ -62,6 +70,7 @@ beforeEach(() => {
   getEntityTypeCounts.mockResolvedValue({});
   listCampaignTags.mockResolvedValue([]);
   resolveFloorEntities.mockResolvedValue(new Map());
+  listAiKeys.mockResolvedValue([]);
 });
 
 afterEach(cleanup);
@@ -88,6 +97,8 @@ describe("CampaignPage", () => {
     expect(screen.getByText("Entity type")).toBeDefined();
     expect(screen.getByText("Locked only")).toBeDefined();
     expect(screen.getByText("Quick create c1")).toBeDefined();
+    // No provider key configured (listAiKeys → []), so the AI scaffold panel is hidden.
+    expect(screen.queryByText("Scaffold with AI c1")).toBeNull();
     // count chip: 0 results / 2 total
     expect(screen.getByText("0 / 2")).toBeDefined();
     expect(listEntitiesForUser).toHaveBeenCalledWith("u1", "c1", {
@@ -98,6 +109,27 @@ describe("CampaignPage", () => {
       lockedOnly: false,
     });
     expect(getEntityTypeCounts).toHaveBeenCalledWith("u1", "c1");
+  });
+
+  it("shows the AI scaffold panel when a provider key is configured", async () => {
+    getCampaignForUser.mockResolvedValue({
+      id: "c1",
+      name: "World One",
+      summary: null,
+      createdAt: new Date(),
+      members: [{ role: "OWNER" }],
+      _count: { members: 1, entities: 0 },
+    });
+    listAiKeys.mockResolvedValue([{ providerId: "anthropic", lastFour: "4242" }]);
+
+    render(
+      await CampaignPage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+
+    expect(screen.getByText("Scaffold with AI c1")).toBeDefined();
   });
 
   it("translates facet search params into service filters", async () => {

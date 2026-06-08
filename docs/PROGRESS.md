@@ -35,9 +35,12 @@ keyword-scanning every doc.
             (2026-06-08) — see the section below. ADR 0009 is now **fully
             delivered**; the brand-new-EntityType "proof" remains deferred to M7's
             BOX (one descriptor file then), per project norm (no stub features).
-- [ ] **M4 generator expansion.** Add bulk-stub scaffolding, a generation panel
-      for bulk runs, a `Job` table + worker for bulk/async runs, and usage/cost
-      tracking with spend caps.
+- [ ] **M4 generator expansion.** Remaining: a generation panel for *bulk runs*,
+      a `Job` table + worker for bulk/async runs, and usage/cost tracking with
+      spend caps.
+      - [x] **Bulk-stub scaffolding generator.** ✅ (2026-06-08) — see the section
+            below. A DM scaffolds a batch of stub entities from a free-text
+            instruction; they land as one PENDING `CREATE_ENTITY` change set.
 - [ ] **Visibility model simplification.** Refactor the visibility enum throughout the codebase (Prisma schema, type validation, forms, and visibility projections) from the three-state model (`DM_ONLY`, `SHARED_WITH_PLAYERS`, `PLAYER_FACING`) to a clean binary model (`DM_ONLY`, `PLAYER_VISIBLE`), mapping any subset access strictly to dynamic `KnowledgeGrant` (fog of war).
 
 ### Follow-ups captured from delivered slices
@@ -91,6 +94,70 @@ keyword-scanning every doc.
       - **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
+
+## M4 — Bulk-stub scaffolding generator (slice 5) ✅ (2026-06-08)
+
+**Goal:** the third generator family from
+[`04-ai-integration.md`](./04-ai-integration.md) and the first **batch**
+generator: from a DM's free-text instruction ("the shopkeepers and stalls of
+the Bone Market"), scaffold a set of thin **stub** entities and route them to
+the Review Queue as a single PENDING change set of `CREATE_ENTITY` proposals.
+Nothing becomes canon until the DM approves it (invariant #1); approved stubs
+carry AI provider/model/prompt provenance (invariant #3). The app stays fully
+usable with no key.
+
+- [x] **Generator** (`src/server/ai/generators/scaffold-stubs.ts`): pure
+      prompt/schema/spec logic, no DB/SDK. `buildScaffoldStubsPrompt` frames the
+      task with the instruction, the allowed types (CRAWLER excluded —
+      protagonists are created deliberately and the generic create path doesn't
+      populate the crawler satellite), existing entity names to avoid duplicating,
+      and existing campaign tags to reuse; stable framing + style guide are
+      cacheable. `scaffoldStubsOutputSchema` bounds the batch to ≤20 stubs of
+      `{ type, name, summary?, tags }`. `scaffoldStubsToSpecs` normalizes/dedupes:
+      drops blank names, names colliding (case-insensitively) with existing canon
+      or earlier in the batch, and trims/dedupes tags. `SCAFFOLD_STUBS_GENERATOR
+      { id, version }` is the versioned identity recorded for provenance.
+- [x] **Stub create-patch reuse** (`entities.ts`): exported `buildStubCreatePatch`
+      reuses the canonical `entityCreatePatch` so a scaffolded stub is
+      byte-identical to a manually quick-created one (visibility `DM_ONLY`,
+      `isStub`, kind-data defaults).
+- [x] **Service** (`src/server/services/generation.ts`): `scaffoldStubEntities`
+      — DM/co-DM only — validates the instruction (non-empty, ≤2000 chars),
+      resolves the provider (graceful `ServiceError` when none), gathers existing
+      names + tags + the campaign style guide, calls `generateStructured`,
+      normalizes to specs (refuses an empty/no-op result), and files them via
+      `createPendingEntityChangeSet` with `source: AI` + provider/model/prompt
+      metadata. Provider failures become safe `ServiceError`s (ProviderError
+      message preserved; raw SDK text never reflected — invariant #6).
+- [x] **Action + UI:** `scaffoldStubsAction` returns a safe success (with a link
+      to the proposed change set) / error state and revalidates the queue + world
+      browser. A DM-only **`ScaffoldStubsPanel`** ("Scaffold with AI") sits in the
+      World Browser header, shown only when a provider key is configured
+      (`listAiKeys`, which is DM-only — gating both role and key in one check). It
+      toggles open a textarea; success links straight to the Review Queue.
+- [x] **Tests:** pure generator unit (prompt framing/style-guide/existing-names/
+      tags/CRAWLER-exclusion; spec normalize/dedupe/blank-drop; schema bounds +
+      CRAWLER/unknown-type rejection); DB-backed `scaffoldStubEntities` (PENDING AI
+      change set of CREATE_ENTITY ops + provenance metadata, prompt context,
+      existing-name dedupe, empty/over-long instruction + no-provider + no-usable +
+      ProviderError + player rejections, AI provenance + AI-sourced stub on
+      approval); action coverage (success/link/revalidate + singular noun +
+      ServiceError/generic); `ScaffoldStubsPanel` component (collapsed→open,
+      success-link, error); campaign-page gating (panel shown with a key, hidden
+      without). lint (0 errors; 2 pre-existing settings warnings), typecheck,
+      build, and the full coverage gate green (statements 95.55%, branches 89.08%,
+      functions 97.69%, lines 97.46%; the new files fully covered).
+- [x] **Verified in-browser** against the seeded Demo Campaign with a placeholder
+      Anthropic key: the "Scaffold with AI" button appears in the World Browser
+      header (gated by the configured key), opens the instruction panel, and
+      submitting routes through the action → service → provider; the placeholder
+      key surfaces the safe, key-free error "The provider rejected the key
+      (authentication failed)" via the alert path (no raw SDK/key text — invariant
+      #6). A **successful** generation needs the DM's own valid BYO key + spend
+      (the documented M4 boundary), verified via mocked-provider service coverage.
+- [x] **Remaining M4 expansion:** a generation panel for *bulk runs* (multi-entity
+      selection), an async `Job` table + worker, and usage/cost tracking with spend
+      caps remain in the open backlog.
 
 ## Entity-kind registry — display + form client slots (ADR 0009 slice 3b) ✅ (2026-06-08)
 
