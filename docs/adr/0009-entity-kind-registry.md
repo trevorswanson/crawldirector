@@ -2,8 +2,10 @@
 
 - **Status:** accepted — on the roadmap (see [`11-roadmap.md`](../11-roadmap.md))
   and tracked in [`PROGRESS.md`](../PROGRESS.md); delivered in phases (slices 1–2
-  done: registry scaffold + FLOOR, then ITEM + reviewable-set derivation; slice 3,
-  the display/form slot + a registry-driven apply-path `data` builder, remains).
+  done: registry scaffold + FLOOR, then ITEM + reviewable-set derivation; slice 3a
+  done: the registry-driven apply-path `data` builder. Slice 3b — the
+  `DisplayPanel`/form client slots, with the new-type "proof" deferred to M7's BOX
+  — remains).
 - **Date:** 2026-06-07
 - **Milestone:** Cross-cutting (entity layer). Surfaced during M3/M4 as FLOOR and
   ITEM grew bespoke fields; should land before the catalog types (BOX, SKILL,
@@ -146,15 +148,23 @@ required by this ADR.
    can't know the type at parse time, so the *write* schema accepts the union of
    all kinds' fields and the patch builders persist only the type's own — the
    key/reviewable sets still can't drift.)
-3. **Display slot + the next bespoke type as proof.** Add the `DisplayPanel`
-   slot, move FLOOR's special display into `FloorPanel`, and onboard the next
-   type that needs bespoke fields (e.g. BOX or a catalog type) entirely through a
-   new descriptor file — confirming "one file, no scattered branches." This slice
-   also retires the **last** hardcoded `type === …` `data.*` lists discovered
-   during slices 1–2: the canonical apply-path data assembly in
-   [`review.ts`](../../src/server/services/review.ts) (`applyCreateEntity`, the
-   update `buildEntityData`, and `getCurrentValue`) — replaced by a
-   registry-driven `data` builder — plus the ITEM form and detail display.
+3. **Registry-driven apply-path + display/form slots.** Split into two
+   shippable parts:
+   - **3a (done).** Retire the **last** hardcoded `type === …` / per-field
+     `data.*` lists in the canonical apply-path data assembly —
+     [`review.ts`](../../src/server/services/review.ts)'s `applyCreateEntity`, the
+     update `buildEntityData`, and `currentEntityValue`/`getCurrentValue` —
+     replaced by a registry-driven `data` builder (`buildKindData` /
+     `normalizeKindFieldValue`) derived from the descriptors. As a side effect each
+     entity now stores only its own kind's `data.*` fields.
+   - **3b (remaining).** Add the `DisplayPanel` slot and move the entity-detail
+     **ITEM display** (the `data.*` field rows + the AI-description blockquote) into
+     it, and move the **ITEM form** (`ItemFields` + the `aiDescription` block) into
+     the `kind-fields.tsx` client companion — retiring the last
+     `type === "ITEM"/"FLOOR"` branches in the form and detail page. The brand-new
+     bespoke-type "proof" is deferred to **M7's BOX** (which then lands as a single
+     descriptor file, confirming "one file, no scattered branches"), rather than
+     inventing a stub type now.
 
 ## Consequences
 

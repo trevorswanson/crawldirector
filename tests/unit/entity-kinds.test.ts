@@ -5,9 +5,11 @@ import { ITEM_KIND, itemDataSchema } from "@/lib/entity-kinds/item";
 import {
   allKindDataKeys,
   allKindDataShape,
+  buildKindData,
   dataKeysFor,
   kindDataDefaults,
   kindFor,
+  normalizeKindFieldValue,
 } from "@/lib/entity-kinds";
 
 describe("entity-kind registry (ADR 0009)", () => {
@@ -107,5 +109,62 @@ describe("entity-kind registry (ADR 0009)", () => {
 
   it("rejects a floor number below 1", () => {
     expect(() => floorDataSchema.parse({ floorNumber: "0" })).toThrow();
+  });
+
+  describe("canonical data normalization (slice 3)", () => {
+    it("normalizes a string field, defaulting empty/wrong-typed to null", () => {
+      expect(normalizeKindFieldValue("itemTypeId", "weapon-1")).toBe("weapon-1");
+      expect(normalizeKindFieldValue("itemTypeId", "")).toBeNull();
+      expect(normalizeKindFieldValue("itemTypeId", undefined)).toBeNull();
+      expect(normalizeKindFieldValue("aiDescription", 42)).toBeNull();
+      expect(normalizeKindFieldValue("theme", "Castle")).toBe("Castle");
+    });
+
+    it("normalizes a number field, defaulting empty/wrong-typed to null", () => {
+      expect(normalizeKindFieldValue("floorNumber", 9)).toBe(9);
+      expect(normalizeKindFieldValue("floorNumber", "9")).toBeNull();
+      expect(normalizeKindFieldValue("startDay", 0)).toBe(0);
+      expect(normalizeKindFieldValue("collapseDay", undefined)).toBeNull();
+    });
+
+    it("normalizes a boolean flag, defaulting empty/wrong-typed to false", () => {
+      expect(normalizeKindFieldValue("divine", true)).toBe(true);
+      expect(normalizeKindFieldValue("unique", false)).toBe(false);
+      expect(normalizeKindFieldValue("fleeting", undefined)).toBe(false);
+      expect(normalizeKindFieldValue("divine", "true")).toBe(false);
+    });
+
+    it("returns null for a field no kind declares", () => {
+      expect(normalizeKindFieldValue("nonexistent", "x")).toBeNull();
+    });
+
+    it("builds the full data object for a type, normalizing each field", () => {
+      const read = (key: string) =>
+        ({ itemTypeId: "weapon-1", divine: true, aiDescription: "Legend." }[key]);
+      expect(buildKindData("ITEM", read)).toEqual({
+        itemTypeId: "weapon-1",
+        divine: true,
+        unique: false,
+        fleeting: false,
+        aiDescription: "Legend.",
+      });
+    });
+
+    it("builds only a FLOOR's own fields (no spurious ITEM keys)", () => {
+      const data = buildKindData("FLOOR", (key) =>
+        ({ floorNumber: 9, theme: "Siege" }[key]),
+      );
+      expect(data).toEqual({
+        floorNumber: 9,
+        theme: "Siege",
+        startDay: null,
+        collapseDay: null,
+      });
+      expect(data).not.toHaveProperty("divine");
+    });
+
+    it("builds an empty data object for a type with no kind", () => {
+      expect(buildKindData("NPC", () => "ignored")).toEqual({});
+    });
   });
 });

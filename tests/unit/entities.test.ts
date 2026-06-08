@@ -1260,6 +1260,47 @@ describe("entity locking", () => {
       })
     ).map((p) => p.field);
     expect(npcProvFields.some((f) => (f ?? "").startsWith("data."))).toBe(false);
+
+    // And it stores none of another kind's bespoke fields either: the apply path
+    // composes `data` from the type's descriptor (ADR 0009 slice 3), so a
+    // non-kind NPC no longer carries spurious ITEM keys (divine/itemTypeId/…).
+    const npcData =
+      ((await getEntityForUser(owner.id, campaign.id, npc.id))
+        ?.data as Record<string, unknown>) || {};
+    expect(npcData).not.toHaveProperty("divine");
+    expect(npcData).not.toHaveProperty("itemTypeId");
+    expect(npcData).not.toHaveProperty("aiDescription");
+  });
+
+  it("composes a FLOOR's stored data from its own kind only (ADR 0009 slice 3)", async () => {
+    const owner = await makeUser("floor-data@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const floor = await createGenericEntity(owner.id, campaign.id, {
+      type: "FLOOR",
+      name: "Larracos",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+      floorNumber: 9,
+      theme: "Castle siege",
+      startDay: 0,
+      collapseDay: 12,
+    });
+
+    const floorData =
+      ((await getEntityForUser(owner.id, campaign.id, floor.id))
+        ?.data as Record<string, unknown>) || {};
+    // Its own descriptor fields are present and normalized…
+    expect(floorData["floorNumber"]).toBe(9);
+    expect(floorData["theme"]).toBe("Castle siege");
+    expect(floorData["startDay"]).toBe(0);
+    expect(floorData["collapseDay"]).toBe(12);
+    // …and the ITEM flags that the old create path stored on every entity are gone.
+    expect(floorData).not.toHaveProperty("divine");
+    expect(floorData).not.toHaveProperty("itemTypeId");
+    expect(floorData).not.toHaveProperty("aiDescription");
   });
 });
 
