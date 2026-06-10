@@ -215,8 +215,7 @@ function isPlayerVisible(entity: {
 }) {
   return (
     entity.status !== CanonStatus.ARCHIVED &&
-    (entity.visibility === Visibility.SHARED_WITH_PLAYERS ||
-      entity.visibility === Visibility.PLAYER_FACING)
+    entity.visibility === Visibility.PLAYER_VISIBLE
   );
 }
 
@@ -828,9 +827,7 @@ export async function resolveFloorEntities(
       status: { not: CanonStatus.ARCHIVED },
       ...(isPlayer
         ? {
-            visibility: {
-              in: [Visibility.SHARED_WITH_PLAYERS, Visibility.PLAYER_FACING],
-            },
+            visibility: Visibility.PLAYER_VISIBLE,
           }
         : {}),
     },
@@ -921,9 +918,7 @@ export async function listCampaignFloors(
         status: { not: CanonStatus.ARCHIVED },
         ...(isPlayer
           ? {
-              visibility: {
-                in: [Visibility.SHARED_WITH_PLAYERS, Visibility.PLAYER_FACING],
-              },
+              visibility: Visibility.PLAYER_VISIBLE,
             }
           : {}),
       },

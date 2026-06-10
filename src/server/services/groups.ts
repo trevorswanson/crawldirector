@@ -79,8 +79,7 @@ const endpointSelect = {
 function isPlayerVisible(entity: { status: CanonStatus; visibility: Visibility }) {
   return (
     entity.status !== CanonStatus.ARCHIVED &&
-    (entity.visibility === Visibility.SHARED_WITH_PLAYERS ||
-      entity.visibility === Visibility.PLAYER_FACING)
+    entity.visibility === Visibility.PLAYER_VISIBLE
   );
 }
 

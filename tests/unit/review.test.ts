@@ -140,7 +140,7 @@ describe("review service — approveChangeSet (single)", () => {
             _baseVersion: { to: baseVersion },
             summary: { from: "Original summary", to: "Rewritten summary" },
             description: { to: "Rewritten description" },
-            visibility: { to: Visibility.SHARED_WITH_PLAYERS },
+            visibility: { to: Visibility.PLAYER_VISIBLE },
             tags: { to: ["rewritten"] },
           },
         },
@@ -153,7 +153,7 @@ describe("review service — approveChangeSet (single)", () => {
 
     const entity = await prisma.entity.findUniqueOrThrow({ where: { id: entityId } });
     expect(entity.summary).toBe("Rewritten summary");
-    expect(entity.visibility).toBe(Visibility.SHARED_WITH_PLAYERS);
+    expect(entity.visibility).toBe(Visibility.PLAYER_VISIBLE);
     expect(entity.version).toBe(baseVersion + 1);
 
     const stored = await prisma.changeSet.findUniqueOrThrow({ where: { id: set.id } });
@@ -927,7 +927,7 @@ describe("review service — review queue enrichment", () => {
             name: { to: "Zev II" },
             summary: { to: "s" },
             description: { to: "d" },
-            visibility: { to: Visibility.SHARED_WITH_PLAYERS },
+            visibility: { to: Visibility.PLAYER_VISIBLE },
             tags: { to: ["a"] },
             isStub: { to: true },
             data: { to: { extra: 1 } },

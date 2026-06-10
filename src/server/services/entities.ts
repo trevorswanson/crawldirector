@@ -241,11 +241,7 @@ async function entityResult(entityId: string) {
 
 function playerVisibleWhere(role: Role) {
   return role === Role.PLAYER
-    ? {
-        visibility: {
-          in: [Visibility.SHARED_WITH_PLAYERS, Visibility.PLAYER_FACING],
-        },
-      }
+    ? { visibility: Visibility.PLAYER_VISIBLE }
     : {};
 }
 

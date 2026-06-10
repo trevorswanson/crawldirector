@@ -58,8 +58,7 @@ enum CanonStatus {
 
 enum Visibility {
   DM_ONLY
-  SHARED_WITH_PLAYERS
-  PLAYER_FACING
+  PLAYER_VISIBLE
 }
 
 enum ChangeSource {

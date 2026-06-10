@@ -197,8 +197,8 @@ export async function seedCampaignFromLore(
     const type = classifyEntity(name, lineObj.text);
     const { summary, description } = extractSummaryAndDescription(name, lineObj.text);
 
-    // Visibility defaults
-    const visibility = type === EntityType.CRAWLER ? Visibility.PLAYER_FACING : Visibility.SHARED_WITH_PLAYERS;
+    // Visibility defaults — seeded canon is player-visible (binary model).
+    const visibility = Visibility.PLAYER_VISIBLE;
 
     // Build the patch
     const patch: ReviewPatch = {

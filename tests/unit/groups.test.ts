@@ -18,7 +18,7 @@ async function makeEntity(
   campaignId: string,
   type: GenericType,
   name: string,
-  visibility: "DM_ONLY" | "SHARED_WITH_PLAYERS" = "DM_ONLY",
+  visibility: "DM_ONLY" | "PLAYER_VISIBLE" = "DM_ONLY",
 ) {
   return createGenericEntity(userId, campaignId, {
     type,
@@ -142,14 +142,14 @@ describe("getGroupRoster", () => {
       campaign.id,
       "PARTY",
       "Open Party",
-      "SHARED_WITH_PLAYERS",
+      "PLAYER_VISIBLE",
     );
     const shown = await makeEntity(
       dm.id,
       campaign.id,
       "NPC",
       "Shown",
-      "SHARED_WITH_PLAYERS",
+      "PLAYER_VISIBLE",
     );
     const hiddenEntity = await makeEntity(
       dm.id,
@@ -163,7 +163,7 @@ describe("getGroupRoster", () => {
       campaign.id,
       "NPC",
       "SecretMember",
-      "SHARED_WITH_PLAYERS",
+      "PLAYER_VISIBLE",
     );
 
     await link(dm.id, campaign.id, shown.id, "MEMBER_OF", party.id);

@@ -134,7 +134,7 @@ describe("entity schemas", () => {
       name: "Carl",
       summary: "",
       description: "",
-      visibility: "PLAYER_FACING",
+      visibility: "PLAYER_VISIBLE",
       tags: "",
       level: "2",
       hp: "30",
@@ -160,7 +160,7 @@ describe("entity schemas", () => {
       name: "Carl",
       summary: "",
       description: "",
-      visibility: "PLAYER_FACING",
+      visibility: "PLAYER_VISIBLE",
       tags: "",
       viewCount,
     });
@@ -172,7 +172,7 @@ describe("entity schemas", () => {
       name: "Carl",
       summary: "",
       description: "",
-      visibility: "PLAYER_FACING",
+      visibility: "PLAYER_VISIBLE",
       tags: "",
       viewCount: 9007199254740992,
     });

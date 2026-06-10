@@ -63,9 +63,9 @@ function CurrentVisibilityProbe() {
 
 function VisibilityHarness({ editing }: { editing: boolean }) {
   return (
-    <EditFormProvider initialVisibility="PLAYER_FACING" isEditing={editing}>
+    <EditFormProvider initialVisibility="PLAYER_VISIBLE" isEditing={editing}>
       <VisibilitySidebarControl
-        initialVisibility="PLAYER_FACING"
+        initialVisibility="PLAYER_VISIBLE"
         isEditing={editing}
         isLocked={false}
       />
@@ -82,7 +82,7 @@ const crawlerEntity: EntityDetail = {
   summary: "No shoes",
   description: "Crawler notes",
   status: "CANON",
-  visibility: "PLAYER_FACING",
+  visibility: "PLAYER_VISIBLE",
   source: "DM",
   tags: ["floor 1"],
   version: 1,
@@ -188,7 +188,7 @@ describe("entity forms", () => {
     ) as HTMLInputElement | null;
     expect(visibilityInput).not.toBeNull();
     expect(visibilityInput?.getAttribute("type")).toBe("hidden");
-    expect(visibilityInput?.getAttribute("value")).toBe("PLAYER_FACING");
+    expect(visibilityInput?.getAttribute("value")).toBe("PLAYER_VISIBLE");
 
     // name is not locked
     const nameInput = screen.getByLabelText("Name");
@@ -339,7 +339,7 @@ describe("entity forms", () => {
     summary: "A heavy gourd",
     description: "It is scary",
     status: "CANON",
-    visibility: "PLAYER_FACING",
+    visibility: "PLAYER_VISIBLE",
     source: "DM",
     tags: ["floor 2"],
     version: 1,
@@ -437,7 +437,7 @@ describe("entity forms", () => {
     expect(
       (screen.getByLabelText("current visibility") as HTMLInputElement).value,
     ).toBe(
-      "PLAYER_FACING",
+      "PLAYER_VISIBLE",
     );
   });
 });

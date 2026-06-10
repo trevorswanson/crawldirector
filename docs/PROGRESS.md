@@ -41,7 +41,9 @@ keyword-scanning every doc.
       - [x] **Bulk-stub scaffolding generator.** ✅ (2026-06-08) — see the section
             below. A DM scaffolds a batch of stub entities from a free-text
             instruction; they land as one PENDING `CREATE_ENTITY` change set.
-- [ ] **Visibility model simplification.** Refactor the visibility enum throughout the codebase (Prisma schema, type validation, forms, and visibility projections) from the three-state model (`DM_ONLY`, `SHARED_WITH_PLAYERS`, `PLAYER_FACING`) to a clean binary model (`DM_ONLY`, `PLAYER_VISIBLE`), mapping any subset access strictly to dynamic `KnowledgeGrant` (fog of war).
+- [x] **Visibility model simplification.** ✅ (2026-06-10) — collapsed the
+      three-state enum (`DM_ONLY`/`SHARED_WITH_PLAYERS`/`PLAYER_FACING`) to a clean
+      binary `DM_ONLY`/`PLAYER_VISIBLE`. See the section below.
 
 ### Follow-ups captured from delivered slices
 
@@ -94,6 +96,46 @@ keyword-scanning every doc.
       - **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
+
+## Visibility model simplification — binary DM_ONLY / PLAYER_VISIBLE ✅ (2026-06-10)
+
+**Goal:** collapse the three-state `Visibility` enum
+(`DM_ONLY`/`SHARED_WITH_PLAYERS`/`PLAYER_FACING`) to a clean binary
+(`DM_ONLY`/`PLAYER_VISIBLE`), per the user decision recorded in the backlog. The
+two non-DM states were always projected **identically** (every player query used
+`visibility in [SHARED_WITH_PLAYERS, PLAYER_FACING]`), so the distinction carried
+no behavior — only ambiguity. Subset/partial access is modeled exclusively via
+dynamic `KnowledgeGrant` (fog of war), not a visibility tier. Invariant #5 holds
+unchanged: players still read only via the visibility projection, and `DM_ONLY`
+content never reaches the client.
+
+- [x] **Schema + migration.** `enum Visibility { DM_ONLY PLAYER_VISIBLE }` in
+      `prisma/schema.prisma`. Migration `20260610120000_binary_visibility` swaps the
+      Postgres enum type (rename-old → create-new → `ALTER COLUMN … USING CASE` →
+      drop-old), mapping every `SHARED_WITH_PLAYERS`/`PLAYER_FACING` row on
+      `Entity.visibility` (the sole column using the enum) to `PLAYER_VISIBLE` and
+      preserving `DM_ONLY`. Applied to the local `dcc` DB; client regenerated.
+- [x] **Validation.** `visibilityValues` in [`validation.ts`](../src/lib/validation.ts)
+      is now `["DM_ONLY", "PLAYER_VISIBLE"]`; the entity form's visibility control
+      derives from it (binary toggle), and `formatVisibility` renders "Player Visible"
+      automatically (no per-label change).
+- [x] **Projections.** The player-visible predicate/where-clauses in
+      [`entities.ts`](../src/server/services/entities.ts),
+      [`events.ts`](../src/server/services/events.ts),
+      [`groups.ts`](../src/server/services/groups.ts), and
+      [`relationships.ts`](../src/server/services/relationships.ts) collapse from
+      `visibility in [SHARED, FACING]` / a two-arm `===` test to a single
+      `visibility === PLAYER_VISIBLE`. Seeding (`seeding.ts` + the `seed-world` /
+      `seed-timeline-demo` scripts) seeds canon as `PLAYER_VISIBLE`.
+- [x] **Tests.** All test fixtures/assertions updated from the legacy literals to
+      `PLAYER_VISIBLE` (no test relied on distinguishing the two — they were used
+      interchangeably as "a player-visible value"). The visibility-projection
+      coverage (DM-only hidden, player-visible shown) is unchanged in intent.
+- [x] **Docs.** `01-domain-model.md` + `09-data-schema.md` already described the
+      binary model (updated ahead of the code); AGENTS.md status + invariant #5 note
+      now state the model is binary (transition complete).
+- [x] **Gates:** lint / typecheck / build / `test:coverage` (see the verification
+      note in the commit).
 
 ## M4 — Bulk-stub scaffolding generator (slice 5) ✅ (2026-06-08)
 

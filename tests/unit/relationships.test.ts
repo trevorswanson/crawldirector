@@ -25,7 +25,7 @@ async function makeEntity(
   userId: string,
   campaignId: string,
   name: string,
-  visibility: "DM_ONLY" | "SHARED_WITH_PLAYERS" = "DM_ONLY",
+  visibility: "DM_ONLY" | "PLAYER_VISIBLE" = "DM_ONLY",
 ) {
   return createGenericEntity(userId, campaignId, {
     type: "NPC",
@@ -155,8 +155,8 @@ describe("relationship service", () => {
       data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
     });
 
-    const hub = await makeEntity(owner.id, campaign.id, "Hub", "SHARED_WITH_PLAYERS");
-    const shared = await makeEntity(owner.id, campaign.id, "Shared", "SHARED_WITH_PLAYERS");
+    const hub = await makeEntity(owner.id, campaign.id, "Hub", "PLAYER_VISIBLE");
+    const shared = await makeEntity(owner.id, campaign.id, "Shared", "PLAYER_VISIBLE");
     const hidden = await makeEntity(owner.id, campaign.id, "Hidden", "DM_ONLY");
 
     // public edge to a shared entity
@@ -574,8 +574,8 @@ describe("getCampaignRelationshipGraph", () => {
       data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
     });
 
-    const hub = await makeEntity(owner.id, campaign.id, "Hub", "SHARED_WITH_PLAYERS");
-    const shared = await makeEntity(owner.id, campaign.id, "Shared", "SHARED_WITH_PLAYERS");
+    const hub = await makeEntity(owner.id, campaign.id, "Hub", "PLAYER_VISIBLE");
+    const shared = await makeEntity(owner.id, campaign.id, "Shared", "PLAYER_VISIBLE");
     const hidden = await makeEntity(owner.id, campaign.id, "Hidden", "DM_ONLY");
 
     await createRelationship(owner.id, campaign.id, hub.id, {

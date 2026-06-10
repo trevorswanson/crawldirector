@@ -716,7 +716,7 @@ describe("event effects", () => {
     // its effects.
     await prisma.entity.update({
       where: { id: carl.id },
-      data: { visibility: "SHARED_WITH_PLAYERS" },
+      data: { visibility: "PLAYER_VISIBLE" },
     });
 
     const player = await makeUser("p@test.com");

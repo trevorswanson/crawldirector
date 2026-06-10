@@ -75,8 +75,7 @@ function isPlayerVisible(entity: {
 }) {
   return (
     entity.status !== CanonStatus.ARCHIVED &&
-    (entity.visibility === Visibility.SHARED_WITH_PLAYERS ||
-      entity.visibility === Visibility.PLAYER_FACING)
+    entity.visibility === Visibility.PLAYER_VISIBLE
   );
 }
 
