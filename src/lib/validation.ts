@@ -78,11 +78,7 @@ export const genericEntityTypeValues = [
   "DEITY",
 ] as const;
 
-export const visibilityValues = [
-  "DM_ONLY",
-  "SHARED_WITH_PLAYERS",
-  "PLAYER_FACING",
-] as const;
+export const visibilityValues = ["DM_ONLY", "PLAYER_VISIBLE"] as const;
 
 // optionalText / optionalInt moved to src/lib/zod-field-helpers.ts so the
 // entity-kind descriptors can reuse them without a circular import.

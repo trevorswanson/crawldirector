@@ -171,7 +171,7 @@ function crawler(overrides = {}) {
     summary: "No shoes",
     description: "Canon text",
     status: "CANON",
-    visibility: "PLAYER_FACING",
+    visibility: "PLAYER_VISIBLE",
     source: "DM",
     tags: ["floor 1"],
     version: 2,

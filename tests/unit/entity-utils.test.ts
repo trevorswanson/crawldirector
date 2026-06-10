@@ -12,7 +12,7 @@ import {
 describe("entity formatting helpers", () => {
   it("formats enum-like values for display", () => {
     expect(formatEntityType("SYSTEM_AI")).toBe("System Ai");
-    expect(formatVisibility("SHARED_WITH_PLAYERS")).toBe("Shared With Players");
+    expect(formatVisibility("PLAYER_VISIBLE")).toBe("Player Visible");
   });
 
   it("formats tags as a comma-separated string", () => {

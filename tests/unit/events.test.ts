@@ -53,7 +53,7 @@ async function makeEntity(
   userId: string,
   campaignId: string,
   name: string,
-  visibility: "DM_ONLY" | "SHARED_WITH_PLAYERS" = "DM_ONLY",
+  visibility: "DM_ONLY" | "PLAYER_VISIBLE" = "DM_ONLY",
 ) {
   return createGenericEntity(userId, campaignId, {
     type: "NPC",
@@ -69,7 +69,7 @@ async function makeCrawler(
   userId: string,
   campaignId: string,
   name: string,
-  visibility: "DM_ONLY" | "SHARED_WITH_PLAYERS" = "DM_ONLY",
+  visibility: "DM_ONLY" | "PLAYER_VISIBLE" = "DM_ONLY",
 ) {
   return createCrawler(userId, campaignId, {
     name,
@@ -309,7 +309,7 @@ describe("event service", () => {
       owner.id,
       campaign.id,
       "Public crawler",
-      "SHARED_WITH_PLAYERS",
+      "PLAYER_VISIBLE",
     );
     const secretEntity = await makeEntity(owner.id, campaign.id, "Secret NPC");
 
@@ -349,7 +349,7 @@ describe("event service", () => {
       owner.id,
       campaign.id,
       "Public crawler",
-      "SHARED_WITH_PLAYERS",
+      "PLAYER_VISIBLE",
     );
 
     // A secret event the player must never learn about.
@@ -412,8 +412,8 @@ describe("event service", () => {
       data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
     });
 
-    const hub = await makeEntity(owner.id, campaign.id, "Hub", "SHARED_WITH_PLAYERS");
-    const shared = await makeEntity(owner.id, campaign.id, "Shared", "SHARED_WITH_PLAYERS");
+    const hub = await makeEntity(owner.id, campaign.id, "Hub", "PLAYER_VISIBLE");
+    const shared = await makeEntity(owner.id, campaign.id, "Shared", "PLAYER_VISIBLE");
     const hidden = await makeEntity(owner.id, campaign.id, "Hidden", "DM_ONLY");
 
     // A public event with a shared and a hidden co-participant.
@@ -717,7 +717,7 @@ describe("event service", () => {
     await prisma.membership.create({
       data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
     });
-    const carl = await makeEntity(owner.id, campaign.id, "Carl", "SHARED_WITH_PLAYERS");
+    const carl = await makeEntity(owner.id, campaign.id, "Carl", "PLAYER_VISIBLE");
     const publicEvent = await createEvent(owner.id, campaign.id, {
       title: "Public consequence",
       secret: false,
@@ -755,7 +755,7 @@ describe("event service", () => {
       owner.id,
       campaign.id,
       "Public crawler",
-      "SHARED_WITH_PLAYERS",
+      "PLAYER_VISIBLE",
     );
     const secretEntity = await makeEntity(
       owner.id,
@@ -807,7 +807,7 @@ describe("event service", () => {
       owner.id,
       campaign.id,
       "Carl",
-      "SHARED_WITH_PLAYERS",
+      "PLAYER_VISIBLE",
     );
 
     const publicEvent = await createEvent(owner.id, campaign.id, {
@@ -1336,7 +1336,7 @@ describe("updateEvent", () => {
       owner.id,
       campaign.id,
       "Public crawler",
-      "SHARED_WITH_PLAYERS",
+      "PLAYER_VISIBLE",
     );
     const event = await createEvent(owner.id, campaign.id, {
       title: "Hidden consequence",
@@ -2386,7 +2386,7 @@ describe("campaign floor metadata", () => {
     name: string,
     floorNumber: number,
     theme = "",
-    visibility: "DM_ONLY" | "SHARED_WITH_PLAYERS" = "DM_ONLY",
+    visibility: "DM_ONLY" | "PLAYER_VISIBLE" = "DM_ONLY",
   ) {
     return createGenericEntity(userId, campaignId, {
       type: "FLOOR",
@@ -2506,7 +2506,7 @@ describe("campaign floor metadata", () => {
       owner.id,
       campaign.id,
       "Carl",
-      "SHARED_WITH_PLAYERS",
+      "PLAYER_VISIBLE",
     );
     const hiddenFloor = await makeFloor(owner.id, campaign.id, "Hidden Floor", 9); // DM_ONLY
     const hiddenNpc = await makeEntity(owner.id, campaign.id, "Mordecai");
@@ -2555,7 +2555,7 @@ describe("campaign floor metadata", () => {
       owner.id,
       campaign.id,
       "Carl",
-      "SHARED_WITH_PLAYERS",
+      "PLAYER_VISIBLE",
     );
     const hiddenNpc = await makeEntity(owner.id, campaign.id, "Mordecai");
     const floor = await makeFloor(
@@ -2564,7 +2564,7 @@ describe("campaign floor metadata", () => {
       "Larracos",
       9,
       "",
-      "SHARED_WITH_PLAYERS",
+      "PLAYER_VISIBLE",
     );
 
     const visibleEvent = await createEvent(owner.id, campaign.id, {
@@ -2673,7 +2673,7 @@ describe("resolveFloorEntity (ADR 0008 §1)", () => {
     campaignId: string,
     name: string,
     floorNumber: number,
-    visibility: "DM_ONLY" | "SHARED_WITH_PLAYERS" = "DM_ONLY",
+    visibility: "DM_ONLY" | "PLAYER_VISIBLE" = "DM_ONLY",
   ) {
     return createGenericEntity(userId, campaignId, {
       type: "FLOOR",
@@ -2737,7 +2737,7 @@ describe("resolveFloorEntity (ADR 0008 §1)", () => {
       campaign.id,
       "Open Floor",
       8,
-      "SHARED_WITH_PLAYERS",
+      "PLAYER_VISIBLE",
     );
 
     expect(await resolveFloorEntity(player.id, campaign.id, 9)).toBeNull();

@@ -65,7 +65,7 @@ describe("entity service", () => {
       crawlerNo: "4122",
       summary: "Royal cat crawler",
       description: "A very visible crawler.",
-      visibility: "PLAYER_FACING",
+      visibility: "PLAYER_VISIBLE",
       tags: ["royalty", "cat"],
       level: 3,
       hp: 22,
@@ -110,7 +110,7 @@ describe("entity service", () => {
       name: "Safe room",
       summary: "",
       description: "",
-      visibility: "SHARED_WITH_PLAYERS",
+      visibility: "PLAYER_VISIBLE",
       tags: [],
     });
 
@@ -261,7 +261,7 @@ describe("entity service", () => {
       name: "Known safe room",
       summary: "A known place",
       description: "Player-safe canon",
-      visibility: "SHARED_WITH_PLAYERS",
+      visibility: "PLAYER_VISIBLE",
       tags: [],
     });
 
@@ -288,7 +288,7 @@ describe("entity service", () => {
       name: "Famous Crawler",
       summary: "",
       description: "",
-      visibility: "PLAYER_FACING",
+      visibility: "PLAYER_VISIBLE",
       tags: [],
       level: 1,
       gold: 0,
@@ -312,7 +312,7 @@ describe("entity service", () => {
       name: "Famous Crawler",
       summary: "",
       description: "",
-      visibility: "PLAYER_FACING",
+      visibility: "PLAYER_VISIBLE",
       tags: [],
       level: 1,
       gold: 0,
@@ -389,7 +389,7 @@ describe("entity service", () => {
       crawlerNo: "1",
       summary: "Main crawler",
       description: "Wears no shoes.",
-      visibility: "PLAYER_FACING",
+      visibility: "PLAYER_VISIBLE",
       tags: ["floor 1"],
       level: 2,
       hp: 30,
@@ -1116,7 +1116,7 @@ describe("entity locking", () => {
       name: "Excalibur",
       summary: "Legendary sword",
       description: "King Arthur's sword.",
-      visibility: "PLAYER_FACING",
+      visibility: "PLAYER_VISIBLE",
       tags: ["legendary", "sword"],
       itemTypeId: weaponType.id,
       divine: true,
@@ -1144,7 +1144,7 @@ describe("entity locking", () => {
       name: "Excalibur",
       summary: "Legendary sword",
       description: "King Arthur's sword.",
-      visibility: "PLAYER_FACING",
+      visibility: "PLAYER_VISIBLE",
       tags: ["legendary", "sword"],
       itemTypeId: weaponType.id,
       divine: false,
@@ -1172,7 +1172,7 @@ describe("entity locking", () => {
         name: "Excalibur",
         summary: "Legendary sword",
         description: "King Arthur's sword.",
-        visibility: "PLAYER_FACING",
+        visibility: "PLAYER_VISIBLE",
         tags: ["legendary", "sword"],
         itemTypeId: weaponType.id,
         divine: true, // attempting to change a locked field
@@ -1188,7 +1188,7 @@ describe("entity locking", () => {
       name: "Excalibur (Modified)",
       summary: "Legendary sword",
       description: "King Arthur's sword.",
-      visibility: "PLAYER_FACING",
+      visibility: "PLAYER_VISIBLE",
       tags: ["legendary", "sword"],
       itemTypeId: weaponType.id,
       divine: false, // same as current value
@@ -1531,7 +1531,7 @@ describe("tagging system", () => {
       name: "Public NPC",
       summary: "",
       description: "",
-      visibility: "SHARED_WITH_PLAYERS",
+      visibility: "PLAYER_VISIBLE",
       tags: ["public-tag"],
     });
 

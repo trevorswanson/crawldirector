@@ -434,7 +434,7 @@ describe("createCrawlerAction", () => {
           name: "Carl",
           summary: "",
           description: "",
-          visibility: "PLAYER_FACING",
+          visibility: "PLAYER_VISIBLE",
           tags: "",
           level: "2",
           gold: "1",

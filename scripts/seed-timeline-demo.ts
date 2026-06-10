@@ -33,7 +33,7 @@ async function main() {
         campaignId: campaign.id,
         type: type as never,
         name,
-        visibility: "SHARED_WITH_PLAYERS",
+        visibility: "PLAYER_VISIBLE",
         createdById: user.id,
         ...extra,
       },
