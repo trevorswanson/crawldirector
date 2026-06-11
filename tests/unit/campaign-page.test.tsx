@@ -8,6 +8,7 @@ const {
   listEntitiesForUser,
   getEntityTypeCounts,
   listCampaignTags,
+  listFleshCandidates,
   resolveFloorEntities,
   listAiKeys,
   notFound,
@@ -17,6 +18,7 @@ const {
   listEntitiesForUser: vi.fn(),
   getEntityTypeCounts: vi.fn(),
   listCampaignTags: vi.fn(),
+  listFleshCandidates: vi.fn(),
   resolveFloorEntities: vi.fn(),
   listAiKeys: vi.fn(),
   notFound: vi.fn(() => {
@@ -30,12 +32,18 @@ vi.mock("@/server/services/entities", () => ({
   listEntitiesForUser,
   getEntityTypeCounts,
   listCampaignTags,
+  listFleshCandidates,
 }));
 vi.mock("@/server/services/events", () => ({ resolveFloorEntities }));
 vi.mock("@/server/services/ai-keys", () => ({ listAiKeys }));
 vi.mock("@/components/entities/scaffold-stubs-panel", () => ({
   ScaffoldStubsPanel: ({ campaignId }: { campaignId: string }) => (
     <div>Scaffold with AI {campaignId}</div>
+  ),
+}));
+vi.mock("@/components/entities/bulk-flesh-panel", () => ({
+  BulkFleshPanel: ({ campaignId }: { campaignId: string }) => (
+    <div>Flesh out with AI {campaignId}</div>
   ),
 }));
 vi.mock("next/navigation", () => ({
@@ -71,6 +79,7 @@ beforeEach(() => {
   listCampaignTags.mockResolvedValue([]);
   resolveFloorEntities.mockResolvedValue(new Map());
   listAiKeys.mockResolvedValue([]);
+  listFleshCandidates.mockResolvedValue([]);
 });
 
 afterEach(cleanup);
@@ -97,8 +106,9 @@ describe("CampaignPage", () => {
     expect(screen.getByText("Entity type")).toBeDefined();
     expect(screen.getByText("Locked only")).toBeDefined();
     expect(screen.getByText("Quick create c1")).toBeDefined();
-    // No provider key configured (listAiKeys → []), so the AI scaffold panel is hidden.
+    // No provider key configured (listAiKeys → []), so the AI panels are hidden.
     expect(screen.queryByText("Scaffold with AI c1")).toBeNull();
+    expect(screen.queryByText("Flesh out with AI c1")).toBeNull();
     // count chip: 0 results / 2 total
     expect(screen.getByText("0 / 2")).toBeDefined();
     expect(listEntitiesForUser).toHaveBeenCalledWith("u1", "c1", {
@@ -130,6 +140,39 @@ describe("CampaignPage", () => {
     );
 
     expect(screen.getByText("Scaffold with AI c1")).toBeDefined();
+  });
+
+  it("shows the bulk flesh-out panel only with a key AND stub candidates", async () => {
+    getCampaignForUser.mockResolvedValue({
+      id: "c1",
+      name: "World One",
+      summary: null,
+      createdAt: new Date(),
+      members: [{ role: "OWNER" }],
+      _count: { members: 1, entities: 0 },
+    });
+    listAiKeys.mockResolvedValue([{ providerId: "anthropic", lastFour: "4242" }]);
+
+    // A key but no stub candidates → the bulk panel is still hidden.
+    render(
+      await CampaignPage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+    expect(screen.queryByText("Flesh out with AI c1")).toBeNull();
+    cleanup();
+
+    // A key AND at least one stub candidate → the bulk panel shows.
+    listFleshCandidates.mockResolvedValue([{ id: "e1", name: "Stub", type: "NPC" }]);
+    render(
+      await CampaignPage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+    expect(screen.getByText("Flesh out with AI c1")).toBeDefined();
+    expect(listFleshCandidates).toHaveBeenCalledWith("u1", "c1");
   });
 
   it("translates facet search params into service filters", async () => {

@@ -35,8 +35,9 @@ keyword-scanning every doc.
             (2026-06-08) — see the section below. ADR 0009 is now **fully
             delivered**; the brand-new-EntityType "proof" remains deferred to M7's
             BOX (one descriptor file then), per project norm (no stub features).
-- [ ] **M4 generator expansion.** Remaining: a generation panel for *bulk runs*
-      (multi-entity selection) and a `Job` table + worker for bulk/async runs.
+- [ ] **M4 generator expansion.** Remaining: a `Job` table + worker for
+      bulk/async runs (long batches off the request path, notifying the DM when
+      ready).
       - [x] **Bulk-stub scaffolding generator.** ✅ (2026-06-08) — see the section
             below. A DM scaffolds a batch of stub entities from a free-text
             instruction; they land as one PENDING `CREATE_ENTITY` change set.
@@ -44,6 +45,11 @@ keyword-scanning every doc.
             below. Every generation records token usage + an estimated cost; the
             Settings page shows campaign spend; a DM-set spend cap blocks
             generation once known spend reaches it.
+      - [x] **Bulk multi-entity flesh-out panel.** ✅ (2026-06-11) — see the
+            section below. A DM selects several stub entities in the World Browser
+            and fleshes them in one synchronous batch; each lands as its own
+            PENDING `UPDATE_ENTITY` proposal, with a per-entity proposed/skipped
+            summary. The async `Job` worker remains the last M4 expansion item.
 - [x] **Visibility model simplification.** ✅ (2026-06-10) — collapsed the
       three-state enum (`DM_ONLY`/`SHARED_WITH_PLAYERS`/`PLAYER_FACING`) to a clean
       binary `DM_ONLY`/`PLAYER_VISIBLE`. See the section below.
@@ -99,6 +105,87 @@ keyword-scanning every doc.
       - **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
+
+## M4 — Bulk multi-entity flesh-out panel ✅ (2026-06-11)
+
+**Goal:** the "generation panel for bulk runs (multi-entity selection)" from
+[`04-ai-integration.md`](./04-ai-integration.md) §"Async / batching" — the
+multi-entity counterpart to the single-entity "Flesh out" on the entity rail.
+A DM picks several stub entities in the World Browser and fleshes them in one
+run; each lands as its own PENDING `UPDATE_ENTITY` proposal (never canon —
+invariant #1), respecting locks (invariant #2) and recording AI provenance on
+approval (invariant #3). Per the doc's "start synchronous" guidance this slice
+runs in-request (one provider call per selected entity); the async `Job` worker
+for long batches stays the last M4 expansion item. The spend cap is enforced
+per entity, so a batch stops spending the moment the cap is reached. The app
+stays fully usable with no key and no candidates.
+
+- [x] **Service** (`fleshOutEntities`, `src/server/services/generation.ts`):
+      DM/co-DM only. Normalizes the selection (drops blanks, dedupes
+      order-preserving, bounds the batch to ≤20). Resolves the provider **once**
+      so a missing key fails the whole batch with one clear `ServiceError`
+      (instead of repeating per entity). Loads names up front so every outcome —
+      including ids that vanished between page load and submit — is labelled.
+      Then loops the selection, **reusing the existing `fleshOutEntity`** per
+      entity (so each is byte-identical to a single-entity run and one entity's
+      failure never blocks the others): a per-entity `try/catch` records a
+      `{ status: "proposed" | "skipped", detail? }` outcome, with locked /
+      no-usable-change / transient-provider failures surfaced as safe
+      ServiceError text (invariant #6). Before each entity it re-checks
+      `assertWithinSpendCap`; the first cap hit flips a `capReached` flag so the
+      remaining entities short-circuit to "Spend cap reached." with **no further
+      provider calls**. Returns `{ outcomes, proposedCount, skippedCount, model }`.
+- [x] **Candidate query** (`listFleshCandidates`, `entities.ts`): non-locked,
+      non-archived **stub** entities (`{ id, name, type }`), the natural bulk
+      targets (a full entity is fleshed one-off from its rail). DM-only (returns
+      `[]` for players / non-members), so the panel is gated the same way as the
+      AI key list.
+- [x] **Action** (`fleshOutEntitiesAction`, `src/app/(dm)/actions.ts`) +
+      `BulkGenerateActionState`: reads the multi-valued `entityIds` from the
+      form, calls the service, revalidates the queue + World Browser, and returns
+      a summary — a success line when ≥1 was proposed (singular/plural noun, a
+      "N skipped" suffix), an `error` when none were ("No drafts were proposed —
+      see the details below."), and the per-entity outcomes (display fields only,
+      never internal ids). Failures map to safe ServiceError text or a generic
+      fallback.
+- [x] **UI** (`src/components/entities/bulk-flesh-panel.tsx`): a DM-only
+      **`BulkFleshPanel`** ("Flesh out with AI") in the World Browser header,
+      beside "Scaffold with AI", shown only when a provider key is configured
+      **and** there's at least one stub candidate. It toggles a checklist of
+      candidates (TypeDot + type + name) with Select-all/Clear-all and a live
+      "N selected" count; the submit button is disabled at zero and labelled
+      "Flesh out N". On a successful run it shows the summary + a link to the
+      Review Queue and a per-entity Proposed/Skipped list (skips show the reason).
+      Selection clears once per successful run via a render-time guard keyed off
+      the run timestamp (the React-recommended "adjust state when input changes"
+      pattern — no `useEffect`/`setState`-in-effect).
+- [x] **Tests:** DB-backed `fleshOutEntities` (one PENDING set per entity all
+      proposed; locked/no-change skipped without blocking others; not-found
+      label; cap stops spending + skips the rest with no provider call; empty /
+      oversized / no-provider rejections; player denial); `listFleshCandidates`
+      (returns non-locked non-archived stubs, excludes full/locked/archived;
+      `[]` for a player); `fleshOutEntitiesAction` (ids passed + summary/outcomes
+      + revalidate; singular noun + it/them; error-when-none keeps outcomes;
+      ServiceError + generic fallback); `BulkFleshPanel` component (collapsed →
+      open → candidate list; select toggles count + enables submit; select-all /
+      clear-all; success + outcomes + queue link; error); campaign-page gating
+      (hidden without a key, hidden with a key but no candidates, shown with both).
+      lint (0 errors; 2 pre-existing settings warnings), typecheck, build, and the
+      full coverage gate green (1116 tests; statements 95.65%, branches 89.23%,
+      functions 97.76%, lines 97.52%; the new files covered).
+- [x] **Verified in-browser** against the seeded Demo Campaign (placeholder
+      Anthropic key + two stub NPCs): the "Flesh out with AI" button appears
+      (gated by the key + candidates), opens the checklist, Select-all checks both
+      and enables "Flesh out 2"; submitting routed through the action → service →
+      per-entity provider call. The placeholder key made each call fail, and the
+      bulk loop **continued past the per-entity failures** rather than aborting:
+      both entities rendered as **Skipped — "The provider rejected the key
+      (authentication failed)"** with the panel's "No drafts were proposed" alert,
+      and no key/raw-SDK text reached the DOM (invariant #6). No console errors. A
+      **successful** generation needs the DM's own valid BYO key + spend (the
+      documented M4 boundary), covered by the mocked-provider service tests.
+- [x] **Remaining M4 expansion:** only the async `Job` table + worker (long
+      batches off the request path, DM notification) stays in the open backlog.
 
 ## M4 — Usage tracking + spend caps ✅ (2026-06-11)
 

@@ -75,6 +75,22 @@ export type ScaffoldStubsResult = {
 };
 
 const MAX_SCAFFOLD_INSTRUCTION = 2000;
+const MAX_BULK_FLESH = 20;
+
+export type BulkFleshOutcome = {
+  entityId: string;
+  entityName: string;
+  status: "proposed" | "skipped";
+  changeSetId?: string;
+  detail?: string;
+};
+
+export type BulkFleshResult = {
+  outcomes: BulkFleshOutcome[];
+  proposedCount: number;
+  skippedCount: number;
+  model: string;
+};
 
 // Flesh out an entity into a fuller summary/description/tags, filed as a PENDING
 // `UPDATE_ENTITY` proposal for the DM to review. DM/co-DM only. Throws a
@@ -208,6 +224,102 @@ export async function fleshOutEntity(
   await linkAiUsageChangeSet(usageRow.id, changeSet.id);
 
   return { changeSetId: changeSet.id, providerId: provider.id, model: provider.model };
+}
+
+// Flesh out several entities in one bulk run — the multi-entity counterpart to
+// `fleshOutEntity`. Each selected entity is fleshed independently and lands as
+// its own PENDING `UPDATE_ENTITY` proposal (so the DM reviews them one by one),
+// and one entity's failure (locked, no usable change) never blocks the others.
+// This slice is synchronous; an async `Job` worker for long batches stays a
+// later M4 slice. DM/co-DM only. Throws a ServiceError (safe message) only for
+// whole-batch problems (bad selection, no provider configured).
+export async function fleshOutEntities(
+  userId: string,
+  campaignId: string,
+  entityIds: string[],
+): Promise<BulkFleshResult> {
+  await assertCampaignDm(userId, campaignId);
+
+  // Normalize the selection: drop blanks, dedupe (order-preserving), bound the batch.
+  const ids = Array.from(new Set(entityIds.map((value) => value.trim()).filter(Boolean)));
+  if (ids.length === 0) {
+    throw new ServiceError("Select at least one entity to flesh out.");
+  }
+  if (ids.length > MAX_BULK_FLESH) {
+    throw new ServiceError(`You can flesh out at most ${MAX_BULK_FLESH} entities at once.`);
+  }
+
+  // Resolve the provider once so a missing key fails the whole batch with one
+  // clear message instead of repeating per entity.
+  const provider = await resolveCampaignProvider(campaignId);
+  if (!provider) {
+    throw new ServiceError(
+      "No AI provider is configured. Add a provider key in campaign Settings first.",
+    );
+  }
+
+  // Names up front so every outcome — including ids that vanished between the
+  // page load and submit — can be labelled.
+  const rows = await prisma.entity.findMany({
+    where: { id: { in: ids }, campaignId, status: { not: CanonStatus.ARCHIVED } },
+    select: { id: true, name: true },
+  });
+  const nameById = new Map(rows.map((row) => [row.id, row.name] as const));
+
+  const outcomes: BulkFleshOutcome[] = [];
+  let capReached = false;
+  for (const entityId of ids) {
+    const entityName = nameById.get(entityId);
+    if (!entityName) {
+      outcomes.push({
+        entityId,
+        entityName: "(unknown entity)",
+        status: "skipped",
+        detail: "Entity not found.",
+      });
+      continue;
+    }
+    if (capReached) {
+      outcomes.push({ entityId, entityName, status: "skipped", detail: "Spend cap reached." });
+      continue;
+    }
+    // Stop spending once the cap is hit; mark this entity and the rest as
+    // skipped rather than making more (no-op) provider calls.
+    try {
+      await assertWithinSpendCap(campaignId);
+    } catch (error) {
+      capReached = true;
+      outcomes.push({
+        entityId,
+        entityName,
+        status: "skipped",
+        detail: error instanceof ServiceError ? error.message : "Spend cap reached.",
+      });
+      continue;
+    }
+    try {
+      const result = await fleshOutEntity(userId, campaignId, entityId);
+      outcomes.push({ entityId, entityName, status: "proposed", changeSetId: result.changeSetId });
+    } catch (error) {
+      // Per-entity failures (locked, no usable change, a transient provider
+      // error) are recorded and the run continues. Messages are already safe
+      // ServiceError text (no key/raw provider output — invariant #6).
+      outcomes.push({
+        entityId,
+        entityName,
+        status: "skipped",
+        detail: error instanceof ServiceError ? error.message : "Generation failed.",
+      });
+    }
+  }
+
+  const proposedCount = outcomes.filter((outcome) => outcome.status === "proposed").length;
+  return {
+    outcomes,
+    proposedCount,
+    skippedCount: outcomes.length - proposedCount,
+    model: provider.model,
+  };
 }
 
 // Infer new relationships involving one existing entity and file them as a
