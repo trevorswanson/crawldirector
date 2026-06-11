@@ -82,6 +82,46 @@ describe("recordAiUsage", () => {
     expect(row.changeSetId).toBeNull();
   });
 
+  it("freezes each run's cost at record time — a later rate change is not retroactive", async () => {
+    const { dmId, campaignId } = await seed();
+    const oneMInput = { inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 };
+
+    // Day 1: rate $1 / 1M input. Record a 1M-input run → $1.
+    await prisma.aiKey.create({
+      data: {
+        campaignId,
+        providerId: "openai-compatible",
+        ciphertext: "x",
+        lastFour: "",
+        baseUrl: "http://localhost:11434/v1",
+        model: "local-llama",
+        inputPerMTokUsd: 1,
+        outputPerMTokUsd: 1,
+        createdById: dmId,
+      },
+    });
+    const day1 = await recordAiUsage({
+      campaignId, userId: dmId, providerId: "openai-compatible", model: "local-llama", generatorId: "scaffold-stubs", usage: oneMInput,
+    });
+    expect(day1.estimatedCostUsd).toBeCloseTo(1, 6);
+
+    // Day 2: provider raised prices — DM bumps the rate to $2 / 1M.
+    await prisma.aiKey.update({
+      where: { campaignId_providerId: { campaignId, providerId: "openai-compatible" } },
+      data: { inputPerMTokUsd: 2, outputPerMTokUsd: 2 },
+    });
+    const day2 = await recordAiUsage({
+      campaignId, userId: dmId, providerId: "openai-compatible", model: "local-llama", generatorId: "scaffold-stubs", usage: oneMInput,
+    });
+    expect(day2.estimatedCostUsd).toBeCloseTo(2, 6);
+
+    // The Day-1 row is untouched, and the total is $1 + $2 = $3 — not 2 × $2.
+    const stored = await prisma.aiUsage.findUniqueOrThrow({ where: { id: day1.id } });
+    expect(stored.estimatedCostUsd).toBeCloseTo(1, 6);
+    const summary = await getCampaignAiUsage(dmId, campaignId);
+    expect(summary.totalCostUsd).toBeCloseTo(3, 6);
+  });
+
   it("costs an unpriced model from the AiKey's per-token override", async () => {
     const { dmId, campaignId } = await seed();
     // The DM sets their own rates on the self-hosted/proxy key.
