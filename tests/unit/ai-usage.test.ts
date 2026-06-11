@@ -81,6 +81,36 @@ describe("recordAiUsage", () => {
     expect(row.inputTokens).toBe(1_000_000);
     expect(row.changeSetId).toBeNull();
   });
+
+  it("costs an unpriced model from the AiKey's per-token override", async () => {
+    const { dmId, campaignId } = await seed();
+    // The DM sets their own rates on the self-hosted/proxy key.
+    await prisma.aiKey.create({
+      data: {
+        campaignId,
+        providerId: "openai-compatible",
+        ciphertext: "x",
+        lastFour: "",
+        baseUrl: "http://localhost:11434/v1",
+        model: "local-llama",
+        inputPerMTokUsd: 0.5,
+        outputPerMTokUsd: 1.5,
+        createdById: dmId,
+      },
+    });
+
+    const row = await recordAiUsage({
+      campaignId,
+      userId: dmId,
+      providerId: "openai-compatible",
+      model: "local-llama",
+      generatorId: "scaffold-stubs",
+      usage, // 1M in + 1M out
+    });
+
+    // $0.50 + $1.50 — no longer null, so it counts toward the cap too.
+    expect(row.estimatedCostUsd).toBeCloseTo(2, 6);
+  });
 });
 
 describe("getCampaignAiUsage", () => {

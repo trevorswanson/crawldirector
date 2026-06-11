@@ -373,6 +373,8 @@ model AiKey {            // encrypted at rest — see docs/adr/0006 + adr/0007
   lastFour    String   // non-secret display hint: the key's last 4 chars
   baseUrl     String?  // OpenAI-compatible endpoint (self-hosted / proxy); non-secret
   model       String?  // optional per-key model override (falls back to provider default)
+  inputPerMTokUsd  Float?  // DM price override (USD / 1M tokens); both set → overrides table
+  outputPerMTokUsd Float?  // ... — the only way to cost a self-hosted/proxy model
   createdById String   // who configured it
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

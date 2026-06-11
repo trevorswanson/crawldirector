@@ -58,6 +58,52 @@ describe("estimateCostUsd", () => {
       }),
     ).toBeNull();
   });
+
+  it("prices an otherwise-unpriced model from a complete DM override", () => {
+    const cost = estimateCostUsd(
+      "local-llama",
+      { inputTokens: 1_000_000, outputTokens: 1_000_000, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      { inputPerMTok: 0.5, outputPerMTok: 1.5 },
+    );
+    expect(cost).toBeCloseTo(2, 6); // $0.50 + $1.50
+  });
+
+  it("derives override cache rates from the input rate (0.1× read, 1.25× write)", () => {
+    const cost = estimateCostUsd(
+      "local-llama",
+      { inputTokens: 0, outputTokens: 0, cacheReadTokens: 1_000_000, cacheCreationTokens: 1_000_000 },
+      { inputPerMTok: 10, outputPerMTok: 20 },
+    );
+    expect(cost).toBeCloseTo(10 * 0.1 + 10 * 1.25, 6); // $1 + $12.50
+  });
+
+  it("lets a complete override win over the built-in table", () => {
+    const cost = estimateCostUsd(
+      "claude-opus-4-8",
+      { inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      { inputPerMTok: 1, outputPerMTok: 1 },
+    );
+    expect(cost).toBeCloseTo(1, 6); // override $1, not the table's $15
+  });
+
+  it("ignores an incomplete override (only one rate) and falls back to the table", () => {
+    const cost = estimateCostUsd(
+      "claude-opus-4-8",
+      { inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      { inputPerMTok: 1, outputPerMTok: null },
+    );
+    expect(cost).toBeCloseTo(15, 6); // table input rate, override ignored
+  });
+
+  it("stays null when an incomplete override can't rescue an unpriced model", () => {
+    expect(
+      estimateCostUsd(
+        "local-llama",
+        { inputTokens: 100, outputTokens: 100, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        { inputPerMTok: 2, outputPerMTok: null },
+      ),
+    ).toBeNull();
+  });
 });
 
 describe("formatUsd", () => {

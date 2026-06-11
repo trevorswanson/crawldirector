@@ -21,12 +21,22 @@ export type RecordAiUsageInput = {
   changeSetId?: string;
 };
 
-// Persist one run's usage. Cost is estimated from the model's price table; an
-// unpriced model records null cost (tokens stay authoritative). Best-effort: a
-// generation that already produced a proposal should not fail because we couldn't
-// write its usage row, so callers may ignore a thrown error here.
+// Persist one run's usage. Cost is estimated from the DM's per-key price override
+// if one is configured, else the built-in model price table; an unpriced model
+// records null cost (tokens stay authoritative). Best-effort: a generation that
+// already produced a proposal should not fail because we couldn't write its usage
+// row, so callers may ignore a thrown error here.
 export async function recordAiUsage(input: RecordAiUsageInput) {
-  const estimatedCostUsd = estimateCostUsd(input.model, input.usage);
+  // A DM-supplied per-token price (set on the AiKey) lets us cost a self-hosted/
+  // proxy model the built-in table doesn't know — and counts it toward the cap.
+  const key = await prisma.aiKey.findUnique({
+    where: { campaignId_providerId: { campaignId: input.campaignId, providerId: input.providerId } },
+    select: { inputPerMTokUsd: true, outputPerMTokUsd: true },
+  });
+  const override = key
+    ? { inputPerMTok: key.inputPerMTokUsd, outputPerMTok: key.outputPerMTokUsd }
+    : null;
+  const estimatedCostUsd = estimateCostUsd(input.model, input.usage, override);
   return prisma.aiUsage.create({
     data: {
       campaignId: input.campaignId,

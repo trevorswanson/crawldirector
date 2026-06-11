@@ -48,10 +48,52 @@ export function isModelPriced(model: string): boolean {
   return getModelPricing(model) !== undefined;
 }
 
-// Estimate a run's cost in USD from its token usage. Returns null when the model
-// is unpriced — callers must treat that as "cost unknown", never as "$0".
-export function estimateCostUsd(model: string, usage: LLMUsage): number | null {
-  const pricing = getModelPricing(model);
+// A DM-supplied per-key price override (USD per 1M tokens). Both rates must be
+// present for the override to apply — see `resolvePricing`.
+export type PricingOverride = {
+  inputPerMTok: number | null;
+  outputPerMTok: number | null;
+};
+
+// Build a full `ModelPricing` from a DM override's input/output rates. The
+// override only carries input + output (a self-hosted/proxy model the DM is
+// pricing themselves); cache rates are derived from the input rate using the
+// same conventions as the built-in table (cache read ≈ 0.1× input, cache write
+// ≈ 1.25× input). For OpenAI-compatible endpoints the adapter reports zero cache
+// tokens, so those rates never actually apply there.
+function pricingFromOverride(o: PricingOverride): ModelPricing | null {
+  if (o.inputPerMTok == null || o.outputPerMTok == null) return null;
+  return {
+    inputPerMTok: o.inputPerMTok,
+    outputPerMTok: o.outputPerMTok,
+    cacheReadPerMTok: o.inputPerMTok * 0.1,
+    cacheWritePerMTok: o.inputPerMTok * 1.25,
+  };
+}
+
+// Resolve the price to use: a complete DM override wins, then the built-in table,
+// then null (cost unknown). Lets a DM cost a self-hosted/proxy model the table
+// doesn't know — or correct a first-party model's price for their own proxy.
+export function resolvePricing(
+  model: string,
+  override?: PricingOverride | null,
+): ModelPricing | null {
+  if (override) {
+    const fromOverride = pricingFromOverride(override);
+    if (fromOverride) return fromOverride;
+  }
+  return getModelPricing(model) ?? null;
+}
+
+// Estimate a run's cost in USD from its token usage. Returns null when neither a
+// DM override nor the built-in table prices the model — callers must treat that
+// as "cost unknown", never as "$0".
+export function estimateCostUsd(
+  model: string,
+  usage: LLMUsage,
+  override?: PricingOverride | null,
+): number | null {
+  const pricing = resolvePricing(model, override);
   if (!pricing) return null;
   const cost =
     (usage.inputTokens * pricing.inputPerMTok +

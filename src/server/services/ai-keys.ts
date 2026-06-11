@@ -42,6 +42,9 @@ export type AiKeyView = {
   // providers). Safe to render — neither carries the key.
   baseUrl: string | null;
   model: string | null;
+  // DM-supplied price override (USD per 1M tokens); null when unset. Non-secret.
+  inputPerMTokUsd: number | null;
+  outputPerMTokUsd: number | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -61,7 +64,14 @@ async function normalizeBaseUrl(raw: string): Promise<string> {
 export async function setAiKey(
   userId: string,
   campaignId: string,
-  input: { providerId: string; apiKey: string; baseUrl?: string; model?: string },
+  input: {
+    providerId: string;
+    apiKey: string;
+    baseUrl?: string;
+    model?: string;
+    inputPerMTokUsd?: number | null;
+    outputPerMTokUsd?: number | null;
+  },
 ): Promise<AiKeyView> {
   await assertCampaignDm(userId, campaignId);
 
@@ -118,16 +128,32 @@ export async function setAiKey(
     lastFour = "";
   }
 
+  // Non-secret per-token price override (USD per 1M tokens); null when unset.
+  const inputPerMTokUsd = input.inputPerMTokUsd ?? null;
+  const outputPerMTokUsd = input.outputPerMTokUsd ?? null;
+
   const saved = await prisma.$transaction(async (tx) => {
     const row = await tx.aiKey.upsert({
       where: { campaignId_providerId: { campaignId, providerId } },
-      create: { campaignId, providerId, ciphertext, lastFour, baseUrl, model, createdById: userId },
-      update: { ciphertext, lastFour, baseUrl, model },
+      create: {
+        campaignId,
+        providerId,
+        ciphertext,
+        lastFour,
+        baseUrl,
+        model,
+        inputPerMTokUsd,
+        outputPerMTokUsd,
+        createdById: userId,
+      },
+      update: { ciphertext, lastFour, baseUrl, model, inputPerMTokUsd, outputPerMTokUsd },
       select: {
         providerId: true,
         lastFour: true,
         baseUrl: true,
         model: true,
+        inputPerMTokUsd: true,
+        outputPerMTokUsd: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -141,7 +167,7 @@ export async function setAiKey(
         targetType: "AI_KEY",
         targetId: providerId,
         // Never the key itself — only non-secret hints + whether we replaced one.
-        detail: { providerId, lastFour, baseUrl, model, replaced: !!existing },
+        detail: { providerId, lastFour, baseUrl, model, inputPerMTokUsd, outputPerMTokUsd, replaced: !!existing },
       },
     });
 
@@ -154,6 +180,8 @@ export async function setAiKey(
     lastFour: saved.lastFour,
     baseUrl: saved.baseUrl,
     model: saved.model,
+    inputPerMTokUsd: saved.inputPerMTokUsd,
+    outputPerMTokUsd: saved.outputPerMTokUsd,
     createdAt: saved.createdAt,
     updatedAt: saved.updatedAt,
   };
@@ -200,6 +228,8 @@ export async function listAiKeys(userId: string, campaignId: string): Promise<Ai
       lastFour: true,
       baseUrl: true,
       model: true,
+      inputPerMTokUsd: true,
+      outputPerMTokUsd: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -211,6 +241,8 @@ export async function listAiKeys(userId: string, campaignId: string): Promise<Ai
     lastFour: k.lastFour,
     baseUrl: k.baseUrl,
     model: k.model,
+    inputPerMTokUsd: k.inputPerMTokUsd,
+    outputPerMTokUsd: k.outputPerMTokUsd,
     createdAt: k.createdAt,
     updatedAt: k.updatedAt,
   }));

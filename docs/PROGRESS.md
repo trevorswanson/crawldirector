@@ -120,10 +120,22 @@ fully usable with no key and no cap.
       change set.
 - [x] **Pure pricing** (`src/lib/ai/pricing.ts`, client-safe): a per-model price
       table (USD / 1M tokens, input/output/cache-read/cache-write) for the models
-      the app defaults to, plus `estimateCostUsd(model, usage)` that returns
-      **`null` for an unpriced model** (a custom endpoint / unknown model) rather
-      than inventing `$0` — tokens stay authoritative either way — and `formatUsd`
-      (extra precision for sub-cent amounts so single runs don't all read "$0.00").
+      the app defaults to, plus `estimateCostUsd(model, usage, override?)` that
+      returns **`null` for an unpriced model** (a custom endpoint / unknown model)
+      rather than inventing `$0` — tokens stay authoritative either way — and
+      `formatUsd` (extra precision for sub-cent amounts so single runs don't all
+      read "$0.00"). `resolvePricing` lets a complete **DM-supplied override** win
+      over the built-in table (cache rates derived from the input rate, 0.1×/1.25×).
+- [x] **Custom per-token rates (follow-up).** A DM can store their own
+      `inputPerMTokUsd`/`outputPerMTokUsd` on the `AiKey` (migration
+      `20260611164233_m4_ai_key_custom_pricing`) — the only way to cost a
+      **self-hosted/proxy** model the table doesn't know (and overrides the table
+      for first-party providers too). `recordAiUsage` reads the key's override at
+      record time, so an otherwise-unpriced run becomes priced, drops out of the
+      "unpriced runs" note, and **counts toward the spend cap**. Both rates are
+      required for the override to apply; surfaced as optional "$ / 1M tokens"
+      inputs per provider row in `AiKeysPanel`, plumbed through `setAiKeySchema` +
+      `setAiKey` (non-secret config, audited in the existing `SET_AI_KEY` detail).
 - [x] **Service** (`src/server/services/ai-usage.ts`): `recordAiUsage` (estimate +
       persist), `assertWithinSpendCap` (throws a `ServiceError` once the sum of
       **priced** usage reaches the cap; unpriced runs can't trip it, since their

@@ -30,6 +30,8 @@ export async function setAiKeyAction(
     apiKey: formData.get("apiKey") ?? undefined,
     baseUrl: formData.get("baseUrl") ?? undefined,
     model: formData.get("model") ?? undefined,
+    inputPerMTokUsd: formData.get("inputPerMTokUsd") ?? undefined,
+    outputPerMTokUsd: formData.get("outputPerMTokUsd") ?? undefined,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input.", timestamp: Date.now() };

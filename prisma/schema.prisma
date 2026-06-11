@@ -626,6 +626,11 @@ model AiKey {
   lastFour    String // non-secret hint: the key's last 4 chars
   baseUrl     String? // OpenAI-compatible endpoint (self-hosted / proxy); non-secret config
   model       String? // optional per-key model override; falls back to the provider default
+  // Optional DM-supplied price (USD per 1M tokens) for usage/cost estimation. When
+  // both are set they override the built-in price table (src/lib/ai/pricing.ts) —
+  // the only way to cost a self-hosted/proxy model the table doesn't know. Non-secret.
+  inputPerMTokUsd  Float?
+  outputPerMTokUsd Float?
   createdById String
 
   campaign  Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)

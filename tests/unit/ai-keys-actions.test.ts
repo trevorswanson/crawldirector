@@ -49,10 +49,36 @@ describe("setAiKeyAction", () => {
       apiKey: "sk-ant-secret-9999",
       baseUrl: "",
       model: "",
+      inputPerMTokUsd: null,
+      outputPerMTokUsd: null,
     });
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/camp1/settings");
     expect(result?.success).toContain("9999");
     expect(result?.error).toBeUndefined();
+  });
+
+  it("passes DM-supplied per-token price overrides through to the service", async () => {
+    setAiKey.mockResolvedValue({ providerId: "openai-compatible", label: "OpenAI-compatible", lastFour: "" });
+    await setAiKeyAction(
+      "camp1",
+      undefined,
+      formData({
+        providerId: "openai-compatible",
+        apiKey: "",
+        baseUrl: "http://localhost:11434/v1",
+        model: "llama3.1",
+        inputPerMTokUsd: "0.5",
+        outputPerMTokUsd: "1.5",
+      }),
+    );
+    expect(setAiKey).toHaveBeenCalledWith("dm1", "camp1", {
+      providerId: "openai-compatible",
+      apiKey: "",
+      baseUrl: "http://localhost:11434/v1",
+      model: "llama3.1",
+      inputPerMTokUsd: 0.5,
+      outputPerMTokUsd: 1.5,
+    });
   });
 
   it("passes the endpoint URL and model through for an OpenAI-compatible provider", async () => {
@@ -72,6 +98,8 @@ describe("setAiKeyAction", () => {
       apiKey: "",
       baseUrl: "http://localhost:11434/v1",
       model: "llama3.1",
+      inputPerMTokUsd: null,
+      outputPerMTokUsd: null,
     });
     // No last-four hint when the key is blank — the message omits it cleanly.
     expect(result?.success).toMatch(/Saved OpenAI-compatible\./);

@@ -139,6 +139,9 @@ tracking + spend caps** (M4) are now in: every successful generation writes an
 the Settings page shows campaign spend, and a DM-set `Campaign.spendCapUsd`
 blocks generation once known spend reaches it (`src/server/services/ai-usage.ts`,
 asserted before each provider call; usage records carry no secret — invariant #6).
+A DM can store their own `inputPerMTokUsd`/`outputPerMTokUsd` on an `AiKey` to
+cost a **self-hosted/proxy** model the price table doesn't know (overrides the
+table for first-party providers too); such runs then count toward the cap.
 Remaining M4 expansion work is a generation panel for bulk *multi-entity* runs
 and an async `Job` table + worker. See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
