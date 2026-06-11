@@ -29,6 +29,8 @@ const anthropicKey: AiKeyView = {
   lastFour: "9999",
   baseUrl: null,
   model: null,
+  inputPerMTokUsd: null,
+  outputPerMTokUsd: null,
   createdAt: new Date("2026-06-01T00:00:00Z"),
   updatedAt: new Date("2026-06-02T00:00:00Z"),
 };
@@ -39,6 +41,8 @@ const compatibleKey: AiKeyView = {
   lastFour: "",
   baseUrl: "http://localhost:11434/v1",
   model: "llama3.1",
+  inputPerMTokUsd: 0.5,
+  outputPerMTokUsd: 1.5,
   createdAt: new Date("2026-06-01T00:00:00Z"),
   updatedAt: new Date("2026-06-02T00:00:00Z"),
 };
@@ -89,6 +93,21 @@ describe("AiKeysPanel", () => {
 
     // The configured (keyless) compatible row reads "Configured" + shows the model/endpoint.
     expect(screen.getByText(/Configured · llama3.1 · http:\/\/localhost:11434\/v1/)).toBeTruthy();
+  });
+
+  it("exposes per-token price inputs for every provider, prefilled when configured", () => {
+    render(<AiKeysPanel campaignId="camp1" configured={[compatibleKey]} />);
+
+    // Every provider row offers input + output price fields (3 of each).
+    expect(screen.getAllByLabelText(/input price per million tokens/i)).toHaveLength(3);
+    expect(screen.getAllByLabelText(/output price per million tokens/i)).toHaveLength(3);
+
+    // The configured compatible key prefills its rates and shows them in the summary.
+    const input = screen.getByLabelText(/OpenAI-compatible.*input price/i) as HTMLInputElement;
+    const output = screen.getByLabelText(/OpenAI-compatible.*output price/i) as HTMLInputElement;
+    expect(input.value).toBe("0.5");
+    expect(output.value).toBe("1.5");
+    expect(screen.getByText(/\$0\.5\/\$1\.5 per 1M tok/)).toBeTruthy();
   });
 
   it("surfaces an action error", () => {

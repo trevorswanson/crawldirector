@@ -350,6 +350,22 @@ export type GrantKnowledgeInput = z.infer<typeof grantKnowledgeSchema>;
 // against the registry in the service; the apiKey is trimmed and length-bounded
 // here, then encrypted at rest. We deliberately don't enforce a prefix so any
 // provider/proxy key works — the registry's `keyPrefix` is only a UI hint.
+// An optional USD-amount form field: blank clears it (null); otherwise a
+// non-negative number bounded by a sane ceiling. Shared by the spend cap and the
+// per-token price overrides, all parsed from string FormData.
+const optionalUsdAmount = (tooHigh: string) =>
+  z
+    .union([
+      z.literal(""),
+      z.coerce
+        .number({ message: "Enter a dollar amount, or leave blank to clear." })
+        .min(0, "The amount can't be negative.")
+        .max(100_000, tooHigh),
+    ])
+    .optional()
+    .default("")
+    .transform((v) => (v === "" ? null : v));
+
 export const setAiKeySchema = z.object({
   providerId: z.string().trim().min(1, "Pick a provider."),
   // The key may be optional (local/compatible servers) and the endpoint/model
@@ -358,8 +374,20 @@ export const setAiKeySchema = z.object({
   apiKey: z.string().trim().max(500).optional().default(""),
   baseUrl: z.string().trim().max(500).optional().default(""),
   model: z.string().trim().max(200).optional().default(""),
+  // DM-supplied price (USD per 1M tokens). Both must be set for the override to
+  // apply to usage/cost estimation; blank clears them. See src/lib/ai/pricing.ts.
+  inputPerMTokUsd: optionalUsdAmount("That price is unreasonably high."),
+  outputPerMTokUsd: optionalUsdAmount("That price is unreasonably high."),
 });
 export type SetAiKeyInput = z.infer<typeof setAiKeySchema>;
+
+// Campaign AI spend cap (M4 — docs/04-ai-integration.md). An empty string clears
+// the cap (null); otherwise a non-negative dollar amount, bounded by a sane
+// ceiling so a typo can't store an absurd value. Parsed from the settings form.
+export const setSpendCapSchema = z.object({
+  spendCapUsd: optionalUsdAmount("That cap is unreasonably high."),
+});
+export type SetSpendCapInput = z.infer<typeof setSpendCapSchema>;
 
 // Event participant roles (docs/01-domain-model.md). Any-to-any, like
 // relationship types — every role is valid for any entity.

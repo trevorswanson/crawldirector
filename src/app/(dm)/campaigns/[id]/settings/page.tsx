@@ -3,7 +3,9 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
 import { listAiKeys } from "@/server/services/ai-keys";
+import { getCampaignAiUsage } from "@/server/services/ai-usage";
 import { AiKeysPanel } from "@/components/settings/ai-keys-panel";
+import { UsagePanel } from "@/components/settings/usage-panel";
 import { Kicker } from "@/components/ui/kicker";
 
 // Campaign settings. First section: BYO AI provider keys (M4). DM/co-DM only —
@@ -22,7 +24,10 @@ export default async function CampaignSettingsPage({
   const role = campaign.members[0]?.role;
   if (role !== "OWNER" && role !== "CO_DM") notFound();
 
-  const configured = await listAiKeys(user.id, id);
+  const [configured, usage] = await Promise.all([
+    listAiKeys(user.id, id),
+    getCampaignAiUsage(user.id, id),
+  ]);
 
   return (
     <div className="h-full overflow-y-auto bg-[var(--bg)] px-6 py-7">
@@ -38,6 +43,7 @@ export default async function CampaignSettingsPage({
           proposals — never silent canon.
         </p>
         <AiKeysPanel campaignId={id} configured={configured} />
+        <UsagePanel campaignId={id} usage={usage} />
       </div>
     </div>
   );

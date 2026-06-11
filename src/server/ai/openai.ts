@@ -49,10 +49,17 @@ function buildMessages(
 
 function readUsage(usage: OpenAI.CompletionUsage | undefined): LLMUsage {
   if (!usage) return emptyUsage();
+  // OpenAI reports `prompt_tokens` as the TOTAL input (cached + uncached) and
+  // `cached_tokens` as the cached subset. `LLMUsage.inputTokens` is *uncached*
+  // input (the Anthropic convention the price model assumes), so subtract the
+  // cached portion out — otherwise cached tokens get billed twice (once at the
+  // input rate, once at the cache-read rate).
+  const promptTokens = usage.prompt_tokens ?? 0;
+  const cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? 0;
   return {
-    inputTokens: usage.prompt_tokens ?? 0,
+    inputTokens: Math.max(0, promptTokens - cachedTokens),
     outputTokens: usage.completion_tokens ?? 0,
-    cacheReadTokens: usage.prompt_tokens_details?.cached_tokens ?? 0,
+    cacheReadTokens: cachedTokens,
     cacheCreationTokens: 0,
   };
 }

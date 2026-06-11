@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "AiKey" ADD COLUMN     "inputPerMTokUsd" DOUBLE PRECISION,
+ADD COLUMN     "outputPerMTokUsd" DOUBLE PRECISION;

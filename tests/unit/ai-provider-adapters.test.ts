@@ -205,8 +205,10 @@ describe("OpenAI / OpenAI-compatible adapter", () => {
     });
 
     expect(result.data).toEqual({ ok: true });
+    // prompt_tokens (11) includes the cached subset (5); inputTokens is the
+    // *uncached* remainder (6) so cached tokens aren't billed twice.
     expect(result.usage).toEqual({
-      inputTokens: 11,
+      inputTokens: 6,
       outputTokens: 4,
       cacheReadTokens: 5,
       cacheCreationTokens: 0,

@@ -76,8 +76,11 @@ function ProviderRow({
             <p className="mt-1 font-mono text-[11px] text-[var(--ink-faint)]">
               {configured.lastFour ? `Key set · ends ••${configured.lastFour}` : "Configured"}
               {configured.model ? ` · ${configured.model}` : ""}
-              {configured.baseUrl ? ` · ${configured.baseUrl}` : ""} · updated{" "}
-              {configured.updatedAt.toLocaleDateString()}
+              {configured.baseUrl ? ` · ${configured.baseUrl}` : ""}
+              {configured.inputPerMTokUsd != null && configured.outputPerMTokUsd != null
+                ? ` · $${configured.inputPerMTokUsd}/$${configured.outputPerMTokUsd} per 1M tok`
+                : ""}{" "}
+              · updated {configured.updatedAt.toLocaleDateString()}
             </p>
           ) : (
             <p className="mt-1 text-[11px] text-[var(--ink-faint)]">
@@ -130,6 +133,37 @@ function ProviderRow({
             aria-label={`${provider.label} model`}
           />
         )}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Input
+            type="number"
+            name="inputPerMTokUsd"
+            min="0"
+            step="0.01"
+            inputMode="decimal"
+            autoComplete="off"
+            defaultValue={configured?.inputPerMTokUsd ?? ""}
+            placeholder="Input $ / 1M tokens (optional)"
+            aria-label={`${provider.label} input price per million tokens`}
+            className="sm:flex-1"
+          />
+          <Input
+            type="number"
+            name="outputPerMTokUsd"
+            min="0"
+            step="0.01"
+            inputMode="decimal"
+            autoComplete="off"
+            defaultValue={configured?.outputPerMTokUsd ?? ""}
+            placeholder="Output $ / 1M tokens (optional)"
+            aria-label={`${provider.label} output price per million tokens`}
+            className="sm:flex-1"
+          />
+        </div>
+        <p className="text-[10.5px] leading-[1.4] text-[var(--ink-faint)]">
+          Set both to cost this provider&rsquo;s usage (and count it toward the
+          spend cap) — required for self-hosted/proxy models the built-in price
+          table doesn&rsquo;t know; overrides the table for the rest.
+        </p>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Input
             type="password"

@@ -227,6 +227,38 @@ describe("OpenAI-compatible providers", () => {
     expect(views[0]).toMatchObject({ baseUrl: "http://localhost:11434/v1", model: "llama3.1" });
   });
 
+  it("stores DM-supplied per-token price overrides and projects them in the safe view", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+
+    const view = await setAiKey(dm.id, campaign.id, {
+      providerId: "openai-compatible",
+      apiKey: "",
+      baseUrl: "http://localhost:11434/v1",
+      model: "llama3.1",
+      inputPerMTokUsd: 0.5,
+      outputPerMTokUsd: 1.5,
+    });
+    expect(view.inputPerMTokUsd).toBe(0.5);
+    expect(view.outputPerMTokUsd).toBe(1.5);
+
+    // Persisted, and surfaced through the list view (non-secret config).
+    const views = await listAiKeys(dm.id, campaign.id);
+    expect(views[0]).toMatchObject({ inputPerMTokUsd: 0.5, outputPerMTokUsd: 1.5 });
+
+    // Clearing the rates (null) on a later save removes them.
+    const cleared = await setAiKey(dm.id, campaign.id, {
+      providerId: "openai-compatible",
+      apiKey: "",
+      baseUrl: "http://localhost:11434/v1",
+      model: "llama3.1",
+      inputPerMTokUsd: null,
+      outputPerMTokUsd: null,
+    });
+    expect(cleared.inputPerMTokUsd).toBeNull();
+    expect(cleared.outputPerMTokUsd).toBeNull();
+  });
+
   it("requires an endpoint URL and a model, and rejects a junk URL", async () => {
     const dm = await makeUser("dm@test.com");
     const campaign = await createCampaign(dm.id, { name: "Crawl" });

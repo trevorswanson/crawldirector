@@ -2,24 +2,26 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ServiceError } from "@/lib/errors";
 
-const { requireUser, setAiKey, deleteAiKey, testAiConnection, revalidatePath } = vi.hoisted(
-  () => ({
+const { requireUser, setAiKey, deleteAiKey, testAiConnection, setCampaignSpendCap, revalidatePath } =
+  vi.hoisted(() => ({
     requireUser: vi.fn(),
     setAiKey: vi.fn(),
     deleteAiKey: vi.fn(),
     testAiConnection: vi.fn(),
+    setCampaignSpendCap: vi.fn(),
     revalidatePath: vi.fn(),
-  }),
-);
+  }));
 
 vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/ai-keys", () => ({ setAiKey, deleteAiKey }));
+vi.mock("@/server/services/ai-usage", () => ({ setCampaignSpendCap }));
 vi.mock("@/server/ai", () => ({ testAiConnection }));
 vi.mock("next/cache", () => ({ revalidatePath }));
 
 import {
   deleteAiKeyAction,
   setAiKeyAction,
+  setSpendCapAction,
   testAiConnectionAction,
 } from "@/app/(dm)/campaigns/[id]/settings/actions";
 
@@ -47,10 +49,36 @@ describe("setAiKeyAction", () => {
       apiKey: "sk-ant-secret-9999",
       baseUrl: "",
       model: "",
+      inputPerMTokUsd: null,
+      outputPerMTokUsd: null,
     });
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/camp1/settings");
     expect(result?.success).toContain("9999");
     expect(result?.error).toBeUndefined();
+  });
+
+  it("passes DM-supplied per-token price overrides through to the service", async () => {
+    setAiKey.mockResolvedValue({ providerId: "openai-compatible", label: "OpenAI-compatible", lastFour: "" });
+    await setAiKeyAction(
+      "camp1",
+      undefined,
+      formData({
+        providerId: "openai-compatible",
+        apiKey: "",
+        baseUrl: "http://localhost:11434/v1",
+        model: "llama3.1",
+        inputPerMTokUsd: "0.5",
+        outputPerMTokUsd: "1.5",
+      }),
+    );
+    expect(setAiKey).toHaveBeenCalledWith("dm1", "camp1", {
+      providerId: "openai-compatible",
+      apiKey: "",
+      baseUrl: "http://localhost:11434/v1",
+      model: "llama3.1",
+      inputPerMTokUsd: 0.5,
+      outputPerMTokUsd: 1.5,
+    });
   });
 
   it("passes the endpoint URL and model through for an OpenAI-compatible provider", async () => {
@@ -70,6 +98,8 @@ describe("setAiKeyAction", () => {
       apiKey: "",
       baseUrl: "http://localhost:11434/v1",
       model: "llama3.1",
+      inputPerMTokUsd: null,
+      outputPerMTokUsd: null,
     });
     // No last-four hint when the key is blank — the message omits it cleanly.
     expect(result?.success).toMatch(/Saved OpenAI-compatible\./);
@@ -103,6 +133,41 @@ describe("setAiKeyAction", () => {
       formData({ providerId: "anthropic", apiKey: "sk-valid-enough" }),
     );
     expect(result?.error).toMatch(/Could not save/);
+  });
+});
+
+describe("setSpendCapAction", () => {
+  it("sets a numeric cap and returns a confirmation", async () => {
+    setCampaignSpendCap.mockResolvedValue({ spendCapUsd: 25 });
+    const result = await setSpendCapAction("camp1", undefined, formData({ spendCapUsd: "25" }));
+    expect(setCampaignSpendCap).toHaveBeenCalledWith("dm1", "camp1", 25);
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/camp1/settings");
+    expect(result?.success).toBe("Spend cap set to $25.00.");
+  });
+
+  it("clears the cap when the field is blank", async () => {
+    setCampaignSpendCap.mockResolvedValue({ spendCapUsd: null });
+    const result = await setSpendCapAction("camp1", undefined, formData({ spendCapUsd: "" }));
+    expect(setCampaignSpendCap).toHaveBeenCalledWith("dm1", "camp1", null);
+    expect(result?.success).toBe("Spend cap cleared.");
+  });
+
+  it("returns a validation error for a negative cap without calling the service", async () => {
+    const result = await setSpendCapAction("camp1", undefined, formData({ spendCapUsd: "-5" }));
+    expect(setCampaignSpendCap).not.toHaveBeenCalled();
+    expect(result?.error).toBeTruthy();
+  });
+
+  it("surfaces a ServiceError message", async () => {
+    setCampaignSpendCap.mockRejectedValue(new ServiceError("nope"));
+    const result = await setSpendCapAction("camp1", undefined, formData({ spendCapUsd: "10" }));
+    expect(result?.error).toBe("nope");
+  });
+
+  it("returns a generic error for an unexpected failure", async () => {
+    setCampaignSpendCap.mockRejectedValue(new Error("boom"));
+    const result = await setSpendCapAction("camp1", undefined, formData({ spendCapUsd: "10" }));
+    expect(result?.error).toMatch(/Could not save the spend cap/);
   });
 });
 

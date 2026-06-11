@@ -2,23 +2,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
-const { requireUser, getCampaignForUser, listAiKeys, notFound } = vi.hoisted(() => ({
-  requireUser: vi.fn(),
-  getCampaignForUser: vi.fn(),
-  listAiKeys: vi.fn(),
-  notFound: vi.fn(() => {
-    throw new Error("NEXT_NOT_FOUND");
+const { requireUser, getCampaignForUser, listAiKeys, getCampaignAiUsage, notFound } = vi.hoisted(
+  () => ({
+    requireUser: vi.fn(),
+    getCampaignForUser: vi.fn(),
+    listAiKeys: vi.fn(),
+    getCampaignAiUsage: vi.fn(),
+    notFound: vi.fn(() => {
+      throw new Error("NEXT_NOT_FOUND");
+    }),
   }),
-}));
+);
 
 vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/campaigns", () => ({ getCampaignForUser }));
 vi.mock("@/server/services/ai-keys", () => ({ listAiKeys }));
+vi.mock("@/server/services/ai-usage", () => ({ getCampaignAiUsage }));
 vi.mock("next/navigation", () => ({ notFound }));
 vi.mock("@/components/settings/ai-keys-panel", () => ({
   AiKeysPanel: ({ campaignId, configured }: { campaignId: string; configured: unknown[] }) => (
     <div data-testid="ai-keys-panel">
       panel:{campaignId}:{configured.length}
+    </div>
+  ),
+}));
+vi.mock("@/components/settings/usage-panel", () => ({
+  UsagePanel: ({ campaignId, usage }: { campaignId: string; usage: { runCount: number } }) => (
+    <div data-testid="usage-panel">
+      usage:{campaignId}:{usage.runCount}
     </div>
   ),
 }));
@@ -30,16 +41,26 @@ beforeEach(() => {
   requireUser.mockResolvedValue({ id: "u1" });
   getCampaignForUser.mockResolvedValue({ id: "c1", name: "World One", members: [{ role: "OWNER" }] });
   listAiKeys.mockResolvedValue([{ providerId: "anthropic", label: "Anthropic (Claude)", lastFour: "9999" }]);
+  getCampaignAiUsage.mockResolvedValue({
+    spendCapUsd: null,
+    totalCostUsd: 0,
+    runCount: 3,
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    unpricedRunCount: 0,
+  });
 });
 
 afterEach(() => cleanup());
 
 describe("CampaignSettingsPage", () => {
-  it("renders the AI keys panel for a DM", async () => {
+  it("renders the AI keys and usage panels for a DM", async () => {
     render(await CampaignSettingsPage({ params: Promise.resolve({ id: "c1" }) }));
     expect(screen.getByRole("heading", { name: /Campaign settings/i })).toBeTruthy();
     expect(screen.getByTestId("ai-keys-panel").textContent).toBe("panel:c1:1");
+    expect(screen.getByTestId("usage-panel").textContent).toBe("usage:c1:3");
     expect(listAiKeys).toHaveBeenCalledWith("u1", "c1");
+    expect(getCampaignAiUsage).toHaveBeenCalledWith("u1", "c1");
   });
 
   it("404s when the campaign is not visible to the user", async () => {
