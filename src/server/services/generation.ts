@@ -3,7 +3,11 @@ import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 import { describeProviderError, resolveCampaignProvider } from "@/server/ai";
 import { ProviderError, emptyUsage, type LLMUsage } from "@/server/ai/types";
-import { assertWithinSpendCap, recordAiUsage } from "@/server/services/ai-usage";
+import {
+  assertWithinSpendCap,
+  linkAiUsageChangeSet,
+  recordAiUsage,
+} from "@/server/services/ai-usage";
 import {
   FLESH_ENTITY_GENERATOR,
   type FleshableField,
@@ -170,6 +174,17 @@ export async function fleshOutEntity(
     throw new ServiceError(message);
   }
 
+  // The provider call spent tokens — record usage now, before any no-op check can
+  // throw, so a paid-but-no-op run still appears in spend and counts toward the cap.
+  const usageRow = await recordAiUsage({
+    campaignId,
+    userId,
+    providerId: provider.id,
+    model: provider.model,
+    generatorId: FLESH_ENTITY_GENERATOR.id,
+    usage,
+  });
+
   const patch = fleshEntityToPatch(
     { version: entity.version, summary: entity.summary, description: entity.description, tags: entity.tags },
     output,
@@ -190,15 +205,7 @@ export async function fleshOutEntity(
     operations: [{ op: OpKind.UPDATE_ENTITY, targetId: entityId, patch }],
   });
 
-  await recordAiUsage({
-    campaignId,
-    userId,
-    providerId: provider.id,
-    model: provider.model,
-    generatorId: FLESH_ENTITY_GENERATOR.id,
-    usage,
-    changeSetId: changeSet.id,
-  });
+  await linkAiUsageChangeSet(usageRow.id, changeSet.id);
 
   return { changeSetId: changeSet.id, providerId: provider.id, model: provider.model };
 }
@@ -357,6 +364,17 @@ export async function inferRelationshipsForEntity(
     throw new ServiceError(message);
   }
 
+  // Record usage before the no-op check so a paid run that yields no usable
+  // relationships still counts toward spend + the cap.
+  const usageRow = await recordAiUsage({
+    campaignId,
+    userId,
+    providerId: provider.id,
+    model: provider.model,
+    generatorId: INFER_RELATIONSHIPS_GENERATOR.id,
+    usage,
+  });
+
   const operations = inferenceToRelationshipOperations(context, output);
   if (operations.length === 0) {
     throw new ServiceError("The model did not propose any usable relationships.");
@@ -373,15 +391,7 @@ export async function inferRelationshipsForEntity(
     operations,
   });
 
-  await recordAiUsage({
-    campaignId,
-    userId,
-    providerId: provider.id,
-    model: provider.model,
-    generatorId: INFER_RELATIONSHIPS_GENERATOR.id,
-    usage,
-    changeSetId: changeSet.id,
-  });
+  await linkAiUsageChangeSet(usageRow.id, changeSet.id);
 
   return {
     changeSetId: changeSet.id,
@@ -464,6 +474,17 @@ export async function scaffoldStubEntities(
     throw new ServiceError(message);
   }
 
+  // Record usage before the no-op check so a paid run that yields no usable stubs
+  // still counts toward spend + the cap.
+  const usageRow = await recordAiUsage({
+    campaignId,
+    userId,
+    providerId: provider.id,
+    model: provider.model,
+    generatorId: SCAFFOLD_STUBS_GENERATOR.id,
+    usage,
+  });
+
   const specs = scaffoldStubsToSpecs(context, output);
   if (specs.length === 0) {
     throw new ServiceError("The model did not propose any usable new entities.");
@@ -483,15 +504,7 @@ export async function scaffoldStubEntities(
     })),
   });
 
-  await recordAiUsage({
-    campaignId,
-    userId,
-    providerId: provider.id,
-    model: provider.model,
-    generatorId: SCAFFOLD_STUBS_GENERATOR.id,
-    usage,
-    changeSetId: changeSet.id,
-  });
+  await linkAiUsageChangeSet(usageRow.id, changeSet.id);
 
   return {
     changeSetId: changeSet.id,

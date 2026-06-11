@@ -15,6 +15,11 @@ export type LLMMessage = { role: "user" | "assistant"; content: string };
 // (Anthropic). Volatile, per-request text should be left uncached.
 export type LLMSystemBlock = { text: string; cache?: boolean };
 
+// Token usage for one call. The four buckets are **disjoint** — no token is
+// counted in more than one — so cost is `Σ tokens × rate` with no overlap.
+// `inputTokens` is *uncached* input (cached input lives in `cacheReadTokens`);
+// adapters normalize their vendor's shape to this convention (Anthropic already
+// reports it this way; the OpenAI adapter subtracts the cached subset out).
 export type LLMUsage = {
   inputTokens: number;
   outputTokens: number;

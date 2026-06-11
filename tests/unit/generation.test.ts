@@ -179,7 +179,7 @@ describe("fleshOutEntity", () => {
     await expect(fleshOutEntity(dmId, campaignId, entityId)).rejects.toThrow(/No AI provider/i);
   });
 
-  it("errors when the model proposes no changes", async () => {
+  it("errors when the model proposes no changes — but still records the paid run", async () => {
     const { dmId, campaignId, entityId } = await seed();
     // The entity already has these exact values (empty summary/description, tag "existing").
     resolveCampaignProvider.mockResolvedValue(
@@ -187,6 +187,12 @@ describe("fleshOutEntity", () => {
     );
     await expect(fleshOutEntity(dmId, campaignId, entityId)).rejects.toThrow(/any changes/i);
     expect(await prisma.changeSet.count({ where: { source: "AI" } })).toBe(0);
+    // The provider call spent tokens, so usage is recorded even though no proposal
+    // was filed — it counts toward spend + the cap (changeSetId stays null).
+    const usageRows = await prisma.aiUsage.findMany({ where: { campaignId } });
+    expect(usageRows).toHaveLength(1);
+    expect(usageRows[0].changeSetId).toBeNull();
+    expect(usageRows[0].inputTokens).toBe(1_000_000);
   });
 
   it("denies a player", async () => {

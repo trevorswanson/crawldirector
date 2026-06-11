@@ -54,6 +54,14 @@ export async function recordAiUsage(input: RecordAiUsageInput) {
   });
 }
 
+// Link an already-recorded usage row to the change set it produced. Called after
+// a run successfully files a proposal — usage is recorded *before* the no-op
+// checks (so paid-but-no-op runs still count), then the change set id is
+// backfilled here on the happy path.
+export async function linkAiUsageChangeSet(usageId: string, changeSetId: string) {
+  await prisma.aiUsage.update({ where: { id: usageId }, data: { changeSetId } });
+}
+
 // Sum the campaign's known (priced) estimated spend. Unpriced runs contribute no
 // dollar figure (their cost is unknown), so they don't count toward the cap.
 async function totalKnownSpendUsd(campaignId: string): Promise<number> {
