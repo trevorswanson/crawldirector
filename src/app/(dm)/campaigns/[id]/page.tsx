@@ -10,6 +10,7 @@ import {
   getEntityTypeCounts,
   listCampaignTags,
   listEntitiesForUser,
+  listFleshCandidates,
   type EntityStatusFilter,
 } from "@/server/services/entities";
 import { Kicker } from "@/components/ui/kicker";
@@ -22,6 +23,7 @@ import {
 } from "@/components/entities/entity-forms";
 import { CampaignSearch } from "@/components/entities/campaign-search";
 import { ScaffoldStubsPanel } from "@/components/entities/scaffold-stubs-panel";
+import { BulkFleshPanel } from "@/components/entities/bulk-flesh-panel";
 import { listAiKeys } from "@/server/services/ai-keys";
 import { formatEntityType } from "@/lib/entities";
 import { cn } from "@/lib/utils";
@@ -86,19 +88,21 @@ export default async function CampaignPage({
         ? "ALL"
         : (activeSource as ChangeSource);
 
-  const [{ entities }, counts, campaignTags, aiKeys] = await Promise.all([
-    listEntitiesForUser(user.id, id, {
-      query: filters.q,
-      tag: activeTag,
-      type: activeType ?? "ALL",
-      status: activeStatus,
-      source: sourceFilter === "ALL" ? undefined : sourceFilter,
-      lockedOnly,
-    }),
-    getEntityTypeCounts(user.id, id),
-    listCampaignTags(user.id, id),
-    listAiKeys(user.id, id),
-  ]);
+  const [{ entities }, counts, campaignTags, aiKeys, fleshCandidates] =
+    await Promise.all([
+      listEntitiesForUser(user.id, id, {
+        query: filters.q,
+        tag: activeTag,
+        type: activeType ?? "ALL",
+        status: activeStatus,
+        source: sourceFilter === "ALL" ? undefined : sourceFilter,
+        lockedOnly,
+      }),
+      getEntityTypeCounts(user.id, id),
+      listCampaignTags(user.id, id),
+      listAiKeys(user.id, id),
+      listFleshCandidates(user.id, id),
+    ]);
   // `listAiKeys` is DM-only (returns [] for players), so a non-empty list gates
   // the panel to DMs with a provider key configured — same as the entity rail.
   const aiConfigured = aiKeys.length > 0;
@@ -305,6 +309,9 @@ export default async function CampaignPage({
           </span>
           <QuickCreateStub campaignId={id} />
           {aiConfigured && <ScaffoldStubsPanel campaignId={id} />}
+          {aiConfigured && fleshCandidates.length > 0 && (
+            <BulkFleshPanel campaignId={id} candidates={fleshCandidates} />
+          )}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-[22px] py-[18px]">

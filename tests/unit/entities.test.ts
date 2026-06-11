@@ -13,6 +13,7 @@ import {
   getEntityTypeCounts,
   listCampaignTags,
   listEntitiesForUser,
+  listFleshCandidates,
   restoreEntity,
   updateEntity,
 } from "@/server/services/entities";
@@ -1711,5 +1712,56 @@ describe("floor number uniqueness (ADR 0008 §1)", () => {
     // Archiving releases the number — a fresh floor can claim it.
     const replacement = await makeFloor(owner.id, campaign.id, "New Larracos", 9);
     expect(replacement.id).not.toBe(original.id);
+  });
+});
+
+describe("listFleshCandidates", () => {
+  async function makeStub(userId: string, campaignId: string, name: string) {
+    const entity = await createGenericEntity(userId, campaignId, {
+      type: "NPC",
+      name,
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    await prisma.entity.update({ where: { id: entity.id }, data: { isStub: true } });
+    return entity;
+  }
+
+  it("returns non-locked, non-archived stubs and excludes full/locked/archived entities", async () => {
+    const owner = await makeUser("flesh-dm@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const stub = await makeStub(owner.id, campaign.id, "Aaa Stub");
+    const lockedStub = await makeStub(owner.id, campaign.id, "Bbb Locked Stub");
+    await setEntityLock(owner.id, campaign.id, lockedStub.id, { locked: true });
+    const archivedStub = await makeStub(owner.id, campaign.id, "Ccc Archived Stub");
+    await archiveEntity(owner.id, campaign.id, archivedStub.id);
+    // A full (non-stub) entity is not a bulk-flesh candidate.
+    await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Full NPC",
+      summary: "Rich",
+      description: "Lore",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    const candidates = await listFleshCandidates(owner.id, campaign.id);
+    expect(candidates.map((c) => c.id)).toEqual([stub.id]);
+    expect(candidates[0]).toMatchObject({ name: "Aaa Stub", type: "NPC" });
+  });
+
+  it("returns [] for a player (DM-only)", async () => {
+    const owner = await makeUser("flesh-dm2@test.com");
+    const player = await makeUser("flesh-player@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    await makeStub(owner.id, campaign.id, "Stub");
+
+    expect(await listFleshCandidates(player.id, campaign.id)).toEqual([]);
   });
 });

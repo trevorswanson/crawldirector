@@ -142,8 +142,16 @@ asserted before each provider call; usage records carry no secret — invariant 
 A DM can store their own `inputPerMTokUsd`/`outputPerMTokUsd` on an `AiKey` to
 cost a **self-hosted/proxy** model the price table doesn't know (overrides the
 table for first-party providers too); such runs then count toward the cap.
-Remaining M4 expansion work is a generation panel for bulk *multi-entity* runs
-and an async `Job` table + worker. See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
+A **bulk multi-entity flesh-out** panel ("Flesh out with AI") then landed beside
+"Scaffold with AI" in the World Browser header: a DM checks several stub entities
+and fleshes them in one synchronous run (`fleshOutEntities`,
+`src/server/services/generation.ts`, reusing the per-entity `fleshOutEntity`),
+each landing as its own PENDING `UPDATE_ENTITY` proposal with a per-entity
+proposed/skipped summary; the spend cap is enforced per entity so a batch stops
+spending the moment it's reached, and one entity's failure never blocks the rest.
+The only remaining M4 expansion work is an async `Job` table + worker for
+long/batched runs off the request path. See
+[`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
 ## Start here, every session
 

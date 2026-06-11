@@ -57,6 +57,7 @@ import {
   revokeKnowledge,
 } from "@/server/services/knowledge";
 import {
+  fleshOutEntities,
   fleshOutEntity,
   inferRelationshipsForEntity,
   scaffoldStubEntities,
@@ -474,6 +475,63 @@ export async function scaffoldStubsAction(
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
     console.error("Scaffold stubs action failed:", error);
+    return { error: "Generation failed. Please try again.", timestamp: Date.now() };
+  }
+}
+
+export type BulkGenerateActionState =
+  | {
+      error?: string;
+      success?: string;
+      proposedCount?: number;
+      skippedCount?: number;
+      outcomes?: {
+        entityName: string;
+        status: "proposed" | "skipped";
+        detail?: string;
+      }[];
+      timestamp?: number;
+    }
+  | undefined;
+
+// Flesh out several selected entities in one bulk run. Each entity lands as its
+// own PENDING proposal in the Review Queue (never canon — invariant #1); we
+// return a per-entity summary so the DM sees which were proposed vs skipped (and
+// why). DM/co-DM only (the service enforces the role). Errors are safe messages
+// (invariant #6).
+export async function fleshOutEntitiesAction(
+  campaignId: string,
+  _prev: BulkGenerateActionState,
+  formData: FormData,
+): Promise<BulkGenerateActionState> {
+  void _prev;
+  const user = await requireUser();
+  const entityIds = formData.getAll("entityIds").map(String);
+  try {
+    const result = await fleshOutEntities(user.id, campaignId, entityIds);
+    revalidatePath(`/campaigns/${campaignId}/review`);
+    revalidatePath(`/campaigns/${campaignId}`);
+    const { proposedCount, skippedCount } = result;
+    const noun = proposedCount === 1 ? "draft" : "drafts";
+    const skippedSuffix = skippedCount ? `, ${skippedCount} skipped` : "";
+    return {
+      success:
+        proposedCount > 0
+          ? `${proposedCount} ${noun} proposed (${result.model})${skippedSuffix}. Review ${proposedCount === 1 ? "it" : "them"} in the queue.`
+          : undefined,
+      error: proposedCount === 0 ? "No drafts were proposed — see the details below." : undefined,
+      proposedCount,
+      skippedCount,
+      outcomes: result.outcomes.map((outcome) => ({
+        entityName: outcome.entityName,
+        status: outcome.status,
+        detail: outcome.detail,
+      })),
+      timestamp: Date.now(),
+    };
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    console.error("Flesh out entities action failed:", error);
     return { error: "Generation failed. Please try again.", timestamp: Date.now() };
   }
 }

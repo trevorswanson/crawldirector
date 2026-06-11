@@ -381,6 +381,30 @@ export async function listEntitiesForUser(
   return { entities, role: membership.role };
 }
 
+export type FleshCandidate = { id: string; name: string; type: EntityType };
+
+// Non-locked, non-archived stub entities — the natural targets for a bulk AI
+// flesh-out run (a full entity is fleshed one-off from its detail rail). DM-only
+// (returns [] for players / non-members), so the World Browser's bulk-flesh
+// panel is gated the same way as the AI key list.
+export async function listFleshCandidates(
+  userId: string,
+  campaignId: string,
+): Promise<FleshCandidate[]> {
+  const membership = await getMembership(userId, campaignId);
+  if (!membership || membership.role === Role.PLAYER) return [];
+  return prisma.entity.findMany({
+    where: {
+      campaignId,
+      status: { not: CanonStatus.ARCHIVED },
+      locked: false,
+      isStub: true,
+    },
+    orderBy: [{ name: "asc" }],
+    select: { id: true, name: true, type: true },
+  });
+}
+
 export async function listCampaignTags(
   userId: string,
   campaignId: string,

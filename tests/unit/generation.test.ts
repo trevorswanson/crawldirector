@@ -20,6 +20,7 @@ import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
 import { createGenericEntity } from "@/server/services/entities";
 import {
+  fleshOutEntities,
   fleshOutEntity,
   inferRelationshipsForEntity,
   scaffoldStubEntities,
@@ -542,11 +543,18 @@ describe("scaffoldStubEntities", () => {
     expect(changeSet?.promptVersion).toBe("1");
     expect(changeSet?.operations).toHaveLength(2);
     expect(changeSet?.operations.every((o) => o.op === "CREATE_ENTITY")).toBe(true);
-    const patch = changeSet!.operations[0].patch as Record<string, { to: unknown }>;
-    expect(patch.name.to).toBe("Grimm the Tailor");
-    expect(patch.type.to).toBe("NPC");
-    expect(patch.isStub.to).toBe(true);
-    expect(patch.visibility.to).toBe("DM_ONLY");
+    // Operations come back without a stable sort key (no orderBy), so assert on
+    // the set of names rather than positional order — Postgres may return either.
+    const patches = changeSet!.operations.map(
+      (o) => o.patch as Record<string, { to: unknown }>,
+    );
+    expect(patches.map((p) => p.name.to).sort()).toEqual(
+      ["Grimm the Tailor", "Rag & Bone Stall"].sort(),
+    );
+    const grimm = patches.find((p) => p.name.to === "Grimm the Tailor")!;
+    expect(grimm.type.to).toBe("NPC");
+    expect(grimm.isStub.to).toBe(true);
+    expect(grimm.visibility.to).toBe("DM_ONLY");
   });
 
   it("passes the style guide, existing names, and tags into the prompt", async () => {
@@ -700,5 +708,107 @@ describe("generation — usage tracking & spend caps", () => {
     // The provider was never called, and no new usage row was written.
     expect(provider.generateStructured).not.toHaveBeenCalled();
     expect(await prisma.aiUsage.count({ where: { campaignId } })).toBe(1);
+  });
+});
+
+describe("fleshOutEntities (bulk)", () => {
+  it("files one PENDING proposal per selected entity and reports each as proposed", async () => {
+    const { dmId, campaignId, entityId } = await seed();
+    const second = await makeStub(dmId, campaignId, "Donut");
+    resolveCampaignProvider.mockResolvedValue(
+      fakeProvider({ summary: "Richer.", description: "Lore.", tags: ["ally"] }),
+    );
+
+    const result = await fleshOutEntities(dmId, campaignId, [entityId, second.id]);
+
+    expect(result).toMatchObject({ model: "claude-opus-4-8", proposedCount: 2, skippedCount: 0 });
+    expect(result.outcomes.every((o) => o.status === "proposed")).toBe(true);
+    // One PENDING change set per entity — independent review (invariant #1).
+    const sets = await prisma.changeSet.findMany({ where: { campaignId, source: "AI" } });
+    expect(sets).toHaveLength(2);
+    expect(sets.every((s) => s.status === "PENDING")).toBe(true);
+    expect(result.outcomes.map((o) => o.changeSetId).sort()).toEqual(
+      sets.map((s) => s.id).sort(),
+    );
+  });
+
+  it("skips a locked or no-change entity without blocking the others", async () => {
+    const { dmId, campaignId, entityId } = await seed();
+    const locked = await makeStub(dmId, campaignId, "Statue");
+    await setEntityLock(dmId, campaignId, locked.id, { locked: true });
+    resolveCampaignProvider.mockResolvedValue(
+      fakeProvider({ summary: "Richer.", description: "Lore.", tags: ["ally"] }),
+    );
+
+    const result = await fleshOutEntities(dmId, campaignId, [locked.id, entityId]);
+
+    expect(result.proposedCount).toBe(1);
+    expect(result.skippedCount).toBe(1);
+    const lockedOutcome = result.outcomes.find((o) => o.entityId === locked.id);
+    expect(lockedOutcome?.status).toBe("skipped");
+    expect(lockedOutcome?.detail).toMatch(/locked/i);
+    expect(result.outcomes.find((o) => o.entityId === entityId)?.status).toBe("proposed");
+  });
+
+  it("labels an id that no longer resolves as not found", async () => {
+    const { dmId, campaignId } = await seed();
+    resolveCampaignProvider.mockResolvedValue(
+      fakeProvider({ summary: "x", description: "y", tags: [] }),
+    );
+
+    const result = await fleshOutEntities(dmId, campaignId, ["missing-id"]);
+
+    expect(result.proposedCount).toBe(0);
+    expect(result.outcomes[0]).toMatchObject({ status: "skipped", detail: "Entity not found." });
+  });
+
+  it("stops spending once the cap is reached and skips the remaining entities", async () => {
+    const { dmId, campaignId, entityId } = await seed();
+    const second = await makeStub(dmId, campaignId, "Donut");
+    // Cap already reached, so no provider call happens at all.
+    await setCampaignSpendCap(dmId, campaignId, 50);
+    await recordAiUsage({
+      campaignId,
+      userId: dmId,
+      providerId: "anthropic",
+      model: "claude-opus-4-8",
+      generatorId: "flesh-entity",
+      usage: SAMPLE_USAGE,
+    });
+    const provider = fakeProvider({ summary: "x", description: "y", tags: ["z"] });
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    const result = await fleshOutEntities(dmId, campaignId, [entityId, second.id]);
+
+    expect(result.proposedCount).toBe(0);
+    expect(result.skippedCount).toBe(2);
+    expect(result.outcomes[0].detail).toMatch(/spend cap/i);
+    expect(result.outcomes[1].detail).toMatch(/spend cap/i);
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+  });
+
+  it("rejects an empty selection, an oversized batch, and a missing provider", async () => {
+    const { dmId, campaignId, entityId } = await seed();
+    resolveCampaignProvider.mockResolvedValue(
+      fakeProvider({ summary: "x", description: "y", tags: [] }),
+    );
+    await expect(fleshOutEntities(dmId, campaignId, ["  ", ""])).rejects.toThrow(/at least one/i);
+    await expect(
+      fleshOutEntities(dmId, campaignId, Array.from({ length: 21 }, (_, i) => `id-${i}`)),
+    ).rejects.toThrow(/at most/i);
+
+    resolveCampaignProvider.mockResolvedValue(null);
+    await expect(fleshOutEntities(dmId, campaignId, [entityId])).rejects.toThrow(/No AI provider/i);
+  });
+
+  it("denies a player", async () => {
+    const { playerId, campaignId, entityId } = await seed();
+    resolveCampaignProvider.mockResolvedValue(
+      fakeProvider({ summary: "x", description: "y", tags: [] }),
+    );
+    await expect(fleshOutEntities(playerId, campaignId, [entityId])).rejects.toBeInstanceOf(
+      ServiceError,
+    );
+    expect(resolveCampaignProvider).not.toHaveBeenCalled();
   });
 });

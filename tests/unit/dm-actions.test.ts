@@ -39,6 +39,7 @@ const {
   grantEntityKnowledge,
   revokeKnowledge,
   fleshOutEntity,
+  fleshOutEntities,
   inferRelationshipsForEntity,
   scaffoldStubEntities,
   signOut,
@@ -83,6 +84,7 @@ const {
   grantEntityKnowledge: vi.fn(),
   revokeKnowledge: vi.fn(),
   fleshOutEntity: vi.fn(),
+  fleshOutEntities: vi.fn(),
   inferRelationshipsForEntity: vi.fn(),
   scaffoldStubEntities: vi.fn(),
   signOut: vi.fn(),
@@ -143,6 +145,7 @@ vi.mock("@/server/services/knowledge", () => ({
 }));
 vi.mock("@/server/services/generation", () => ({
   fleshOutEntity,
+  fleshOutEntities,
   inferRelationshipsForEntity,
   scaffoldStubEntities,
 }));
@@ -202,6 +205,7 @@ import {
   grantEntityKnowsAboutAction,
   revokeKnowledgeAction,
   fleshOutEntityAction,
+  fleshOutEntitiesAction,
   inferRelationshipsForEntityAction,
   scaffoldStubsAction,
 } from "@/app/(dm)/actions";
@@ -2103,6 +2107,78 @@ describe("scaffoldStubsAction", () => {
 
     scaffoldStubEntities.mockRejectedValueOnce(new Error("boom"));
     expect((await scaffoldStubsAction("c1", undefined, form({ instruction: "x" })))?.error).toBe(
+      "Generation failed. Please try again.",
+    );
+  });
+});
+
+describe("fleshOutEntitiesAction", () => {
+  function idsForm(ids: string[]): FormData {
+    const fd = new FormData();
+    for (const id of ids) fd.append("entityIds", id);
+    return fd;
+  }
+
+  it("passes the selected ids and returns a summary with outcomes, revalidating queue + world", async () => {
+    fleshOutEntities.mockResolvedValue({
+      model: "claude-opus-4-8",
+      proposedCount: 2,
+      skippedCount: 1,
+      outcomes: [
+        { entityId: "e1", entityName: "A", status: "proposed", changeSetId: "cs1" },
+        { entityId: "e2", entityName: "B", status: "proposed", changeSetId: "cs2" },
+        { entityId: "e3", entityName: "C", status: "skipped", detail: "Locked." },
+      ],
+    });
+
+    const result = await fleshOutEntitiesAction("c1", undefined, idsForm(["e1", "e2", "e3"]));
+
+    expect(fleshOutEntities).toHaveBeenCalledWith("u1", "c1", ["e1", "e2", "e3"]);
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1");
+    expect(result?.success).toContain("2 drafts proposed");
+    expect(result?.success).toContain("1 skipped");
+    expect(result?.proposedCount).toBe(2);
+    expect(result?.outcomes).toHaveLength(3);
+    // The action only surfaces display fields, never internal ids.
+    expect(result?.outcomes?.[2]).toEqual({ entityName: "C", status: "skipped", detail: "Locked." });
+    expect(result?.error).toBeUndefined();
+  });
+
+  it("uses the singular noun and an it/them phrasing for a single proposal", async () => {
+    fleshOutEntities.mockResolvedValue({
+      model: "m",
+      proposedCount: 1,
+      skippedCount: 0,
+      outcomes: [{ entityId: "e1", entityName: "A", status: "proposed", changeSetId: "cs1" }],
+    });
+    const result = await fleshOutEntitiesAction("c1", undefined, idsForm(["e1"]));
+    expect(result?.success).toContain("1 draft proposed");
+    expect(result?.success).toContain("Review it in the queue");
+    expect(result?.success).not.toContain("skipped");
+  });
+
+  it("returns an error (not a success) when nothing was proposed, keeping the outcomes", async () => {
+    fleshOutEntities.mockResolvedValue({
+      model: "m",
+      proposedCount: 0,
+      skippedCount: 1,
+      outcomes: [{ entityId: "e1", entityName: "A", status: "skipped", detail: "No changes." }],
+    });
+    const result = await fleshOutEntitiesAction("c1", undefined, idsForm(["e1"]));
+    expect(result?.success).toBeUndefined();
+    expect(result?.error).toContain("No drafts were proposed");
+    expect(result?.outcomes).toHaveLength(1);
+  });
+
+  it("surfaces a ServiceError message and a generic fallback", async () => {
+    fleshOutEntities.mockRejectedValueOnce(new ServiceError("Select at least one entity to flesh out."));
+    expect((await fleshOutEntitiesAction("c1", undefined, idsForm([])))?.error).toBe(
+      "Select at least one entity to flesh out.",
+    );
+
+    fleshOutEntities.mockRejectedValueOnce(new Error("boom"));
+    expect((await fleshOutEntitiesAction("c1", undefined, idsForm(["e1"])))?.error).toBe(
       "Generation failed. Please try again.",
     );
   });
