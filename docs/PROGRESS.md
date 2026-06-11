@@ -145,8 +145,18 @@ fully usable with no key and no cap.
 - [x] **Wired into all three generators** (`generation.ts`): `fleshOutEntity`,
       `inferRelationshipsForEntity`, and `scaffoldStubEntities` now assert the cap
       **before** spending, capture the provider result's `usage`, and record it
-      after filing the change set (cap reached → no provider call, no proposal,
-      safe message). Token usage threads through tolerantly (`?? emptyUsage()`).
+      **immediately after the provider call — before any no-op check** (so a paid
+      run that yields nothing reviewable still counts toward spend + the cap),
+      backfilling `changeSetId` on the happy path (`linkAiUsageChangeSet`). Cap
+      reached → no provider call, no proposal, safe message. Token usage threads
+      through tolerantly (`?? emptyUsage()`). *(Both refinements — and the
+      cached-token fix below — came from Codex review of PR #91.)*
+- [x] **Disjoint token buckets** (`LLMUsage`): `inputTokens` is **uncached** input
+      (cached input lives in `cacheReadTokens`), so cost is `Σ tokens × rate` with
+      no overlap. Anthropic already reports it this way; the OpenAI adapter
+      (`src/server/ai/openai.ts`) subtracts the cached subset out of
+      `prompt_tokens` — otherwise cached OpenAI tokens were billed twice (once at
+      the input rate, once at the cache-read rate), overstating spend.
 - [x] **UI** (`src/components/settings/usage-panel.tsx`): a DM-only **Usage & spend**
       panel on the Settings page — estimated spend / runs / input+output token
       totals (honest empty state before any run), an unpriced-run note, and a spend
