@@ -25,16 +25,25 @@ import {
   scaffoldStubEntities,
 } from "@/server/services/generation";
 import { approveChangeSet, setEntityLock } from "@/server/services/review";
+import { recordAiUsage, setCampaignSpendCap } from "@/server/services/ai-usage";
+
+const SAMPLE_USAGE = {
+  inputTokens: 1_000_000,
+  outputTokens: 1_000_000,
+  cacheReadTokens: 0,
+  cacheCreationTokens: 0,
+};
 
 function fakeProvider(
   data: { summary: string; description: string; tags: string[] },
   over: { id?: string; model?: string } = {},
 ) {
+  const model = over.model ?? "claude-opus-4-8";
   return {
     id: over.id ?? "anthropic",
-    model: over.model ?? "claude-opus-4-8",
+    model,
     generate: vi.fn(),
-    generateStructured: vi.fn().mockResolvedValue({ data }),
+    generateStructured: vi.fn().mockResolvedValue({ data, usage: SAMPLE_USAGE, model }),
   };
 }
 
@@ -70,6 +79,7 @@ async function seed() {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  await prisma.aiUsage.deleteMany();
   await prisma.provenance.deleteMany();
   await prisma.changeOperation.deleteMany();
   await prisma.changeSet.deleteMany();
@@ -634,5 +644,55 @@ describe("scaffoldStubEntities", () => {
     expect(prov.length).toBeGreaterThan(0);
     expect(prov.every((p) => p.model === "claude-opus-4-8")).toBe(true);
     expect(prov.map((p) => p.promptId)).toContain("scaffold-stubs");
+  });
+});
+
+describe("generation — usage tracking & spend caps", () => {
+  it("records an AiUsage row (tokens, model, cost, change set) after a successful run", async () => {
+    const { dmId, campaignId, entityId } = await seed();
+    resolveCampaignProvider.mockResolvedValue(
+      fakeProvider({ summary: "A grizzled guide.", description: "Long lore.", tags: ["guide"] }),
+    );
+
+    const { changeSetId } = await fleshOutEntity(dmId, campaignId, entityId);
+
+    const rows = await prisma.aiUsage.findMany({ where: { campaignId } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      providerId: "anthropic",
+      model: "claude-opus-4-8",
+      generatorId: "flesh-entity",
+      changeSetId,
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+    });
+    // 1M input ($15) + 1M output ($75) on opus.
+    expect(rows[0].estimatedCostUsd).toBeCloseTo(90, 6);
+    // The usage record carries no API key (invariant #6).
+    expect(JSON.stringify(rows[0])).not.toMatch(/sk-/);
+  });
+
+  it("blocks generation once the campaign spend cap is reached", async () => {
+    const { dmId, campaignId, entityId } = await seed();
+    await setCampaignSpendCap(dmId, campaignId, 50);
+    // Pre-existing spend ($90) already exceeds the $50 cap.
+    await recordAiUsage({
+      campaignId,
+      userId: dmId,
+      providerId: "anthropic",
+      model: "claude-opus-4-8",
+      generatorId: "flesh-entity",
+      usage: SAMPLE_USAGE,
+    });
+
+    const provider = fakeProvider({ summary: "x", description: "y", tags: ["z"] });
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    await expect(fleshOutEntity(dmId, campaignId, entityId)).rejects.toMatchObject({
+      message: expect.stringContaining("spend cap"),
+    });
+    // The provider was never called, and no new usage row was written.
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+    expect(await prisma.aiUsage.count({ where: { campaignId } })).toBe(1);
   });
 });

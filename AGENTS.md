@@ -132,9 +132,15 @@ records AI provider/model/prompt provenance on approval. The **bulk-stub
 scaffolding** generator (M4 slice 5) is also in: a DM-only **Scaffold with AI**
 panel on the World Browser header turns a free-text instruction into a batch of
 thin stub entities, filed as one **PENDING `CREATE_ENTITY` change set** in the
-Review Queue (`src/server/ai/generators/scaffold-stubs.ts`). Remaining M4
-expansion work is a generation panel for bulk *multi-entity* runs, async jobs,
-and usage/cost controls. See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
+Review Queue (`src/server/ai/generators/scaffold-stubs.ts`). **Usage/cost
+tracking + spend caps** (M4) are now in: every successful generation writes an
+`AiUsage` row (token counts + an estimated USD cost from a per-model price table,
+`src/lib/ai/pricing.ts`; unpriced models record null cost, never a fake `$0`),
+the Settings page shows campaign spend, and a DM-set `Campaign.spendCapUsd`
+blocks generation once known spend reaches it (`src/server/services/ai-usage.ts`,
+asserted before each provider call; usage records carry no secret — invariant #6).
+Remaining M4 expansion work is a generation panel for bulk *multi-entity* runs
+and an async `Job` table + worker. See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
 ## Start here, every session
 

@@ -380,6 +380,27 @@ model AiKey {            // encrypted at rest — see docs/adr/0006 + adr/0007
   @@index([campaignId])
 }
 
+model AiUsage {          // one generation's token usage + estimated cost (M4)
+  id                  String @id @default(cuid())
+  campaignId          String
+  createdById         String // who triggered the run
+  providerId          String // matches src/lib/ai/providers.ts
+  model               String
+  generatorId         String // the generator's prompt id (e.g. "flesh-entity")
+  changeSetId         String?  // the PENDING change set it produced (plain id, no FK)
+  inputTokens         Int
+  outputTokens        Int
+  cacheReadTokens     Int    @default(0)
+  cacheCreationTokens Int    @default(0)
+  estimatedCostUsd    Float?   // null = model unpriced; tokens stay authoritative
+  createdAt           DateTime @default(now())
+  @@index([campaignId, createdAt])
+}
+// Spend cap lives on Campaign: `spendCapUsd Float?` (null = no cap). Enforced
+// against the sum of priced AiUsage rows before a generation runs. Carries no
+// secret — the API key is never referenced here (invariant #6). See pricing in
+// src/lib/ai/pricing.ts. (Distinct from review-pipeline Provenance.)
+
 model Job {              // async generation / bulk + simulation + indexing runs
   id          String @id @default(cuid())
   campaignId  String

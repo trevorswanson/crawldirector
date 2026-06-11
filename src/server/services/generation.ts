@@ -2,7 +2,8 @@ import { CanonStatus, ChangeSource, OpKind, Role } from "@/generated/prisma/clie
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 import { describeProviderError, resolveCampaignProvider } from "@/server/ai";
-import { ProviderError } from "@/server/ai/types";
+import { ProviderError, emptyUsage, type LLMUsage } from "@/server/ai/types";
+import { assertWithinSpendCap, recordAiUsage } from "@/server/services/ai-usage";
 import {
   FLESH_ENTITY_GENERATOR,
   type FleshableField,
@@ -118,6 +119,8 @@ export async function fleshOutEntity(
     );
   }
 
+  await assertWithinSpendCap(campaignId);
+
   const lockedFields = entity.lockedFields.filter((f): f is FleshableField =>
     (FLESHABLE_FIELDS as string[]).includes(f),
   );
@@ -148,6 +151,7 @@ export async function fleshOutEntity(
   });
 
   let output;
+  let usage: LLMUsage = emptyUsage();
   try {
     const result = await provider.generateStructured({
       schemaName: "flesh_entity",
@@ -157,6 +161,7 @@ export async function fleshOutEntity(
       maxTokens: 2048,
     });
     output = result.data;
+    usage = result.usage ?? usage;
   } catch (error) {
     // Keep messages safe: never reflect a provider's raw free text, which (for an
     // OpenAI-compatible endpoint) could echo key-bearing config (invariant #6).
@@ -183,6 +188,16 @@ export async function fleshOutEntity(
     promptId: FLESH_ENTITY_GENERATOR.id,
     promptVersion: FLESH_ENTITY_GENERATOR.version,
     operations: [{ op: OpKind.UPDATE_ENTITY, targetId: entityId, patch }],
+  });
+
+  await recordAiUsage({
+    campaignId,
+    userId,
+    providerId: provider.id,
+    model: provider.model,
+    generatorId: FLESH_ENTITY_GENERATOR.id,
+    usage,
+    changeSetId: changeSet.id,
   });
 
   return { changeSetId: changeSet.id, providerId: provider.id, model: provider.model };
@@ -228,6 +243,8 @@ export async function inferRelationshipsForEntity(
       "No AI provider is configured. Add a provider key in campaign Settings first.",
     );
   }
+
+  await assertWithinSpendCap(campaignId);
 
   const [candidates, existing, pendingCreates] = await Promise.all([
     prisma.entity.findMany({
@@ -323,6 +340,7 @@ export async function inferRelationshipsForEntity(
   const { system, messages } = buildInferRelationshipsPrompt(context);
 
   let output;
+  let usage: LLMUsage = emptyUsage();
   try {
     const result = await provider.generateStructured({
       schemaName: "infer_relationships",
@@ -332,6 +350,7 @@ export async function inferRelationshipsForEntity(
       maxTokens: 2048,
     });
     output = result.data;
+    usage = result.usage ?? usage;
   } catch (error) {
     const message =
       error instanceof ProviderError ? error.message : describeProviderError(error);
@@ -352,6 +371,16 @@ export async function inferRelationshipsForEntity(
     promptId: INFER_RELATIONSHIPS_GENERATOR.id,
     promptVersion: INFER_RELATIONSHIPS_GENERATOR.version,
     operations,
+  });
+
+  await recordAiUsage({
+    campaignId,
+    userId,
+    providerId: provider.id,
+    model: provider.model,
+    generatorId: INFER_RELATIONSHIPS_GENERATOR.id,
+    usage,
+    changeSetId: changeSet.id,
   });
 
   return {
@@ -395,6 +424,8 @@ export async function scaffoldStubEntities(
     );
   }
 
+  await assertWithinSpendCap(campaignId);
+
   // Existing entity names (to dedupe against) and campaign tags (to encourage
   // reuse), scoped to live (non-archived) canon.
   const existing = await prisma.entity.findMany({
@@ -415,6 +446,7 @@ export async function scaffoldStubEntities(
   const { system, messages } = buildScaffoldStubsPrompt(context);
 
   let output;
+  let usage: LLMUsage = emptyUsage();
   try {
     const result = await provider.generateStructured({
       schemaName: "scaffold_stubs",
@@ -424,6 +456,7 @@ export async function scaffoldStubEntities(
       maxTokens: 2048,
     });
     output = result.data;
+    usage = result.usage ?? usage;
   } catch (error) {
     // Keep messages safe: never reflect a provider's raw free text (invariant #6).
     const message =
@@ -448,6 +481,16 @@ export async function scaffoldStubEntities(
       op: OpKind.CREATE_ENTITY,
       patch: buildStubCreatePatch(userId, campaignId, spec),
     })),
+  });
+
+  await recordAiUsage({
+    campaignId,
+    userId,
+    providerId: provider.id,
+    model: provider.model,
+    generatorId: SCAFFOLD_STUBS_GENERATOR.id,
+    usage,
+    changeSetId: changeSet.id,
   });
 
   return {

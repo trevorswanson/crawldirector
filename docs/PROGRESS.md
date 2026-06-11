@@ -35,12 +35,15 @@ keyword-scanning every doc.
             (2026-06-08) — see the section below. ADR 0009 is now **fully
             delivered**; the brand-new-EntityType "proof" remains deferred to M7's
             BOX (one descriptor file then), per project norm (no stub features).
-- [ ] **M4 generator expansion.** Remaining: a generation panel for *bulk runs*,
-      a `Job` table + worker for bulk/async runs, and usage/cost tracking with
-      spend caps.
+- [ ] **M4 generator expansion.** Remaining: a generation panel for *bulk runs*
+      (multi-entity selection) and a `Job` table + worker for bulk/async runs.
       - [x] **Bulk-stub scaffolding generator.** ✅ (2026-06-08) — see the section
             below. A DM scaffolds a batch of stub entities from a free-text
             instruction; they land as one PENDING `CREATE_ENTITY` change set.
+      - [x] **Usage tracking + spend caps.** ✅ (2026-06-11) — see the section
+            below. Every generation records token usage + an estimated cost; the
+            Settings page shows campaign spend; a DM-set spend cap blocks
+            generation once known spend reaches it.
 - [x] **Visibility model simplification.** ✅ (2026-06-10) — collapsed the
       three-state enum (`DM_ONLY`/`SHARED_WITH_PLAYERS`/`PLAYER_FACING`) to a clean
       binary `DM_ONLY`/`PLAYER_VISIBLE`. See the section below.
@@ -96,6 +99,69 @@ keyword-scanning every doc.
       - **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
+
+## M4 — Usage tracking + spend caps ✅ (2026-06-11)
+
+**Goal:** the cost/trust control from [`04-ai-integration.md`](./04-ai-integration.md)
+§"Async / batching" + §"Safety, cost, and trust controls": record what BYO
+generation costs and let a DM cap it. Every successful provider call now writes a
+usage row (tokens + estimated USD); the Settings page surfaces campaign spend; and
+a DM-set spend cap blocks generation once known spend reaches the ceiling. The
+record carries **no secret** (the API key is never referenced — invariant #6), and
+it's a cost/usage trail distinct from review-pipeline provenance. The app stays
+fully usable with no key and no cap.
+
+- [x] **Schema + migration** (`20260611162129_m4_ai_usage`): new `AiUsage`
+      (`campaignId`, `createdById`, `providerId`, `model`, `generatorId`,
+      `changeSetId?`, input/output/cacheRead/cacheCreation token counts,
+      `estimatedCostUsd Float?`, `createdAt`; FK to Campaign+User, indexed by
+      `(campaignId, createdAt)`) and `Campaign.spendCapUsd Float?` (null = no cap).
+      `changeSetId` is a plain id (no FK) so the usage trail outlives a deleted
+      change set.
+- [x] **Pure pricing** (`src/lib/ai/pricing.ts`, client-safe): a per-model price
+      table (USD / 1M tokens, input/output/cache-read/cache-write) for the models
+      the app defaults to, plus `estimateCostUsd(model, usage)` that returns
+      **`null` for an unpriced model** (a custom endpoint / unknown model) rather
+      than inventing `$0` — tokens stay authoritative either way — and `formatUsd`
+      (extra precision for sub-cent amounts so single runs don't all read "$0.00").
+- [x] **Service** (`src/server/services/ai-usage.ts`): `recordAiUsage` (estimate +
+      persist), `assertWithinSpendCap` (throws a `ServiceError` once the sum of
+      **priced** usage reaches the cap; unpriced runs can't trip it, since their
+      cost is unknown), `getCampaignAiUsage` (DM-only aggregate: spend, runs,
+      tokens, unpriced-run count + the current cap), and `setCampaignSpendCap`
+      (DM-only, audited `SET_SPEND_CAP`; rejects a negative cap; null clears it).
+- [x] **Wired into all three generators** (`generation.ts`): `fleshOutEntity`,
+      `inferRelationshipsForEntity`, and `scaffoldStubEntities` now assert the cap
+      **before** spending, capture the provider result's `usage`, and record it
+      after filing the change set (cap reached → no provider call, no proposal,
+      safe message). Token usage threads through tolerantly (`?? emptyUsage()`).
+- [x] **UI** (`src/components/settings/usage-panel.tsx`): a DM-only **Usage & spend**
+      panel on the Settings page — estimated spend / runs / input+output token
+      totals (honest empty state before any run), an unpriced-run note, and a spend
+      cap form (`setSpendCapAction`; blank = clear). Costs are labelled estimates;
+      token counts are exact. No fake/filler data.
+- [x] **Validation:** `setSpendCapSchema` (empty → null, else a non-negative amount
+      bounded to ≤100k) in [`validation.ts`](../src/lib/validation.ts).
+- [x] **Tests:** pure pricing unit (rates, cache pricing, unpriced → null, format);
+      DB-backed `ai-usage` (record priced/unpriced, aggregate + unpriced flag, cap
+      set/clear/negative + player rejection, cap allows-under / blocks-at / ignores
+      unpriced); generation suite extended (usage row written with tokens/cost/no
+      key; cap blocks before the provider call); `UsagePanel` component, settings
+      page (renders + wires both panels), and `setSpendCapAction` (set/clear/invalid/
+      ServiceError/generic). lint (0 errors; 2 pre-existing settings warnings),
+      typecheck, build, and the full coverage gate green (statements 95.61%,
+      branches 89.12%, functions 97.72%, lines 97.51%; new pricing/ai-usage files
+      100%).
+- [x] **Verified in-browser** against a seeded campaign (two usage rows — one priced
+      opus run, one unpriced local-model run — and a $5 cap): the panel shows
+      **Est. spend $0.20 · Runs 2 · 9,200 in · 2,700 out**, the unpriced-run note,
+      and the cap line; saving a new cap ($12.50) routed through the action →
+      service → DB (confirmed `Campaign.spendCapUsd = 12.5` + a `SET_SPEND_CAP`
+      audit row) and re-rendered "Capped at $12.50." No new console errors.
+- [x] **Remaining M4 expansion:** a bulk *multi-entity* generation panel and an
+      async `Job` table + worker stay in the open backlog. (A live generation still
+      depends on the DM's own BYO key/spend — usage recording + cap enforcement are
+      covered by mocked-provider service tests + the in-browser seeded check.)
 
 ## Visibility model simplification — binary DM_ONLY / PLAYER_VISIBLE ✅ (2026-06-10)
 

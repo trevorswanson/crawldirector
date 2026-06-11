@@ -4,8 +4,9 @@ import { revalidatePath } from "next/cache";
 
 import { requireUser } from "@/server/auth/session";
 import { ServiceError } from "@/lib/errors";
-import { setAiKeySchema } from "@/lib/validation";
+import { setAiKeySchema, setSpendCapSchema } from "@/lib/validation";
 import { deleteAiKey, setAiKey } from "@/server/services/ai-keys";
+import { setCampaignSpendCap } from "@/server/services/ai-usage";
 import { testAiConnection } from "@/server/ai";
 
 export type SettingsActionState =
@@ -66,6 +67,39 @@ export async function testAiConnectionAction(
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
     console.error("Test AI connection action failed:", error);
     return { error: "Could not reach the provider. Please try again.", timestamp: Date.now() };
+  }
+}
+
+// Set or clear the campaign's AI spend cap. An empty field clears it (null).
+// DM/co-DM only (the service enforces the role). Returns a success/error message.
+export async function setSpendCapAction(
+  campaignId: string,
+  _prev: SettingsActionState,
+  formData: FormData,
+): Promise<SettingsActionState> {
+  const user = await requireUser();
+
+  const parsed = setSpendCapSchema.safeParse({
+    spendCapUsd: formData.get("spendCapUsd") ?? "",
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input.", timestamp: Date.now() };
+  }
+
+  try {
+    const { spendCapUsd } = await setCampaignSpendCap(user.id, campaignId, parsed.data.spendCapUsd);
+    revalidatePath(`/campaigns/${campaignId}/settings`);
+    return {
+      success:
+        spendCapUsd == null
+          ? "Spend cap cleared."
+          : `Spend cap set to $${spendCapUsd.toFixed(2)}.`,
+      timestamp: Date.now(),
+    };
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    console.error("Set spend cap action failed:", error);
+    return { error: "Could not save the spend cap. Please try again.", timestamp: Date.now() };
   }
 }
 

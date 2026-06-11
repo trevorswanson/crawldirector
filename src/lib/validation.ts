@@ -361,6 +361,22 @@ export const setAiKeySchema = z.object({
 });
 export type SetAiKeyInput = z.infer<typeof setAiKeySchema>;
 
+// Campaign AI spend cap (M4 — docs/04-ai-integration.md). An empty string clears
+// the cap (null); otherwise a non-negative dollar amount, bounded by a sane
+// ceiling so a typo can't store an absurd value. Parsed from the settings form.
+export const setSpendCapSchema = z.object({
+  spendCapUsd: z
+    .union([
+      z.literal(""),
+      z.coerce
+        .number({ message: "Enter a dollar amount, or leave blank to clear." })
+        .min(0, "The cap can't be negative.")
+        .max(100_000, "That cap is unreasonably high."),
+    ])
+    .transform((v) => (v === "" ? null : v)),
+});
+export type SetSpendCapInput = z.infer<typeof setSpendCapSchema>;
+
 // Event participant roles (docs/01-domain-model.md). Any-to-any, like
 // relationship types — every role is valid for any entity.
 export const eventParticipantRoleValues = [

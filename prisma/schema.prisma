@@ -188,6 +188,7 @@ model User {
   provenanceRows     Provenance[] @relation("ActorProvenance")
   auditLogs          AuditLog[]   @relation("ActorAuditLogs")
   createdAiKeys      AiKey[]      @relation("CreatedAiKeys")
+  aiUsage            AiUsage[]    @relation("RequestedAiUsage")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -239,6 +240,11 @@ model Campaign {
   // Tone / canon constraints surfaced to AI generators in later milestones.
   styleGuide String?
 
+  // Optional DM-set ceiling (USD) on total estimated AI spend for this campaign.
+  // Null = no cap. Enforced against the sum of priced AiUsage rows before a
+  // generation runs (M4 — docs/04-ai-integration.md).
+  spendCapUsd Float?
+
   ownerId String
   owner   User   @relation("OwnedCampaigns", fields: [ownerId], references: [id])
 
@@ -258,6 +264,7 @@ model Campaign {
   auditLogs        AuditLog[]
   knowledgeGrants  KnowledgeGrant[]
   aiKeys           AiKey[]
+  aiUsage          AiUsage[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -629,4 +636,40 @@ model AiKey {
 
   @@unique([campaignId, providerId])
   @@index([campaignId])
+}
+
+// One AI generation's token usage + estimated cost (M4 — docs/04-ai-
+// integration.md). Written after a successful provider call so the DM can see
+// what generation is costing and so spend caps can be enforced. Tokens are
+// always recorded; `estimatedCostUsd` is null when the model's price is unknown
+// (a custom endpoint or an unpriced model) — we never invent a number. This is a
+// cost/usage record, NOT provenance, and it carries no secret: the API key is
+// never referenced here (invariant #6).
+model AiUsage {
+  id          String @id @default(cuid())
+  campaignId  String
+  // Who triggered the run, and what produced it.
+  createdById String
+  providerId  String // matches an id in src/lib/ai/providers.ts
+  model       String
+  generatorId String // the generator's prompt id (e.g. "flesh-entity")
+  // The PENDING change set this run produced, if any. Plain id (no FK relation):
+  // a usage record is an audit trail that should outlive a deleted change set.
+  changeSetId String?
+
+  inputTokens         Int
+  outputTokens        Int
+  cacheReadTokens     Int @default(0)
+  cacheCreationTokens Int @default(0)
+
+  // Estimated USD cost from src/lib/ai/pricing.ts. Null when the model is
+  // unpriced — the tokens above are still authoritative.
+  estimatedCostUsd Float?
+
+  campaign  Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  createdBy User     @relation("RequestedAiUsage", fields: [createdById], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([campaignId, createdAt])
 }
