@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 import { signUpAndCreateCampaign } from "./helpers";
 
 test("quick-create stub appears in the card grid", async ({ page }) => {
@@ -8,7 +9,7 @@ test("quick-create stub appears in the card grid", async ({ page }) => {
   await page.getByRole("button", { name: "Create Entity" }).click();
 
   // Fill the stub name and submit with "Create stub" to stay on the browser
-  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+  const suffix = `${Date.now()}-${randomUUID().slice(0, 8)}`;
   const stubName = `Stub Entity ${suffix}`;
   await page.getByPlaceholder("New entity name…").fill(stubName);
   await page.getByRole("button", { name: "Create stub" }).click();
@@ -20,7 +21,7 @@ test("quick-create stub appears in the card grid", async ({ page }) => {
 test("create full entity via Create Entity button and see detail page", async ({ page }) => {
   await signUpAndCreateCampaign(page);
 
-  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+  const suffix = `${Date.now()}-${randomUUID().slice(0, 8)}`;
   const entityName = `NPC Full ${suffix}`;
   const entitySummary = `Summary for ${entityName}`;
 
@@ -56,7 +57,7 @@ test("create full entity via Create Entity button and see detail page", async ({
 test("type facet filters the entity list", async ({ page }) => {
   await signUpAndCreateCampaign(page);
 
-  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+  const suffix = `${Date.now()}-${randomUUID().slice(0, 8)}`;
 
   // Create an NPC stub
   await page.getByRole("button", { name: "Create Entity" }).click();

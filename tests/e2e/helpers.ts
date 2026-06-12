@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import type { Page } from "@playwright/test";
 import { Client } from "pg";
 
@@ -10,7 +11,7 @@ export async function signUpAndCreateCampaign(
   page: Page,
   opts: { name?: string; campaignName?: string } = {},
 ): Promise<{ email: string; campaignId: string }> {
-  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const suffix = `${Date.now()}-${randomUUID().slice(0, 8)}`;
   const email = `e2e-${suffix}@example.com`;
   const campaignName = opts.campaignName ?? `Campaign ${suffix}`;
 
@@ -68,8 +69,8 @@ export async function addPlayerMembership(
     }
     const userId = userRes.rows[0].id;
 
-    // Use a random cuid-like id: timestamp + random chars
-    const id = `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 9)}`;
+    // Use a random cuid-shaped id derived from a UUID
+    const id = `c${randomUUID().replace(/-/g, "")}`;
 
     await client.query(
       `INSERT INTO "Membership" (id, "userId", "campaignId", role, "createdAt")
