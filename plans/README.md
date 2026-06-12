@@ -15,7 +15,7 @@ a PR unless the operator says so.
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| [001](001-e2e-core-flows.md) | E2E coverage: review pipeline, locks, player visibility | P1 | M | — | TODO |
+| [001](001-e2e-core-flows.md) | E2E coverage: review pipeline, locks, player visibility | P1 | M | — | DONE (commit `4b5934d`; 9 e2e tests vs plan's ≥10 — all scenarios covered) |
 | [002](002-bulk-approve-hardening.md) | Bulk-approve hardening: error codes, decision restore | P1 | M | — (after 001 recommended) | TODO |
 | [003](003-pagination-world-browser-timeline.md) | Paginate World Browser + campaign timeline | P2 | L | — | TODO |
 | [004](004-spend-cap-serialization.md) | Per-campaign AI lock closes the spend-cap race | P2 | M | — | TODO |
