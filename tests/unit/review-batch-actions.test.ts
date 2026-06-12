@@ -4,11 +4,16 @@ import { EntityType, Role } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
+import { setEventLock } from "@/server/services/events";
 import {
+  applyAutoApprovedEventChangeSet,
   applyAutoApprovedEntityChangeSet,
+  approveChangeSet,
   approveChangeSetRun,
+  createPendingEventChangeSet,
   createPendingEntityChangeSet,
   rejectChangeSetRun,
+  setChangeOperationDecision,
   setChangeOperationFieldDecision,
   setEntityLock,
 } from "@/server/services/review";
@@ -53,6 +58,22 @@ async function createEntity(dmId: string, campaignId: string, name: string) {
   return result.targetIds[0];
 }
 
+async function createEvent(dmId: string, campaignId: string, actorId: string) {
+  const result = await applyAutoApprovedEventChangeSet(dmId, campaignId, {
+    title: "Create event",
+    operations: [
+      {
+        op: "CREATE_EVENT",
+        patch: {
+          title: { to: "Locked event" },
+          participants: { to: [{ entityId: actorId, role: "ACTOR" }] },
+        },
+      },
+    ],
+  });
+  return result.targetIds[0];
+}
+
 async function versionOf(entityId: string) {
   const entity = await prisma.entity.findUniqueOrThrow({
     where: { id: entityId },
@@ -83,6 +104,18 @@ async function pendingRunUpdate(
         },
       },
     ],
+  });
+}
+
+async function operationSnapshot(operationId: string) {
+  return prisma.changeOperation.findUniqueOrThrow({
+    where: { id: operationId },
+    select: {
+      id: true,
+      decision: true,
+      editedPatch: true,
+      fieldDecisions: true,
+    },
   });
 }
 
@@ -281,6 +314,155 @@ describe("review service - batch run actions", () => {
     });
     expect(pendingChangeSet.status).toBe("PENDING");
     expect(pendingChangeSet.operations[0].isStale).toBe(true);
+  });
+
+  it("holds an all-rejected set without aborting the generator run", async () => {
+    const { dmId, campaignId } = await seed();
+    const approvedEntityId = await createEntity(dmId, campaignId, "Approved NPC");
+    const rejectedEntityId = await createEntity(dmId, campaignId, "Rejected NPC");
+    const runId = "generator-run-all-rejected";
+    const approved = await pendingRunUpdate(
+      dmId,
+      campaignId,
+      runId,
+      approvedEntityId,
+      "Approved summary",
+    );
+    const rejected = await pendingRunUpdate(
+      dmId,
+      campaignId,
+      runId,
+      rejectedEntityId,
+      "Rejected summary",
+    );
+    const rejectedOperation = await prisma.changeOperation.findFirstOrThrow({
+      where: { changeSetId: rejected.id },
+      select: { id: true },
+    });
+    const before = await operationSnapshot(rejectedOperation.id);
+
+    await setChangeOperationDecision(
+      dmId,
+      campaignId,
+      rejected.id,
+      rejectedOperation.id,
+      { decision: "REJECTED" },
+    );
+
+    const result = await approveChangeSetRun(dmId, campaignId, runId);
+
+    expect(result).toEqual({
+      runId,
+      approvedIds: [approved.id],
+      rejectedIds: [],
+      heldIds: [rejected.id],
+    });
+    await expect(
+      prisma.entity.findUniqueOrThrow({ where: { id: approvedEntityId } }),
+    ).resolves.toMatchObject({ summary: "Approved summary", version: 2 });
+    await expect(
+      prisma.entity.findUniqueOrThrow({ where: { id: rejectedEntityId } }),
+    ).resolves.toMatchObject({ summary: null, version: 1 });
+    await expect(
+      prisma.changeSet.findUniqueOrThrow({ where: { id: rejected.id } }),
+    ).resolves.toMatchObject({ status: "PENDING" });
+    await expect(operationSnapshot(rejectedOperation.id)).resolves.toEqual({
+      ...before,
+      decision: "REJECTED",
+      fieldDecisions: {},
+    });
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          campaignId,
+          action: "BULK_APPROVE_RUN",
+          targetType: "CHANGE_SET_RUN",
+          targetId: runId,
+        },
+      }),
+    ).resolves.toMatchObject({
+      detail: { approvedIds: [approved.id], heldIds: [rejected.id] },
+    });
+  });
+
+  // The race between flag refresh and apply is covered by coded throw + catch/restore tests.
+  it("codes stale approveChangeSet failures without changing the message", async () => {
+    const { dmId, campaignId } = await seed();
+    const entityId = await createEntity(dmId, campaignId, "Stale NPC");
+    const changeSet = await pendingRunUpdate(
+      dmId,
+      campaignId,
+      "generator-run-stale-code",
+      entityId,
+      "Stale summary",
+    );
+    const operation = await prisma.changeOperation.findFirstOrThrow({
+      where: { changeSetId: changeSet.id },
+      select: { id: true },
+    });
+
+    await setChangeOperationDecision(dmId, campaignId, changeSet.id, operation.id, {
+      decision: "ACCEPTED",
+    });
+    await applyAutoApprovedEntityChangeSet(dmId, campaignId, {
+      title: "Concurrent edit",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: entityId,
+          patch: {
+            _baseVersion: { to: await versionOf(entityId) },
+            summary: { from: "", to: "Concurrent summary" },
+          },
+        },
+      ],
+    });
+
+    await expect(approveChangeSet(dmId, campaignId, changeSet.id)).rejects.toMatchObject({
+      name: "ServiceError",
+      message: "One or more operations are stale.",
+      code: "OPERATION_STALE",
+    });
+  });
+
+  it("restores pre-run operation decisions when a coded hold happens after bulk flipping", async () => {
+    const { dmId, campaignId } = await seed();
+    const actorId = await createEntity(dmId, campaignId, "Actor");
+    const eventId = await createEvent(dmId, campaignId, actorId);
+    const runId = "generator-run-restore-decisions";
+    const changeSet = await createPendingEventChangeSet(dmId, campaignId, {
+      source: "AI",
+      runId,
+      title: "AI event update",
+      operations: [
+        {
+          op: "UPDATE_EVENT",
+          targetId: eventId,
+          patch: {
+            summary: { from: "", to: "Bulk summary" },
+          },
+        },
+      ],
+    });
+    const operation = changeSet.operations[0];
+
+    await setChangeOperationDecision(dmId, campaignId, changeSet.id, operation.id, {
+      decision: "EDITED",
+      editedPatch: { summary: { from: "", to: "Edited summary" } },
+    });
+    const before = await operationSnapshot(operation.id);
+    await setEventLock(dmId, campaignId, eventId, true);
+
+    await expect(approveChangeSetRun(dmId, campaignId, runId)).resolves.toEqual({
+      runId,
+      approvedIds: [],
+      rejectedIds: [],
+      heldIds: [changeSet.id],
+    });
+    await expect(operationSnapshot(operation.id)).resolves.toEqual(before);
+    await expect(
+      prisma.event.findUniqueOrThrow({ where: { id: eventId } }),
+    ).resolves.toMatchObject({ summary: null, version: 1, locked: true });
   });
 
   it("rejects batch actions without a pending run or DM permission", async () => {
