@@ -362,6 +362,29 @@ function bulkApprovedOperationData(
   };
 }
 
+type OperationDecisionSnapshot = Pick<
+  Prisma.ChangeOperationGetPayload<object>,
+  "id" | "decision" | "editedPatch" | "fieldDecisions"
+>;
+
+async function restoreOperationDecisions(
+  snapshots: OperationDecisionSnapshot[],
+): Promise<void> {
+  for (const snapshot of snapshots) {
+    await prisma.changeOperation.update({
+      where: { id: snapshot.id },
+      data: {
+        decision: snapshot.decision,
+        editedPatch:
+          snapshot.editedPatch === null
+            ? Prisma.DbNull
+            : (snapshot.editedPatch as Prisma.InputJsonValue),
+        fieldDecisions: snapshot.fieldDecisions as Prisma.InputJsonValue,
+      },
+    });
+  }
+}
+
 function lockedPatchFields(
   patch: ReviewPatch,
   locked: boolean,
@@ -1481,13 +1504,19 @@ export async function approveChangeSet(
         operation.decision === OpDecision.EDITED,
     );
     if (applicableOperations.length === 0) {
-      throw new ServiceError("Accept at least one operation before approval.");
+      throw new ServiceError("Accept at least one operation before approval.", {
+        code: "NO_ACCEPTED_OPERATIONS",
+      });
     }
     if (applicableOperations.some((operation) => operation.blockedByLock)) {
-      throw new ServiceError("One or more operations are blocked by locks.");
+      throw new ServiceError("One or more operations are blocked by locks.", {
+        code: "OPERATION_BLOCKED",
+      });
     }
     if (applicableOperations.some((operation) => operation.isStale)) {
-      throw new ServiceError("One or more operations are stale.");
+      throw new ServiceError("One or more operations are stale.", {
+        code: "OPERATION_STALE",
+      });
     }
 
     const appliedIds: string[] = [];
@@ -1623,6 +1652,18 @@ export async function approveChangeSetRun(
       heldIds.push(changeSet.id);
       continue;
     }
+    const snapshots = changeSet.operations
+      .filter(
+        (operation) =>
+          operation.decision === OpDecision.PENDING ||
+          operation.decision === OpDecision.EDITED,
+      )
+      .map(({ id, decision, editedPatch, fieldDecisions }) => ({
+        id,
+        decision,
+        editedPatch,
+        fieldDecisions,
+      }));
 
     try {
       for (const operation of changeSet.operations) {
@@ -1642,8 +1683,11 @@ export async function approveChangeSetRun(
     } catch (error) {
       if (
         error instanceof ServiceError &&
-        (error.message.includes("stale") || error.message.includes("lock"))
+        (error.code === "OPERATION_STALE" ||
+          error.code === "OPERATION_BLOCKED" ||
+          error.code === "NO_ACCEPTED_OPERATIONS")
       ) {
+        await restoreOperationDecisions(snapshots);
         heldIds.push(changeSet.id);
       } else {
         throw error;
@@ -2447,7 +2491,9 @@ async function applyUpdateEntity(
       where: { id: operationId },
       data: { isStale: true },
     });
-    throw new ServiceError("Entity changed since this proposal was created.");
+    throw new ServiceError("Entity changed since this proposal was created.", {
+      code: "OPERATION_STALE",
+    });
   }
 
   const lockedFields = lockedPatchFields(patch, entity.locked, entity.lockedFields);
@@ -2457,10 +2503,14 @@ async function applyUpdateEntity(
       data: { blockedByLock: true },
     });
     if (entity.locked) {
-      throw new ServiceError("Cannot update because the entity is locked.");
+      throw new ServiceError("Cannot update because the entity is locked.", {
+        code: "OPERATION_BLOCKED",
+      });
     }
     const fieldsText = lockedFields.map((f) => `"${f}"`).join(", ");
-    throw new ServiceError(`This proposal touches locked entity fields: ${fieldsText}`);
+    throw new ServiceError(`This proposal touches locked entity fields: ${fieldsText}`, {
+      code: "OPERATION_BLOCKED",
+    });
   }
 
   if (entity.type === EntityType.FLOOR && "data.floorNumber" in patch) {
@@ -2552,7 +2602,9 @@ async function applyDeleteEntity(
       where: { id: operationId },
       data: { isStale: true },
     });
-    throw new ServiceError("Entity changed since this proposal was created.");
+    throw new ServiceError("Entity changed since this proposal was created.", {
+      code: "OPERATION_STALE",
+    });
   }
 
   if (entity.locked) {
@@ -2560,7 +2612,9 @@ async function applyDeleteEntity(
       where: { id: operationId },
       data: { blockedByLock: true },
     });
-    throw new ServiceError("This entity is locked.");
+    throw new ServiceError("This entity is locked.", {
+      code: "OPERATION_BLOCKED",
+    });
   }
 
   await tx.entity.update({
@@ -2865,6 +2919,7 @@ async function applyUpdateRelationship(
     });
     throw new ServiceError(
       "This relationship changed since you opened it. Reload and try again.",
+      { code: "OPERATION_STALE" },
     );
   }
 
@@ -2873,7 +2928,9 @@ async function applyUpdateRelationship(
       where: { id: operationId },
       data: { blockedByLock: true },
     });
-    throw new ServiceError("This relationship is locked.");
+    throw new ServiceError("This relationship is locked.", {
+      code: "OPERATION_BLOCKED",
+    });
   }
   if (isRestore) {
     await assertCanonEntity(tx, changeSet.campaignId, relationship.sourceId);
@@ -2950,6 +3007,7 @@ async function applyDeleteRelationship(
     });
     throw new ServiceError(
       "This relationship changed since you opened it. Reload and try again.",
+      { code: "OPERATION_STALE" },
     );
   }
 
@@ -2958,7 +3016,9 @@ async function applyDeleteRelationship(
       where: { id: operationId },
       data: { blockedByLock: true },
     });
-    throw new ServiceError("This relationship is locked.");
+    throw new ServiceError("This relationship is locked.", {
+      code: "OPERATION_BLOCKED",
+    });
   }
 
   await tx.relationship.update({
@@ -3828,6 +3888,7 @@ async function applyUpdateEvent(
     });
     throw new ServiceError(
       "This event changed since you opened it. Reload and try again.",
+      { code: "OPERATION_STALE" },
     );
   }
 
@@ -3836,7 +3897,9 @@ async function applyUpdateEvent(
       where: { id: operationId },
       data: { blockedByLock: true },
     });
-    throw new ServiceError("This event is locked.");
+    throw new ServiceError("This event is locked.", {
+      code: "OPERATION_BLOCKED",
+    });
   }
   if (isRestore) {
     for (const participant of event.participants) {
@@ -4290,7 +4353,9 @@ async function applyDeleteEventCausality(
       where: { id: operationId },
       data: { blockedByLock: true },
     });
-    throw new ServiceError("This causality link is locked.");
+    throw new ServiceError("This causality link is locked.", {
+      code: "OPERATION_BLOCKED",
+    });
   }
   if (isRestore) {
     await assertCanonEvent(tx, changeSet.campaignId, edge.causeId);
