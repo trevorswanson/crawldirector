@@ -124,7 +124,12 @@ export async function withCampaignAiLock<T>(
   const previous = tails.get(campaignId) ?? Promise.resolve();
   let release!: () => void;
   const current = new Promise<void>((resolve) => { release = resolve; });
-  tails.set(campaignId, previous.then(() => current));
+  // Store the chained promise in a local: the cleanup below must compare
+  // against the EXACT object placed in the map. Comparing against `current`
+  // instead would never match, every campaign's entry would live forever,
+  // and a long-running process would leak one stale promise per campaign.
+  const tail = previous.then(() => current);
+  tails.set(campaignId, tail);
   await previous;
   try {
     return await fn();
@@ -132,16 +137,20 @@ export async function withCampaignAiLock<T>(
     release();
     // Drop the tail entry when no one queued behind us, so the map can't grow
     // unboundedly across campaigns.
-    if (tails.get(campaignId) === current) tails.delete(campaignId);
+    if (tails.get(campaignId) === tail) tails.delete(campaignId);
   }
+}
+
+// Test-only introspection: how many campaigns currently hold a tail entry.
+// Pins the cleanup behavior above; not for production use.
+export function lockTailCountForTests(): number {
+  return tails.size;
 }
 ```
 
-Note the cleanup comparison: the map stores `previous.then(() => current)`,
-so the "am I the tail" check must compare against the same promise that was
-stored. Get this right or write the simpler equivalent (store the chained
-promise in a local and compare that) — the unit test in the Test plan pins
-the behavior either way.
+The cleanup comparison is the easy thing to get wrong here — the unit test
+in the Test plan pins it via `lockTailCountForTests()`, so a wrong
+comparison fails the suite instead of silently leaking.
 
 **Verify**: `npx vitest run tests/unit/ai-lock.test.ts` (written in Step 3)
 → all pass.
@@ -187,6 +196,11 @@ See Test plan.
   reaching 2).
 - A rejected `fn` releases the lock (the next caller still runs) and the
   rejection propagates.
+- **Cleanup (leak regression)**: after awaiting a single run,
+  `lockTailCountForTests() === 0`; after two queued runs on the same
+  campaign both settle (including the rejected-`fn` case), it is `0` again;
+  while a run is in flight it is ≥ 1. This is the test that fails if the
+  `finally` compares against the wrong promise.
 
 `tests/unit/generation.test.ts` (extend, matching its existing provider-stub
 and DB-seed patterns):
@@ -239,4 +253,7 @@ Stop and report back (do not improvise) if:
   other. Acceptable for now (same single-overshoot bound as today across two
   processes); note it in the worker plan's review.
 - Reviewer focus: the lock must not enclose `assertCampaignDm` (permission
-  failures shouldn't queue), and `fleshOutEntities` must remain unwrapped.
+  failures shouldn't queue); `fleshOutEntities` must remain unwrapped; and
+  the `finally` cleanup must compare against the stored `tail` promise (the
+  `lockTailCountForTests()` assertions guard this — don't let a refactor
+  drop them).
