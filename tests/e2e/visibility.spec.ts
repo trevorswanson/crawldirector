@@ -1,10 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { randomBytes } from "crypto";
 import { signUpAndCreateCampaign, addPlayerMembership } from "./helpers";
 
 test("player sees only PLAYER_VISIBLE entities and non-secret events; review queue is inaccessible", async ({
   page,
 }) => {
-  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+  const suffix = `${Date.now()}-${randomBytes(4).toString("hex")}`;
 
   // ── DM session: set up the campaign ──────────────────────────────────────
   const { campaignId } = await signUpAndCreateCampaign(page, {
