@@ -111,10 +111,22 @@ The unit suite **wipes tables** in the configured DB.
 ```ts
 // Key-safe server logging (invariant #6: secrets never reach logs). Raw error
 // objects from provider SDKs / user-configured endpoints can carry request
-// config or response bodies; we log name + a bounded message + stack, and for
-// HTTP-shaped errors (anything exposing a numeric `status`) we follow
+// config or response bodies; we log name + a bounded message + stack FRAMES,
+// and for HTTP-shaped errors (anything exposing a numeric `status`) we follow
 // describeProviderError's rule (src/server/ai/index.ts): status code only,
 // never the upstream free text.
+//
+// Frames-only is load-bearing: a V8 `error.stack` BEGINS with
+// "Error: <message>" (and a multi-line message spans several lines before the
+// frames), so logging the raw stack would re-leak the exact text the message
+// rule withholds. Keep only the "    at …" frame lines.
+function stackFrames(error: Error): string {
+  return (error.stack ?? "")
+    .split("\n")
+    .filter((line) => /^\s+at /.test(line))
+    .join("\n");
+}
+
 export function logActionError(context: string, error: unknown): void {
   if (error instanceof Error) {
     const status =
@@ -125,7 +137,7 @@ export function logActionError(context: string, error: unknown): void {
       status !== undefined
         ? `HTTP ${status} from upstream (message withheld — may echo endpoint config)`
         : error.message.slice(0, 500);
-    console.error(`${context}: [${error.name}] ${message}`, error.stack ?? "");
+    console.error(`${context}: [${error.name}] ${message}`, stackFrames(error));
     return;
   }
   console.error(`${context}: non-Error thrown (${typeof error})`);
@@ -162,9 +174,16 @@ See Test plan.
    `db went away`.
 2. HTTP-shaped error: `Object.assign(new Error("SECRET-MARKER-XYZ"), { status: 401 })`
    → logged output contains `HTTP 401` and does **not** contain
-   `SECRET-MARKER-XYZ` anywhere in any argument of the spy call.
-3. Message truncation: a 2,000-char message logs ≤ 500 chars of it.
-4. Non-Error throw (`logActionError("x", "boom")`) → logs the non-Error line,
+   `SECRET-MARKER-XYZ` anywhere in **any** argument of the spy call — this
+   is the assertion that catches the V8 stack's `Error: <message>` first
+   line; it must fail if the implementation logs `error.stack` raw instead
+   of frames-only.
+3. Multi-line message in an HTTP-shaped error
+   (`new Error("SECRET-A\nSECRET-B")` with `status: 500`) → neither line
+   appears in any spy argument (pins the frames filter over a naive
+   `slice(1)` of the stack).
+4. Message truncation: a 2,000-char message logs ≤ 500 chars of it.
+5. Non-Error throw (`logActionError("x", "boom")`) → logs the non-Error line,
    does not include `"boom"`. (Matches the helper as specced; if you choose
    to include the stringified value instead, you must justify why that's
    safe — strings thrown by SDKs are rare but not impossible carriers.
@@ -201,4 +220,6 @@ Stop and report back (do not improvise) if:
 - If structured logging (request ids, levels) ever lands, this helper is the
   single seam to upgrade.
 - The 500-char truncation is a defense-in-depth bound, not a parser: the real
-  protection for provider errors is the status-only rule.
+  protection for provider errors is the status-only rule **plus** the
+  frames-only stack — both must survive any future refactor of this helper
+  (a raw `error.stack` re-leaks the message via the stack's first line).

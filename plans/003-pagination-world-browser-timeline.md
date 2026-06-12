@@ -180,14 +180,36 @@ Add an optional `{ limit?: number }` options arg. When set, apply
 `take: limit` to the `findMany` (ordering is already newest-first), and
 return enough information for the caller to know truncation happened. Change
 the return type to `{ events: CampaignTimelineEvent[]; totalEvents: number;
-truncated: boolean }` where `totalEvents` comes from a `prisma.event.count`
-with the same `where`. Update the one production call site and any tests to
-destructure (`grep -rn "listCampaignTimeline" src tests` to find them all).
+truncated: boolean }` where `totalEvents` comes from a `prisma.event.count`.
+Update the one production call site and any tests to destructure
+(`grep -rn "listCampaignTimeline" src tests` to find them all).
 
-Caveat to preserve: player-visibility filtering happens **in JS after the
-query** (events whose participants are all hidden are dropped for players),
-so for a player, `events.length` may be < the window size. That's
-acceptable; don't try to backfill.
+**The count and the window must respect the player projection.** Today,
+player visibility is applied in two layers: `secret: false` in the SQL
+`where`, plus a **JS post-filter** that drops events whose participants are
+all player-hidden (`if (isPlayer && participants.length === 0) continue`). A
+count (or a `take` window) computed from the SQL `where` alone therefore
+includes events a player will never see — exposing the existence/number of
+hidden participant-only events through the "(N total)" label, and producing
+under-full windows for players. Fix this by pushing the post-filter's rule
+into the SQL `where` for players:
+
+- Read the `isPlayerVisible(entity)` helper in `events.ts` to get the exact
+  per-entity visibility conditions, and add (players only) a
+  `participants: { some: { entity: { …those same conditions… } } }` clause to
+  the shared `where` used by **both** the `findMany` and the `count`.
+- Keep the existing JS per-participant filtering — it still strips hidden
+  co-participants from the participant *lists* of visible events — but the
+  events-with-no-visible-participants drop should now be redundant for the
+  query results. Keep the JS guard in place as belt-and-braces; add a
+  comment that the SQL clause is what makes `totalEvents`/`take` projection-
+  correct.
+- **Fallback if the rule is not expressible in a `where`** (e.g.
+  `isPlayerVisible` consults something beyond entity columns): do not window
+  for players at all — players get the full (projected) list, no truncation
+  UI, exactly today's behavior — and only DM/co-DM roles get
+  `limit`/`totalEvents`. Zero leak, and player-visible event sets are the
+  smaller ones anyway. State in the code which branch was taken and why.
 
 **Verify**: `npx vitest run tests/unit/events.test.ts` (confirm filename) →
 existing tests updated for the new shape, all pass.
@@ -209,8 +231,14 @@ In `timeline/page.tsx`:
   newest-first slice.
 - One interaction to handle: the `?event=` deep link may point at an event
   outside the current window. Detect it server-side (the id not present in
-  `events`) and, in that case, fall back to `limit = totalEvents` (load all)
+  `events`) and, in that case, fall back to loading all (omit `limit`)
   rather than breaking the deep link. Add a code comment stating this rule.
+- Role note: with Step 3's SQL-projection clause, `totalEvents` for a player
+  counts only player-visible events, so the "(N total)" label is safe for
+  every role. If Step 3 had to take its fallback branch instead, the page
+  must not pass `limit` (and must not render the truncation link) for
+  players — gate on the same role signal the page already computes for
+  `canEdit`.
 
 **Verify**: `npm run build` → exit 0; `npx vitest run tests/unit/campaign-timeline-page.test.tsx tests/unit/campaign-timeline.test.tsx` → pass after prop updates.
 
@@ -232,6 +260,13 @@ few entities, so paging must not regress small campaigns).
   - `listCampaignTimeline` with `limit: 2` on 3 events → newest 2 returned,
     `truncated === true`, `totalEvents === 3`; without `limit` → all, not
     truncated. Player-role variant still hides secret events.
+  - **Player-projection count** (the leak regression test): campaign with 3
+    events — one normal, one `secret`, one whose only participant is a
+    `DM_ONLY` entity. As a PLAYER with `limit: 10`: `events.length === 1`
+    and `totalEvents === 1` — the count must never include the secret or
+    hidden-participant events. As the DM: `totalEvents === 3`. Also assert
+    the player's `take` window fills with visible events (e.g. 3 visible +
+    2 hidden + `limit: 3` → 3 events returned, not 1–2).
 - **Page/component (jsdom, services mocked)** — extend
   `tests/unit/campaign-timeline-page.test.tsx` and the World Browser page
   test (find it: `ls tests/unit | grep -i "page"` → the campaign page test):
@@ -246,6 +281,8 @@ few entities, so paging must not regress small campaigns).
       filters intact
 - [ ] Timeline at 201+ events renders "Show older"; `?event=` deep links to
       old events still resolve
+- [ ] Player-projection count test (Test plan) passes: `totalEvents` for a
+      PLAYER never includes secret or hidden-participant events
 - [ ] `npm run test:coverage`, `npm run lint`, `npm run typecheck`,
       `npm run build`, `npm run test:e2e` all exit 0
 - [ ] `git status` shows no modified files outside the in-scope list
@@ -275,7 +312,9 @@ Stop and report back (do not improvise) if:
   1,660-entity campaigns as a normal flow.
 - Reviewer focus: filter links must not leak a stale `page` param; the
   timeline deep-link fallback (load-all) is the deliberate trade-off, check
-  it's commented.
+  it's commented; and the timeline `count` must share the *player-projected*
+  `where` (invariant #5) — a count built from the pre-projection filters
+  reveals hidden-event existence to players.
 - "Order from causality" (`orderEventsFromCausality`) operates server-side on
   whole floors regardless of the display window — unaffected, but a reviewer
   should confirm no UI handler passes the windowed list into it.
