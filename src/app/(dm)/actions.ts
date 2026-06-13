@@ -62,6 +62,7 @@ import {
   inferRelationshipsForEntity,
   scaffoldStubEntities,
 } from "@/server/services/generation";
+import { enqueueJob } from "@/server/services/jobs";
 import {
   approveChangeSet,
   approveChangeSetRun,
@@ -534,6 +535,38 @@ export async function fleshOutEntitiesAction(
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
     logActionError("Flesh out entities action failed", error);
     return { error: "Generation failed. Please try again.", timestamp: Date.now() };
+  }
+}
+
+// Enqueue a bulk flesh-out run to run off the request path in the worker
+// (scripts/worker.ts). Uses the same FormData shape as fleshOutEntitiesAction
+// so both can share the same form in the UI.
+export async function enqueueBulkFleshAction(
+  campaignId: string,
+  _prev: BulkGenerateActionState,
+  formData: FormData,
+): Promise<BulkGenerateActionState> {
+  void _prev;
+  const user = await requireUser();
+  const entityIds = formData.getAll("entityIds").map(String);
+  if (entityIds.length === 0) {
+    return { error: "No entities selected.", timestamp: Date.now() };
+  }
+  if (entityIds.length > 20) {
+    return { error: "Select at most 20 entities.", timestamp: Date.now() };
+  }
+  try {
+    await enqueueJob(user.id, campaignId, "BULK_FLESH", { entityIds });
+    revalidatePath(`/campaigns/${campaignId}`);
+    return {
+      success:
+        "Background run queued — proposals will appear in the Review Queue when it finishes.",
+      timestamp: Date.now(),
+    };
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    logActionError("Enqueue bulk flesh action failed", error);
+    return { error: "Failed to queue job. Please try again.", timestamp: Date.now() };
   }
 }
 
