@@ -16,7 +16,8 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
     "db:generate": "prisma generate",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "worker": "tsx scripts/worker.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.0",
