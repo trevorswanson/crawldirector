@@ -1831,4 +1831,43 @@ describe("listEntitiesForUser — pagination", () => {
     expect(result.entities).toHaveLength(0);
     expect(result.total).toBe(0);
   });
+
+  it("id tiebreaker produces stable pagination when name and updatedAt are tied", async () => {
+    const owner = await makeUser("paging-tiebreak@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    // Create 4 entities with distinct ids.
+    const created = await Promise.all(
+      [1, 2, 3, 4].map((i) =>
+        createGenericEntity(owner.id, campaign.id, {
+          type: "NPC",
+          name: `NPC ${i}`,
+          summary: "",
+          description: "",
+          visibility: "DM_ONLY",
+          tags: [],
+        }),
+      ),
+    );
+    const campaignId = campaign.id;
+    const tiedDate = new Date("2024-01-01T00:00:00.000Z");
+
+    // Force a total tie: same name and same updatedAt for all 4 entities.
+    await prisma.entity.updateMany({
+      where: { campaignId },
+      data: { name: "Same", updatedAt: tiedDate },
+    });
+
+    // Page through with pageSize=1 and collect ids from each page.
+    const ids: string[] = [];
+    for (let p = 1; p <= 4; p++) {
+      const result = await listEntitiesForUser(owner.id, campaignId, {}, { page: p, pageSize: 1 });
+      expect(result.entities).toHaveLength(1);
+      ids.push(result.entities[0].id);
+    }
+
+    // All 4 ids must be distinct (no duplicates, none missing).
+    expect(new Set(ids).size).toBe(4);
+    expect(new Set(ids)).toEqual(new Set(created.map((e) => e.id)));
+  });
 });

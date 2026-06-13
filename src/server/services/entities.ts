@@ -383,7 +383,7 @@ export async function listEntitiesForUser(
     const [entities, total] = await Promise.all([
       prisma.entity.findMany({
         where,
-        orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
+        orderBy: [{ updatedAt: "desc" }, { name: "asc" }, { id: "asc" }],
         select: entityListSelect,
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -395,7 +395,7 @@ export async function listEntitiesForUser(
 
   const entities = await prisma.entity.findMany({
     where,
-    orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
+    orderBy: [{ updatedAt: "desc" }, { name: "asc" }, { id: "asc" }],
     select: entityListSelect,
   });
 

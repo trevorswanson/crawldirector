@@ -12,6 +12,7 @@ const {
   resolveFloorEntities,
   listAiKeys,
   notFound,
+  redirect,
 } = vi.hoisted(() => ({
   requireUser: vi.fn(),
   getCampaignForUser: vi.fn(),
@@ -23,6 +24,9 @@ const {
   listAiKeys: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
+  }),
+  redirect: vi.fn((url: string) => {
+    throw new Error(`NEXT_REDIRECT:${url}`);
   }),
 }));
 
@@ -48,6 +52,7 @@ vi.mock("@/components/entities/bulk-flesh-panel", () => ({
 }));
 vi.mock("next/navigation", () => ({
   notFound,
+  redirect,
   useRouter: () => ({
     push: vi.fn(),
     replace: vi.fn(),
@@ -492,6 +497,66 @@ describe("CampaignPage", () => {
 
     expect(screen.queryByText(/Previous/)).toBeNull();
     expect(screen.queryByRole("link", { name: /Next/ })).toBeNull();
+  });
+
+  it("redirects to the last valid page when the requested page is out of range", async () => {
+    getCampaignForUser.mockResolvedValue({
+      id: "cp5",
+      name: "Pager World",
+      summary: null,
+      createdAt: new Date(),
+      members: [{ role: "OWNER" }],
+      _count: { members: 1, entities: 61 },
+    });
+    // 61 results → totalPages=2, but ?page=3 is requested.
+    listEntitiesForUser.mockResolvedValue({
+      role: "OWNER",
+      entities: [],
+      total: 61,
+      page: 3,
+      pageSize: 60,
+    });
+
+    await expect(
+      CampaignPage({
+        params: Promise.resolve({ id: "cp5" }),
+        searchParams: Promise.resolve({ page: "3" }),
+      }),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+
+    expect(redirect).toHaveBeenCalledOnce();
+    const redirectUrl: string = redirect.mock.calls[0][0];
+    const searchParams = new URLSearchParams(redirectUrl.split("?")[1] ?? "");
+    expect(searchParams.get("page")).toBe("2");
+  });
+
+  it("does not redirect when filteredTotal is 0 (renders empty state instead)", async () => {
+    getCampaignForUser.mockResolvedValue({
+      id: "cp6",
+      name: "Pager World",
+      summary: null,
+      createdAt: new Date(),
+      members: [{ role: "OWNER" }],
+      _count: { members: 1, entities: 0 },
+    });
+    listEntitiesForUser.mockResolvedValue({
+      role: "OWNER",
+      entities: [],
+      total: 0,
+      page: 1,
+      pageSize: 60,
+    });
+
+    // Should render without throwing (empty state, not a redirect).
+    render(
+      await CampaignPage({
+        params: Promise.resolve({ id: "cp6" }),
+        searchParams: Promise.resolve({ page: "2" }),
+      }),
+    );
+
+    expect(redirect).not.toHaveBeenCalled();
+    expect(screen.getByText(/No entities match/)).toBeDefined();
   });
 
   it("filter links exclude page param so they reset to page 1", async () => {

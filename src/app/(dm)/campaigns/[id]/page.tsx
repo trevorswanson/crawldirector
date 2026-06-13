@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ChevronLeft, ChevronRight, Lock, Search, Sparkles } from "lucide-react";
 import type { EntityType, ChangeSource } from "@/generated/prisma/client";
 
@@ -165,6 +165,12 @@ export default async function CampaignPage({
     const qs = next.toString();
     return qs ? `/campaigns/${id}?${qs}` : `/campaigns/${id}`;
   };
+
+  // If the requested page is beyond the last page (and results exist), redirect
+  // to the last valid page so the grid never renders empty with a nonsense range label.
+  if (filteredTotal > 0 && activePage > totalPages) {
+    redirect(hrefWithPage(totalPages));
+  }
 
   return (
     <div className="grid h-full grid-cols-1 lg:grid-cols-[248px_minmax(0,1fr)]">
