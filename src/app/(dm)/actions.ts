@@ -74,6 +74,7 @@ import {
   supersedeChangeSet,
   type ReviewPatch,
 } from "@/server/services/review";
+import { logActionError } from "@/server/log";
 
 export type CampaignActionState = { error?: string } | undefined;
 export type EntityActionState =
@@ -99,7 +100,7 @@ export async function createCampaignAction(
     const campaign = await createCampaign(user.id, parsed.data);
     campaignId = campaign.id;
   } catch (err) {
-    console.error("Campaign creation failed:", err);
+    logActionError("Campaign creation failed", err);
     return { error: "Could not create the campaign. Please try again." };
   }
 
@@ -142,7 +143,7 @@ export async function createGenericEntityAction(
     const entity = await createGenericEntity(user.id, campaignId, parsed.data);
     entityId = entity.id;
   } catch (error) {
-    console.error("Create generic entity action failed:", error);
+    logActionError("Create generic entity action failed", error);
     return { error: "Could not create the entity. Please try again." };
   }
 
@@ -231,7 +232,7 @@ export async function quickCreateEntityAction(
       entityId = entity.id;
     }
   } catch (error) {
-    console.error("Quick-create entity failed:", error);
+    logActionError("Quick-create entity failed", error);
     if (error instanceof ServiceError) return { error: error.message };
     return { error: "Could not create the entity. Please try again." };
   }
@@ -419,7 +420,7 @@ export async function fleshOutEntityAction(
     };
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
-    console.error("Flesh out entity action failed:", error);
+    logActionError("Flesh out entity action failed", error);
     return { error: "Generation failed. Please try again.", timestamp: Date.now() };
   }
 }
@@ -445,7 +446,7 @@ export async function inferRelationshipsForEntityAction(
     };
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
-    console.error("Infer relationships action failed:", error);
+    logActionError("Infer relationships action failed", error);
     return { error: "Generation failed. Please try again.", timestamp: Date.now() };
   }
 }
@@ -474,7 +475,7 @@ export async function scaffoldStubsAction(
     };
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
-    console.error("Scaffold stubs action failed:", error);
+    logActionError("Scaffold stubs action failed", error);
     return { error: "Generation failed. Please try again.", timestamp: Date.now() };
   }
 }
@@ -531,7 +532,7 @@ export async function fleshOutEntitiesAction(
     };
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
-    console.error("Flesh out entities action failed:", error);
+    logActionError("Flesh out entities action failed", error);
     return { error: "Generation failed. Please try again.", timestamp: Date.now() };
   }
 }

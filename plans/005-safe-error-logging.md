@@ -55,10 +55,10 @@ and uses it at every action catch site.
     inside an `if (!(error instanceof ServiceError)))` guard)
   - (dm)/actions.ts: `:102` (campaign creation), `:145` (create entity),
     `:234` (quick-create), `:422` (flesh out), `:448` (infer relationships),
-    `:477` (scaffold stubs)
-  The highest-risk sites are the four settings actions and the three
-  generation actions — those catch errors from code paths that talk to
-  user-configured AI endpoints.
+    `:477` (scaffold stubs), `:534` (flesh out entities — bulk)
+  The highest-risk sites are the four settings actions and the four
+  generation actions (`:422`, `:448`, `:477`, `:534`) — those catch errors
+  from code paths that talk to user-configured AI endpoints.
 
 - The existing safe-text precedent, `src/server/ai/index.ts:80-94`
   (`describeProviderError`): surfaces **only** a numeric HTTP status, never
@@ -146,7 +146,7 @@ export function logActionError(context: string, error: unknown): void {
 
 **Verify**: `npm run typecheck` → exit 0.
 
-### Step 2: Replace the ten call sites
+### Step 2: Replace the eleven call sites
 
 At each site from "Current state", replace
 `console.error("<label>:", error)` with
