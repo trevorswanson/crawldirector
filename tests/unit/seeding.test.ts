@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Role } from "@/generated/prisma/client";
+import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
 import fs from "fs";
@@ -227,6 +228,8 @@ describe("seeding service integration", () => {
     });
 
     await expect(seedCampaignFromLore(player.id, campaign.id, { limit: 5 }))
+      .rejects.toThrow(ServiceError);
+    await expect(seedCampaignFromLore(player.id, campaign.id, { limit: 5 }))
       .rejects.toThrow("You do not have permission to seed this campaign.");
   });
 
@@ -243,5 +246,19 @@ describe("seeding service integration", () => {
 
     const count = await prisma.entity.count({ where: { campaignId: campaign.id } });
     expect(count).toBe(3);
+  });
+
+  it("refuses to seed a non-empty campaign without clearExisting", async () => {
+    const owner = await makeUser("owner@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Pre-seeded Campaign" });
+
+    // Seed 5 entries first
+    await seedCampaignFromLore(owner.id, campaign.id, { limit: 5 });
+
+    // Attempt to seed again without clearExisting — must throw ServiceError
+    await expect(seedCampaignFromLore(owner.id, campaign.id, { limit: 5 }))
+      .rejects.toThrow(ServiceError);
+    await expect(seedCampaignFromLore(owner.id, campaign.id, { limit: 5 }))
+      .rejects.toThrow("This campaign already has entities — lore seeding only runs on an empty campaign.");
   });
 });

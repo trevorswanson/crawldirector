@@ -45,6 +45,12 @@ export function CreateCampaignForm() {
           placeholder="A floor-by-floor run through the World Dungeon."
         />
       </div>
+      <div className="flex flex-col gap-2">
+        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+          <input type="checkbox" id="seedLore" name="seedLore" />
+          Start with official DCC lore (~1,660 entities, imports in the background)
+        </label>
+      </div>
       {state?.error && (
         <p role="alert" className="text-sm text-[var(--destructive)]">
           {state.error}

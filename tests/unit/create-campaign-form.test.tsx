@@ -38,6 +38,15 @@ describe("CreateCampaignForm", () => {
     expect(screen.getByRole("button", { name: "Create crawl" })).toBeDefined();
   });
 
+  it("renders the seedLore checkbox unchecked with the correct name", () => {
+    render(<CreateCampaignForm />);
+    const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
+    expect(checkbox.name).toBe("seedLore");
+    expect(checkbox.checked).toBe(false);
+    // No explicit value attribute; browser defaults to "on" when checked — correct per spec
+    expect(checkbox.hasAttribute("value")).toBe(false);
+  });
+
   it("shows the error alert from the action state", () => {
     useActionState.mockReturnValue([{ error: "Nope" }, noopAction]);
     render(<CreateCampaignForm />);

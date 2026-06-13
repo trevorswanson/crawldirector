@@ -105,6 +105,15 @@ export async function createCampaignAction(
     return { error: "Could not create the campaign. Please try again." };
   }
 
+  if (formData.get("seedLore") === "on") {
+    try {
+      await enqueueJob(user.id, campaignId, "LORE_SEED", {});
+    } catch (err) {
+      logActionError("LORE_SEED enqueue failed", err);
+      // Enqueue failure must NOT fail campaign creation — continue to redirect.
+    }
+  }
+
   redirect(`/campaigns/${campaignId}`);
 }
 

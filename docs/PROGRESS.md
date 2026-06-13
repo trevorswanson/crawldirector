@@ -110,6 +110,15 @@ keyword-scanning every doc.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
 
+### Done — opt-in DCC lore seed at campaign creation (2026-06-13)
+
+- [x] Added `LORE_SEED` to `enum JobKind` (additive `ALTER TYPE ... ADD VALUE` migration).
+- [x] `seedCampaignFromLore` now throws `ServiceError` (was plain `Error`) for the membership and missing-file cases; added an idempotency guard that rejects re-seeding a non-empty campaign unless `clearExisting` is set.
+- [x] `jobHandlers.LORE_SEED` delegates to `seedCampaignFromLore(job.createdById, job.campaignId)`; `clearExisting` is not reachable from the handler.
+- [x] `CreateCampaignForm` has an unchecked-by-default native checkbox (`name="seedLore"`, no `value` attribute); submits `"on"` when checked.
+- [x] `createCampaignAction`: after campaign creation, if `seedLore === "on"` enqueues a `LORE_SEED` job in its own try/catch — enqueue failure never blocks the redirect.
+- [x] Tests: seeding ServiceError assertions updated; non-empty campaign guard test added; LORE_SEED handler delegation test (mocked seeding module); dm-actions tests for seedLore=on/off/enqueue-throw; form checkbox test.
+
 ## M4 — Async Job table + worker ✅ (2026-06-13)
 
 **Goal:** the last open M4 item from [`04-ai-integration.md`](./04-ai-integration.md)
