@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireUser } from "@/server/auth/session";
+import { logActionError } from "@/server/log";
 import { ServiceError } from "@/lib/errors";
 import { setAiKeySchema, setSpendCapSchema } from "@/lib/validation";
 import { deleteAiKey, setAiKey } from "@/server/services/ai-keys";
@@ -44,7 +45,7 @@ export async function setAiKeyAction(
     return { success: `Saved ${key.label}${hint}.`, timestamp: Date.now() };
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
-    console.error("Set AI key action failed:", error);
+    logActionError("Set AI key action failed", error);
     return { error: "Could not save the key. Please try again.", timestamp: Date.now() };
   }
 }
@@ -67,7 +68,7 @@ export async function testAiConnectionAction(
     };
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
-    console.error("Test AI connection action failed:", error);
+    logActionError("Test AI connection action failed", error);
     return { error: "Could not reach the provider. Please try again.", timestamp: Date.now() };
   }
 }
@@ -100,7 +101,7 @@ export async function setSpendCapAction(
     };
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
-    console.error("Set spend cap action failed:", error);
+    logActionError("Set spend cap action failed", error);
     return { error: "Could not save the spend cap. Please try again.", timestamp: Date.now() };
   }
 }
@@ -115,7 +116,7 @@ export async function deleteAiKeyAction(campaignId: string, providerId: string):
     await deleteAiKey(user.id, campaignId, providerId);
   } catch (error) {
     if (!(error instanceof ServiceError)) {
-      console.error("Delete AI key action failed:", error);
+      logActionError("Delete AI key action failed", error);
     }
   }
   revalidatePath(`/campaigns/${campaignId}/settings`);
