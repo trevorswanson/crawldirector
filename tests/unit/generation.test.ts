@@ -711,6 +711,82 @@ describe("generation — usage tracking & spend caps", () => {
   });
 });
 
+describe("generation — concurrency / spend-cap serialization", () => {
+  it(
+    "cap race regression: exactly one of two concurrent fleshOutEntity calls succeeds when cap fits only one run",
+    async () => {
+      const { dmId, campaignId, entityId } = await seed();
+      const second = await makeStub(dmId, campaignId, "Donut");
+
+      // Cap of $50: a single claude-opus-4-8 run at 1M+1M tokens costs $90,
+      // so the first run (spending $0→$90) exceeds the cap on subsequent checks
+      // but passes an initial $0 check. With the lock, the second run sees $90
+      // already spent and is blocked. Without the lock, both see $0 and both pass.
+      await setCampaignSpendCap(dmId, campaignId, 50);
+
+      // Add ~50ms artificial delay to the provider so both calls are in-flight
+      // long enough for the race window to matter.
+      const slowProvider = fakeProvider(
+        { summary: "A grizzled guide.", description: "Long lore.", tags: ["guide"] },
+      );
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (slowProvider.generateStructured as any).mockImplementation(async () => {
+        await new Promise((r) => setTimeout(r, 50));
+        return {
+          data: { summary: "A grizzled guide.", description: "Long lore.", tags: ["guide"] },
+          usage: SAMPLE_USAGE,
+          model: "claude-opus-4-8",
+        };
+      });
+      resolveCampaignProvider.mockResolvedValue(slowProvider);
+
+      const results = await Promise.allSettled([
+        fleshOutEntity(dmId, campaignId, entityId),
+        fleshOutEntity(dmId, campaignId, second.id),
+      ]);
+
+      const fulfilled = results.filter((r) => r.status === "fulfilled");
+      const rejected = results.filter((r) => r.status === "rejected");
+
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+
+      const err = (rejected[0] as PromiseRejectedResult).reason;
+      expect(err).toBeInstanceOf(ServiceError);
+      expect(err.message).toMatch(/spend cap/i);
+
+      // Only one usage row should exist — the second run never called the provider.
+      const usageRows = await prisma.aiUsage.findMany({ where: { campaignId } });
+      expect(usageRows).toHaveLength(1);
+    },
+    10_000,
+  );
+
+  it(
+    "bulk + single interleave smoke: fleshOutEntities(2) concurrent with fleshOutEntity completes without deadlock",
+    async () => {
+      const { dmId, campaignId, entityId } = await seed();
+      const second = await makeStub(dmId, campaignId, "Donut");
+      const third = await makeStub(dmId, campaignId, "Carl");
+
+      resolveCampaignProvider.mockResolvedValue(
+        fakeProvider({ summary: "Richer.", description: "Lore.", tags: ["ally"] }),
+      );
+
+      // Run a bulk batch of 2 AND a single in parallel — the single must not
+      // deadlock waiting on the bulk wrapper (which doesn't hold the lock).
+      const [bulkResult, singleResult] = await Promise.all([
+        fleshOutEntities(dmId, campaignId, [entityId, second.id]),
+        fleshOutEntity(dmId, campaignId, third.id),
+      ]);
+
+      expect(bulkResult.proposedCount).toBe(2);
+      expect(singleResult.changeSetId).toBeTruthy();
+    },
+    10_000,
+  );
+});
+
 describe("fleshOutEntities (bulk)", () => {
   it("files one PENDING proposal per selected entity and reports each as proposed", async () => {
     const { dmId, campaignId, entityId } = await seed();
