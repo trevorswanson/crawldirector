@@ -18,7 +18,6 @@ import { ServiceError } from "@/lib/errors";
 const POLL_INTERVAL_MS = 2000;
 
 let shuttingDown = false;
-let inFlight: string | null = null;
 
 async function runLoop() {
   console.log("[worker] started, polling for jobs...");
@@ -32,7 +31,8 @@ async function runLoop() {
       continue;
     }
 
-    inFlight = job.id;
+    // shuttingDown may have been set while we awaited claimNextJob; finish
+    // the in-flight job before the loop condition exits.
     console.log(`[worker] claimed job ${job.id} (${job.kind})`);
 
     try {
@@ -45,8 +45,6 @@ async function runLoop() {
         err instanceof ServiceError ? err.message : "Job failed.";
       await failJob(job.id, safeMessage);
       console.log(`[worker] job ${job.id} FAILED: ${safeMessage}`);
-    } finally {
-      inFlight = null;
     }
   }
 

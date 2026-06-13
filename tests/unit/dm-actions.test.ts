@@ -42,6 +42,7 @@ const {
   fleshOutEntities,
   inferRelationshipsForEntity,
   scaffoldStubEntities,
+  enqueueJob,
   signOut,
   redirect,
   revalidatePath,
@@ -87,6 +88,7 @@ const {
   fleshOutEntities: vi.fn(),
   inferRelationshipsForEntity: vi.fn(),
   scaffoldStubEntities: vi.fn(),
+  enqueueJob: vi.fn(),
   signOut: vi.fn(),
   redirect: vi.fn(() => {
     throw new Error("NEXT_REDIRECT");
@@ -149,6 +151,7 @@ vi.mock("@/server/services/generation", () => ({
   inferRelationshipsForEntity,
   scaffoldStubEntities,
 }));
+vi.mock("@/server/services/jobs", () => ({ enqueueJob }));
 vi.mock("@/server/auth", () => ({ signOut }));
 vi.mock("next/navigation", () => ({ redirect }));
 vi.mock("next/cache", () => ({ revalidatePath }));
@@ -206,6 +209,7 @@ import {
   revokeKnowledgeAction,
   fleshOutEntityAction,
   fleshOutEntitiesAction,
+  enqueueBulkFleshAction,
   inferRelationshipsForEntityAction,
   scaffoldStubsAction,
 } from "@/app/(dm)/actions";
@@ -2180,6 +2184,50 @@ describe("fleshOutEntitiesAction", () => {
     fleshOutEntities.mockRejectedValueOnce(new Error("boom"));
     expect((await fleshOutEntitiesAction("c1", undefined, idsForm(["e1"])))?.error).toBe(
       "Generation failed. Please try again.",
+    );
+  });
+});
+
+describe("enqueueBulkFleshAction", () => {
+  function idsForm(ids: string[]): FormData {
+    const fd = new FormData();
+    for (const id of ids) fd.append("entityIds", id);
+    return fd;
+  }
+
+  it("calls enqueueJob with BULK_FLESH kind and the parsed entityIds, returns queued message", async () => {
+    enqueueJob.mockResolvedValue({ id: "j1" });
+
+    const result = await enqueueBulkFleshAction("c1", undefined, idsForm(["e1", "e2"]));
+
+    expect(enqueueJob).toHaveBeenCalledWith("u1", "c1", "BULK_FLESH", { entityIds: ["e1", "e2"] });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1");
+    expect(result?.success).toContain("Background run queued");
+    expect(result?.error).toBeUndefined();
+  });
+
+  it("returns an error when entityIds is empty", async () => {
+    const result = await enqueueBulkFleshAction("c1", undefined, idsForm([]));
+    expect(enqueueJob).not.toHaveBeenCalled();
+    expect(result?.error).toBe("No entities selected.");
+  });
+
+  it("returns an error when entityIds exceeds 20", async () => {
+    const ids = Array.from({ length: 21 }, (_, i) => `e${i}`);
+    const result = await enqueueBulkFleshAction("c1", undefined, idsForm(ids));
+    expect(enqueueJob).not.toHaveBeenCalled();
+    expect(result?.error).toBe("Select at most 20 entities.");
+  });
+
+  it("surfaces a ServiceError message and a generic fallback for unexpected errors", async () => {
+    enqueueJob.mockRejectedValueOnce(new ServiceError("You do not have permission."));
+    expect((await enqueueBulkFleshAction("c1", undefined, idsForm(["e1"])))?.error).toBe(
+      "You do not have permission.",
+    );
+
+    enqueueJob.mockRejectedValueOnce(new Error("db down"));
+    expect((await enqueueBulkFleshAction("c1", undefined, idsForm(["e1"])))?.error).toBe(
+      "Failed to queue job. Please try again.",
     );
   });
 });
