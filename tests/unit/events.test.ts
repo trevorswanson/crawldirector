@@ -285,7 +285,7 @@ describe("event service", () => {
       ],
     });
 
-    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    const { events: timeline } = await listCampaignTimeline(owner.id, campaign.id);
 
     expect(timeline.map((event) => event.title)).toEqual([
       "Later boss fight",
@@ -329,7 +329,7 @@ describe("event service", () => {
       participants: [{ entityId: publicEntity.id, role: "ACTOR" }],
     });
 
-    const timeline = await listCampaignTimeline(player.id, campaign.id);
+    const { events: timeline } = await listCampaignTimeline(player.id, campaign.id);
 
     expect(timeline).toHaveLength(1);
     expect(timeline[0].title).toBe("Public scene");
@@ -372,14 +372,14 @@ describe("event service", () => {
       participants: [{ entityId: publicEntity.id, role: "ACTOR" }],
     });
 
-    const playerTimeline = await listCampaignTimeline(player.id, campaign.id);
+    const { events: playerTimeline } = await listCampaignTimeline(player.id, campaign.id);
     const playerScene = playerTimeline.find((e) => e.title === "Public scene");
     // The hidden title must not appear; phrasing falls back to a neutral anchor.
     expect(playerScene?.time.phrase).not.toContain("Royal Heir");
     expect(playerScene?.time.phrase).toBe("1 day after another event");
 
     // The DM still sees the real anchor title.
-    const dmTimeline = await listCampaignTimeline(owner.id, campaign.id);
+    const { events: dmTimeline } = await listCampaignTimeline(owner.id, campaign.id);
     const dmScene = dmTimeline.find((e) => e.title === "Public scene");
     expect(dmScene?.time.phrase).toBe("1 day after The Royal Heir Is Murdered");
   });
@@ -790,7 +790,7 @@ describe("event service", () => {
       [],
     );
 
-    const campaignTimelineAsPlayer = await listCampaignTimeline(player.id, campaign.id);
+    const { events: campaignTimelineAsPlayer } = await listCampaignTimeline(player.id, campaign.id);
     expect(campaignTimelineAsPlayer.find((event) => event.id === publicEvent.id)?.causedBy).toEqual(
       [],
     );
@@ -925,7 +925,7 @@ describe("event service", () => {
       effectId: effect.id,
     });
 
-    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    const { events: timeline } = await listCampaignTimeline(owner.id, campaign.id);
     const causeRow = timeline.find((event) => event.id === cause.id);
     const effectRow = timeline.find((event) => event.id === effect.id);
 
@@ -1543,7 +1543,7 @@ describe("event order (orderKey + rank)", () => {
     // Newer event ranks higher, so it sorts first within the floor.
     expect(rankById.get(second.id)! > rankById.get(first.id)!).toBe(true);
 
-    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    const { events: timeline } = await listCampaignTimeline(owner.id, campaign.id);
     expect(timeline.map((event) => event.title)).toEqual(["Second", "First"]);
   });
 
@@ -1572,7 +1572,7 @@ describe("event order (orderKey + rank)", () => {
     });
 
     // Newest first → displayed order is C, B, A.
-    let timeline = await listCampaignTimeline(owner.id, campaign.id);
+    let { events: timeline } = await listCampaignTimeline(owner.id, campaign.id);
     expect(timeline.map((event) => event.title)).toEqual(["C", "B", "A"]);
 
     // Move C to the bottom: drop it below A (aboveId = A, belowId = null).
@@ -1582,7 +1582,7 @@ describe("event order (orderKey + rank)", () => {
     });
     expect(result.participantIds).toContain(carl.id);
 
-    timeline = await listCampaignTimeline(owner.id, campaign.id);
+    ({ events: timeline } = await listCampaignTimeline(owner.id, campaign.id));
     expect(timeline.map((event) => event.title)).toEqual(["B", "A", "C"]);
   });
 
@@ -1740,7 +1740,7 @@ describe("order from causality (ADR 0004 slice 3)", () => {
     await linkEventCause(owner.id, campaign.id, { causeId: c.id, effectId: a.id });
 
     // Before: newest-first display is C, A.
-    let timeline = await listCampaignTimeline(owner.id, campaign.id);
+    let { events: timeline } = await listCampaignTimeline(owner.id, campaign.id);
     expect(timeline.map((event) => event.title)).toEqual(["C", "A"]);
 
     const result = await orderEventsFromCausality(owner.id, campaign.id);
@@ -1748,7 +1748,7 @@ describe("order from causality (ADR 0004 slice 3)", () => {
     expect(result.affectedEntityIds).toContain(carl.id);
 
     // After: C precedes A in fiction, so the later-first display is A, C.
-    timeline = await listCampaignTimeline(owner.id, campaign.id);
+    ({ events: timeline } = await listCampaignTimeline(owner.id, campaign.id));
     expect(timeline.map((event) => event.title)).toEqual(["A", "C"]);
 
     // The reorder is audited as a mechanical causality pass.
@@ -1815,7 +1815,7 @@ describe("order from causality (ADR 0004 slice 3)", () => {
     const after = await prisma.event.findUnique({ where: { id: pinned.id } });
     expect(after?.rank).toBe(before?.rank); // pinned rank untouched
 
-    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    const { events: timeline } = await listCampaignTimeline(owner.id, campaign.id);
     // Movable now precedes Pinned in fiction → later-first display is Pinned, Movable.
     expect(timeline.map((event) => event.title)).toEqual(["Pinned", "Movable"]);
   });
@@ -1923,7 +1923,7 @@ describe("typed timeRef (ADR 0004 slice 2)", () => {
       });
     }
 
-    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    const { events: timeline } = await listCampaignTimeline(owner.id, campaign.id);
     expect(timeline.map((event) => event.title)).toEqual(["Day 5", "Day 3", "Day 1"]);
   });
 
@@ -1952,7 +1952,7 @@ describe("typed timeRef (ADR 0004 slice 2)", () => {
     });
 
     // 2h-before is closer to collapse (later in fiction) so it sorts on top.
-    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    const { events: timeline } = await listCampaignTimeline(owner.id, campaign.id);
     expect(timeline.map((event) => event.title)).toEqual(["2h before", "10h before"]);
   });
 
@@ -1990,7 +1990,7 @@ describe("typed timeRef (ADR 0004 slice 2)", () => {
       secret: false,
     });
 
-    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    const { events: timeline } = await listCampaignTimeline(owner.id, campaign.id);
     expect(timeline.map((event) => event.title)).toEqual(["Early", "Mid"]);
   });
 
@@ -2047,7 +2047,7 @@ describe("typed timeRef (ADR 0004 slice 2)", () => {
       participants: [{ entityId: carl.id, role: "ACTOR" }],
     });
 
-    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    const { events: timeline } = await listCampaignTimeline(owner.id, campaign.id);
     expect(timeline.map((event) => event.title)).toEqual([
       "Event C",
       "Event B",
@@ -2104,7 +2104,7 @@ describe("typed timeRef (ADR 0004 slice 2)", () => {
     });
 
     // Initially: Marker (71), Dependent (66), Anchor (61).
-    let timeline = await listCampaignTimeline(owner.id, campaign.id);
+    let { events: timeline } = await listCampaignTimeline(owner.id, campaign.id);
     expect(timeline.map((event) => event.title)).toEqual([
       "Marker",
       "Dependent",
@@ -2122,7 +2122,7 @@ describe("typed timeRef (ADR 0004 slice 2)", () => {
       secret: false,
     });
 
-    timeline = await listCampaignTimeline(owner.id, campaign.id);
+    ({ events: timeline } = await listCampaignTimeline(owner.id, campaign.id));
     expect(timeline.map((event) => event.title)).toEqual([
       "Dependent",
       "Anchor",
@@ -2221,7 +2221,7 @@ describe("typed timeRef (ADR 0004 slice 2)", () => {
 
     // Initially: floor 9 [Marker 130, Low 100, After 61], floor 8 [Collapse 82,
     // Start 61]. Timeline is floor-desc, then later-in-fiction first.
-    let timeline = await listCampaignTimeline(owner.id, campaign.id);
+    let { events: timeline } = await listCampaignTimeline(owner.id, campaign.id);
     expect(timeline.map((event) => event.title)).toEqual([
       "F9 Marker",
       "F9 Low",
@@ -2245,7 +2245,7 @@ describe("typed timeRef (ADR 0004 slice 2)", () => {
       ],
     });
 
-    timeline = await listCampaignTimeline(owner.id, campaign.id);
+    ({ events: timeline } = await listCampaignTimeline(owner.id, campaign.id));
     expect(timeline.map((event) => event.title)).toEqual([
       "F9 Marker",
       "F9 After",
@@ -2303,7 +2303,7 @@ describe("typed timeRef (ADR 0004 slice 2)", () => {
       participants: [{ entityId: carl.id, role: "ACTOR" }],
     });
 
-    let timeline = await listCampaignTimeline(owner.id, campaign.id);
+    let { events: timeline } = await listCampaignTimeline(owner.id, campaign.id);
     expect(timeline.map((event) => event.title)).toEqual([
       "Early collapse",
       "Late start",
@@ -2322,7 +2322,7 @@ describe("typed timeRef (ADR 0004 slice 2)", () => {
       ],
     });
 
-    timeline = await listCampaignTimeline(owner.id, campaign.id);
+    ({ events: timeline } = await listCampaignTimeline(owner.id, campaign.id));
     expect(timeline.map((event) => event.title)).toEqual([
       "Late start",
       "Early collapse",
@@ -2455,7 +2455,7 @@ describe("campaign floor metadata", () => {
     expect(floor1).toMatchObject({ logged: false, reached: true });
 
     // The live event is the newest event on the current floor.
-    const timeline = await listCampaignTimeline(owner.id, campaign.id);
+    const { events: timeline } = await listCampaignTimeline(owner.id, campaign.id);
     const topFloor9 = timeline.find((event) => event.orderKey === 9);
     expect(meta.liveEventId).toBe(topFloor9?.id);
 
@@ -2753,5 +2753,95 @@ describe("resolveFloorEntity (ADR 0008 §1)", () => {
     await makeFloor(owner.id, campaign.id, "Larracos", 9);
 
     expect(await resolveFloorEntity(stranger.id, campaign.id, 9)).toBeNull();
+  });
+});
+
+describe("listCampaignTimeline — limit / truncation", () => {
+  async function makePublicEvent(
+    userId: string,
+    campaignId: string,
+    entityId: string,
+    title: string,
+  ) {
+    return createEvent(userId, campaignId, {
+      title,
+      summary: "",
+      secret: false,
+      participants: [{ entityId, role: "ACTOR" }],
+    });
+  }
+
+  it("returns all events and truncated=false when no limit is set", async () => {
+    const owner = await makeUser("limit-owner@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await makeEntity(owner.id, campaign.id, "Carl");
+
+    await makePublicEvent(owner.id, campaign.id, entity.id, "Event A");
+    await makePublicEvent(owner.id, campaign.id, entity.id, "Event B");
+    await makePublicEvent(owner.id, campaign.id, entity.id, "Event C");
+
+    const result = await listCampaignTimeline(owner.id, campaign.id);
+    expect(result.events).toHaveLength(3);
+    expect(result.totalEvents).toBe(3);
+    expect(result.truncated).toBe(false);
+  });
+
+  it("returns only limit events, sets truncated=true, and totalEvents reflects the full count", async () => {
+    const owner = await makeUser("limit-trunc@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await makeEntity(owner.id, campaign.id, "Carl");
+
+    await makePublicEvent(owner.id, campaign.id, entity.id, "Event 1");
+    await makePublicEvent(owner.id, campaign.id, entity.id, "Event 2");
+    await makePublicEvent(owner.id, campaign.id, entity.id, "Event 3");
+
+    const result = await listCampaignTimeline(owner.id, campaign.id, { limit: 2 });
+    expect(result.events).toHaveLength(2);
+    expect(result.totalEvents).toBe(3);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("returns truncated=false when limit equals total", async () => {
+    const owner = await makeUser("limit-exact@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await makeEntity(owner.id, campaign.id, "Carl");
+
+    await makePublicEvent(owner.id, campaign.id, entity.id, "Event X");
+    await makePublicEvent(owner.id, campaign.id, entity.id, "Event Y");
+
+    const result = await listCampaignTimeline(owner.id, campaign.id, { limit: 2 });
+    expect(result.events).toHaveLength(2);
+    expect(result.totalEvents).toBe(2);
+    expect(result.truncated).toBe(false);
+  });
+
+  it("player totalEvents count excludes hidden-participant events (projection regression)", async () => {
+    // Creates two events: one with a PLAYER_VISIBLE entity (visible to player)
+    // and one with only a DM_ONLY entity (invisible to player). The player's
+    // totalEvents must be 1, not 2 — SQL projection keeps the count correct.
+    const owner = await makeUser("player-proj-owner@test.com");
+    const player = await makeUser("player-proj-player@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+
+    const publicEntity = await makeEntity(owner.id, campaign.id, "Public Carl", "PLAYER_VISIBLE");
+    const hiddenEntity = await makeEntity(owner.id, campaign.id, "Hidden NPC", "DM_ONLY");
+
+    // Visible event: public participant.
+    await makePublicEvent(owner.id, campaign.id, publicEntity.id, "Visible event");
+    // Hidden event: DM_ONLY participant only.
+    await makePublicEvent(owner.id, campaign.id, hiddenEntity.id, "Hidden event");
+
+    // DM sees both.
+    const dm = await listCampaignTimeline(owner.id, campaign.id);
+    expect(dm.totalEvents).toBe(2);
+
+    // Player sees only 1; totalEvents must also be 1 (not 2).
+    const playerResult = await listCampaignTimeline(player.id, campaign.id);
+    expect(playerResult.events).toHaveLength(1);
+    expect(playerResult.totalEvents).toBe(1);
+    expect(playerResult.events[0].title).toBe("Visible event");
   });
 });

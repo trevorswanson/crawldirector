@@ -117,7 +117,7 @@ describe("CampaignPage", () => {
       status: "ALL",
       source: undefined,
       lockedOnly: false,
-    });
+    }, { page: 1, pageSize: 60 });
     expect(getEntityTypeCounts).toHaveBeenCalledWith("u1", "c1");
   });
 
@@ -204,7 +204,7 @@ describe("CampaignPage", () => {
       status: "PENDING",
       source: "PLAYER_SUGGESTION",
       lockedOnly: true,
-    });
+    }, { page: 1, pageSize: 60 });
   });
 
   it("renders entity cards linking to detail", async () => {
@@ -361,6 +361,7 @@ describe("CampaignPage", () => {
       "u1",
       "c5",
       expect.objectContaining({ tag: "floor 1" }),
+      { page: 1, pageSize: 60 },
     );
   });
 
@@ -395,5 +396,133 @@ describe("CampaignPage", () => {
       }),
     ).rejects.toThrow("NEXT_NOT_FOUND");
     expect(notFound).toHaveBeenCalled();
+  });
+
+  it("renders pager with correct hrefs at page 1 of 2", async () => {
+    getCampaignForUser.mockResolvedValue({
+      id: "cp1",
+      name: "Pager World",
+      summary: null,
+      createdAt: new Date(),
+      members: [{ role: "OWNER" }],
+      _count: { members: 1, entities: 120 },
+    });
+    // Simulate 120 entities filtered, page 1 of 2 (pageSize=60).
+    listEntitiesForUser.mockResolvedValue({
+      role: "OWNER",
+      entities: [],
+      total: 120,
+      page: 1,
+      pageSize: 60,
+    });
+
+    render(
+      await CampaignPage({
+        params: Promise.resolve({ id: "cp1" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+
+    // Shows range info.
+    expect(screen.getByText("Showing 1–60 of 120")).toBeDefined();
+    // "Previous" is disabled (span, not a link) at page 1.
+    const allPrev = screen.getAllByText("Previous");
+    expect(allPrev.length).toBeGreaterThanOrEqual(1);
+    // "Next" link href should be page=2.
+    const nextLink = screen.getByRole("link", { name: /Next/ });
+    expect(nextLink.getAttribute("href")).toBe("/campaigns/cp1?page=2");
+  });
+
+  it("renders pager at last page with disabled Next", async () => {
+    getCampaignForUser.mockResolvedValue({
+      id: "cp2",
+      name: "Pager World",
+      summary: null,
+      createdAt: new Date(),
+      members: [{ role: "OWNER" }],
+      _count: { members: 1, entities: 120 },
+    });
+    listEntitiesForUser.mockResolvedValue({
+      role: "OWNER",
+      entities: [],
+      total: 120,
+      page: 2,
+      pageSize: 60,
+    });
+
+    render(
+      await CampaignPage({
+        params: Promise.resolve({ id: "cp2" }),
+        searchParams: Promise.resolve({ page: "2" }),
+      }),
+    );
+
+    // Shows range: 61–120 of 120.
+    expect(screen.getByText("Showing 61–120 of 120")).toBeDefined();
+    // "Previous" is a link at page 2.
+    const prevLink = screen.getByRole("link", { name: /Previous/ });
+    expect(prevLink.getAttribute("href")).toBe("/campaigns/cp2");
+    // "Next" is disabled (no link with that text, only a span).
+    expect(screen.queryByRole("link", { name: /Next/ })).toBeNull();
+  });
+
+  it("does not render pager when there is only one page", async () => {
+    getCampaignForUser.mockResolvedValue({
+      id: "cp3",
+      name: "Pager World",
+      summary: null,
+      createdAt: new Date(),
+      members: [{ role: "OWNER" }],
+      _count: { members: 1, entities: 3 },
+    });
+    listEntitiesForUser.mockResolvedValue({
+      role: "OWNER",
+      entities: [],
+      total: 3,
+      page: 1,
+      pageSize: 60,
+    });
+
+    render(
+      await CampaignPage({
+        params: Promise.resolve({ id: "cp3" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+
+    expect(screen.queryByText(/Previous/)).toBeNull();
+    expect(screen.queryByRole("link", { name: /Next/ })).toBeNull();
+  });
+
+  it("filter links exclude page param so they reset to page 1", async () => {
+    getCampaignForUser.mockResolvedValue({
+      id: "cp4",
+      name: "Pager World",
+      summary: null,
+      createdAt: new Date(),
+      members: [{ role: "OWNER" }],
+      _count: { members: 1, entities: 120 },
+    });
+    getEntityTypeCounts.mockResolvedValue({ CRAWLER: 120 });
+    listEntitiesForUser.mockResolvedValue({
+      role: "OWNER",
+      entities: [],
+      total: 120,
+      page: 2,
+      pageSize: 60,
+    });
+
+    render(
+      await CampaignPage({
+        params: Promise.resolve({ id: "cp4" }),
+        searchParams: Promise.resolve({ page: "2" }),
+      }),
+    );
+
+    // The CRAWLER type facet link should not carry ?page=2.
+    const crawlerLink = screen.getByRole("link", { name: /CRAWLER/i });
+    const href = crawlerLink.getAttribute("href") ?? "";
+    expect(href).not.toContain("page=");
+    expect(href).toContain("type=CRAWLER");
   });
 });
