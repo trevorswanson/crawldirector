@@ -2815,12 +2815,15 @@ describe("listCampaignTimeline — limit / truncation", () => {
     expect(result.truncated).toBe(false);
   });
 
-  it("player totalEvents count excludes hidden-participant events (projection regression)", async () => {
-    // Creates two events: one with a PLAYER_VISIBLE entity (visible to player)
-    // and one with only a DM_ONLY entity (invisible to player). The player's
-    // totalEvents must be 1, not 2 — SQL projection keeps the count correct.
-    const owner = await makeUser("player-proj-owner@test.com");
-    const player = await makeUser("player-proj-player@test.com");
+  it("player count via prisma.event.count never reveals secret or hidden-participant events (projection regression)", async () => {
+    // Scenario: 3 events —
+    //   (a) non-secret, PLAYER_VISIBLE participant → visible to player
+    //   (b) secret,     PLAYER_VISIBLE participant → hidden from player
+    //   (c) non-secret, DM_ONLY-only participant   → hidden from player
+    // Calling with { limit: 10 } forces the prisma.event.count path. The
+    // player's totalEvents must be 1, not 2 or 3.
+    const owner = await makeUser("player-proj-count-owner@test.com");
+    const player = await makeUser("player-proj-count-player@test.com");
     const campaign = await createCampaign(owner.id, { name: "Dungeon" });
     await prisma.membership.create({
       data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
@@ -2829,19 +2832,92 @@ describe("listCampaignTimeline — limit / truncation", () => {
     const publicEntity = await makeEntity(owner.id, campaign.id, "Public Carl", "PLAYER_VISIBLE");
     const hiddenEntity = await makeEntity(owner.id, campaign.id, "Hidden NPC", "DM_ONLY");
 
-    // Visible event: public participant.
-    await makePublicEvent(owner.id, campaign.id, publicEntity.id, "Visible event");
-    // Hidden event: DM_ONLY participant only.
-    await makePublicEvent(owner.id, campaign.id, hiddenEntity.id, "Hidden event");
+    // (a) Visible to player: non-secret, PLAYER_VISIBLE participant.
+    await createEvent(owner.id, campaign.id, {
+      title: "Visible event",
+      secret: false,
+      participants: [{ entityId: publicEntity.id, role: "ACTOR" }],
+    });
+    // (b) Hidden from player: secret event, but has a PLAYER_VISIBLE participant.
+    await createEvent(owner.id, campaign.id, {
+      title: "Secret event",
+      secret: true,
+      participants: [{ entityId: publicEntity.id, role: "ACTOR" }],
+    });
+    // (c) Hidden from player: non-secret, but the only participant is DM_ONLY.
+    await createEvent(owner.id, campaign.id, {
+      title: "Hidden-participant event",
+      secret: false,
+      participants: [{ entityId: hiddenEntity.id, role: "ACTOR" }],
+    });
 
-    // DM sees both.
-    const dm = await listCampaignTimeline(owner.id, campaign.id);
-    expect(dm.totalEvents).toBe(2);
+    // DM: all 3 events visible; count path exercised with limit.
+    const dmResult = await listCampaignTimeline(owner.id, campaign.id, { limit: 10 });
+    expect(dmResult.events).toHaveLength(3);
+    expect(dmResult.totalEvents).toBe(3);
+    expect(dmResult.truncated).toBe(false);
 
-    // Player sees only 1; totalEvents must also be 1 (not 2).
-    const playerResult = await listCampaignTimeline(player.id, campaign.id);
+    // Player: only event (a) is visible; count must also be 1, not 2 or 3.
+    const playerResult = await listCampaignTimeline(player.id, campaign.id, { limit: 10 });
     expect(playerResult.events).toHaveLength(1);
     expect(playerResult.totalEvents).toBe(1);
+    expect(playerResult.truncated).toBe(false);
     expect(playerResult.events[0].title).toBe("Visible event");
+  });
+
+  it("SQL-level player projection fills the take-window with visible events, not partially with hidden rows", async () => {
+    // Scenario: 5 events — 3 with a PLAYER_VISIBLE participant (visible to
+    // players) and 2 hidden from players (1 secret + 1 DM_ONLY-only). With
+    // limit: 3 the player's window must fill entirely with visible events, not
+    // be partially consumed by the hidden rows that SQL already excluded.
+    const owner = await makeUser("window-fill-owner@test.com");
+    const player = await makeUser("window-fill-player@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+
+    const publicEntity = await makeEntity(owner.id, campaign.id, "Public NPC", "PLAYER_VISIBLE");
+    const hiddenEntity = await makeEntity(owner.id, campaign.id, "Hidden NPC", "DM_ONLY");
+
+    // 3 events visible to the player.
+    await createEvent(owner.id, campaign.id, {
+      title: "Visible 1",
+      secret: false,
+      participants: [{ entityId: publicEntity.id, role: "ACTOR" }],
+    });
+    await createEvent(owner.id, campaign.id, {
+      title: "Visible 2",
+      secret: false,
+      participants: [{ entityId: publicEntity.id, role: "ACTOR" }],
+    });
+    await createEvent(owner.id, campaign.id, {
+      title: "Visible 3",
+      secret: false,
+      participants: [{ entityId: publicEntity.id, role: "ACTOR" }],
+    });
+    // 2 events hidden from the player.
+    await createEvent(owner.id, campaign.id, {
+      title: "Secret event",
+      secret: true,
+      participants: [{ entityId: publicEntity.id, role: "ACTOR" }],
+    });
+    await createEvent(owner.id, campaign.id, {
+      title: "DM-only participant event",
+      secret: false,
+      participants: [{ entityId: hiddenEntity.id, role: "ACTOR" }],
+    });
+
+    // Player with limit: 3 — the window fills with the 3 visible events exactly.
+    const playerResult = await listCampaignTimeline(player.id, campaign.id, { limit: 3 });
+    expect(playerResult.events).toHaveLength(3);
+    expect(playerResult.totalEvents).toBe(3);
+    expect(playerResult.truncated).toBe(false);
+
+    // DM with limit: 3 — sees 3 of 5 events, truncated.
+    const dmResult = await listCampaignTimeline(owner.id, campaign.id, { limit: 3 });
+    expect(dmResult.events).toHaveLength(3);
+    expect(dmResult.totalEvents).toBe(5);
+    expect(dmResult.truncated).toBe(true);
   });
 });
