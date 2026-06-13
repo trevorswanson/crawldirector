@@ -149,9 +149,12 @@ and fleshes them in one synchronous run (`fleshOutEntities`,
 each landing as its own PENDING `UPDATE_ENTITY` proposal with a per-entity
 proposed/skipped summary; the spend cap is enforced per entity so a batch stops
 spending the moment it's reached, and one entity's failure never blocks the rest.
-The only remaining M4 expansion work is an async `Job` table + worker for
-long/batched runs off the request path. See
-[`docs/PROGRESS.md`](./docs/PROGRESS.md).
+An **async `Job` table + worker** (M4, plan 006) is now also in: a `Job` model
+backs a single-worker polling loop (`scripts/worker.ts`, `npm run worker`).
+A "Run in background" button on the bulk-flesh panel enqueues a `BULK_FLESH` job;
+the worker claims it, runs `fleshOutEntities`, and marks SUCCEEDED/FAILED.
+Raw provider/error text is never persisted — only ServiceError messages or the
+generic fallback (invariant #6). See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
 ## Start here, every session
 
@@ -247,6 +250,10 @@ npm run db:seed                # seed: dm@example.com / password123
 
 # develop
 npm run dev                    # Next.js dev server on :3000
+npm run worker                 # Background job worker — needed for async AI
+                               #   runs queued via "Run in background" in the
+                               #   bulk-flesh panel (M4, plan 006). Not needed
+                               #   for synchronous generation or the dev server.
 
 # quality gates (must pass before "done")
 npm run lint

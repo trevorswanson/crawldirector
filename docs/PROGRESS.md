@@ -35,9 +35,7 @@ keyword-scanning every doc.
             (2026-06-08) — see the section below. ADR 0009 is now **fully
             delivered**; the brand-new-EntityType "proof" remains deferred to M7's
             BOX (one descriptor file then), per project norm (no stub features).
-- [ ] **M4 generator expansion.** Remaining: a `Job` table + worker for
-      bulk/async runs (long batches off the request path, notifying the DM when
-      ready).
+- [x] **M4 generator expansion.** ✅ All items delivered.
       - [x] **Bulk-stub scaffolding generator.** ✅ (2026-06-08) — see the section
             below. A DM scaffolds a batch of stub entities from a free-text
             instruction; they land as one PENDING `CREATE_ENTITY` change set.
@@ -49,7 +47,13 @@ keyword-scanning every doc.
             section below. A DM selects several stub entities in the World Browser
             and fleshes them in one synchronous batch; each lands as its own
             PENDING `UPDATE_ENTITY` proposal, with a per-entity proposed/skipped
-            summary. The async `Job` worker remains the last M4 expansion item.
+            summary.
+      - [x] **Async `Job` table + worker.** ✅ (2026-06-13) — see the section
+            below. A `Job` model + single-worker loop (`npm run worker`) runs
+            long bulk-flesh batches off the request path. A "Run in background"
+            button in the bulk-flesh panel enqueues a `BULK_FLESH` job; proposals
+            land in the Review Queue when the worker finishes; raw provider/error
+            text is never persisted (invariant #6).
 - [x] **Visibility model simplification.** ✅ (2026-06-10) — collapsed the
       three-state enum (`DM_ONLY`/`SHARED_WITH_PLAYERS`/`PLAYER_FACING`) to a clean
       binary `DM_ONLY`/`PLAYER_VISIBLE`. See the section below.
@@ -105,6 +109,45 @@ keyword-scanning every doc.
       - **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
+
+## M4 — Async Job table + worker ✅ (2026-06-13)
+
+**Goal:** the last open M4 item from [`04-ai-integration.md`](./04-ai-integration.md)
+§"Async / batching" — a `Job` table + single-worker loop for long/bulk generation
+runs off the request path. M5 re-indexing builds on the same primitive (one new
+`JobKind` entry + one handler). "Notify the DM when ready" is satisfied for now
+by proposals appearing in the Review Queue plus a job-status line in the panel
+(live polling deferred).
+
+- [x] **Schema** (`prisma/schema.prisma`): `JobStatus` and `JobKind` enums + `Job`
+      model with `status`, `payload` (no secrets), `result`, `error` (safe text
+      only — invariant #6), `attempts`, `maxAttempts`, `runAfter`, `startedAt`,
+      `finishedAt`. FK to Campaign + User with Cascade. Migration
+      `add_job_table` applied.
+- [x] **Jobs service** (`src/server/services/jobs.ts`): `enqueueJob` (DM-only, invariant),
+      `listRecentJobs` (DM-only, display fields only), `claimNextJob` (worker-internal
+      optimistic claim guard), `completeJob`, `failJob`.
+- [x] **Handler registry** (`src/server/jobs/handlers.ts`): `jobHandlers` record keyed
+      by `JobKind`; `BULK_FLESH` validates payload shape and delegates to
+      `fleshOutEntities` (which re-checks DM membership with `job.createdById`).
+- [x] **Worker loop** (`scripts/worker.ts`, `npm run worker`): polls queue every 2s,
+      claims oldest due job, runs handler, completes/fails; graceful SIGINT/SIGTERM
+      shutdown (finishes in-flight job then exits). Raw unknown-error text never
+      persisted — only `ServiceError.message` or generic fallback.
+- [x] **UI** (`enqueueBulkFleshAction` + `BulkFleshPanel`): "Run in background" button
+      in the bulk-flesh panel queues a `BULK_FLESH` job; recent job statuses shown
+      below the form (page-refresh freshness; live polling deferred).
+- [x] **Ops**: `docker-compose.yml` worker service; `AGENTS.md` updated with
+      `npm run worker` guidance.
+- [x] **Tests**: `tests/unit/jobs.test.ts` (real Postgres — enqueue DM gate, claim
+      lifecycle, complete/fail, safe-fallback assertion, handler invalid-payload guard,
+      handler delegation with provider stub); `tests/unit/dm-actions.test.ts`
+      (`enqueueBulkFleshAction` form parsing + validation + mock); `tests/unit/bulk-flesh-panel.test.tsx`
+      (background button render, job status lines, empty job list).
+
+**Single-worker note:** before running two workers, replace the optimistic claim
+with `FOR UPDATE SKIP LOCKED`. The spend-cap lock (plan 004) is in-process;
+two workers do not serialize against each other — bounded overshoot, acceptable now.
 
 ## M4 — Bulk multi-entity flesh-out panel ✅ (2026-06-11)
 
