@@ -25,6 +25,7 @@ import { CampaignSearch } from "@/components/entities/campaign-search";
 import { ScaffoldStubsPanel } from "@/components/entities/scaffold-stubs-panel";
 import { BulkFleshPanel } from "@/components/entities/bulk-flesh-panel";
 import { listAiKeys } from "@/server/services/ai-keys";
+import { listRecentJobs } from "@/server/services/jobs";
 import { formatEntityType } from "@/lib/entities";
 import { cn } from "@/lib/utils";
 import { entityTypeValues } from "@/lib/validation";
@@ -92,7 +93,7 @@ export default async function CampaignPage({
         ? "ALL"
         : (activeSource as ChangeSource);
 
-  const [{ entities, total: pageTotal, page: returnedPage, pageSize: returnedPageSize }, counts, campaignTags, aiKeys, fleshCandidates] =
+  const [{ entities, total: pageTotal, page: returnedPage, pageSize: returnedPageSize }, counts, campaignTags, aiKeys, fleshCandidates, recentJobs] =
     await Promise.all([
       listEntitiesForUser(user.id, id, {
         query: filters.q,
@@ -106,6 +107,7 @@ export default async function CampaignPage({
       listCampaignTags(user.id, id),
       listAiKeys(user.id, id),
       listFleshCandidates(user.id, id),
+      listRecentJobs(user.id, id).catch(() => [] as Awaited<ReturnType<typeof listRecentJobs>>),
     ]);
   // `listAiKeys` is DM-only (returns [] for players), so a non-empty list gates
   // the panel to DMs with a provider key configured — same as the entity rail.
@@ -346,7 +348,7 @@ export default async function CampaignPage({
           <QuickCreateStub campaignId={id} />
           {aiConfigured && <ScaffoldStubsPanel campaignId={id} />}
           {aiConfigured && fleshCandidates.length > 0 && (
-            <BulkFleshPanel campaignId={id} candidates={fleshCandidates} />
+            <BulkFleshPanel campaignId={id} candidates={fleshCandidates} recentJobs={recentJobs} />
           )}
         </div>
 

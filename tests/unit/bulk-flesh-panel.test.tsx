@@ -2,27 +2,45 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
-const { fleshOutEntitiesAction, mockUseActionState } = vi.hoisted(() => ({
+const { fleshOutEntitiesAction, enqueueBulkFleshAction, mockUseActionState } = vi.hoisted(() => ({
   fleshOutEntitiesAction: vi.fn(),
+  enqueueBulkFleshAction: vi.fn(),
   mockUseActionState: vi.fn(),
 }));
 
-vi.mock("@/app/(dm)/actions", () => ({ fleshOutEntitiesAction }));
+vi.mock("@/app/(dm)/actions", () => ({ fleshOutEntitiesAction, enqueueBulkFleshAction }));
 vi.mock("react", async (orig) => {
   const actual = await orig<typeof import("react")>();
   return { ...actual, useActionState: mockUseActionState };
 });
 
-import { BulkFleshPanel } from "@/components/entities/bulk-flesh-panel";
+import { BulkFleshPanel, type RecentBulkJob } from "@/components/entities/bulk-flesh-panel";
 
 const CANDIDATES = [
   { id: "e1", name: "Mordecai", type: "NPC" as const },
   { id: "e2", name: "Bone Stall", type: "LOCATION" as const },
 ];
 
+// The panel calls useActionState twice per render: sync action first, bg action second.
+// This helper wires the mock so even across re-renders (fireEvent triggers re-render)
+// every odd call (1st, 3rd, 5th …) returns syncState and every even call (2nd, 4th …)
+// returns bgState. Call count is reset by vi.clearAllMocks() in beforeEach.
+function mockBothActions(
+  syncState: unknown = undefined,
+  bgState: unknown = undefined,
+) {
+  let callCount = 0;
+  mockUseActionState.mockImplementation(() => {
+    callCount++;
+    return callCount % 2 === 1
+      ? [syncState, vi.fn(), false]
+      : [bgState, vi.fn(), false];
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
-  mockUseActionState.mockReturnValue([undefined, vi.fn(), false]);
+  mockBothActions();
 });
 
 afterEach(() => cleanup());
@@ -68,7 +86,7 @@ describe("BulkFleshPanel", () => {
   });
 
   it("renders the success message, per-entity outcomes, and a queue link", () => {
-    mockUseActionState.mockReturnValue([
+    mockBothActions(
       {
         success: "1 draft proposed (claude-opus-4-8), 1 skipped. Review it in the queue.",
         proposedCount: 1,
@@ -78,9 +96,7 @@ describe("BulkFleshPanel", () => {
           { entityName: "Bone Stall", status: "skipped" as const, detail: "This entity is locked." },
         ],
       },
-      vi.fn(),
-      false,
-    ]);
+    );
     render(<BulkFleshPanel campaignId="c1" candidates={CANDIDATES} />);
     fireEvent.click(screen.getByRole("button", { name: /flesh out with ai/i }));
 
@@ -91,13 +107,42 @@ describe("BulkFleshPanel", () => {
   });
 
   it("surfaces an error message", () => {
-    mockUseActionState.mockReturnValue([
-      { error: "No drafts were proposed — see the details below.", outcomes: [] },
-      vi.fn(),
-      false,
-    ]);
+    mockBothActions({ error: "No drafts were proposed — see the details below.", outcomes: [] });
     render(<BulkFleshPanel campaignId="c1" candidates={CANDIDATES} />);
     fireEvent.click(screen.getByRole("button", { name: /flesh out with ai/i }));
     expect(screen.getByRole("alert").textContent).toContain("No drafts were proposed");
+  });
+
+  it("renders a 'Run in background' button alongside the sync submit", () => {
+    render(<BulkFleshPanel campaignId="c1" candidates={CANDIDATES} />);
+    fireEvent.click(screen.getByRole("button", { name: /flesh out with ai/i }));
+    expect(screen.getByRole("button", { name: /run in background/i })).toBeTruthy();
+  });
+
+  it("renders job status lines for recent BULK_FLESH jobs", () => {
+    const recentJobs: RecentBulkJob[] = [
+      {
+        id: "j1",
+        kind: "BULK_FLESH",
+        status: "SUCCEEDED",
+        error: null,
+        result: { proposedCount: 3, skippedCount: 1 },
+        createdAt: new Date(Date.now() - 5 * 60_000),
+        finishedAt: new Date(),
+      },
+    ];
+    render(
+      <BulkFleshPanel campaignId="c1" candidates={CANDIDATES} recentJobs={recentJobs} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /flesh out with ai/i }));
+    expect(screen.getByText("SUCCEEDED")).toBeTruthy();
+    expect(screen.getByText(/3 proposed/i)).toBeTruthy();
+    expect(screen.getByText("Background runs")).toBeTruthy();
+  });
+
+  it("renders no job section when recentJobs is empty", () => {
+    render(<BulkFleshPanel campaignId="c1" candidates={CANDIDATES} recentJobs={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: /flesh out with ai/i }));
+    expect(screen.queryByText("Background runs")).toBeNull();
   });
 });

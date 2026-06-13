@@ -189,6 +189,7 @@ model User {
   auditLogs          AuditLog[]   @relation("ActorAuditLogs")
   createdAiKeys      AiKey[]      @relation("CreatedAiKeys")
   aiUsage            AiUsage[]    @relation("RequestedAiUsage")
+  createdJobs        Job[]        @relation("CreatedJobs")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -265,6 +266,7 @@ model Campaign {
   knowledgeGrants  KnowledgeGrant[]
   aiKeys           AiKey[]
   aiUsage          AiUsage[]
+  jobs             Job[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -608,6 +610,51 @@ model KnowledgeGrant {
 
   @@index([campaignId, recipientType, recipientId])
   @@index([campaignId, targetType, targetId])
+}
+
+// ───────────── Async job queue (M4 — docs/04-ai-integration.md §"Async / batching") ─────────────
+enum JobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum JobKind {
+  BULK_FLESH
+}
+
+// Async work queue (M4 — docs/04-ai-integration.md §"Async / batching"): long
+// or bulk generation runs execute off the request path in the worker
+// (scripts/worker.ts). Jobs only ever *file proposals* through the existing
+// services — a job never writes canon directly (invariant #1) and its payload
+// carries no secret (invariant #6).
+model Job {
+  id          String    @id @default(cuid())
+  campaignId  String
+  createdById String
+  kind        JobKind
+  status      JobStatus @default(QUEUED)
+  // Handler input (e.g. { entityIds: [...] } for BULK_FLESH). No secrets.
+  payload     Json
+  // Handler output on success (e.g. fleshOutEntities' outcome summary).
+  result      Json?
+  // Safe message on failure (ServiceError text only — never raw provider text).
+  error       String?
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(1)
+  runAfter    DateTime  @default(now())
+  startedAt   DateTime?
+  finishedAt  DateTime?
+
+  campaign  Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  createdBy User     @relation("CreatedJobs", fields: [createdById], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, runAfter])
+  @@index([campaignId, createdAt])
 }
 
 // ───────────── AI config ─────────────
