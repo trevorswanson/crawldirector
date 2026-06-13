@@ -21,7 +21,7 @@ a PR unless the operator says so.
 | [004](004-spend-cap-serialization.md) | Per-campaign AI lock closes the spend-cap race | P2 | M | — | DONE (commit `efc4be9` on branch `improve/004-spend-cap-serialization`, unmerged; reviewer reran coverage 95.67/89.21/97.78/97.56 + lint/typecheck, cap-race + interleave regressions pass) |
 | [005](005-safe-error-logging.md) | Key-safe error logging in server actions | P3 | S | — | DONE ([PR #113](https://github.com/trevorswanson/crawldirector/pull/113), commit `1868b23` on branch `improve/005-safe-error-logging`, open; plan reconciled to 11 catch sites — added bulk flesh-out at actions.ts:534; reviewer reran coverage 95.68/89.21/97.79/97.57 + lint/typecheck + log.test.ts 5/5) |
 | [006](006-job-table-worker.md) | Job table + worker (last M4 item, M5 prerequisite) | P2 | L | — | DONE ([PR #114](https://github.com/trevorswanson/crawldirector/pull/114), branch `improve/006-job-table-worker`, open; reviewer reran coverage 95.61/88.98/97.81/97.54 EXIT=0 1173 tests + lint/typecheck/build; safe-error invariant test verified; live worker round-trip with a real AI key left to operator) |
-| [007](007-lore-seed-onboarding.md) | "Seed with DCC lore" opt-in at campaign creation | P3 | M | 006 (hard), 003 (soft) | TODO |
+| [007](007-lore-seed-onboarding.md) | "Seed with DCC lore" opt-in at campaign creation | P3 | M | 006 (hard), 003 (soft) | DONE (commit `0526020` on branch `improve/007-lore-seed-onboarding`; additive `ALTER TYPE … ADD VALUE` enum migration; reviewer reran coverage 95.62/88.99/97.81/97.54 EXIT=0 1179 tests + lint/typecheck/build; browser/live-worker round-trip left to operator) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
