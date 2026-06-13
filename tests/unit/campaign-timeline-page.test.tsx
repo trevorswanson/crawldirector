@@ -191,4 +191,75 @@ describe("CampaignTimelinePage", () => {
 
     expect(screen.queryByTestId("show-older")).toBeNull();
   });
+
+  it("re-queries the full timeline when the deep-linked event is outside the window", async () => {
+    listCampaignTimeline
+      .mockResolvedValueOnce({
+        events: [
+          {
+            id: "ev1",
+            title: "Recent event",
+            summary: "",
+            time: { floor: 1, label: null },
+            orderKey: 1,
+            rank: "a0",
+            secret: false,
+            locked: false,
+            source: "DM",
+            participants: [],
+            causedBy: [],
+            causes: [],
+          },
+        ],
+        totalEvents: 300,
+        truncated: true,
+      })
+      .mockResolvedValueOnce({
+        events: [
+          {
+            id: "ev1",
+            title: "Recent event",
+            summary: "",
+            time: { floor: 1, label: null },
+            orderKey: 1,
+            rank: "a0",
+            secret: false,
+            locked: false,
+            source: "DM",
+            participants: [],
+            causedBy: [],
+            causes: [],
+          },
+          {
+            id: "ev-old",
+            title: "Ancient event",
+            summary: "",
+            time: { floor: 1, label: null },
+            orderKey: 0,
+            rank: "Zz",
+            secret: false,
+            locked: false,
+            source: "DM",
+            participants: [],
+            causedBy: [],
+            causes: [],
+          },
+        ],
+        totalEvents: 300,
+        truncated: false,
+      });
+
+    render(
+      await CampaignTimelinePage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({ event: "ev-old" }),
+      }),
+    );
+
+    expect(listCampaignTimeline).toHaveBeenCalledTimes(2);
+    expect(listCampaignTimeline).toHaveBeenNthCalledWith(1, "u1", "c1", { limit: 200 });
+    expect(listCampaignTimeline).toHaveBeenNthCalledWith(2, "u1", "c1");
+    expect(screen.getByText("Ancient event")).toBeDefined();
+    expect(screen.queryByTestId("show-older")).toBeNull();
+  });
 });
