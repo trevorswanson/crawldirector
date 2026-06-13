@@ -7,7 +7,7 @@
 > in `plans/README.md` — unless a reviewer dispatched you and told you they
 > maintain the index.
 >
-> **Drift check (run first)**: `git diff --stat bd64af7..HEAD -- prisma/schema.prisma src/server/services/generation.ts src/components/entities/bulk-flesh-panel.tsx "src/app/(dm)/actions.ts" docker-compose.yml AGENTS.md`
+> **Drift check (run first)**: `git diff --stat ffa444f..HEAD -- prisma/schema.prisma src/server/services/generation.ts src/components/entities/bulk-flesh-panel.tsx "src/app/(dm)/actions.ts" docker-compose.yml AGENTS.md`
 > If any in-scope file changed since this plan was written, compare the
 > "Current state" excerpts against the live code before proceeding; on a
 > mismatch, treat it as a STOP condition.
@@ -19,7 +19,10 @@
 - **Risk**: MED
 - **Depends on**: none (plan 007 depends on this; see also plan 004's note on cross-process cap serialization)
 - **Category**: direction
-- **Planned at**: commit `bd64af7`, 2026-06-12
+- **Planned at**: commit `bd64af7`, 2026-06-12; reconciled at `ffa444f`,
+  2026-06-13 (drift was additive only: plan 004's `withCampaignAiLock`
+  wrappers + plan 005's `logActionError` landed in the two in-scope files;
+  excerpts below re-verified, line numbers refreshed)
 
 ## Why this matters
 
@@ -39,11 +42,15 @@ inside one server-action request.
 - `docs/PROGRESS.md` "Open backlog" → "M4 generator expansion. Remaining: a
   `Job` table + worker for bulk/async runs (long batches off the request
   path, notifying the DM when ready)."
-- `src/server/services/generation.ts:236-323` — `fleshOutEntities(userId,
-  campaignId, entityIds)`: validates, resolves provider once, loops ≤20
-  entities calling `fleshOutEntity` each, returns
-  `{ outcomes, proposedCount, skippedCount, model }`. This function is the
-  job handler's entire payload — the worker just calls it.
+- `src/server/services/generation.ts:251-338` — `fleshOutEntities(userId,
+  campaignId, entityIds: string[]): Promise<BulkFleshResult>`: validates,
+  resolves provider once, loops ≤20 entities calling `fleshOutEntity` each,
+  returns `{ outcomes, proposedCount, skippedCount, model }` (the
+  `BulkFleshResult` type at line 89). This function is the job handler's
+  entire payload — the worker just calls it. Note: `fleshOutEntities` is
+  deliberately NOT wrapped in `withCampaignAiLock` (each per-entity
+  `fleshOutEntity` acquires the lock independently — see the comment at
+  lines 247-250); the handler is unaffected, it still just calls it as-is.
 - `src/components/entities/bulk-flesh-panel.tsx` — "Flesh out with AI" panel
   in the World Browser header; checklist of stub candidates; submits a form
   to `fleshOutEntitiesAction` (`src/app/(dm)/actions.ts`), which reads
@@ -176,7 +183,7 @@ for expected failures):
 
 - `enqueueJob(userId, campaignId, kind, payload)` — DM/co-DM only (copy the
   `assertCampaignDm` membership-check pattern from
-  `src/server/services/generation.ts:46-55`); creates a QUEUED row; returns
+  `src/server/services/generation.ts:47-56`); creates a QUEUED row; returns
   `{ id }`.
 - `listRecentJobs(userId, campaignId, take = 5)` — DM/co-DM only; newest
   first; selects display fields only (id, kind, status, error, result,
@@ -242,7 +249,11 @@ exits cleanly on Ctrl-C.
   { entityIds })`, revalidate the campaign page, return a state like
   `{ success: "Background run queued — proposals will appear in the Review
   Queue when it finishes." }`. Reuse `BulkGenerateActionState` if its shape
-  fits; otherwise extend it minimally.
+  fits; otherwise extend it minimally. If you add a catch block, match the
+  file's current convention: `logActionError("...", error)` (already imported
+  from `@/server/log` at the top of `actions.ts`) for unexpected errors and
+  `error instanceof ServiceError` → `{ error: error.message }` for expected
+  ones — do NOT use `console.error` (the file was migrated off it in plan 005).
 - `bulk-flesh-panel.tsx`: alongside the existing synchronous "Flesh out N"
   submit, add a secondary "Run in background" submit bound to the new action
   (same form, `formAction` on the button). Below the form, render the
