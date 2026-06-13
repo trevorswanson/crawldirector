@@ -8,6 +8,7 @@ import {
   linkAiUsageChangeSet,
   recordAiUsage,
 } from "@/server/services/ai-usage";
+import { withCampaignAiLock } from "@/server/services/ai-lock";
 import {
   FLESH_ENTITY_GENERATOR,
   type FleshableField,
@@ -103,6 +104,16 @@ export async function fleshOutEntity(
 ): Promise<FleshOutEntityResult> {
   await assertCampaignDm(userId, campaignId);
 
+  return withCampaignAiLock(campaignId, () =>
+    fleshOutEntityLocked(userId, campaignId, entityId),
+  );
+}
+
+async function fleshOutEntityLocked(
+  userId: string,
+  campaignId: string,
+  entityId: string,
+): Promise<FleshOutEntityResult> {
   const [campaign, entity] = await Promise.all([
     prisma.campaign.findUnique({
       where: { id: campaignId },
@@ -233,6 +244,10 @@ export async function fleshOutEntity(
 // This slice is synchronous; an async `Job` worker for long batches stays a
 // later M4 slice. DM/co-DM only. Throws a ServiceError (safe message) only for
 // whole-batch problems (bad selection, no provider configured).
+// NOT wrapped in withCampaignAiLock — each per-entity fleshOutEntity call
+// acquires the lock independently, giving correct interleaving between a bulk
+// run and other concurrent single-entity runs. Wrapping here too would deadlock
+// on the first entity (re-entrancy is not supported).
 export async function fleshOutEntities(
   userId: string,
   campaignId: string,
@@ -332,6 +347,16 @@ export async function inferRelationshipsForEntity(
 ): Promise<InferRelationshipsResult> {
   await assertCampaignDm(userId, campaignId);
 
+  return withCampaignAiLock(campaignId, () =>
+    inferRelationshipsForEntityLocked(userId, campaignId, entityId),
+  );
+}
+
+async function inferRelationshipsForEntityLocked(
+  userId: string,
+  campaignId: string,
+  entityId: string,
+): Promise<InferRelationshipsResult> {
   const [campaign, target] = await Promise.all([
     prisma.campaign.findUnique({
       where: { id: campaignId },
@@ -533,6 +558,16 @@ export async function scaffoldStubEntities(
     throw new ServiceError("That instruction is too long. Trim it and try again.");
   }
 
+  return withCampaignAiLock(campaignId, () =>
+    scaffoldStubEntitiesLocked(userId, campaignId, trimmed),
+  );
+}
+
+async function scaffoldStubEntitiesLocked(
+  userId: string,
+  campaignId: string,
+  trimmed: string,
+): Promise<ScaffoldStubsResult> {
   const campaign = await prisma.campaign.findUnique({
     where: { id: campaignId },
     select: { name: true, styleGuide: true },
