@@ -90,7 +90,7 @@ jobs:
           --exit-code
 
       - name: Next.js build cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .next/cache
           key: ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('**/*.[jt]s', '**/*.[jt]sx') }}
@@ -111,7 +111,7 @@ jobs:
         run: echo "version=$(npx playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
