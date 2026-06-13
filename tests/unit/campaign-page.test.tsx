@@ -12,6 +12,7 @@ const {
   resolveFloorEntities,
   listAiKeys,
   notFound,
+  redirect,
 } = vi.hoisted(() => ({
   requireUser: vi.fn(),
   getCampaignForUser: vi.fn(),
@@ -23,6 +24,9 @@ const {
   listAiKeys: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
+  }),
+  redirect: vi.fn((url: string) => {
+    throw new Error(`NEXT_REDIRECT:${url}`);
   }),
 }));
 
@@ -48,6 +52,7 @@ vi.mock("@/components/entities/bulk-flesh-panel", () => ({
 }));
 vi.mock("next/navigation", () => ({
   notFound,
+  redirect,
   useRouter: () => ({
     push: vi.fn(),
     replace: vi.fn(),
@@ -117,7 +122,7 @@ describe("CampaignPage", () => {
       status: "ALL",
       source: undefined,
       lockedOnly: false,
-    });
+    }, { page: 1, pageSize: 60 });
     expect(getEntityTypeCounts).toHaveBeenCalledWith("u1", "c1");
   });
 
@@ -204,7 +209,7 @@ describe("CampaignPage", () => {
       status: "PENDING",
       source: "PLAYER_SUGGESTION",
       lockedOnly: true,
-    });
+    }, { page: 1, pageSize: 60 });
   });
 
   it("renders entity cards linking to detail", async () => {
@@ -361,6 +366,7 @@ describe("CampaignPage", () => {
       "u1",
       "c5",
       expect.objectContaining({ tag: "floor 1" }),
+      { page: 1, pageSize: 60 },
     );
   });
 
@@ -395,5 +401,193 @@ describe("CampaignPage", () => {
       }),
     ).rejects.toThrow("NEXT_NOT_FOUND");
     expect(notFound).toHaveBeenCalled();
+  });
+
+  it("renders pager with correct hrefs at page 1 of 2", async () => {
+    getCampaignForUser.mockResolvedValue({
+      id: "cp1",
+      name: "Pager World",
+      summary: null,
+      createdAt: new Date(),
+      members: [{ role: "OWNER" }],
+      _count: { members: 1, entities: 120 },
+    });
+    // Simulate 120 entities filtered, page 1 of 2 (pageSize=60).
+    listEntitiesForUser.mockResolvedValue({
+      role: "OWNER",
+      entities: [],
+      total: 120,
+      page: 1,
+      pageSize: 60,
+    });
+
+    render(
+      await CampaignPage({
+        params: Promise.resolve({ id: "cp1" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+
+    // Shows range info.
+    expect(screen.getByText("Showing 1–60 of 120")).toBeDefined();
+    // "Previous" is disabled (span, not a link) at page 1.
+    const allPrev = screen.getAllByText("Previous");
+    expect(allPrev.length).toBeGreaterThanOrEqual(1);
+    // "Next" link href should be page=2.
+    const nextLink = screen.getByRole("link", { name: /Next/ });
+    expect(nextLink.getAttribute("href")).toBe("/campaigns/cp1?page=2");
+  });
+
+  it("renders pager at last page with disabled Next", async () => {
+    getCampaignForUser.mockResolvedValue({
+      id: "cp2",
+      name: "Pager World",
+      summary: null,
+      createdAt: new Date(),
+      members: [{ role: "OWNER" }],
+      _count: { members: 1, entities: 120 },
+    });
+    listEntitiesForUser.mockResolvedValue({
+      role: "OWNER",
+      entities: [],
+      total: 120,
+      page: 2,
+      pageSize: 60,
+    });
+
+    render(
+      await CampaignPage({
+        params: Promise.resolve({ id: "cp2" }),
+        searchParams: Promise.resolve({ page: "2" }),
+      }),
+    );
+
+    // Shows range: 61–120 of 120.
+    expect(screen.getByText("Showing 61–120 of 120")).toBeDefined();
+    // "Previous" is a link at page 2.
+    const prevLink = screen.getByRole("link", { name: /Previous/ });
+    expect(prevLink.getAttribute("href")).toBe("/campaigns/cp2");
+    // "Next" is disabled (no link with that text, only a span).
+    expect(screen.queryByRole("link", { name: /Next/ })).toBeNull();
+  });
+
+  it("does not render pager when there is only one page", async () => {
+    getCampaignForUser.mockResolvedValue({
+      id: "cp3",
+      name: "Pager World",
+      summary: null,
+      createdAt: new Date(),
+      members: [{ role: "OWNER" }],
+      _count: { members: 1, entities: 3 },
+    });
+    listEntitiesForUser.mockResolvedValue({
+      role: "OWNER",
+      entities: [],
+      total: 3,
+      page: 1,
+      pageSize: 60,
+    });
+
+    render(
+      await CampaignPage({
+        params: Promise.resolve({ id: "cp3" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+
+    expect(screen.queryByText(/Previous/)).toBeNull();
+    expect(screen.queryByRole("link", { name: /Next/ })).toBeNull();
+  });
+
+  it("redirects to the last valid page when the requested page is out of range", async () => {
+    getCampaignForUser.mockResolvedValue({
+      id: "cp5",
+      name: "Pager World",
+      summary: null,
+      createdAt: new Date(),
+      members: [{ role: "OWNER" }],
+      _count: { members: 1, entities: 61 },
+    });
+    // 61 results → totalPages=2, but ?page=3 is requested.
+    listEntitiesForUser.mockResolvedValue({
+      role: "OWNER",
+      entities: [],
+      total: 61,
+      page: 3,
+      pageSize: 60,
+    });
+
+    await expect(
+      CampaignPage({
+        params: Promise.resolve({ id: "cp5" }),
+        searchParams: Promise.resolve({ page: "3" }),
+      }),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+
+    expect(redirect).toHaveBeenCalledOnce();
+    const redirectUrl: string = redirect.mock.calls[0][0];
+    const searchParams = new URLSearchParams(redirectUrl.split("?")[1] ?? "");
+    expect(searchParams.get("page")).toBe("2");
+  });
+
+  it("does not redirect when filteredTotal is 0 (renders empty state instead)", async () => {
+    getCampaignForUser.mockResolvedValue({
+      id: "cp6",
+      name: "Pager World",
+      summary: null,
+      createdAt: new Date(),
+      members: [{ role: "OWNER" }],
+      _count: { members: 1, entities: 0 },
+    });
+    listEntitiesForUser.mockResolvedValue({
+      role: "OWNER",
+      entities: [],
+      total: 0,
+      page: 1,
+      pageSize: 60,
+    });
+
+    // Should render without throwing (empty state, not a redirect).
+    render(
+      await CampaignPage({
+        params: Promise.resolve({ id: "cp6" }),
+        searchParams: Promise.resolve({ page: "2" }),
+      }),
+    );
+
+    expect(redirect).not.toHaveBeenCalled();
+    expect(screen.getByText(/No entities match/)).toBeDefined();
+  });
+
+  it("filter links exclude page param so they reset to page 1", async () => {
+    getCampaignForUser.mockResolvedValue({
+      id: "cp4",
+      name: "Pager World",
+      summary: null,
+      createdAt: new Date(),
+      members: [{ role: "OWNER" }],
+      _count: { members: 1, entities: 120 },
+    });
+    getEntityTypeCounts.mockResolvedValue({ CRAWLER: 120 });
+    listEntitiesForUser.mockResolvedValue({
+      role: "OWNER",
+      entities: [],
+      total: 120,
+      page: 2,
+      pageSize: 60,
+    });
+
+    render(
+      await CampaignPage({
+        params: Promise.resolve({ id: "cp4" }),
+        searchParams: Promise.resolve({ page: "2" }),
+      }),
+    );
+
+    // The CRAWLER type facet link should not carry ?page=2.
+    const crawlerLink = screen.getByRole("link", { name: /CRAWLER/i });
+    const href = crawlerLink.getAttribute("href") ?? "";
+    expect(href).not.toContain("page=");
+    expect(href).toContain("type=CRAWLER");
   });
 });

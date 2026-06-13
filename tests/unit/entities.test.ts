@@ -1765,3 +1765,109 @@ describe("listFleshCandidates", () => {
     expect(await listFleshCandidates(player.id, campaign.id)).toEqual([]);
   });
 });
+
+describe("listEntitiesForUser — pagination", () => {
+  it("returns a page of results and a correct total", async () => {
+    const owner = await makeUser("paging-owner@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    // Create 5 NPC entities so we can page through them.
+    for (let i = 1; i <= 5; i++) {
+      await createGenericEntity(owner.id, campaign.id, {
+        type: "NPC",
+        name: `NPC ${i}`,
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: [],
+      });
+    }
+
+    // Page 1: pageSize=2 → 2 entities, total=5.
+    const page1 = await listEntitiesForUser(owner.id, campaign.id, {}, { page: 1, pageSize: 2 });
+    expect(page1.entities).toHaveLength(2);
+    expect(page1.total).toBe(5);
+    expect(page1.page).toBe(1);
+    expect(page1.pageSize).toBe(2);
+
+    // Page 3: pageSize=2 → 1 entity (the last one), total=5.
+    const page3 = await listEntitiesForUser(owner.id, campaign.id, {}, { page: 3, pageSize: 2 });
+    expect(page3.entities).toHaveLength(1);
+    expect(page3.total).toBe(5);
+
+    // Pages do not overlap: all ids from page 1 are absent from page 2.
+    const page2 = await listEntitiesForUser(owner.id, campaign.id, {}, { page: 2, pageSize: 2 });
+    const page1Ids = new Set(page1.entities.map((e) => e.id));
+    const page2Ids = new Set(page2.entities.map((e) => e.id));
+    for (const id of page2Ids) expect(page1Ids.has(id)).toBe(false);
+  });
+
+  it("clamps pageSize to 100 and page to ≥1", async () => {
+    const owner = await makeUser("paging-clamp@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Solo NPC",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    // page=0 clamps to 1.
+    const r = await listEntitiesForUser(owner.id, campaign.id, {}, { page: 0, pageSize: 200 });
+    expect(r.page).toBe(1);
+    expect(r.pageSize).toBe(100);
+    expect(r.entities).toHaveLength(1);
+  });
+
+  it("returns total:0 for a non-member", async () => {
+    const owner = await makeUser("paging-owner2@test.com");
+    const stranger = await makeUser("paging-stranger@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const result = await listEntitiesForUser(stranger.id, campaign.id, {}, { page: 1, pageSize: 10 });
+    expect(result.entities).toHaveLength(0);
+    expect(result.total).toBe(0);
+  });
+
+  it("id tiebreaker produces stable pagination when name and updatedAt are tied", async () => {
+    const owner = await makeUser("paging-tiebreak@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    // Create 4 entities with distinct ids.
+    const created = await Promise.all(
+      [1, 2, 3, 4].map((i) =>
+        createGenericEntity(owner.id, campaign.id, {
+          type: "NPC",
+          name: `NPC ${i}`,
+          summary: "",
+          description: "",
+          visibility: "DM_ONLY",
+          tags: [],
+        }),
+      ),
+    );
+    const campaignId = campaign.id;
+    const tiedDate = new Date("2024-01-01T00:00:00.000Z");
+
+    // Force a total tie: same name and same updatedAt for all 4 entities.
+    await prisma.entity.updateMany({
+      where: { campaignId },
+      data: { name: "Same", updatedAt: tiedDate },
+    });
+
+    // Page through with pageSize=1 and collect ids from each page.
+    const ids: string[] = [];
+    for (let p = 1; p <= 4; p++) {
+      const result = await listEntitiesForUser(owner.id, campaignId, {}, { page: p, pageSize: 1 });
+      expect(result.entities).toHaveLength(1);
+      ids.push(result.entities[0].id);
+    }
+
+    // All 4 ids must be distinct (no duplicates, none missing).
+    expect(new Set(ids).size).toBe(4);
+    expect(new Set(ids)).toEqual(new Set(created.map((e) => e.id)));
+  });
+});

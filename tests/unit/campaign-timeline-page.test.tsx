@@ -33,11 +33,17 @@ vi.mock("next/link", () => ({
 vi.mock("@/components/timeline/campaign-timeline", () => ({
   CampaignTimeline: ({
     events,
+    truncated,
+    loadOlderHref,
+    totalEvents,
   }: {
     events: Array<{
       title: string;
       participants: Array<{ name: string }>;
     }>;
+    truncated?: boolean;
+    loadOlderHref?: string;
+    totalEvents?: number;
   }) => (
     <main>
       <h1>Campaign Timeline</h1>
@@ -52,6 +58,11 @@ vi.mock("@/components/timeline/campaign-timeline", () => ({
             ))}
           </section>
         ))
+      )}
+      {truncated && loadOlderHref && (
+        <a href={loadOlderHref} data-testid="show-older">
+          Show older ({totalEvents} total)
+        </a>
       )}
     </main>
   ),
@@ -89,25 +100,29 @@ afterEach(() => {
 
 describe("CampaignTimelinePage", () => {
   it("renders campaign events with participants", async () => {
-    listCampaignTimeline.mockResolvedValue([
-      {
-        id: "ev1",
-        title: "Boss fight",
-        summary: "Carl and Donut survive.",
-        time: { floor: 9, label: "Day 3" },
-        orderKey: 9,
-        rank: "a0",
-        secret: false,
-        locked: false,
-        source: "DM",
-        participants: [
-          { id: "e1", name: "Carl", type: "CRAWLER", role: "ACTOR" },
-          { id: "e2", name: "Donut", type: "CRAWLER", role: "TARGET" },
-        ],
-        causedBy: [],
-        causes: [],
-      },
-    ]);
+    listCampaignTimeline.mockResolvedValue({
+      events: [
+        {
+          id: "ev1",
+          title: "Boss fight",
+          summary: "Carl and Donut survive.",
+          time: { floor: 9, label: "Day 3" },
+          orderKey: 9,
+          rank: "a0",
+          secret: false,
+          locked: false,
+          source: "DM",
+          participants: [
+            { id: "e1", name: "Carl", type: "CRAWLER", role: "ACTOR" },
+            { id: "e2", name: "Donut", type: "CRAWLER", role: "TARGET" },
+          ],
+          causedBy: [],
+          causes: [],
+        },
+      ],
+      totalEvents: 1,
+      truncated: false,
+    });
 
     render(await CampaignTimelinePage({ params: Promise.resolve({ id: "c1" }) }));
 
@@ -118,7 +133,7 @@ describe("CampaignTimelinePage", () => {
   });
 
   it("shows an honest empty state when no events exist", async () => {
-    listCampaignTimeline.mockResolvedValue([]);
+    listCampaignTimeline.mockResolvedValue({ events: [], totalEvents: 0, truncated: false });
 
     render(await CampaignTimelinePage({ params: Promise.resolve({ id: "c1" }) }));
 
@@ -131,5 +146,49 @@ describe("CampaignTimelinePage", () => {
     await expect(
       CampaignTimelinePage({ params: Promise.resolve({ id: "nope" }) }),
     ).rejects.toThrow("NEXT_NOT_FOUND");
+  });
+
+  it("passes truncated=true and a loadOlderHref when the timeline is windowed", async () => {
+    listCampaignTimeline.mockResolvedValue({
+      events: [
+        {
+          id: "ev1",
+          title: "Recent event",
+          summary: "",
+          time: { floor: 1, label: null },
+          orderKey: 1,
+          rank: "a0",
+          secret: false,
+          locked: false,
+          source: "DM",
+          participants: [],
+          causedBy: [],
+          causes: [],
+        },
+      ],
+      totalEvents: 300,
+      truncated: true,
+    });
+
+    render(
+      await CampaignTimelinePage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({ window: "1" }),
+      }),
+    );
+
+    const link = screen.getByTestId("show-older");
+    expect(link).toBeDefined();
+    // href should increment the window to 2 (no event deep-link here).
+    expect((link as HTMLAnchorElement).href).toContain("window=2");
+    expect(screen.getByText(/300 total/)).toBeDefined();
+  });
+
+  it("does not render the show-older link when not truncated", async () => {
+    listCampaignTimeline.mockResolvedValue({ events: [], totalEvents: 0, truncated: false });
+
+    render(await CampaignTimelinePage({ params: Promise.resolve({ id: "c1" }) }));
+
+    expect(screen.queryByTestId("show-older")).toBeNull();
   });
 });

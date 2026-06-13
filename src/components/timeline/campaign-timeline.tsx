@@ -725,6 +725,9 @@ export function CampaignTimeline({
   candidates,
   canEdit,
   initialEventId,
+  truncated,
+  loadOlderHref,
+  totalEvents,
 }: {
   campaignId: string;
   events: CampaignTimelineEvent[];
@@ -734,6 +737,12 @@ export function CampaignTimeline({
   // Deep-link target (e.g. from a causality link on another page): scroll to and
   // highlight this event on mount.
   initialEventId?: string;
+  // When the timeline is windowed, truncated=true signals that older events exist.
+  truncated?: boolean;
+  // href to a larger window; rendered as "Show older events" when truncated=true.
+  loadOlderHref?: string;
+  // Total event count (used in the "Show older" label).
+  totalEvents?: number;
 }) {
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1573,6 +1582,19 @@ export function CampaignTimeline({
                   </div>
                 );
               })()}
+
+            {/* "Show older" growth-window link */}
+            {truncated && loadOlderHref && (
+              <div className="mt-4 flex justify-center">
+                <Link
+                  href={loadOlderHref}
+                  className="rounded border border-[var(--line-muted)] px-4 py-2 text-sm text-[var(--ink-faint)] hover:text-[var(--ink)] hover:border-[var(--line-strong)] transition-colors"
+                >
+                  Show older events
+                  {totalEvents != null ? ` (${totalEvents} total)` : ""}
+                </Link>
+              </div>
+            )}
           </div>
         </div>
       </div>

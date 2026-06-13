@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { Lock, Search, Sparkles } from "lucide-react";
+import { notFound, redirect } from "next/navigation";
+import { ChevronLeft, ChevronRight, Lock, Search, Sparkles } from "lucide-react";
 import type { EntityType, ChangeSource } from "@/generated/prisma/client";
 
 import { requireUser } from "@/server/auth/session";
@@ -56,6 +56,7 @@ export default async function CampaignPage({
     source?: string;
     locked?: string;
     archivedEntity?: string;
+    page?: string;
   }>;
 }) {
   const { id } = await params;
@@ -80,6 +81,9 @@ export default async function CampaignPage({
     ? filters.source!
     : "ALL";
   const lockedOnly = filters.locked === "1";
+  const PAGE_SIZE = 60;
+  // Clamp to ≥ 1; non-numeric or missing defaults to 1.
+  const activePage = Math.max(1, parseInt(filters.page ?? "1", 10) || 1);
 
   const sourceFilter =
     activeSource === "PLAYER"
@@ -88,7 +92,7 @@ export default async function CampaignPage({
         ? "ALL"
         : (activeSource as ChangeSource);
 
-  const [{ entities }, counts, campaignTags, aiKeys, fleshCandidates] =
+  const [{ entities, total: pageTotal, page: returnedPage, pageSize: returnedPageSize }, counts, campaignTags, aiKeys, fleshCandidates] =
     await Promise.all([
       listEntitiesForUser(user.id, id, {
         query: filters.q,
@@ -97,7 +101,7 @@ export default async function CampaignPage({
         status: activeStatus,
         source: sourceFilter === "ALL" ? undefined : sourceFilter,
         lockedOnly,
-      }),
+      }, { page: activePage, pageSize: PAGE_SIZE }),
       getEntityTypeCounts(user.id, id),
       listCampaignTags(user.id, id),
       listAiKeys(user.id, id),
@@ -106,7 +110,15 @@ export default async function CampaignPage({
   // `listAiKeys` is DM-only (returns [] for players), so a non-empty list gates
   // the panel to DMs with a provider key configured — same as the entity rail.
   const aiConfigured = aiKeys.length > 0;
+  // `total` = total across all entity types (for the type-facet count chip).
   const total = Object.values(counts).reduce((sum, n) => sum + (n ?? 0), 0);
+  // Pagination: the paged call always returns these fields.
+  const currentPage = returnedPage ?? activePage;
+  const currentPageSize = returnedPageSize ?? PAGE_SIZE;
+  const filteredTotal = pageTotal ?? entities.length;
+  const totalPages = Math.ceil(filteredTotal / currentPageSize) || 1;
+  const rangeStart = (currentPage - 1) * currentPageSize + 1;
+  const rangeEnd = Math.min(currentPage * currentPageSize, filteredTotal);
 
   // Resolve the floor numbers crawlers stand on to their FLOOR entities so each
   // card names the floor instead of showing a bare number (ADR 0008 §1). The
@@ -120,6 +132,7 @@ export default async function CampaignPage({
   );
 
   // Build a query string from the current facets with overrides applied.
+  // NOTE: `page` is intentionally excluded — filter links always reset to page 1.
   const hrefWith = (overrides: Record<string, string | undefined>) => {
     const next = new URLSearchParams();
     const merged = {
@@ -135,6 +148,29 @@ export default async function CampaignPage({
     const qs = next.toString();
     return qs ? `/campaigns/${id}?${qs}` : `/campaigns/${id}`;
   };
+
+  // Build a pager href: same filter params as current page, but with a new page number.
+  const hrefWithPage = (p: number) => {
+    const next = new URLSearchParams();
+    const merged: Record<string, string | undefined> = {
+      q: filters.q,
+      tag: activeTag,
+      type: activeType,
+      status: activeStatus === "ALL" ? undefined : activeStatus,
+      source: activeSource === "ALL" ? undefined : activeSource,
+      locked: lockedOnly ? "1" : undefined,
+      page: p > 1 ? String(p) : undefined,
+    };
+    for (const [k, v] of Object.entries(merged)) if (v) next.set(k, v);
+    const qs = next.toString();
+    return qs ? `/campaigns/${id}?${qs}` : `/campaigns/${id}`;
+  };
+
+  // If the requested page is beyond the last page (and results exist), redirect
+  // to the last valid page so the grid never renders empty with a nonsense range label.
+  if (filteredTotal > 0 && activePage > totalPages) {
+    redirect(hrefWithPage(totalPages));
+  }
 
   return (
     <div className="grid h-full grid-cols-1 lg:grid-cols-[248px_minmax(0,1fr)]">
@@ -305,7 +341,7 @@ export default async function CampaignPage({
             lockedOnly={lockedOnly}
           />
           <span className="font-mono text-[11px] text-[var(--ink-faint)]">
-            {entities.length} / {total}
+            {filteredTotal} / {total}
           </span>
           <QuickCreateStub campaignId={id} />
           {aiConfigured && <ScaffoldStubsPanel campaignId={id} />}
@@ -324,7 +360,7 @@ export default async function CampaignPage({
               />
             </div>
           )}
-          {entities.length === 0 ? (
+          {filteredTotal === 0 ? (
             <div className="grid h-60 place-items-center text-center text-[var(--ink-faint)]">
               <div>
                 <Search aria-hidden size={36} className="mx-auto opacity-40" />
@@ -383,6 +419,43 @@ export default async function CampaignPage({
                   </div>
                 </Link>
               ))}
+            </div>
+          )}
+
+          {/* Pager — only shown when there are multiple pages */}
+          {totalPages > 1 && (
+            <div className="mt-6 flex items-center gap-3 border-t border-[var(--line)] pt-4 font-mono text-[11px] text-[var(--ink-dim)]">
+              {currentPage > 1 ? (
+                <Link
+                  href={hrefWithPage(currentPage - 1)}
+                  className="inline-flex items-center gap-[5px] border border-[var(--line-strong)] px-[9px] py-[5px] hover:text-[var(--ink)]"
+                >
+                  <ChevronLeft aria-hidden size={12} />
+                  Previous
+                </Link>
+              ) : (
+                <span className="inline-flex items-center gap-[5px] border border-[var(--line)] px-[9px] py-[5px] opacity-40 cursor-not-allowed">
+                  <ChevronLeft aria-hidden size={12} />
+                  Previous
+                </span>
+              )}
+              <span className="flex-1 text-center text-[var(--ink-faint)]">
+                {filteredTotal === 0 ? "No results" : `Showing ${rangeStart}–${rangeEnd} of ${filteredTotal}`}
+              </span>
+              {currentPage < totalPages ? (
+                <Link
+                  href={hrefWithPage(currentPage + 1)}
+                  className="inline-flex items-center gap-[5px] border border-[var(--line-strong)] px-[9px] py-[5px] hover:text-[var(--ink)]"
+                >
+                  Next
+                  <ChevronRight aria-hidden size={12} />
+                </Link>
+              ) : (
+                <span className="inline-flex items-center gap-[5px] border border-[var(--line)] px-[9px] py-[5px] opacity-40 cursor-not-allowed">
+                  Next
+                  <ChevronRight aria-hidden size={12} />
+                </span>
+              )}
             </div>
           )}
         </div>

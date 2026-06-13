@@ -633,89 +633,144 @@ export async function listEventsForEntity(
   return timeline;
 }
 
+export type CampaignTimelineResult = {
+  events: CampaignTimelineEvent[];
+  totalEvents: number;
+  truncated: boolean;
+};
+
 /**
  * Campaign-wide event timeline for the dedicated M3 timeline page. Players get
  * the same visibility projection as entity timelines: secret events are hidden,
  * invisible co-participants are dropped, and a public event with no visible
  * participants is omitted rather than leaking orphaned canon.
+ *
+ * When `limit` is set, only the newest `limit` events are returned (ordering is
+ * already newest-first). The `totalEvents` count and `truncated` flag let the
+ * caller surface a "load older" affordance.
+ *
+ * Player-projection invariant: the `totalEvents` count is built from the same
+ * player-projected `where` clause as the query, so it never reveals the existence
+ * of secret or hidden-participant events to players. This is achieved by pushing
+ * the JS post-filter's "at least one player-visible participant" rule into SQL for
+ * players via a `participants: { some: ... }` clause.
+ *
+ * isPlayerVisible conditions (from the `isPlayerVisible` helper above):
+ *   entity.status !== ARCHIVED && entity.visibility === PLAYER_VISIBLE
+ * These are plain entity column checks, so they are expressible in a WHERE clause.
  */
 export async function listCampaignTimeline(
   userId: string,
   campaignId: string,
-): Promise<CampaignTimelineEvent[]> {
+  options?: { limit?: number },
+): Promise<CampaignTimelineResult> {
   const membership = await getMembership(userId, campaignId);
-  if (!membership) return [];
+  if (!membership) return { events: [], totalEvents: 0, truncated: false };
   const isPlayer = membership.role === Role.PLAYER;
 
-  const events = await prisma.event.findMany({
-    where: {
-      campaignId,
-      status: { not: CanonStatus.ARCHIVED },
-      ...(isPlayer ? { secret: false } : {}),
-    },
-    orderBy: [{ orderKey: "desc" }, { rank: "desc" }, { createdAt: "desc" }],
-    select: {
-      id: true,
-      title: true,
-      summary: true,
-      inGameTime: true,
-      orderKey: true,
-      rank: true,
-      secret: true,
-      locked: true,
-      source: true,
-      effects: true,
-      participants: {
-        orderBy: { createdAt: "asc" },
-        select: {
-          role: true,
-          entity: { select: otherEntitySelect },
-        },
-      },
-      causedBy: {
-        where: { status: { not: CanonStatus.ARCHIVED } },
-        select: {
-          id: true,
-          cause: {
-            select: {
-              id: true,
-              title: true,
-              status: true,
-              secret: true,
-              participants: {
-                select: {
-                  entity: { select: otherEntitySelect },
-                },
+  // Player-projected WHERE: SQL filters out secret events AND (for players only)
+  // events whose only participants are DM-only or archived — mirroring the JS
+  // post-filter `if (isPlayer && participants.length === 0) continue`. This keeps
+  // totalEvents and the `take` window projection-correct.
+  const where: Prisma.EventWhereInput = {
+    campaignId,
+    status: { not: CanonStatus.ARCHIVED },
+    ...(isPlayer
+      ? {
+          secret: false,
+          // Keep only events that have at least one player-visible participant,
+          // matching isPlayerVisible(entity): status !== ARCHIVED && visibility === PLAYER_VISIBLE.
+          participants: {
+            some: {
+              entity: {
+                status: { not: CanonStatus.ARCHIVED },
+                visibility: Visibility.PLAYER_VISIBLE,
               },
             },
           },
-        },
-      },
-      causes: {
-        where: { status: { not: CanonStatus.ARCHIVED } },
-        select: {
-          id: true,
-          effect: {
-            select: {
-              id: true,
-              title: true,
-              status: true,
-              secret: true,
-              participants: {
-                select: {
-                  entity: { select: otherEntitySelect },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  });
+        }
+      : {}),
+  };
 
-  const anchorTitles = await loadAnchorTitles(campaignId, events, isPlayer);
+  const eventSelect = {
+    id: true,
+    title: true,
+    summary: true,
+    inGameTime: true,
+    orderKey: true,
+    rank: true,
+    secret: true,
+    locked: true,
+    source: true,
+    effects: true,
+    participants: {
+      orderBy: { createdAt: "asc" as const },
+      select: {
+        role: true,
+        entity: { select: otherEntitySelect },
+      },
+    },
+    causedBy: {
+      where: { status: { not: CanonStatus.ARCHIVED } },
+      select: {
+        id: true,
+        cause: {
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            secret: true,
+            participants: {
+              select: {
+                entity: { select: otherEntitySelect },
+              },
+            },
+          },
+        },
+      },
+    },
+    causes: {
+      where: { status: { not: CanonStatus.ARCHIVED } },
+      select: {
+        id: true,
+        effect: {
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            secret: true,
+            participants: {
+              select: {
+                entity: { select: otherEntitySelect },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+
+  const orderBy: Prisma.EventOrderByWithRelationInput[] = [
+    { orderKey: "desc" },
+    { rank: "desc" },
+    { createdAt: "desc" },
+  ];
+
+  const limit = options?.limit;
+
+  const [rawEvents, totalEvents] = limit !== undefined
+    ? await Promise.all([
+        prisma.event.findMany({ where, orderBy, select: eventSelect, take: limit }),
+        prisma.event.count({ where }),
+      ])
+    : await (async () => {
+        const evs = await prisma.event.findMany({ where, orderBy, select: eventSelect });
+        return [evs, evs.length] as const;
+      })();
+
+  const anchorTitles = await loadAnchorTitles(campaignId, rawEvents, isPlayer);
   const timeline: CampaignTimelineEvent[] = [];
-  for (const event of events) {
+  for (const event of rawEvents) {
     const participants = event.participants
       .filter((participant) => !isPlayer || isPlayerVisible(participant.entity))
       .map((participant) => ({
@@ -724,6 +779,9 @@ export async function listCampaignTimeline(
         type: participant.entity.type,
         role: participant.role,
       }));
+    // Belt-and-braces guard: the SQL `participants: { some: ... }` clause above
+    // makes projection-correct so windowed player queries fill correctly, but we
+    // keep this JS guard in place for non-windowed paths and defensive safety.
     if (isPlayer && participants.length === 0) continue;
 
     timeline.push({
@@ -755,7 +813,11 @@ export async function listCampaignTimeline(
     });
   }
 
-  return timeline;
+  return {
+    events: timeline,
+    totalEvents,
+    truncated: limit !== undefined && totalEvents > limit,
+  };
 }
 
 // ── Floor metadata for the timeline's descent rail (docs/adr/0005) ──

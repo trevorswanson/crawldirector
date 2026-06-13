@@ -728,7 +728,7 @@ describe("event effects", () => {
     expect(entityTimeline.length).toBeGreaterThan(0);
     expect(entityTimeline[0].effects).toEqual([]);
 
-    const campaignTimeline = await listCampaignTimeline(player.id, campaign.id);
+    const { events: campaignTimeline } = await listCampaignTimeline(player.id, campaign.id);
     expect(campaignTimeline.length).toBeGreaterThan(0);
     expect(campaignTimeline.every((e) => e.effects.length === 0)).toBe(true);
   });

@@ -3,6 +3,7 @@ import {
   ChangeSource,
   EntityType,
   OpKind,
+  Prisma,
   Role,
   Visibility,
 } from "@/generated/prisma/client";
@@ -310,9 +311,10 @@ export async function listEntitiesForUser(
     lockedOnly?: boolean;
     source?: ChangeSource | "ALL";
   } = {},
+  paging?: { page: number; pageSize: number },
 ) {
   const membership = await assertCampaignMember(userId, campaignId);
-  if (!membership) return { entities: [], role: null };
+  if (!membership) return { entities: [], role: null, total: 0 };
 
   const query = filters.query?.trim();
   const tag = filters.tag?.trim();
@@ -321,64 +323,84 @@ export async function listEntitiesForUser(
   const lockedOnly = filters.lockedOnly || status === "LOCKED";
   const source = filters.source && filters.source !== "ALL" ? filters.source : undefined;
 
-  const entities = await prisma.entity.findMany({
-    where: {
-      campaignId,
-      // CANON/PENDING narrow the status; everything else just excludes archived.
-      status:
-        status === "CANON"
-          ? CanonStatus.CANON
-          : status === "PENDING"
-            ? CanonStatus.PENDING
-            : { not: CanonStatus.ARCHIVED },
-      ...(lockedOnly
-        ? {
-            OR: [
-              { locked: true },
-              { NOT: { lockedFields: { equals: [] } } },
+  const where: Prisma.EntityWhereInput = {
+    campaignId,
+    // CANON/PENDING narrow the status; everything else just excludes archived.
+    status:
+      status === "CANON"
+        ? CanonStatus.CANON
+        : status === "PENDING"
+          ? CanonStatus.PENDING
+          : { not: CanonStatus.ARCHIVED },
+    ...(lockedOnly
+      ? {
+          OR: [
+            { locked: true },
+            { NOT: { lockedFields: { equals: [] } } },
+          ],
+        }
+      : {}),
+    ...(source ? { source } : {}),
+    ...playerVisibleWhere(membership.role),
+    ...(type ? { type } : {}),
+    ...(tag
+      ? {
+          tags: {
+            hasSome: [
+              tag,
+              tag.toLowerCase(),
+              tag.toUpperCase(),
+              tag.charAt(0).toUpperCase() + tag.slice(1).toLowerCase(),
             ],
-          }
-        : {}),
-      ...(source ? { source } : {}),
-      ...playerVisibleWhere(membership.role),
-      ...(type ? { type } : {}),
-      ...(tag
-        ? {
-            tags: {
-              hasSome: [
-                tag,
-                tag.toLowerCase(),
-                tag.toUpperCase(),
-                tag.charAt(0).toUpperCase() + tag.slice(1).toLowerCase(),
-              ],
-            },
-          }
-        : {}),
-      ...(query
-        ? {
-            OR: [
-              { name: { contains: query, mode: "insensitive" } },
-              { summary: { contains: query, mode: "insensitive" } },
-              { description: { contains: query, mode: "insensitive" } },
-              {
-                tags: {
-                  hasSome: [
-                    query,
-                    query.toLowerCase(),
-                    query.toUpperCase(),
-                    query.charAt(0).toUpperCase() + query.slice(1).toLowerCase(),
-                  ],
-                },
+          },
+        }
+      : {}),
+    ...(query
+      ? {
+          OR: [
+            { name: { contains: query, mode: "insensitive" } },
+            { summary: { contains: query, mode: "insensitive" } },
+            { description: { contains: query, mode: "insensitive" } },
+            {
+              tags: {
+                hasSome: [
+                  query,
+                  query.toLowerCase(),
+                  query.toUpperCase(),
+                  query.charAt(0).toUpperCase() + query.slice(1).toLowerCase(),
+                ],
               },
-            ],
-          }
-        : {}),
-    },
-    orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
+            },
+          ],
+        }
+      : {}),
+  };
+
+  if (paging) {
+    // Clamp to safe bounds: page ≥ 1, pageSize ≤ 100.
+    const page = Math.max(1, paging.page);
+    const pageSize = Math.min(100, Math.max(1, paging.pageSize));
+    const [entities, total] = await Promise.all([
+      prisma.entity.findMany({
+        where,
+        orderBy: [{ updatedAt: "desc" }, { name: "asc" }, { id: "asc" }],
+        select: entityListSelect,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.entity.count({ where }),
+    ]);
+    return { entities, role: membership.role, total, page, pageSize };
+  }
+
+  const entities = await prisma.entity.findMany({
+    where,
+    orderBy: [{ updatedAt: "desc" }, { name: "asc" }, { id: "asc" }],
     select: entityListSelect,
   });
 
-  return { entities, role: membership.role };
+  // Return `total` even on the un-paged path (avoids a second count query).
+  return { entities, role: membership.role, total: entities.length };
 }
 
 export type FleshCandidate = { id: string; name: string; type: EntityType };

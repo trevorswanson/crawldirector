@@ -17,7 +17,7 @@ a PR unless the operator says so.
 |------|-------|----------|--------|------------|--------|
 | [001](001-e2e-core-flows.md) | E2E coverage: review pipeline, locks, player visibility | P1 | M | — | DONE (commit `4b5934d`; 9 e2e tests vs plan's ≥10 — all scenarios covered) |
 | [002](002-bulk-approve-hardening.md) | Bulk-approve hardening: error codes, decision restore | P1 | M | — (after 001 recommended) | DONE (commit `28e37b4`; reviewer reran coverage + lint/typecheck) |
-| [003](003-pagination-world-browser-timeline.md) | Paginate World Browser + campaign timeline | P2 | L | — | TODO |
+| [003](003-pagination-world-browser-timeline.md) | Paginate World Browser + campaign timeline | P2 | L | — | DONE (commits `7446b1f`+`5dc34a7`; reviewer reran coverage/lint/typecheck/build/e2e) |
 | [004](004-spend-cap-serialization.md) | Per-campaign AI lock closes the spend-cap race | P2 | M | — | TODO |
 | [005](005-safe-error-logging.md) | Key-safe error logging in server actions | P3 | S | — | TODO |
 | [006](006-job-table-worker.md) | Job table + worker (last M4 item, M5 prerequisite) | P2 | L | — | TODO |
