@@ -110,6 +110,18 @@ keyword-scanning every doc.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
 
+### Done — bring-your-own lore dataset + seed-checkbox gating (2026-06-13)
+
+- [x] `resolveLoreSeedPath()` and `isLoreSeedDatasetAvailable()` exported from `seeding.ts`; `seedCampaignFromLore` uses the resolver (respects `LORE_SEED_FILE` env var).
+- [x] `CreateCampaignForm` accepts a required `loreSeedAvailable: boolean` prop; the seedLore checkbox renders only when `true`.
+- [x] `DashboardPage` (server component) calls `isLoreSeedDatasetAvailable()` and passes the result down as `loreSeedAvailable`.
+- [x] `createCampaignAction` gates the `LORE_SEED` enqueue on `isLoreSeedDatasetAvailable()` (defense in depth).
+- [x] `docker-compose.yml`: commented-out bind-mount example on both `app` and `worker` services (opt-in; missing host file would error).
+- [x] `.env.example`: documents `LORE_SEED_FILE`.
+- [x] `docs/14-lore-seeding.md`: operator doc with legal note, JSONL format, synthetic example, mount instructions for docker-compose and raw `docker run`.
+- [x] Tests: `seeding.test.ts` gains `resolveLoreSeedPath` + `isLoreSeedDatasetAvailable` tests; `create-campaign-form.test.tsx` passes `loreSeedAvailable` prop + new "false → checkbox hidden" case; `dashboard-page.test.tsx` mocks `isLoreSeedDatasetAvailable`; `dm-actions.test.ts` mocks seeding module + new "available=false → no enqueue, still redirects" test.
+- [x] Dataset is NOT tracked or bundled anywhere (`git ls-files | grep jsonl` → empty).
+
 ### Done — opt-in DCC lore seed at campaign creation (2026-06-13)
 
 - [x] Added `LORE_SEED` to `enum JobKind` (additive `ALTER TYPE ... ADD VALUE` migration).

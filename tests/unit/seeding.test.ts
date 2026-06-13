@@ -30,7 +30,7 @@ vi.spyOn(fs, "readFileSync").mockImplementation(((filePath: fs.PathOrFileDescrip
   return originalReadFileSync(filePath, encoding);
 }) as unknown as typeof fs.readFileSync);
 
-import { seedCampaignFromLore, classifyEntity, extractSummaryAndDescription } from "@/server/services/seeding";
+import { seedCampaignFromLore, classifyEntity, extractSummaryAndDescription, resolveLoreSeedPath, isLoreSeedDatasetAvailable } from "@/server/services/seeding";
 
 
 function makeUser(email: string) {
@@ -149,6 +149,38 @@ describe("seeding heuristics", () => {
     const resultVeryLong = extractSummaryAndDescription("Test", `#Test\n${veryLongText}`);
     expect(resultVeryLong.description.length).toBe(10000);
     expect(resultVeryLong.description.endsWith("...")).toBe(true);
+  });
+});
+
+describe("resolveLoreSeedPath", () => {
+  it("returns a path ending in dungeon-crawler-carl.jsonl when LORE_SEED_FILE is unset", () => {
+    const original = process.env.LORE_SEED_FILE;
+    delete process.env.LORE_SEED_FILE;
+    expect(resolveLoreSeedPath()).toMatch(/dungeon-crawler-carl\.jsonl$/);
+    if (original !== undefined) process.env.LORE_SEED_FILE = original;
+  });
+
+  it("returns the custom path when LORE_SEED_FILE is set", () => {
+    const original = process.env.LORE_SEED_FILE;
+    process.env.LORE_SEED_FILE = "/custom/path/my-lore.jsonl";
+    expect(resolveLoreSeedPath()).toBe("/custom/path/my-lore.jsonl");
+    if (original !== undefined) {
+      process.env.LORE_SEED_FILE = original;
+    } else {
+      delete process.env.LORE_SEED_FILE;
+    }
+  });
+});
+
+describe("isLoreSeedDatasetAvailable", () => {
+  it("returns true when the fs mock makes existsSync return true for the resolved path", () => {
+    // The module-level fs.existsSync mock returns true for paths ending in dungeon-crawler-carl.jsonl
+    expect(isLoreSeedDatasetAvailable()).toBe(true);
+  });
+
+  it("returns false when existsSync returns false for the resolved path", () => {
+    vi.mocked(fs.existsSync).mockReturnValueOnce(false);
+    expect(isLoreSeedDatasetAvailable()).toBe(false);
   });
 });
 

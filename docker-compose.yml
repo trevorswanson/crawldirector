@@ -28,6 +28,12 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/dcc?schema=public
+    # Optional: enable "seed with official lore" onboarding by mounting your
+    # OWN dataset read-only. The DCC dataset is copyrighted and NOT shipped —
+    # see docs/14-lore-seeding.md for the file format. Uncomment and point the
+    # left side at your file (or set LORE_SEED_FILE for a custom container path).
+    # volumes:
+    #   - ./dungeon-crawler-carl.jsonl:/app/dungeon-crawler-carl.jsonl:ro
 
   worker:
     build: .
@@ -40,6 +46,12 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/dcc?schema=public
+    # Optional: enable "seed with official lore" onboarding by mounting your
+    # OWN dataset read-only. The DCC dataset is copyrighted and NOT shipped —
+    # see docs/14-lore-seeding.md for the file format. Uncomment and point the
+    # left side at your file (or set LORE_SEED_FILE for a custom container path).
+    # volumes:
+    #   - ./dungeon-crawler-carl.jsonl:/app/dungeon-crawler-carl.jsonl:ro
 
 volumes:
   dcc-postgres:

@@ -63,6 +63,7 @@ import {
   scaffoldStubEntities,
 } from "@/server/services/generation";
 import { enqueueJob } from "@/server/services/jobs";
+import { isLoreSeedDatasetAvailable } from "@/server/services/seeding";
 import {
   approveChangeSet,
   approveChangeSetRun,
@@ -105,7 +106,7 @@ export async function createCampaignAction(
     return { error: "Could not create the campaign. Please try again." };
   }
 
-  if (formData.get("seedLore") === "on") {
+  if (formData.get("seedLore") === "on" && isLoreSeedDatasetAvailable()) {
     try {
       await enqueueJob(user.id, campaignId, "LORE_SEED", {});
     } catch (err) {

@@ -12,6 +12,23 @@ import {
   type ReviewPatch,
 } from "@/server/services/review";
 
+/**
+ * Resolve the lore dataset path. The DCC dataset is copyrighted and NOT shipped
+ * with the repo — operators bring their own and either place it at the repo/app
+ * root or point LORE_SEED_FILE at it (see docs/14-lore-seeding.md).
+ */
+export function resolveLoreSeedPath(): string {
+  return (
+    process.env.LORE_SEED_FILE ??
+    path.join(process.cwd(), "dungeon-crawler-carl.jsonl")
+  );
+}
+
+/** True when a lore dataset is present and readable at the resolved path. */
+export function isLoreSeedDatasetAvailable(): boolean {
+  return fs.existsSync(resolveLoreSeedPath());
+}
+
 export interface SeedingOptions {
   limit?: number;
   clearExisting?: boolean;
@@ -144,7 +161,7 @@ export async function seedCampaignFromLore(
   }
 
   // Check if JSONL file exists
-  const filePath = path.join(process.cwd(), "dungeon-crawler-carl.jsonl");
+  const filePath = resolveLoreSeedPath();
   if (!fs.existsSync(filePath)) {
     throw new ServiceError(`Lore seed file not found at ${filePath}`);
   }

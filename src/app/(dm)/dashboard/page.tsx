@@ -12,10 +12,12 @@ import { Kicker } from "@/components/ui/kicker";
 import { HudTag } from "@/components/ui/hud-tag";
 import { PageContainer } from "@/components/console/page-container";
 import { CreateCampaignForm } from "@/components/campaigns/create-campaign-form";
+import { isLoreSeedDatasetAvailable } from "@/server/services/seeding";
 
 export default async function DashboardPage() {
   const user = await requireUser();
   const campaigns = await listCampaignsForUser(user.id);
+  const loreSeedAvailable = isLoreSeedDatasetAvailable();
 
   return (
     <PageContainer>
@@ -38,7 +40,7 @@ export default async function DashboardPage() {
           </CardDescription>
         </CardHeader>
         <div className="px-6 pb-6">
-          <CreateCampaignForm />
+          <CreateCampaignForm loreSeedAvailable={loreSeedAvailable} />
         </div>
       </Card>
 
