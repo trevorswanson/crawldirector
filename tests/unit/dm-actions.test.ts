@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const {
   requireUser,
   createCampaign,
+  isLoreSeedDatasetAvailable,
   getCampaignCanonIntegrity,
   setCampaignCurrentFloor,
   createCrawler,
@@ -49,6 +50,7 @@ const {
 } = vi.hoisted(() => ({
   requireUser: vi.fn(),
   createCampaign: vi.fn(),
+  isLoreSeedDatasetAvailable: vi.fn().mockReturnValue(true),
   getCampaignCanonIntegrity: vi.fn(),
   setCampaignCurrentFloor: vi.fn(),
   createCrawler: vi.fn(),
@@ -152,6 +154,7 @@ vi.mock("@/server/services/generation", () => ({
   scaffoldStubEntities,
 }));
 vi.mock("@/server/services/jobs", () => ({ enqueueJob }));
+vi.mock("@/server/services/seeding", () => ({ isLoreSeedDatasetAvailable }));
 vi.mock("@/server/auth", () => ({ signOut }));
 vi.mock("next/navigation", () => ({ redirect }));
 vi.mock("next/cache", () => ({ revalidatePath }));
@@ -256,6 +259,51 @@ describe("createCampaignAction", () => {
     );
     expect(result?.error).toBe("Could not create the campaign. Please try again.");
     expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it("enqueues a LORE_SEED job and still redirects when seedLore is 'on'", async () => {
+    createCampaign.mockResolvedValue({ id: "c1" });
+    enqueueJob.mockResolvedValue({ id: "j1" });
+
+    await expect(
+      createCampaignAction(undefined, form({ name: "Lore World", summary: "", seedLore: "on" })),
+    ).rejects.toThrow("NEXT_REDIRECT");
+
+    expect(enqueueJob).toHaveBeenCalledWith("u1", "c1", "LORE_SEED", {});
+    expect(redirect).toHaveBeenCalledWith("/campaigns/c1");
+  });
+
+  it("does not enqueue when seedLore is absent", async () => {
+    createCampaign.mockResolvedValue({ id: "c1" });
+
+    await expect(
+      createCampaignAction(undefined, form({ name: "No Lore", summary: "" })),
+    ).rejects.toThrow("NEXT_REDIRECT");
+
+    expect(enqueueJob).not.toHaveBeenCalled();
+  });
+
+  it("still redirects even if the enqueue throws", async () => {
+    createCampaign.mockResolvedValue({ id: "c1" });
+    enqueueJob.mockRejectedValue(new Error("queue down"));
+
+    await expect(
+      createCampaignAction(undefined, form({ name: "Lore World", summary: "", seedLore: "on" })),
+    ).rejects.toThrow("NEXT_REDIRECT");
+
+    expect(redirect).toHaveBeenCalledWith("/campaigns/c1");
+  });
+
+  it("does not enqueue when seedLore is 'on' but dataset is unavailable, still redirects", async () => {
+    createCampaign.mockResolvedValue({ id: "c1" });
+    isLoreSeedDatasetAvailable.mockReturnValueOnce(false);
+
+    await expect(
+      createCampaignAction(undefined, form({ name: "Lore World", summary: "", seedLore: "on" })),
+    ).rejects.toThrow("NEXT_REDIRECT");
+
+    expect(enqueueJob).not.toHaveBeenCalled();
+    expect(redirect).toHaveBeenCalledWith("/campaigns/c1");
   });
 });
 

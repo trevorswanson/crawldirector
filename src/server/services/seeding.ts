@@ -6,10 +6,28 @@ import {
   Visibility,
 } from "@/generated/prisma/client";
 import { prisma } from "@/server/db";
+import { ServiceError } from "@/lib/errors";
 import {
   applyAutoApprovedEntityChangeSet,
   type ReviewPatch,
 } from "@/server/services/review";
+
+/**
+ * Resolve the lore dataset path. The DCC dataset is copyrighted and NOT shipped
+ * with the repo — operators bring their own and either place it at the repo/app
+ * root or point LORE_SEED_FILE at it (see docs/14-lore-seeding.md).
+ */
+export function resolveLoreSeedPath(): string {
+  return (
+    process.env.LORE_SEED_FILE ??
+    path.join(process.cwd(), "dungeon-crawler-carl.jsonl")
+  );
+}
+
+/** True when a lore dataset is present and readable at the resolved path. */
+export function isLoreSeedDatasetAvailable(): boolean {
+  return fs.existsSync(resolveLoreSeedPath());
+}
 
 export interface SeedingOptions {
   limit?: number;
@@ -139,13 +157,20 @@ export async function seedCampaignFromLore(
     where: { userId_campaignId: { userId, campaignId } },
   });
   if (!membership || membership.role === "PLAYER") {
-    throw new Error("You do not have permission to seed this campaign.");
+    throw new ServiceError("You do not have permission to seed this campaign.");
   }
 
   // Check if JSONL file exists
-  const filePath = path.join(process.cwd(), "dungeon-crawler-carl.jsonl");
+  const filePath = resolveLoreSeedPath();
   if (!fs.existsSync(filePath)) {
-    throw new Error(`Lore seed file not found at ${filePath}`);
+    throw new ServiceError(`Lore seed file not found at ${filePath}`);
+  }
+
+  // Guard against double-seeding: refuse if the campaign already has entities
+  // unless clearExisting is explicitly requested (dev/reset path only).
+  const existing = await prisma.entity.count({ where: { campaignId } });
+  if (existing > 0 && !options?.clearExisting) {
+    throw new ServiceError("This campaign already has entities — lore seeding only runs on an empty campaign.");
   }
 
   if (options?.clearExisting) {

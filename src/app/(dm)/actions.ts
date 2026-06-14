@@ -63,6 +63,7 @@ import {
   scaffoldStubEntities,
 } from "@/server/services/generation";
 import { enqueueJob } from "@/server/services/jobs";
+import { isLoreSeedDatasetAvailable } from "@/server/services/seeding";
 import {
   approveChangeSet,
   approveChangeSetRun,
@@ -103,6 +104,15 @@ export async function createCampaignAction(
   } catch (err) {
     logActionError("Campaign creation failed", err);
     return { error: "Could not create the campaign. Please try again." };
+  }
+
+  if (formData.get("seedLore") === "on" && isLoreSeedDatasetAvailable()) {
+    try {
+      await enqueueJob(user.id, campaignId, "LORE_SEED", {});
+    } catch (err) {
+      logActionError("LORE_SEED enqueue failed", err);
+      // Enqueue failure must NOT fail campaign creation — continue to redirect.
+    }
   }
 
   redirect(`/campaigns/${campaignId}`);

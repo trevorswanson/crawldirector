@@ -622,6 +622,7 @@ enum JobStatus {
 
 enum JobKind {
   BULK_FLESH
+  LORE_SEED
 }
 
 // Async work queue (M4 — docs/04-ai-integration.md §"Async / batching"): long

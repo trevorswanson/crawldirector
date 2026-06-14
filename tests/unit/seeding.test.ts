@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Role } from "@/generated/prisma/client";
+import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
 import fs from "fs";
@@ -29,7 +30,7 @@ vi.spyOn(fs, "readFileSync").mockImplementation(((filePath: fs.PathOrFileDescrip
   return originalReadFileSync(filePath, encoding);
 }) as unknown as typeof fs.readFileSync);
 
-import { seedCampaignFromLore, classifyEntity, extractSummaryAndDescription } from "@/server/services/seeding";
+import { seedCampaignFromLore, classifyEntity, extractSummaryAndDescription, resolveLoreSeedPath, isLoreSeedDatasetAvailable } from "@/server/services/seeding";
 
 
 function makeUser(email: string) {
@@ -151,6 +152,38 @@ describe("seeding heuristics", () => {
   });
 });
 
+describe("resolveLoreSeedPath", () => {
+  it("returns a path ending in dungeon-crawler-carl.jsonl when LORE_SEED_FILE is unset", () => {
+    const original = process.env.LORE_SEED_FILE;
+    delete process.env.LORE_SEED_FILE;
+    expect(resolveLoreSeedPath()).toMatch(/dungeon-crawler-carl\.jsonl$/);
+    if (original !== undefined) process.env.LORE_SEED_FILE = original;
+  });
+
+  it("returns the custom path when LORE_SEED_FILE is set", () => {
+    const original = process.env.LORE_SEED_FILE;
+    process.env.LORE_SEED_FILE = "/custom/path/my-lore.jsonl";
+    expect(resolveLoreSeedPath()).toBe("/custom/path/my-lore.jsonl");
+    if (original !== undefined) {
+      process.env.LORE_SEED_FILE = original;
+    } else {
+      delete process.env.LORE_SEED_FILE;
+    }
+  });
+});
+
+describe("isLoreSeedDatasetAvailable", () => {
+  it("returns true when the fs mock makes existsSync return true for the resolved path", () => {
+    // The module-level fs.existsSync mock returns true for paths ending in dungeon-crawler-carl.jsonl
+    expect(isLoreSeedDatasetAvailable()).toBe(true);
+  });
+
+  it("returns false when existsSync returns false for the resolved path", () => {
+    vi.mocked(fs.existsSync).mockReturnValueOnce(false);
+    expect(isLoreSeedDatasetAvailable()).toBe(false);
+  });
+});
+
 describe("seeding service integration", () => {
   it("seeds the campaign from the JSONL file", async () => {
     const owner = await makeUser("owner@test.com");
@@ -227,6 +260,8 @@ describe("seeding service integration", () => {
     });
 
     await expect(seedCampaignFromLore(player.id, campaign.id, { limit: 5 }))
+      .rejects.toThrow(ServiceError);
+    await expect(seedCampaignFromLore(player.id, campaign.id, { limit: 5 }))
       .rejects.toThrow("You do not have permission to seed this campaign.");
   });
 
@@ -243,5 +278,19 @@ describe("seeding service integration", () => {
 
     const count = await prisma.entity.count({ where: { campaignId: campaign.id } });
     expect(count).toBe(3);
+  });
+
+  it("refuses to seed a non-empty campaign without clearExisting", async () => {
+    const owner = await makeUser("owner@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Pre-seeded Campaign" });
+
+    // Seed 5 entries first
+    await seedCampaignFromLore(owner.id, campaign.id, { limit: 5 });
+
+    // Attempt to seed again without clearExisting — must throw ServiceError
+    await expect(seedCampaignFromLore(owner.id, campaign.id, { limit: 5 }))
+      .rejects.toThrow(ServiceError);
+    await expect(seedCampaignFromLore(owner.id, campaign.id, { limit: 5 }))
+      .rejects.toThrow("This campaign already has entities — lore seeding only runs on an empty campaign.");
   });
 });

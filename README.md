@@ -83,6 +83,7 @@ All planning lives in [`docs/`](./docs). Read in this order:
 | [`docs/11-roadmap.md`](./docs/11-roadmap.md) | Milestones M0–M12, sequenced and decomposable |
 | [`docs/12-working-sessions.md`](./docs/12-working-sessions.md) | How future sessions pick up and extend the work |
 | [`docs/13-design-language.md`](./docs/13-design-language.md) | The "broadcast HUD" design system: tokens, fonts, primitives, FX (build all UI from this) |
+| [`docs/14-lore-seeding.md`](./docs/14-lore-seeding.md) | Bring-your-own lore dataset: file format, mount instructions, legal note |
 
 ## Decisions already made
 

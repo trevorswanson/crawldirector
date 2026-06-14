@@ -2,6 +2,7 @@ import type { Job } from "@/generated/prisma/client";
 import { JobKind } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { fleshOutEntities } from "@/server/services/generation";
+import { seedCampaignFromLore } from "@/server/services/seeding";
 
 // Job handler registry (M4 — docs/04-ai-integration.md §"Async / batching").
 // Each handler receives the full Job row and returns a JSON-serialisable result.
@@ -23,5 +24,11 @@ export const jobHandlers: Record<JobKind, (job: Job) => Promise<unknown>> = {
     // fleshOutEntities re-checks DM membership with job.createdById, so a member
     // who lost the role between enqueue and execution fails safely.
     return fleshOutEntities(job.createdById, job.campaignId, payload.entityIds);
+  },
+  [JobKind.LORE_SEED]: async (job: Job) => {
+    // Payload is empty by design — dataset path and visibility policy are fixed
+    // server-side; nothing user-controlled flows in (clearExisting is deliberately
+    // not reachable from here).
+    return seedCampaignFromLore(job.createdById, job.campaignId);
   },
 };

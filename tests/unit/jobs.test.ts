@@ -2,13 +2,18 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the generation module's provider seam — handler tests should not make
 // real network calls. Uses the same vi.hoisted + vi.mock pattern as generation.test.ts.
-const { resolveCampaignProvider } = vi.hoisted(() => ({
+const { resolveCampaignProvider, seedCampaignFromLore } = vi.hoisted(() => ({
   resolveCampaignProvider: vi.fn(),
+  seedCampaignFromLore: vi.fn().mockResolvedValue({ count: 3 }),
 }));
 
 vi.mock("@/server/ai", () => ({
   resolveCampaignProvider,
   describeProviderError: () => "Connection failed.",
+}));
+
+vi.mock("@/server/services/seeding", () => ({
+  seedCampaignFromLore,
 }));
 
 import { JobKind, JobStatus } from "@/generated/prisma/client";
@@ -275,5 +280,33 @@ describe("jobHandlers.BULK_FLESH", () => {
     };
     expect(typeof result.proposedCount).toBe("number");
     expect(typeof result.skippedCount).toBe("number");
+  });
+});
+
+// ─── LORE_SEED handler ──────────────────────────────────────────────────────
+
+describe("jobHandlers.LORE_SEED", () => {
+  it("delegates to seedCampaignFromLore with the job's createdById and campaignId", async () => {
+    const fakeJob = {
+      id: "j2",
+      campaignId: "c1",
+      createdById: "u1",
+      kind: JobKind.LORE_SEED,
+      status: JobStatus.RUNNING,
+      payload: {},
+      result: null,
+      error: null,
+      attempts: 1,
+      maxAttempts: 1,
+      runAfter: new Date(),
+      startedAt: new Date(),
+      finishedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const result = await jobHandlers[JobKind.LORE_SEED](fakeJob);
+    expect(seedCampaignFromLore).toHaveBeenCalledWith("u1", "c1");
+    expect(result).toEqual({ count: 3 });
   });
 });

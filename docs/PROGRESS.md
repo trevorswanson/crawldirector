@@ -110,6 +110,27 @@ keyword-scanning every doc.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
 
+### Done — bring-your-own lore dataset + seed-checkbox gating (2026-06-13)
+
+- [x] `resolveLoreSeedPath()` and `isLoreSeedDatasetAvailable()` exported from `seeding.ts`; `seedCampaignFromLore` uses the resolver (respects `LORE_SEED_FILE` env var).
+- [x] `CreateCampaignForm` accepts a required `loreSeedAvailable: boolean` prop; the seedLore checkbox renders only when `true`.
+- [x] `DashboardPage` (server component) calls `isLoreSeedDatasetAvailable()` and passes the result down as `loreSeedAvailable`.
+- [x] `createCampaignAction` gates the `LORE_SEED` enqueue on `isLoreSeedDatasetAvailable()` (defense in depth).
+- [x] `docker-compose.yml`: commented-out bind-mount example on both `app` and `worker` services (opt-in; missing host file would error).
+- [x] `.env.example`: documents `LORE_SEED_FILE`.
+- [x] `docs/14-lore-seeding.md`: operator doc with legal note, JSONL format, synthetic example, mount instructions for docker-compose and raw `docker run`.
+- [x] Tests: `seeding.test.ts` gains `resolveLoreSeedPath` + `isLoreSeedDatasetAvailable` tests; `create-campaign-form.test.tsx` passes `loreSeedAvailable` prop + new "false → checkbox hidden" case; `dashboard-page.test.tsx` mocks `isLoreSeedDatasetAvailable`; `dm-actions.test.ts` mocks seeding module + new "available=false → no enqueue, still redirects" test.
+- [x] Dataset is NOT tracked or bundled anywhere (`git ls-files | grep jsonl` → empty).
+
+### Done — opt-in DCC lore seed at campaign creation (2026-06-13)
+
+- [x] Added `LORE_SEED` to `enum JobKind` (additive `ALTER TYPE ... ADD VALUE` migration).
+- [x] `seedCampaignFromLore` now throws `ServiceError` (was plain `Error`) for the membership and missing-file cases; added an idempotency guard that rejects re-seeding a non-empty campaign unless `clearExisting` is set.
+- [x] `jobHandlers.LORE_SEED` delegates to `seedCampaignFromLore(job.createdById, job.campaignId)`; `clearExisting` is not reachable from the handler.
+- [x] `CreateCampaignForm` has an unchecked-by-default native checkbox (`name="seedLore"`, no `value` attribute); submits `"on"` when checked.
+- [x] `createCampaignAction`: after campaign creation, if `seedLore === "on"` enqueues a `LORE_SEED` job in its own try/catch — enqueue failure never blocks the redirect.
+- [x] Tests: seeding ServiceError assertions updated; non-empty campaign guard test added; LORE_SEED handler delegation test (mocked seeding module); dm-actions tests for seedLore=on/off/enqueue-throw; form checkbox test.
+
 ## M4 — Async Job table + worker ✅ (2026-06-13)
 
 **Goal:** the last open M4 item from [`04-ai-integration.md`](./04-ai-integration.md)

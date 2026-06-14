@@ -2,13 +2,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
-const { requireUser, listCampaignsForUser } = vi.hoisted(() => ({
+const { requireUser, listCampaignsForUser, isLoreSeedDatasetAvailable } = vi.hoisted(() => ({
   requireUser: vi.fn(),
   listCampaignsForUser: vi.fn(),
+  isLoreSeedDatasetAvailable: vi.fn().mockReturnValue(false),
 }));
 
 vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/campaigns", () => ({ listCampaignsForUser }));
+vi.mock("@/server/services/seeding", () => ({ isLoreSeedDatasetAvailable }));
 vi.mock("@/components/campaigns/create-campaign-form", () => ({
   CreateCampaignForm: () => <div data-testid="create-campaign-form" />,
 }));
