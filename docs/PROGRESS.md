@@ -162,6 +162,17 @@ and retrieval-fed generator context build on. Scoped to **ENTITY** targets;
 relationships/events, the materialized `tsvector`+GIN index, embeddings, Ask, and
 generator wiring are the remaining M5 slices (tracked in the open backlog).
 
+- [x] **Backfill migration** (`20260614160000_backfill_search_docs`): a one-time
+      data migration that seeds a `SearchDoc` for every pre-existing non-archived
+      entity, mirroring the indexer (`content` = name+summary+description+tags one
+      per line, blanks dropped; `visibility` mirrors the source). Without it, an
+      already-populated DB would create an empty index and pre-existing canon would
+      stay unsearchable until each entity was next edited (the write-path hooks only
+      catch *future* writes). Idempotent via `ON CONFLICT DO NOTHING` (a no-op on a
+      fresh DB whose seeds already ran through the indexed write paths). Verified
+      against the seeded world: 12 rows, content + visibility byte-match
+      `buildEntityContent` for all 12, searchable, second run inserts 0. *(Addresses
+      Codex's P2 review note on PR #117.)*
 - [x] **Schema + migration** (`20260614143421_m5_search_doc`): the `SearchDoc`
       model from [`09-data-schema.md`](./09-data-schema.md) — `campaignId`,
       `targetType` (ENTITY|RELATIONSHIP|EVENT), `targetId`, `content`
