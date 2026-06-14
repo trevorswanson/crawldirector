@@ -1,5 +1,6 @@
-import { CanonStatus, Prisma, Role } from "@/generated/prisma/client";
+import { CanonStatus, Prisma, Role, Visibility } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
+import { relationshipTypeMeta } from "@/lib/relationship-types";
 import { prisma } from "@/server/db";
 
 // Search & retrieval index (M5 — docs/07-search-retrieval.md).
@@ -8,12 +9,36 @@ import { prisma } from "@/server/db";
 // full-text (and, in a later slice, semantic) retrieval. It is *derived* data:
 // regenerable from canon at any time, never part of provenance, and never shown
 // to players except through the `visibility` mirror it copies from its source
-// (invariant #5 — scoping happens at retrieval, see search.ts).
+// (invariant #5 — final scoping happens at retrieval, see search.ts).
 //
-// Slice 1 indexes ENTITY targets only; RELATIONSHIP/EVENT targets land in a
-// follow-up slice (the schema's `targetType` already allows them).
+// Slice 1 indexed ENTITY targets; slice 2 adds RELATIONSHIP and EVENT targets
+// (the schema's `targetType` already allows them). Relationship/event player
+// visibility is *derived* (an edge depends on its endpoints; an event on its
+// participants) so the mirror only copies the cheap `secret → DM_ONLY` signal
+// and the authoritative endpoint/participant projection is re-applied at
+// retrieval against live canon — see search.ts.
 
 export const SEARCH_TARGET_ENTITY = "ENTITY";
+export const SEARCH_TARGET_RELATIONSHIP = "RELATIONSHIP";
+export const SEARCH_TARGET_EVENT = "EVENT";
+
+// The full client and a transaction client both satisfy this for our needs.
+type Db = Prisma.TransactionClient;
+
+/** Map a `secret` flag to the visibility mirror (the coarse retrieval pre-filter). */
+function visibilityForSecret(secret: boolean): Visibility {
+  return secret ? Visibility.DM_ONLY : Visibility.PLAYER_VISIBLE;
+}
+
+/** Join the non-blank parts of a search document, one per line. */
+function joinContent(parts: (string | null | undefined)[]): string {
+  return parts
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part))
+    .join("\n");
+}
+
+// ───────────────────────────── Entities ─────────────────────────────
 
 // The fields whose values make up an entity's searchable text. Re-read inside
 // the write transaction so the index reflects the entity's *final* persisted
@@ -40,14 +65,8 @@ export function buildEntityContent(entity: {
   description: string | null;
   tags: string[];
 }): string {
-  return [entity.name, entity.summary, entity.description, ...entity.tags]
-    .map((part) => part?.trim())
-    .filter((part): part is string => Boolean(part))
-    .join("\n");
+  return joinContent([entity.name, entity.summary, entity.description, ...entity.tags]);
 }
-
-// The full client and a transaction client both satisfy this for our needs.
-type Db = Prisma.TransactionClient;
 
 /**
  * Upsert (or remove) the SearchDoc for one entity. Called from the canon write
@@ -90,6 +109,168 @@ export async function indexEntity(
   });
 }
 
+// ─────────────────────────── Relationships ──────────────────────────
+
+const relationshipSearchSelect = {
+  id: true,
+  campaignId: true,
+  status: true,
+  type: true,
+  notes: true,
+  secret: true,
+  sourceEntity: { select: { name: true } },
+  targetEntity: { select: { name: true } },
+} satisfies Prisma.RelationshipSelect;
+
+type RelationshipSearchSource = Prisma.RelationshipGetPayload<{
+  select: typeof relationshipSearchSelect;
+}>;
+
+/**
+ * Build the searchable text for a relationship. An edge has no name of its own,
+ * so its document is its (human) type phrase + both endpoint names + notes —
+ * making "Donut ally" or "betrayed Mordecai" find the edge. Pure; exported for
+ * testing. The endpoint names are denormalized, so a later endpoint *rename*
+ * leaves this stale until the next reindex (the doc-07 "stale-but-close between
+ * writes" tolerance); the edge's own writes keep it fresh.
+ */
+export function buildRelationshipContent(relationship: {
+  typePhrase: string;
+  sourceName: string;
+  targetName: string;
+  notes: string | null;
+}): string {
+  return joinContent([
+    relationship.typePhrase,
+    relationship.sourceName,
+    relationship.targetName,
+    relationship.notes,
+  ]);
+}
+
+function relationshipContentFrom(relationship: RelationshipSearchSource): string {
+  return buildRelationshipContent({
+    typePhrase: relationshipTypeMeta[relationship.type].forward,
+    sourceName: relationship.sourceEntity.name,
+    targetName: relationship.targetEntity.name,
+    notes: relationship.notes,
+  });
+}
+
+/**
+ * Upsert (or remove) the SearchDoc for one relationship. Called from the edge
+ * write paths (review.ts) in the same transaction. Archived/missing edges drop
+ * out. `visibility` mirrors only the edge's own `secret` flag; endpoint
+ * visibility is enforced at retrieval (search.ts), since it can change without
+ * an edge write.
+ */
+export async function indexRelationship(
+  db: Db,
+  campaignId: string,
+  relationshipId: string,
+): Promise<void> {
+  const relationship = await db.relationship.findUnique({
+    where: { id: relationshipId },
+    select: relationshipSearchSelect,
+  });
+
+  if (
+    !relationship ||
+    relationship.campaignId !== campaignId ||
+    relationship.status === CanonStatus.ARCHIVED
+  ) {
+    await removeSearchDoc(db, SEARCH_TARGET_RELATIONSHIP, relationshipId);
+    return;
+  }
+
+  const content = relationshipContentFrom(relationship);
+  const visibility = visibilityForSecret(relationship.secret);
+  await db.searchDoc.upsert({
+    where: {
+      targetType_targetId: {
+        targetType: SEARCH_TARGET_RELATIONSHIP,
+        targetId: relationshipId,
+      },
+    },
+    create: {
+      campaignId,
+      targetType: SEARCH_TARGET_RELATIONSHIP,
+      targetId: relationshipId,
+      content,
+      visibility,
+    },
+    update: { campaignId, content, visibility },
+  });
+}
+
+// ─────────────────────────────── Events ─────────────────────────────
+
+const eventSearchSelect = {
+  id: true,
+  campaignId: true,
+  status: true,
+  title: true,
+  summary: true,
+  description: true,
+  secret: true,
+} satisfies Prisma.EventSelect;
+
+/**
+ * Build the searchable text for an event: title + summary + description, one
+ * per line, blanks dropped. Pure; exported for testing.
+ */
+export function buildEventContent(event: {
+  title: string;
+  summary: string | null;
+  description: string | null;
+}): string {
+  return joinContent([event.title, event.summary, event.description]);
+}
+
+/**
+ * Upsert (or remove) the SearchDoc for one event. Called from the event write
+ * paths (review.ts) in the same transaction. Archived/missing events drop out.
+ * `visibility` mirrors only the event's own `secret` flag; the participant
+ * projection is enforced at retrieval (search.ts).
+ */
+export async function indexEvent(
+  db: Db,
+  campaignId: string,
+  eventId: string,
+): Promise<void> {
+  const event = await db.event.findUnique({
+    where: { id: eventId },
+    select: eventSearchSelect,
+  });
+
+  if (
+    !event ||
+    event.campaignId !== campaignId ||
+    event.status === CanonStatus.ARCHIVED
+  ) {
+    await removeSearchDoc(db, SEARCH_TARGET_EVENT, eventId);
+    return;
+  }
+
+  const content = buildEventContent(event);
+  const visibility = visibilityForSecret(event.secret);
+  await db.searchDoc.upsert({
+    where: {
+      targetType_targetId: { targetType: SEARCH_TARGET_EVENT, targetId: eventId },
+    },
+    create: {
+      campaignId,
+      targetType: SEARCH_TARGET_EVENT,
+      targetId: eventId,
+      content,
+      visibility,
+    },
+    update: { campaignId, content, visibility },
+  });
+}
+
+// ─────────────────────────── Shared helpers ─────────────────────────
+
 /** Drop a target's SearchDoc (no-op if absent). */
 export async function removeSearchDoc(
   db: Db,
@@ -100,9 +281,10 @@ export async function removeSearchDoc(
 }
 
 /**
- * Rebuild every entity SearchDoc for a campaign from current canon. DM-only.
- * The index is hooked into the write paths, so this is a recovery/backfill tool
- * (e.g. after enabling search on an existing campaign) rather than a hot path.
+ * Rebuild every SearchDoc for a campaign from current canon — entities,
+ * relationships, and events. DM-only. The index is hooked into the write paths,
+ * so this is a recovery/backfill tool (e.g. after enabling search on an existing
+ * campaign, or to refresh denormalized endpoint names) rather than a hot path.
  */
 export async function reindexCampaign(
   userId: string,
@@ -116,26 +298,43 @@ export async function reindexCampaign(
     throw new ServiceError("You do not have permission to reindex this campaign.");
   }
 
-  const entities = await prisma.entity.findMany({
-    where: { campaignId, status: { not: CanonStatus.ARCHIVED } },
-    select: { id: true, name: true, summary: true, description: true, tags: true, visibility: true },
-  });
+  const live = { campaignId, status: { not: CanonStatus.ARCHIVED } } as const;
+  const [entities, relationships, events] = await Promise.all([
+    prisma.entity.findMany({
+      where: live,
+      select: { id: true, name: true, summary: true, description: true, tags: true, visibility: true },
+    }),
+    prisma.relationship.findMany({ where: live, select: relationshipSearchSelect }),
+    prisma.event.findMany({ where: live, select: eventSearchSelect }),
+  ]);
 
-  const docs = entities.map((entity) => ({
-    campaignId,
-    targetType: SEARCH_TARGET_ENTITY,
-    targetId: entity.id,
-    content: buildEntityContent(entity),
-    visibility: entity.visibility,
-  }));
+  const docs: Prisma.SearchDocCreateManyInput[] = [
+    ...entities.map((entity) => ({
+      campaignId,
+      targetType: SEARCH_TARGET_ENTITY,
+      targetId: entity.id,
+      content: buildEntityContent(entity),
+      visibility: entity.visibility,
+    })),
+    ...relationships.map((relationship) => ({
+      campaignId,
+      targetType: SEARCH_TARGET_RELATIONSHIP,
+      targetId: relationship.id,
+      content: relationshipContentFrom(relationship),
+      visibility: visibilityForSecret(relationship.secret),
+    })),
+    ...events.map((event) => ({
+      campaignId,
+      targetType: SEARCH_TARGET_EVENT,
+      targetId: event.id,
+      content: buildEventContent(event),
+      visibility: visibilityForSecret(event.secret),
+    })),
+  ];
 
   await prisma.$transaction([
-    prisma.searchDoc.deleteMany({
-      where: { campaignId, targetType: SEARCH_TARGET_ENTITY },
-    }),
-    ...(docs.length > 0
-      ? [prisma.searchDoc.createMany({ data: docs })]
-      : []),
+    prisma.searchDoc.deleteMany({ where: { campaignId } }),
+    ...(docs.length > 0 ? [prisma.searchDoc.createMany({ data: docs })] : []),
   ]);
 
   return { indexed: docs.length };

@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Search } from "lucide-react";
+import { CalendarClock, Search, Share2 } from "lucide-react";
 
 import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
-import { searchCanon } from "@/server/services/search";
+import { searchCanon, type SearchHit } from "@/server/services/search";
 import { PageContainer } from "@/components/console/page-container";
 import { SearchBar } from "@/components/search/search-bar";
 import { Kicker } from "@/components/ui/kicker";
@@ -12,6 +12,89 @@ import { TypeDot } from "@/components/ui/type-dot";
 import { SourceBadge } from "@/components/ui/source-badge";
 import { StatusPill } from "@/components/ui/status-pill";
 import { formatEntityType } from "@/lib/entities";
+import { relationshipTypeMeta } from "@/lib/relationship-types";
+
+const cardClass =
+  "panel flex flex-col gap-[9px] p-[14px] transition-colors hover:border-[var(--line-strong)] hover:bg-[var(--bg-2)]";
+const kickerClass =
+  "font-mono text-[9.5px] uppercase tracking-[.08em] text-[var(--ink-faint)]";
+
+function ResultCard({ campaignId, hit }: { campaignId: string; hit: SearchHit }) {
+  if (hit.targetType === "RELATIONSHIP") {
+    const { relationship: rel } = hit;
+    return (
+      <Link href={`/campaigns/${campaignId}/graph`} className={cardClass}>
+        <div className="flex items-center gap-2">
+          <Share2 aria-hidden size={12} className="text-[var(--ink-faint)]" />
+          <span className={kickerClass}>Relationship</span>
+          <span className="ml-auto">
+            <SourceBadge source={rel.source} small />
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+          <TypeDot type={rel.sourceEntity.type} />
+          <span className="font-display text-[15px] font-semibold">{rel.sourceEntity.name}</span>
+          <span className="font-mono text-[10px] uppercase tracking-[.06em] text-[var(--ink-faint)]">
+            {relationshipTypeMeta[rel.type].forward}
+          </span>
+          <TypeDot type={rel.targetEntity.type} />
+          <span className="font-display text-[15px] font-semibold">{rel.targetEntity.name}</span>
+        </div>
+        <p className="flex-1 text-[12.5px] leading-[1.5] text-[var(--ink-dim)]">
+          {rel.notes || "No notes."}
+        </p>
+        <StatusPill status={rel.status} />
+      </Link>
+    );
+  }
+
+  if (hit.targetType === "EVENT") {
+    const { event } = hit;
+    return (
+      <Link href={`/campaigns/${campaignId}/timeline`} className={cardClass}>
+        <div className="flex items-center gap-2">
+          <CalendarClock aria-hidden size={12} className="text-[var(--ink-faint)]" />
+          <span className={kickerClass}>Event</span>
+          <span className="ml-auto">
+            <SourceBadge source={event.source} small />
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="font-display text-[16px] font-semibold">{event.title}</span>
+        </div>
+        <p className="flex-1 text-[12.5px] leading-[1.5] text-[var(--ink-dim)]">
+          {event.summary || "No summary yet."}
+        </p>
+        <StatusPill status={event.status} />
+      </Link>
+    );
+  }
+
+  const { entity } = hit;
+  return (
+    <Link href={`/campaigns/${campaignId}/entities/${entity.id}`} className={cardClass}>
+      <div className="flex items-center gap-2">
+        <TypeDot type={entity.type} />
+        <span className={kickerClass}>{formatEntityType(entity.type)}</span>
+        <span className="ml-auto">
+          <SourceBadge source={entity.source} small />
+        </span>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="font-display text-[16px] font-semibold">{entity.name}</span>
+        {entity.isStub && (
+          <span className="hud-tag px-[5px] py-px text-[8.5px] text-[var(--ink-faint)]">
+            Stub
+          </span>
+        )}
+      </div>
+      <p className="flex-1 text-[12.5px] leading-[1.5] text-[var(--ink-dim)]">
+        {entity.summary || "No summary yet."}
+      </p>
+      <StatusPill status={entity.status} />
+    </Link>
+  );
+}
 
 export default async function CampaignSearchPage({
   params,
@@ -40,9 +123,9 @@ export default async function CampaignSearchPage({
         Search the campaign
       </h1>
       <p className="mb-5 max-w-2xl text-[13px] leading-[1.6] text-[var(--ink-dim)]">
-        Full-text search across every entity you can see — names, summaries,
-        descriptions, and tags. Semantic search and Ask the Campaign arrive in a
-        later M5 slice.
+        Full-text search across every entity, relationship, and event you can
+        see — names, summaries, descriptions, tags, and connections. Semantic
+        search and Ask the Campaign arrive in a later M5 slice.
       </p>
 
       <SearchBar campaignId={id} initialQuery={rawQuery} autoFocus />
@@ -71,35 +154,7 @@ export default async function CampaignSearchPage({
             </p>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
               {hits.map((hit) => (
-                <Link
-                  key={hit.targetId}
-                  href={`/campaigns/${id}/entities/${hit.targetId}`}
-                  className="panel flex flex-col gap-[9px] p-[14px] transition-colors hover:border-[var(--line-strong)] hover:bg-[var(--bg-2)]"
-                >
-                  <div className="flex items-center gap-2">
-                    <TypeDot type={hit.entity.type} />
-                    <span className="font-mono text-[9.5px] uppercase tracking-[.08em] text-[var(--ink-faint)]">
-                      {formatEntityType(hit.entity.type)}
-                    </span>
-                    <span className="ml-auto">
-                      <SourceBadge source={hit.entity.source} small />
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-display text-[16px] font-semibold">
-                      {hit.entity.name}
-                    </span>
-                    {hit.entity.isStub && (
-                      <span className="hud-tag px-[5px] py-px text-[8.5px] text-[var(--ink-faint)]">
-                        Stub
-                      </span>
-                    )}
-                  </div>
-                  <p className="flex-1 text-[12.5px] leading-[1.5] text-[var(--ink-dim)]">
-                    {hit.entity.summary || "No summary yet."}
-                  </p>
-                  <StatusPill status={hit.entity.status} />
-                </Link>
+                <ResultCard key={`${hit.targetType}:${hit.targetId}`} campaignId={id} hit={hit} />
               ))}
             </div>
           </>
