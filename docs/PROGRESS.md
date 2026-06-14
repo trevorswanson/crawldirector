@@ -207,11 +207,18 @@ generator wiring are the remaining M5 slices (tracked in the open backlog).
       settings warnings only), typecheck, build (the `/search` route compiles), and
       the full coverage gate green (statements 95.65%, branches 89.03%, functions
       97.85%, lines 97.58%; the new search files covered).
-- [ ] **In-browser verification:** not yet performed (the seeded DB needs a reseed
-      + re-login after the test run, and the usual local port-3000 constraint).
-      Covered by the DB-backed visibility-scoping tests + real-component page tests
-      and a clean production build of the route; an in-browser pass is the one
-      remaining manual step.
+- [x] **In-browser verification** (2026-06-14): reseeded the `dcc` DB + ran
+      `scripts/seed-world.ts` (12 entities via the real service layer). Confirmed
+      the write-path hook fired — **12 `SearchDoc` rows, visibility mirror exact**
+      (7 `PLAYER_VISIBLE` / 5 `DM_ONLY`). Drove the running app authenticated
+      (Auth.js credentials login → session cookie): `/search?q=donut` renders
+      "3 results" cards (Princess Donut, Team Princess Donut, Mordecai);
+      `/search?q=maestro` shows the DM-only "The Maestro" to the DM; an empty query
+      shows the prompt state; a no-match query shows "No matches for …"; the topbar
+      `GlobalSearchLink` + nav **Search** item render with the correct hrefs.
+      **Invariant #5 confirmed live:** a player query for "maestro" returns 0 hits
+      while the DM gets 1. The `OR` operator (`websearch_to_tsquery`) and multi-
+      field ranking both work against real seeded canon.
 
 ## M4 — Async Job table + worker ✅ (2026-06-13)
 
