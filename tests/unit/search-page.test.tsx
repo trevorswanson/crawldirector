@@ -49,6 +49,33 @@ function hit(id: string, name: string, summary: string | null) {
   };
 }
 
+function relHit(id: string, notes: string | null) {
+  return {
+    targetType: "RELATIONSHIP",
+    targetId: id,
+    rank: 0.4,
+    relationship: {
+      id,
+      type: "ALLY_OF",
+      notes,
+      status: "CANON",
+      source: "AI",
+      secret: false,
+      sourceEntity: { id: "s1", name: "Source Ent", type: "NPC" },
+      targetEntity: { id: "t1", name: "Target Ent", type: "NPC" },
+    },
+  };
+}
+
+function eventHit(id: string, title: string, summary: string | null) {
+  return {
+    targetType: "EVENT",
+    targetId: id,
+    rank: 0.3,
+    event: { id, title, summary, status: "CANON", source: "DM", secret: false },
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   requireUser.mockResolvedValue({ id: "u1" });
@@ -101,6 +128,47 @@ describe("CampaignSearchPage", () => {
     expect(screen.getByText("No summary yet.")).toBeDefined();
     const link = screen.getByText("Princess Donut").closest("a");
     expect(link?.getAttribute("href")).toBe("/campaigns/c1/entities/e1");
+  });
+
+  it("renders relationship and event cards linking to graph and timeline", async () => {
+    searchCanon.mockResolvedValue({
+      role: "OWNER",
+      query: "x",
+      hits: [relHit("r1", "close pals"), eventHit("ev1", "Big Event", "stuff happened")],
+    });
+    render(
+      await CampaignSearchPage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({ q: "x" }),
+      }),
+    );
+    expect(screen.getByText("2 results")).toBeDefined();
+
+    expect(screen.getByText("Relationship")).toBeDefined();
+    expect(screen.getByText("ally of")).toBeDefined();
+    expect(screen.getByText("close pals")).toBeDefined();
+    const relLink = screen.getByText("Source Ent").closest("a");
+    expect(relLink?.getAttribute("href")).toBe("/campaigns/c1/graph");
+
+    expect(screen.getByText("Event")).toBeDefined();
+    const evLink = screen.getByText("Big Event").closest("a");
+    expect(evLink?.getAttribute("href")).toBe("/campaigns/c1/timeline");
+  });
+
+  it("shows fallback copy for a relationship with no notes and an event with no summary", async () => {
+    searchCanon.mockResolvedValue({
+      role: "OWNER",
+      query: "x",
+      hits: [relHit("r1", null), eventHit("ev1", "Quiet Event", null)],
+    });
+    render(
+      await CampaignSearchPage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({ q: "x" }),
+      }),
+    );
+    expect(screen.getByText("No notes.")).toBeDefined();
+    expect(screen.getByText("No summary yet.")).toBeDefined();
   });
 
   it("shows a no-matches state for a query with no hits", async () => {

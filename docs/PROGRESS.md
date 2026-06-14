@@ -22,9 +22,12 @@ keyword-scanning every doc.
             write paths + a DM backfill; `searchCanon` full-text service
             (visibility-scoped); a `/campaigns/[id]/search` page wired from the
             topbar + nav. Keyword/full-text works with no AI key.
-      - [ ] **Slice 2 — index relationships + events.** Extend the indexer/search
-            to `RELATIONSHIP` and `EVENT` targets (the schema's `targetType`
-            already allows them); hook the relationship/event apply paths.
+      - [x] **Slice 2 — index relationships + events.** ✅ (2026-06-14) — see the
+            section below. The indexer/search now cover `RELATIONSHIP` and `EVENT`
+            targets; the edge/event apply paths hook the indexer in-transaction;
+            search returns a typed hit union (entity/relationship/event cards).
+            Visibility is two-layer: the doc `visibility` mirrors `secret`, and
+            the endpoint/participant projection is re-applied at retrieval.
       - [ ] **Slice 3 — perf: materialized `tsvector` + GIN index.** Replace the
             query-time `to_tsvector` with a stored column + GIN index (decide the
             Prisma drift handling — `Unsupported` column or accept out-of-schema).
@@ -152,6 +155,78 @@ keyword-scanning every doc.
 - [x] `CreateCampaignForm` has an unchecked-by-default native checkbox (`name="seedLore"`, no `value` attribute); submits `"on"` when checked.
 - [x] `createCampaignAction`: after campaign creation, if `seedLore === "on"` enqueues a `LORE_SEED` job in its own try/catch — enqueue failure never blocks the redirect.
 - [x] Tests: seeding ServiceError assertions updated; non-empty campaign guard test added; LORE_SEED handler delegation test (mocked seeding module); dm-actions tests for seedLore=on/off/enqueue-throw; form checkbox test.
+
+## M5 — Search: index relationships + events (slice 2) ✅ (2026-06-14)
+
+**Goal:** broaden the M5 search subsystem ([`07-search-retrieval.md`](./07-search-retrieval.md))
+from ENTITY-only (slice 1) to also index and retrieve **RELATIONSHIP** and
+**EVENT** canon — the schema's `SearchDoc.targetType` already allowed all three.
+Still AI-key-free keyword/full-text; the materialized `tsvector`+GIN index,
+embeddings, Ask, and generator wiring remain the later M5 slices.
+
+- [x] **Indexer** ([`search-index.ts`](../src/server/services/search-index.ts)):
+      generalized alongside `indexEntity`. New pure builders `buildRelationshipContent`
+      (the type's forward phrase + both endpoint names + notes) and
+      `buildEventContent` (title + summary + description), plus `indexRelationship`
+      / `indexEvent` (upsert the doc, or drop it when archived/missing — the
+      mirror is regenerable). New `SEARCH_TARGET_RELATIONSHIP` / `SEARCH_TARGET_EVENT`
+      constants. `reindexCampaign` now rebuilds all three target types (and clears
+      the whole campaign's docs, not just ENTITY).
+- [x] **Visibility is two-layer (invariant #5).** A relationship/event's player
+      visibility is *derived* — an edge needs both endpoints player-visible, an
+      event needs ≥1 player-visible participant — and those can change **without an
+      edge/event write**, so a single stored `visibility` can't stay authoritative.
+      The doc `visibility` therefore mirrors only the cheap `secret → DM_ONLY`
+      signal (a coarse SQL pre-filter), and the **authoritative** endpoint/
+      participant projection is re-applied at retrieval against *live* canon (the
+      same projection graph/timeline use). A stale index row can never leak: even
+      if the mirror says PLAYER_VISIBLE, hydration drops a hit whose endpoints/
+      participants are hidden. (Entity docs keep their authoritative `visibility`
+      mirror, kept fresh by `indexEntity` on every entity write.)
+- [x] **Hooked into the canon write paths** ([`review.ts`](../src/server/services/review.ts)):
+      `applyCreateRelationship` / `applyUpdateRelationship` / `applyDeleteRelationship`
+      call `indexRelationship`, and `applyCreateEvent` / `applyUpdateEvent` call
+      `indexEvent`, all **in the same transaction** (covering both the auto-approved
+      DM path and reviewed approvals). UPDATE_EVENT covers both field edits and
+      soft-archive; DELETE_RELATIONSHIP archives then drops the doc. **Deliberate
+      deferral:** an entity *rename* leaves its edges' denormalized endpoint names
+      stale until the next reindex (the doc-07 "stale-but-close between writes"
+      tolerance) — no cascade re-index on entity writes this slice.
+- [x] **Search service** ([`search.ts`](../src/server/services/search.ts)):
+      `searchCanon` drops the ENTITY-only filter and ranks across all three types
+      in one `ts_rank` query, then hydrates each type from live canon with the
+      requester's projection (entities: not archived; relationships: both endpoints
+      player-visible for players; events: ≥1 player-visible participant). Returns a
+      discriminated `SearchHit` union (`EntitySearchHit | RelationshipSearchHit |
+      EventSearchHit`).
+- [x] **UI** ([search page](<../src/app/(dm)/campaigns/[id]/search/page.tsx>)): a
+      `ResultCard` dispatcher renders per-type cards — relationships show
+      `source → forward-phrase → target` + notes and link to the **Graph**; events
+      show title + summary and link to the **Timeline**; entities are unchanged and
+      link to detail. Honest empty states (`No notes.` / `No summary yet.`). Intro
+      copy updated to name relationships + events.
+- [x] **Tests:** DB-backed `search.test.ts` extended — pure
+      `buildRelationshipContent`/`buildEventContent`; relationship + event index on
+      create/update/archive; **secret edges + edges to hidden endpoints hidden from
+      players**; **secret events + events with only hidden participants hidden from
+      players** (invariant #5, DM 3 / player 1 each); `reindexCampaign` rebuilds all
+      three types. `search-page.test.tsx` gains relationship/event card render +
+      graph/timeline link + empty-state cases. lint (0 errors; pre-existing settings
+      warnings only), typecheck, build (the `/search` route compiles), and the full
+      coverage gate green (statements 95.69%, branches 89.09%, functions 97.87%,
+      lines 97.59%; `search-index.ts` 100%, `search.ts` 97.77%).
+- [x] **In-browser verification** (2026-06-14): reseeded `dcc` + ran
+      `scripts/seed-world.ts` (12 entities, 11 edges, 4 events **via the real
+      service layer**). Confirmed the write-path hooks fired: **11 RELATIONSHIP docs
+      (10 PLAYER_VISIBLE / 1 secret→DM_ONLY)** and **4 EVENT docs**, content
+      byte-matching the builders. Drove the running app authenticated as the DM:
+      `/search?q=Donut` renders **11 results** mixing entity, relationship
+      (`Carl ALLY OF Princess Donut` — notes "Bonded under fire."), and event
+      (`Carl & Donut breach Floor 9`) cards with correct Graph/Timeline hrefs and no
+      console errors. **Invariant #5 confirmed live** via a throwaway player (removed
+      after): `Maestro` → DM sees the DM-only entity **and** the secret
+      `Maestro → Borant Syndicate` edge (2), player **0**; `manipulates` (the secret
+      edge's type phrase) → DM 1, player **0**.
 
 ## M5 — Search foundation: full-text over canon (slice 1) ✅ (2026-06-14)
 

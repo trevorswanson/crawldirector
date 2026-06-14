@@ -26,7 +26,11 @@ import {
 } from "@/lib/time-resolve";
 import { floorRelativeSortKey, readTimeRef } from "@/lib/time-ref";
 import { prisma } from "@/server/db";
-import { indexEntity } from "@/server/services/search-index";
+import {
+  indexEntity,
+  indexEvent,
+  indexRelationship,
+} from "@/server/services/search-index";
 
 type JsonPrimitive = string | number | boolean | null;
 type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
@@ -2877,6 +2881,7 @@ async function applyCreateRelationship(
   });
 
   await writeRelationshipProvenance(tx, changeSet, relationship.id, patch);
+  await indexRelationship(tx, changeSet.campaignId, relationship.id);
   await tx.auditLog.create({
     data: {
       campaignId: changeSet.campaignId,
@@ -2975,6 +2980,7 @@ async function applyUpdateRelationship(
     select: { id: true },
   });
   await writeRelationshipProvenance(tx, changeSet, relationshipId, patch);
+  await indexRelationship(tx, changeSet.campaignId, relationshipId);
   await tx.auditLog.create({
     data: {
       campaignId: changeSet.campaignId,
@@ -3036,6 +3042,8 @@ async function applyDeleteRelationship(
     data: { status: CanonStatus.ARCHIVED, version: { increment: 1 } },
     select: { id: true },
   });
+  // The edge is now ARCHIVED, so indexRelationship drops its SearchDoc.
+  await indexRelationship(tx, changeSet.campaignId, relationshipId);
   await tx.auditLog.create({
     data: {
       campaignId: changeSet.campaignId,
@@ -3850,6 +3858,7 @@ async function applyCreateEvent(
   });
 
   await writeEventProvenance(tx, changeSet, event.id, patch);
+  await indexEvent(tx, changeSet.campaignId, event.id);
   await tx.auditLog.create({
     data: {
       campaignId: changeSet.campaignId,
@@ -4041,6 +4050,9 @@ async function applyUpdateEvent(
     }
   }
   await writeEventProvenance(tx, changeSet, eventId, patch);
+  // UPDATE_EVENT covers field edits and soft-archive (a status change); either
+  // way indexEvent refreshes or drops the event's SearchDoc to match.
+  await indexEvent(tx, changeSet.campaignId, eventId);
   await tx.auditLog.create({
     data: {
       campaignId: changeSet.campaignId,

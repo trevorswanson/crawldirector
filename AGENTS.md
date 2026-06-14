@@ -48,13 +48,18 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
 - **Cross-cutting ✅.** Visibility collapsed to a binary `DM_ONLY`/`PLAYER_VISIBLE`
   (subset access via `KnowledgeGrant`, not a tier); entity-kind registry (ADR 0009)
   derives validation/data-keys/reviewable-set/form/display from per-type descriptors.
-- **M5 — Search & retrieval 🚧.** Slice 1 (full-text foundation) done: a `SearchDoc`
-  index kept in sync inside entity canon-write transactions + a DM backfill;
-  `searchCanon` runs visibility-scoped Postgres full-text (players see only
-  `PLAYER_VISIBLE` — invariant #5); a `/campaigns/[id]/search` page wired from the
-  topbar + nav. Works with **no AI key**. Remaining slices (relationship/event
-  indexing, materialized `tsvector`+GIN, pgvector semantic layer, "Ask the
-  Campaign", retrieval-fed generator context) are in the backlog.
+- **M5 — Search & retrieval 🚧.** Slices 1–2 done. Slice 1 (full-text foundation):
+  a `SearchDoc` index kept in sync inside entity canon-write transactions + a DM
+  backfill; `searchCanon` runs visibility-scoped Postgres full-text (players see
+  only `PLAYER_VISIBLE` — invariant #5); a `/campaigns/[id]/search` page wired from
+  the topbar + nav. Slice 2 (relationships + events): the indexer/search now cover
+  `RELATIONSHIP` and `EVENT` targets too (edge/event apply paths hook the indexer
+  in-transaction; typed entity/relationship/event hit union → per-type result
+  cards). Their player visibility is two-layer — the doc mirrors `secret`, and the
+  endpoint/participant projection is re-applied at retrieval against live canon, so
+  a stale index can't leak. Works with **no AI key**. Remaining slices (materialized
+  `tsvector`+GIN, pgvector semantic layer, "Ask the Campaign", retrieval-fed
+  generator context) are in the backlog.
 
 For per-slice detail (files, tests, decisions) see
 [`docs/PROGRESS.md`](./docs/PROGRESS.md) — its "Open backlog" section is the
