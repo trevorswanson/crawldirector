@@ -20,6 +20,9 @@ import {
 // Postgres `ts_rank`. Always campaign-scoped and filtered by the requester's
 // visibility (invariant #5 — a player's query can never retrieve DM-only canon).
 // Slice 2 broadens the index from ENTITY to RELATIONSHIP and EVENT targets.
+// Slice 3 moves ranking/filtering onto the generated `searchVector` column so
+// Postgres can use the SearchDoc GIN index instead of recomputing tsvectors per
+// query.
 //
 // Two-layer visibility enforcement. The SQL pass filters on the SearchDoc's
 // `visibility` mirror (cheap: drops DM-only entities and secret edges/events).
@@ -120,6 +123,35 @@ const hitEventSelect = {
   secret: true,
 } satisfies Prisma.EventSelect;
 
+export function buildSearchDocSearchSql({
+  campaignId,
+  query,
+  playerOnly,
+  limit,
+  offset,
+}: {
+  campaignId: string;
+  query: string;
+  playerOnly: boolean;
+  limit: number;
+  offset: number;
+}) {
+  const visibilityClause = playerOnly
+    ? Prisma.sql`AND "visibility" = ${Visibility.PLAYER_VISIBLE}::"Visibility"`
+    : Prisma.empty;
+
+  return Prisma.sql`
+    SELECT "targetId", "targetType",
+      ts_rank("searchVector", websearch_to_tsquery('english', ${query})) AS rank
+    FROM "SearchDoc"
+    WHERE "campaignId" = ${campaignId}
+      ${visibilityClause}
+      AND "searchVector" @@ websearch_to_tsquery('english', ${query})
+    ORDER BY rank DESC, "targetId" ASC
+    LIMIT ${limit} OFFSET ${offset}
+  `;
+}
+
 /**
  * Full-text search over a campaign's canon for one user. Returns ranked hits
  * (entities, relationships, events) scoped to what the requester may see. An
@@ -144,15 +176,9 @@ export async function searchCanon(
   const limit = Math.min(MAX_LIMIT, Math.max(1, options.limit ?? DEFAULT_LIMIT));
   const playerOnly = membership.role === Role.PLAYER;
 
-  // Players see only player-visible docs; DMs/co-DMs see everything. The mirror
-  // is kept in sync with each source's `secret`/visibility by the indexer.
-  const visibilityClause = playerOnly
-    ? Prisma.sql`AND "visibility" = ${Visibility.PLAYER_VISIBLE}::"Visibility"`
-    : Prisma.empty;
-
   // `websearch_to_tsquery` safely parses arbitrary user input (quotes, OR, -),
-  // so no query sanitising is needed. Slice 1 computes the tsvector at query
-  // time; a materialized column + GIN index is a later perf slice.
+  // so no query sanitising is needed. `searchVector` is generated from content
+  // and GIN-indexed by the M5 slice 3 migration.
   const hits: SearchHit[] = [];
   let offset = 0;
   const BATCH_SIZE = Math.max(limit, 50);
@@ -163,16 +189,7 @@ export async function searchCanon(
   while (hits.length < limit) {
     const rows = await prisma.$queryRaw<
       { targetId: string; targetType: string; rank: number }[]
-    >(Prisma.sql`
-      SELECT "targetId", "targetType",
-        ts_rank(to_tsvector('english', "content"), websearch_to_tsquery('english', ${query})) AS rank
-      FROM "SearchDoc"
-      WHERE "campaignId" = ${campaignId}
-        ${visibilityClause}
-        AND to_tsvector('english', "content") @@ websearch_to_tsquery('english', ${query})
-      ORDER BY rank DESC, "targetId" ASC
-      LIMIT ${BATCH_SIZE} OFFSET ${offset}
-    `);
+    >(buildSearchDocSearchSql({ campaignId, query, playerOnly, limit: BATCH_SIZE, offset }));
 
     if (rows.length === 0) break;
 

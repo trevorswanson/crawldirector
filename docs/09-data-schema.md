@@ -417,20 +417,22 @@ model Job {              // async generation / bulk + simulation + indexing runs
 }
 
 // ───────────── Search & retrieval (doc 07) ─────────────
-// Hybrid full-text + vector index over canon. Derived data, regenerable,
-// never part of provenance. Requires the pgvector extension.
+// Full-text now and vector later over canon. Derived data, regenerable,
+// never part of provenance. The semantic slice adds pgvector embeddings.
 model SearchDoc {
-  id          String   @id @default(cuid())
-  campaignId  String
-  targetType  String   // ENTITY | RELATIONSHIP | EVENT
-  targetId    String
-  content     String   // denormalized name + summary + salient fields
-  // tsv      Unsupported("tsvector")        // full-text (generated/maintained)
-  // embedding Unsupported("vector(1536)")   // pgvector; dims per embed model
-  visibility  Visibility @default(DM_ONLY)   // mirror of source, for scoped retrieval
-  updatedAt   DateTime @updatedAt
+  id           String                 @id @default(cuid())
+  campaignId   String
+  targetType   String                 // ENTITY | RELATIONSHIP | EVENT
+  targetId     String
+  content      String                 // denormalized name + summary + salient fields
+  // Generated from content; GIN-indexed in migration.
+  searchVector Unsupported("tsvector")? @default(dbgenerated("to_tsvector('english'::regconfig, content)"))
+  // embedding Unsupported("vector(1536)")    // pgvector; dims per embed model
+  visibility   Visibility             @default(DM_ONLY) // mirror of source, for scoped retrieval
+  updatedAt    DateTime               @updatedAt
   @@unique([targetType, targetId])
   @@index([campaignId, targetType])
+  @@index([searchVector], type: Gin, map: "SearchDoc_searchVector_idx")
 }
 
 // ───────────── Knowledge / reveals (fog of war) ─────────────
@@ -522,8 +524,11 @@ model SessionLogEntry {             // real-time capture; NOT canon until promot
   keeps the System AI's drift in the same reviewable causality graph as
   everything else (see doc 05).
 - `SearchDoc` mirrors its source's `visibility` so retrieval can be scoped
-  without joining back to canon; the indexer keeps it in sync on re-index.
-  Enable the `pgvector` extension in the first migration that adds it (M5).
+  before hydration; relationship/event results still re-apply endpoint/
+  participant visibility against live canon because that projection can change
+  without an edge/event write. `searchVector` is generated from `content` and
+  GIN-indexed for keyword/full-text search. Enable the `pgvector` extension in
+  the first migration that adds embeddings (M5 semantic slice).
 - **Export/import** (doc 02, M9) serializes campaign canon + provenance to
   JSON/Markdown; import re-creates it as `IMPORT` change sets. No new tables —
   it reads/writes the existing model.
