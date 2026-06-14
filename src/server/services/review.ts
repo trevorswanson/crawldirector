@@ -26,6 +26,7 @@ import {
 } from "@/lib/time-resolve";
 import { floorRelativeSortKey, readTimeRef } from "@/lib/time-ref";
 import { prisma } from "@/server/db";
+import { indexEntity } from "@/server/services/search-index";
 
 type JsonPrimitive = string | number | boolean | null;
 type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
@@ -2457,6 +2458,9 @@ async function applyCreateEntity(
       detail: { entityId: entity.id, op: OpKind.CREATE_ENTITY },
     },
   });
+  // Mirror the new canon into the search index (M5, search-index.ts) in the
+  // same transaction so retrieval is fresh the moment the write commits.
+  await indexEntity(tx, changeSet.campaignId, entity.id);
   return entity.id;
 }
 
@@ -2576,6 +2580,9 @@ async function applyUpdateEntity(
       detail: { entityId, op: OpKind.UPDATE_ENTITY },
     },
   });
+  // Refresh the search index from the entity's final persisted state (a restore
+  // re-adds it; a content edit re-indexes; a visibility change re-mirrors).
+  await indexEntity(tx, changeSet.campaignId, entityId);
   return entityId;
 }
 
@@ -2633,6 +2640,9 @@ async function applyDeleteEntity(
       detail: { entityId, op: OpKind.DELETE_ENTITY },
     },
   });
+  // The entity is now ARCHIVED, so indexEntity drops its SearchDoc — archived
+  // canon must not surface in search (it's hidden everywhere else too).
+  await indexEntity(tx, changeSet.campaignId, entityId);
   return entityId;
 }
 
