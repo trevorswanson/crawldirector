@@ -28,9 +28,12 @@ keyword-scanning every doc.
             search returns a typed hit union (entity/relationship/event cards).
             Visibility is two-layer: the doc `visibility` mirrors `secret`, and
             the endpoint/participant projection is re-applied at retrieval.
-      - [ ] **Slice 3 — perf: materialized `tsvector` + GIN index.** Replace the
-            query-time `to_tsvector` with a stored column + GIN index (decide the
-            Prisma drift handling — `Unsupported` column or accept out-of-schema).
+      - [x] **Slice 3 — perf: materialized `tsvector` + GIN index.** ✅
+            (2026-06-14) — see the section below. Replaced query-time
+            `to_tsvector` with a database-generated `SearchDoc.searchVector`
+            column plus GIN index; Prisma represents it as optional
+            `Unsupported("tsvector")` with the mapped GIN index so the drift gate
+            stays clean.
       - [ ] **Slice 4 — semantic layer (pgvector).** Enable the extension, embed
             SearchDocs via the BYO-key provider, async re-embed on canon change
             via the `Job` worker, hybrid ranking.
@@ -156,13 +159,46 @@ keyword-scanning every doc.
 - [x] `createCampaignAction`: after campaign creation, if `seedLore === "on"` enqueues a `LORE_SEED` job in its own try/catch — enqueue failure never blocks the redirect.
 - [x] Tests: seeding ServiceError assertions updated; non-empty campaign guard test added; LORE_SEED handler delegation test (mocked seeding module); dm-actions tests for seedLore=on/off/enqueue-throw; form checkbox test.
 
+## M5 — Search perf: materialized tsvector + GIN index (slice 3) ✅ (2026-06-14)
+
+**Goal:** keep the slice 1–2 search behavior intact while moving the full-text
+match/rank off query-time `to_tsvector('english', content)` and onto a stored,
+indexed Postgres vector.
+
+- [x] **Schema + migration** (`20260614170000_m5_search_vector_gin`): added
+      `SearchDoc.searchVector` as a generated stored `tsvector` column
+      (`to_tsvector('english'::regconfig, content)`) and
+      `SearchDoc_searchVector_idx` as a GIN index. Existing rows materialize
+      automatically from `content`; app write paths still only write `content`.
+- [x] **Prisma drift handling** ([`schema.prisma`](../prisma/schema.prisma)):
+      the generated column is represented as optional `Unsupported("tsvector")`
+      with `@default(dbgenerated(...))`, and the GIN index is represented with
+      `@@index([searchVector], type: Gin, map: "SearchDoc_searchVector_idx")`.
+      Because the unsupported field is optional, Prisma Client create/update/
+      upsert calls for `SearchDoc` remain available and the client never writes
+      the derived vector directly.
+- [x] **Search service** ([`search.ts`](../src/server/services/search.ts)):
+      extracted `buildSearchDocSearchSql` and changed `searchCanon` to rank and
+      filter with `"searchVector" @@ websearch_to_tsquery(...)` plus
+      `ts_rank("searchVector", ...)`. Campaign scoping, visibility prefiltering,
+      over-fetch hydration, and live entity/relationship/event projection are
+      unchanged.
+- [x] **Tests / verification:** `search.test.ts` now asserts the generated
+      column + GIN index exist, and that the search SQL uses `searchVector`
+      instead of recomputing `to_tsvector` from `content`. Red/green verified
+      locally; `npm run db:deploy`, Prisma migration drift check,
+      `npm run test -- tests/unit/search.test.ts`, lint (0 errors; existing
+      settings-action warnings), typecheck, build, and the full coverage gate are
+      green (statements 95.71%, branches 89.1%, functions 97.87%, lines 97.61%;
+      `search.ts` 100%).
+
 ## M5 — Search: index relationships + events (slice 2) ✅ (2026-06-14)
 
 **Goal:** broaden the M5 search subsystem ([`07-search-retrieval.md`](./07-search-retrieval.md))
 from ENTITY-only (slice 1) to also index and retrieve **RELATIONSHIP** and
 **EVENT** canon — the schema's `SearchDoc.targetType` already allowed all three.
-Still AI-key-free keyword/full-text; the materialized `tsvector`+GIN index,
-embeddings, Ask, and generator wiring remain the later M5 slices.
+Still AI-key-free keyword/full-text; the semantic layer, Ask, and generator
+wiring remain later M5 slices.
 
 - [x] **Indexer** ([`search-index.ts`](../src/server/services/search-index.ts)):
       generalized alongside `indexEntity`. New pure builders `buildRelationshipContent`
@@ -234,8 +270,8 @@ embeddings, Ask, and generator wiring remain the later M5 slices.
 with its first, AI-key-free layer: keyword/full-text search over a campaign's
 canon. This is the foundation the semantic (pgvector) layer, "Ask the Campaign",
 and retrieval-fed generator context build on. Scoped to **ENTITY** targets;
-relationships/events, the materialized `tsvector`+GIN index, embeddings, Ask, and
-generator wiring are the remaining M5 slices (tracked in the open backlog).
+relationships/events and perf materialization were later slices, while embeddings,
+Ask, and generator wiring remain tracked in the open backlog.
 
 - [x] **Backfill migration** (`20260614160000_backfill_search_docs`): a one-time
       data migration that seeds a `SearchDoc` for every pre-existing non-archived
