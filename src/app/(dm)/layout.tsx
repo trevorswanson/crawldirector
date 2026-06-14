@@ -1,11 +1,10 @@
-import { Search } from "lucide-react";
-
 import { cookies } from "next/headers";
 
 import { requireUser } from "@/server/auth/session";
 import { listCampaignsForUser } from "@/server/services/campaigns";
 import { DmNav } from "@/components/console/dm-nav";
 import { CampaignSwitcher } from "@/components/console/campaign-switcher";
+import { GlobalSearchLink } from "@/components/console/global-search-link";
 import { UserMenu } from "@/components/console/user-menu";
 
 export default async function DmLayout({
@@ -41,17 +40,7 @@ export default async function DmLayout({
         <header className="flex h-[52px] shrink-0 items-center gap-4 border-b border-[var(--line)] bg-[var(--bg-1)] px-[18px]">
           <CampaignSwitcher campaigns={campaignChoices} />
 
-          <span
-            title="Global search & Ask the Campaign — planned (M5). Per-campaign search is on the World Browser."
-            aria-disabled
-            className="hidden cursor-not-allowed items-center gap-[9px] border border-[var(--line)] bg-[var(--bg)] px-[11px] py-[6px] text-[var(--ink-faint)] lg:flex"
-          >
-            <Search aria-hidden size={14} />
-            <span className="text-[12.5px]">Search · Query the System…</span>
-            <span className="font-mono text-[9px] uppercase tracking-[.08em]">
-              M5
-            </span>
-          </span>
+          <GlobalSearchLink />
 
           <div className="ml-auto flex items-center gap-3">
             <UserMenu

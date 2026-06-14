@@ -726,3 +726,25 @@ model AiUsage {
 
   @@index([campaignId, createdAt])
 }
+
+// ───────────── Search & retrieval (M5 — docs/07-search-retrieval.md) ─────────────
+// Denormalized, campaign-scoped search index over canon. Derived data:
+// regenerable from canon, never part of provenance, never shown to players
+// except through the visibility mirror below. `content` is the searchable text
+// (name + summary + salient fields); slice 1 runs Postgres full-text over it at
+// query time (`to_tsvector` / `websearch_to_tsquery`). The semantic layer
+// (pgvector embeddings) and a materialized tsvector + GIN index land in a later
+// M5 slice. No FK to the source: `targetId` is polymorphic and a SearchDoc is a
+// regenerable mirror that should outlive churn in canon.
+model SearchDoc {
+  id         String     @id @default(cuid())
+  campaignId String
+  targetType String // ENTITY | RELATIONSHIP | EVENT
+  targetId   String
+  content    String // denormalized name + summary + salient fields
+  visibility Visibility @default(DM_ONLY) // mirror of source, for scoped retrieval
+  updatedAt  DateTime   @updatedAt
+
+  @@unique([targetType, targetId])
+  @@index([campaignId, targetType])
+}

@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   Layers,
   ListChecks,
+  Search,
   SlidersHorizontal,
   Workflow,
   Network,
@@ -47,6 +48,13 @@ const NAV: NavItem[] = [
     href: (campaignId) => (campaignId ? `/campaigns/${campaignId}` : "/dashboard"),
     match: (p) =>
       p === "/dashboard" || (/^\/campaigns\/[^/]+(?:\/entities\/.*)?$/.test(p)),
+  },
+  {
+    label: "Search",
+    icon: Search,
+    group: "dm",
+    href: (campaignId) => (campaignId ? `/campaigns/${campaignId}/search` : "/dashboard"),
+    match: (p) => /^\/campaigns\/[^/]+\/search/.test(p),
   },
   {
     label: "Review Queue",

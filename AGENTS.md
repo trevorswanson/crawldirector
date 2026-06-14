@@ -14,147 +14,52 @@ pitch and [`docs/`](./docs) for the full plan.
 
 ## Current status
 
-🚧 **M0 + M1 + M2 + M3 + M3.5 complete; M4 (AI generation, BYO-key) underway.** The app is scaffolded
+🚧 **M0–M4 complete; M5 (search & retrieval) underway.** The app is scaffolded
 and runnable: Next.js 16 (App Router, TS, Tailwind) + Postgres/Prisma 7 +
-Auth.js, with sign-up → create campaign working, and CI (lint, typecheck, build,
-unit, e2e, coverage) plus security/quality gates (CodeQL, dependency review,
-`npm audit`, migration-drift). M1 ships generic-entity + Crawler CRUD, the world
-browser, and entity detail/edit. M2 so far: all entity writes route through the
-`review` service as change sets with provenance + audit; a Review Queue approves/
-rejects proposals; and DMs can lock entities/fields (locked targets can't be
-overwritten). Per-field accept/edit/reject and `supersede` (a DM retires a stale
-or replaced proposal) work too. Batch review actions let DMs bulk approve/reject
-pending generator runs while blocked/stale proposals remain held for manual
-review. **M3's main relationship/event graph scope is complete; ADR 0008 floor
-cleanup is fully delivered (slices 1–3).** Typed any-to-any `Relationship` edges,
-`Event`s (with participants), and `EventCausality` cause→effect links route
-through the
-pipeline (auto-approved DM path with provenance); the entity detail page's
-Connections panel shows real edges, and its Timeline panel shows real events
-plus simple cause/effect traversal and add/remove. Group-type entities
-(PARTY/GUILD/FACTION/ORGANIZATION) show a read-only roster that rolls up
-`MEMBER_OF`/`LEADS` edges into a crawler→party→guild membership hierarchy. A
-campaign-wide **Relationship Graph** view (`/campaigns/[id]/graph`, linked from
-the nav) renders every visibility-scoped edge as a mockup-aligned force-directed
-node-link diagram with filters, pan/zoom, and a connections panel. A campaign
-**Timeline** page (`/campaigns/[id]/timeline`) renders the visibility-scoped
-event stream and logs multi-participant events. DMs can also **edit** live edges
-(type/disposition/notes/secret) and events — scalar fields plus the participant
-set (add/remove/re-role) — inline through the pipeline (version-bumped,
-provenance-tracked, lock-aware), from both the entity Timeline panel and the
-campaign timeline page. Structured crawler event effects (`ADJUST_STAT`,
-`SET_STAT`, `SET_ALIVE`) live on `Event.effects`; the normal UI path sends
-unapplied effects to the Review Queue as `PENDING` `APPLY_EVENT_EFFECTS`
-operations, and approval applies them atomically with provenance. Relationships
-are now fully reviewable, not just auto-approved: `createPendingRelationshipChangeSet`
-routes any-to-any edge create/update/delete through the Review Queue as `PENDING`
-proposals (lock-/staleness-flagged, with `Source → Target` queue labels), the
-counterpart to the entity and event pending paths — ready for AI/import (M4+)
-producers. Pending `APPLY_EVENT_EFFECTS` proposals now render a **structured
-effect-row editor** in the Review Queue (kind/target/stat/value pickers reusing
-the timeline's `EffectRows`) instead of a raw JSON patch — a DM corrects effects
-and saves an `EDITED` decision the existing approval path reconciles by effect
-id. Event **order is now derived, not authored** (ADR 0004 slice 1): `orderKey`
-(the floor) is computed server-side and stripped from the reviewable patch — no
-more `ORDERKEY` leak in the queue — and a fractional intra-floor `rank`
-(`src/lib/rank.ts`) gives stable within-floor ordering the DM sets by **dragging**
-events on the campaign timeline (a mechanical, audited, review-bypassing update).
-ADR 0004 slice 2 then replaced the overloaded `{ floor, label }` in-game time with
-a **typed `timeRef`** (`src/lib/time-ref.ts`): `{ basis, floor?, offset?, unit?,
-anchorEventId?, label? }`, where every DCC time flavor is an offset from a basis
-(`FLOOR_START`/`FLOOR_COLLAPSE`/`COLLAPSE`/`ABSOLUTE_DAY`/`EVENT`/`UNSCHEDULED`).
-The human phrasing is now **generated** from the structure (`label` is an optional
-override), and a concrete floor-relative offset **derives** the intra-floor `rank`
-automatically (manual drag still wins for unscheduled/label-only events). A shared
-`EventTimeFields` picker drives the timeline forms and the Review Queue editor.
-**Knowledge/reveal grants** (fog-of-war foundation) are now in: a `KnowledgeGrant`
-model + `knowledge` service let a DM reveal a canon entity to one actor entity
-(NPC/crawler/party/faction) without campaign-wide visibility — deliberate, audited
-`REVEAL`/`REVOKE` actions (not change sets), surfaced as a **Knowledge** panel
-("Known to" / "Knows about") on the entity detail page. This M3 slice wires
-ENTITY→ENTITY grants; the schema already supports field/relationship/event/FACT
-targets + MEMBERSHIP recipients for the M7 player "known world" and M11 agent
-fog-of-war. ADR 0004 slice 3 is complete: the timeline flags **causality-consistency
-warnings** (`src/lib/causality.ts`) — a causal link whose effect is ordered
-earlier in fiction than its cause shows an inline ⚠ + a header "N out of order"
-count, non-blocking — and a one-click **Order from causality**
-(`src/lib/causality-order.ts` + `orderEventsFromCausality`) topologically sorts
-each floor's *movable* (unlocked, non-derived-order) events from the DAG so causes
-precede their effects, an audited review-bypassing `rank` rewrite that leaves
-locked/system-derived events pinned. **Time-bounded membership** is now modeled
-on relationship edges with optional `sinceDay` / `untilDay` crawl-day bounds:
-`MEMBER_OF`, `PART_OF`, and `LEADS` edges preserve "who was where, when"; the
-Connections panel can display/edit the bounds; and the group roster service shows
-current open-ended memberships by default or reconstructs a historical roster via
-`getGroupRoster(..., { asOfDay })`.
-**M3.5 (tagging)** is
-underway: the service layer (campaign tag list, tag filtering, tag-aware search)
-plus the UI — a tag-selection input with campaign autocomplete on the entity
-form, a Tags facet in the World Browser sidebar, and clickable tag badges — are
-in; tags are still a `String[]` on `Entity` (no normalized `Tag` table yet).
-**M4 (AI generation, BYO-key) has started** with its storage foundation: a DM
-stores their own provider API key per campaign on a new **Settings** page
-(`/campaigns/[id]/settings`), encrypted at rest (AES-256-GCM envelope encryption,
-`src/server/crypto.ts`, keyed off a new `AI_KEYS_SECRET` env var). The `ai-keys`
-service set/remove/list keeps secrets server-side only (never ciphertext/plaintext
-to the client; audited `SET_AI_KEY`/`DELETE_AI_KEY` carry only a last-four hint);
-`getDecryptedAiKey`/`getAiKeyConfig` are the server-only seams the provider
-abstraction calls (invariant #6). The provider registry lives in
-`src/lib/ai/providers.ts`. See [ADR 0006](./docs/adr/0006-ai-key-encryption-at-rest.md).
-The **provider abstraction** then landed (M4 slice 2): a vendor-neutral
-`LLMProvider` (`src/server/ai/`) with an Anthropic adapter (forced tool use +
-prompt caching) and a single OpenAI-compatible adapter (`json_schema` output)
-that serves OpenAI itself **and any OpenAI-compatible endpoint** — a self-hosted
-model (Ollama/LM Studio/vLLM) or third-party proxy, configured by a non-secret
-`baseUrl` + `model` on `AiKey` (key optional for local servers).
-`generateStructured` derives a JSON Schema from Zod, validates, and repairs once
-before erroring. `getCampaignProvider` is the single seam generators call;
-a DM-only **connection test** on the Settings page verifies a key/endpoint/model
-with a tiny live call. See [ADR 0007](./docs/adr/0007-provider-abstraction-and-openai-compatible.md).
-The **first generator** then landed (M4 slice 3): an **entity-fleshing**
-generator (`src/server/ai/generators/flesh-entity.ts` — pure prompt/schema/patch
-logic) wired through `fleshOutEntity` (`src/server/services/generation.ts`). A
-DM-only **GeneratePanel** ("Flesh out") on the entity detail rail (shown only
-when a provider key is configured) expands a thin/stub entity's summary/
-description/tags into a **PENDING `UPDATE_ENTITY` proposal** in the Review Queue —
-never canon (invariant #1), with locked fields excluded (invariant #2) and AI
-provenance (provider/model/prompt) recorded on approval (invariant #3).
-`resolveCampaignProvider` picks whichever provider the campaign has a key for.
-The app stays fully usable with no key configured. The **visibility model is now a
-clean binary** (`DM_ONLY` / `PLAYER_VISIBLE`): the legacy three-state enum
-(`SHARED_WITH_PLAYERS`/`PLAYER_FACING`, always projected identically) was collapsed
-to `PLAYER_VISIBLE`, with subset/partial access modeled exclusively via dynamic
-`KnowledgeGrant` (fog of war). See `docs/PROGRESS.md`.
-The **relationship inference** generator (M4 slice 4) is also in: the entity
-detail rail's **Infer relationships** action proposes typed edges involving the
-current entity, files them as **PENDING `CREATE_RELATIONSHIP` proposals**, and
-records AI provider/model/prompt provenance on approval. The **bulk-stub
-scaffolding** generator (M4 slice 5) is also in: a DM-only **Scaffold with AI**
-panel on the World Browser header turns a free-text instruction into a batch of
-thin stub entities, filed as one **PENDING `CREATE_ENTITY` change set** in the
-Review Queue (`src/server/ai/generators/scaffold-stubs.ts`). **Usage/cost
-tracking + spend caps** (M4) are now in: every successful generation writes an
-`AiUsage` row (token counts + an estimated USD cost from a per-model price table,
-`src/lib/ai/pricing.ts`; unpriced models record null cost, never a fake `$0`),
-the Settings page shows campaign spend, and a DM-set `Campaign.spendCapUsd`
-blocks generation once known spend reaches it (`src/server/services/ai-usage.ts`,
-asserted before each provider call; usage records carry no secret — invariant #6).
-A DM can store their own `inputPerMTokUsd`/`outputPerMTokUsd` on an `AiKey` to
-cost a **self-hosted/proxy** model the price table doesn't know (overrides the
-table for first-party providers too); such runs then count toward the cap.
-A **bulk multi-entity flesh-out** panel ("Flesh out with AI") then landed beside
-"Scaffold with AI" in the World Browser header: a DM checks several stub entities
-and fleshes them in one synchronous run (`fleshOutEntities`,
-`src/server/services/generation.ts`, reusing the per-entity `fleshOutEntity`),
-each landing as its own PENDING `UPDATE_ENTITY` proposal with a per-entity
-proposed/skipped summary; the spend cap is enforced per entity so a batch stops
-spending the moment it's reached, and one entity's failure never blocks the rest.
-An **async `Job` table + worker** (M4, plan 006) is now also in: a `Job` model
-backs a single-worker polling loop (`scripts/worker.ts`, `npm run worker`).
-A "Run in background" button on the bulk-flesh panel enqueues a `BULK_FLESH` job;
-the worker claims it, runs `fleshOutEntities`, and marks SUCCEEDED/FAILED.
-Raw provider/error text is never persisted — only ServiceError messages or the
-generic fallback (invariant #6). See [`docs/PROGRESS.md`](./docs/PROGRESS.md).
+Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
+`npm audit`, migration-drift, coverage). Milestone-by-milestone:
+
+- **M0 — Foundation ✅.** Next.js + Postgres/Prisma + Auth.js scaffold, CI, sign-up
+  → create campaign.
+- **M1 — Entity core ✅.** Generic-entity + Crawler CRUD, the World Browser, entity
+  detail/edit.
+- **M2 — Review pipeline ✅.** Every canon write routes through the `review` service
+  as a change set with provenance + audit; a Review Queue approves/rejects (with
+  per-field accept/edit/reject, supersede, and batch run actions); DMs lock
+  entities/fields. This underpins everything — invariants in
+  [`docs/03-review-pipeline.md`](./docs/03-review-pipeline.md).
+- **M3 — Relationship/event graph ✅.** Any-to-any `Relationship` edges, `Event`s
+  (participants + structured effects), and `EventCausality` links route through the
+  pipeline; campaign **Graph** and **Timeline** pages; group rosters; derived event
+  order (typed `timeRef`, intra-floor `rank`, drag-to-order); causality-consistency
+  warnings + "order from causality"; time-bounded membership; **KnowledgeGrant**
+  fog-of-war foundation (ENTITY→ENTITY reveals). Floor model unified per ADRs 0004 &
+  0008.
+- **M3.5 — Tagging ✅(ish).** Tag service + UI (autocomplete, World Browser facet,
+  clickable badges); tags are still a `String[]` on `Entity` (no normalized `Tag`
+  table — backlog).
+- **M4 — AI generation (BYO-key) ✅.** Per-campaign encrypted provider keys
+  (AES-256-GCM, ADR 0006); vendor-neutral `LLMProvider` with Anthropic +
+  OpenAI-compatible adapters (ADR 0007); generators (entity flesh-out single +
+  bulk, relationship inference, bulk-stub scaffolding) that file **PENDING**
+  proposals — never canon; usage/cost tracking + DM spend caps; async `Job` table +
+  worker (`npm run worker`) for long batches. Secrets never reach client/logs/
+  provenance (invariant #6).
+- **Cross-cutting ✅.** Visibility collapsed to a binary `DM_ONLY`/`PLAYER_VISIBLE`
+  (subset access via `KnowledgeGrant`, not a tier); entity-kind registry (ADR 0009)
+  derives validation/data-keys/reviewable-set/form/display from per-type descriptors.
+- **M5 — Search & retrieval 🚧.** Slice 1 (full-text foundation) done: a `SearchDoc`
+  index kept in sync inside entity canon-write transactions + a DM backfill;
+  `searchCanon` runs visibility-scoped Postgres full-text (players see only
+  `PLAYER_VISIBLE` — invariant #5); a `/campaigns/[id]/search` page wired from the
+  topbar + nav. Works with **no AI key**. Remaining slices (relationship/event
+  indexing, materialized `tsvector`+GIN, pgvector semantic layer, "Ask the
+  Campaign", retrieval-fed generator context) are in the backlog.
+
+For per-slice detail (files, tests, decisions) see
+[`docs/PROGRESS.md`](./docs/PROGRESS.md) — its "Open backlog" section is the
+authoritative pickup list — and older completed milestones in
+[`docs/PROGRESS-archive.md`](./docs/PROGRESS-archive.md).
 
 ## Start here, every session
 
