@@ -153,99 +153,109 @@ export async function searchCanon(
   // `websearch_to_tsquery` safely parses arbitrary user input (quotes, OR, -),
   // so no query sanitising is needed. Slice 1 computes the tsvector at query
   // time; a materialized column + GIN index is a later perf slice.
-  const rows = await prisma.$queryRaw<
-    { targetId: string; targetType: string; rank: number }[]
-  >(Prisma.sql`
-    SELECT "targetId", "targetType",
-      ts_rank(to_tsvector('english', "content"), websearch_to_tsquery('english', ${query})) AS rank
-    FROM "SearchDoc"
-    WHERE "campaignId" = ${campaignId}
-      ${visibilityClause}
-      AND to_tsvector('english', "content") @@ websearch_to_tsquery('english', ${query})
-    ORDER BY rank DESC, "targetId" ASC
-    LIMIT ${limit}
-  `);
+  const hits: SearchHit[] = [];
+  let offset = 0;
+  const BATCH_SIZE = Math.max(limit, 50);
 
-  if (rows.length === 0) return { role: membership.role, query, hits: [] };
+  // We over-fetch in batches because player-visibility of relationships/events
+  // is derived (e.g. requires endpoints to be visible). A query might match many
+  // docs that the SQL pass sees as PLAYER_VISIBLE but hydration drops.
+  while (hits.length < limit) {
+    const rows = await prisma.$queryRaw<
+      { targetId: string; targetType: string; rank: number }[]
+    >(Prisma.sql`
+      SELECT "targetId", "targetType",
+        ts_rank(to_tsvector('english', "content"), websearch_to_tsquery('english', ${query})) AS rank
+      FROM "SearchDoc"
+      WHERE "campaignId" = ${campaignId}
+        ${visibilityClause}
+        AND to_tsvector('english', "content") @@ websearch_to_tsquery('english', ${query})
+      ORDER BY rank DESC, "targetId" ASC
+      LIMIT ${BATCH_SIZE} OFFSET ${offset}
+    `);
 
-  const idsByType = (type: string) =>
-    rows.filter((row) => row.targetType === type).map((row) => row.targetId);
-  const entityIds = idsByType(SEARCH_TARGET_ENTITY);
-  const relationshipIds = idsByType(SEARCH_TARGET_RELATIONSHIP);
-  const eventIds = idsByType(SEARCH_TARGET_EVENT);
+    if (rows.length === 0) break;
 
-  // Hydrate display fields from live canon. The where-clauses re-confirm the
-  // requester's projection (entities: not archived; relationships: both
-  // endpoints player-visible; events: ≥1 player-visible participant) so a stale
-  // index row is dropped rather than leaked.
-  const [entities, relationships, events] = await Promise.all([
-    entityIds.length === 0
-      ? []
-      : prisma.entity.findMany({
-          where: { id: { in: entityIds }, campaignId, status: { not: CanonStatus.ARCHIVED } },
-          select: hitEntitySelect,
-        }),
-    relationshipIds.length === 0
-      ? []
-      : prisma.relationship.findMany({
-          where: {
-            id: { in: relationshipIds },
-            campaignId,
-            status: { not: CanonStatus.ARCHIVED },
-            ...(playerOnly
-              ? {
-                  secret: false,
-                  sourceEntity: { status: { not: CanonStatus.ARCHIVED }, visibility: Visibility.PLAYER_VISIBLE },
-                  targetEntity: { status: { not: CanonStatus.ARCHIVED }, visibility: Visibility.PLAYER_VISIBLE },
-                }
-              : {}),
-          },
-          select: hitRelationshipSelect,
-        }),
-    eventIds.length === 0
-      ? []
-      : prisma.event.findMany({
-          where: {
-            id: { in: eventIds },
-            campaignId,
-            status: { not: CanonStatus.ARCHIVED },
-            ...(playerOnly
-              ? {
-                  secret: false,
-                  participants: {
-                    some: {
-                      entity: { status: { not: CanonStatus.ARCHIVED }, visibility: Visibility.PLAYER_VISIBLE },
+    const idsByType = (type: string) =>
+      rows.filter((row) => row.targetType === type).map((row) => row.targetId);
+    const entityIds = idsByType(SEARCH_TARGET_ENTITY);
+    const relationshipIds = idsByType(SEARCH_TARGET_RELATIONSHIP);
+    const eventIds = idsByType(SEARCH_TARGET_EVENT);
+
+    // Hydrate display fields from live canon. The where-clauses re-confirm the
+    // requester's projection (entities: not archived; relationships: both
+    // endpoints player-visible; events: ≥1 player-visible participant) so a stale
+    // index row is dropped rather than leaked.
+    const [entities, relationships, events] = await Promise.all([
+      entityIds.length === 0
+        ? []
+        : prisma.entity.findMany({
+            where: { id: { in: entityIds }, campaignId, status: { not: CanonStatus.ARCHIVED } },
+            select: hitEntitySelect,
+          }),
+      relationshipIds.length === 0
+        ? []
+        : prisma.relationship.findMany({
+            where: {
+              id: { in: relationshipIds },
+              campaignId,
+              status: { not: CanonStatus.ARCHIVED },
+              sourceEntity: {
+                status: { not: CanonStatus.ARCHIVED },
+                ...(playerOnly ? { visibility: Visibility.PLAYER_VISIBLE } : {}),
+              },
+              targetEntity: {
+                status: { not: CanonStatus.ARCHIVED },
+                ...(playerOnly ? { visibility: Visibility.PLAYER_VISIBLE } : {}),
+              },
+              ...(playerOnly ? { secret: false } : {}),
+            },
+            select: hitRelationshipSelect,
+          }),
+      eventIds.length === 0
+        ? []
+        : prisma.event.findMany({
+            where: {
+              id: { in: eventIds },
+              campaignId,
+              status: { not: CanonStatus.ARCHIVED },
+              ...(playerOnly
+                ? {
+                    secret: false,
+                    participants: {
+                      some: {
+                        entity: { status: { not: CanonStatus.ARCHIVED }, visibility: Visibility.PLAYER_VISIBLE },
+                      },
                     },
-                  },
-                }
-              : {}),
-          },
-          select: hitEventSelect,
-        }),
-  ]);
+                  }
+                : {}),
+            },
+            select: hitEventSelect,
+          }),
+    ]);
 
-  const entityById = new Map(entities.map((entity) => [entity.id, entity]));
-  const relationshipById = new Map(relationships.map((relationship) => [relationship.id, relationship]));
-  const eventById = new Map(events.map((event) => [event.id, event]));
+    const entityById = new Map(entities.map((entity) => [entity.id, entity]));
+    const relationshipById = new Map(relationships.map((relationship) => [relationship.id, relationship]));
+    const eventById = new Map(events.map((event) => [event.id, event]));
 
-  const hits = rows.flatMap((row): SearchHit[] => {
-    const rank = Number(row.rank);
-    if (row.targetType === SEARCH_TARGET_ENTITY) {
-      const entity = entityById.get(row.targetId);
-      return entity ? [{ targetType: SEARCH_TARGET_ENTITY, targetId: row.targetId, rank, entity }] : [];
+    for (const row of rows) {
+      const rank = Number(row.rank);
+      if (row.targetType === SEARCH_TARGET_ENTITY) {
+        const entity = entityById.get(row.targetId);
+        if (entity) hits.push({ targetType: SEARCH_TARGET_ENTITY, targetId: row.targetId, rank, entity });
+      } else if (row.targetType === SEARCH_TARGET_RELATIONSHIP) {
+        const relationship = relationshipById.get(row.targetId);
+        if (relationship) hits.push({ targetType: SEARCH_TARGET_RELATIONSHIP, targetId: row.targetId, rank, relationship });
+      } else if (row.targetType === SEARCH_TARGET_EVENT) {
+        const event = eventById.get(row.targetId);
+        if (event) hits.push({ targetType: SEARCH_TARGET_EVENT, targetId: row.targetId, rank, event });
+      }
+
+      if (hits.length >= limit) break;
     }
-    if (row.targetType === SEARCH_TARGET_RELATIONSHIP) {
-      const relationship = relationshipById.get(row.targetId);
-      return relationship
-        ? [{ targetType: SEARCH_TARGET_RELATIONSHIP, targetId: row.targetId, rank, relationship }]
-        : [];
-    }
-    if (row.targetType === SEARCH_TARGET_EVENT) {
-      const event = eventById.get(row.targetId);
-      return event ? [{ targetType: SEARCH_TARGET_EVENT, targetId: row.targetId, rank, event }] : [];
-    }
-    return [];
-  });
+
+    offset += BATCH_SIZE;
+  }
 
   return { role: membership.role, query, hits };
 }
