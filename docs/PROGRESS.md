@@ -44,9 +44,11 @@ keyword-scanning every doc.
                   a new `EMBED_SEARCH_DOCS` `Job`; `searchCanon` blends full-text
                   `ts_rank` with pgvector cosine similarity. Degrades to full-text
                   when no embedder is configured.
-            - [ ] **Slice 4b — auto re-embed on canon change.** Enqueue a re-embed
-                  when a SearchDoc's `content` changes in the canon write paths, so
-                  the semantic index stays fresh without a manual rebuild.
+            - [ ] **Slice 4b — auto re-embed on canon change.** Content-change
+                  *invalidation* already lands in 4a (the index write paths clear
+                  `embeddingModel` so the next backfill re-embeds). 4b proper:
+                  auto-enqueue an `EMBED_SEARCH_DOCS` re-embed on canon writes so
+                  the index self-heals without a manual rebuild.
             - [ ] **Slice 4c — ANN index perf + configurable model.** Add an
                   HNSW/IVFFlat index on `SearchDoc.embedding` once campaigns grow
                   past sequential-scan sizes (needs an `Unsupported`/out-of-schema
@@ -243,6 +245,15 @@ key keeps the exact slice-3 full-text behaviour. Branch: `feat/m5-search-slice4a
       warnings only), typecheck, build, and the full coverage gate green (1256
       tests; statements 95.73%, branches 89.12%, functions 97.89%, lines 97.61%;
       `embeddings.ts` 96.96%, `search.ts` 98.61%, `ai/index.ts` 100%).
+- [x] **Review fixes (Codex on PR #124).** (1) The request-path query embed now
+      honors the spend cap (cap reached → degrade to full-text) and records its
+      cost as a `search-query-embed` `AiUsage` row, so a player/repeated search
+      can't spend past the cap untracked. (2) The in-transaction index write paths
+      now clear `embeddingModel` when a doc's `content` changes (shared
+      `upsertSearchDoc` helper in [`search-index.ts`](../src/server/services/search-index.ts)),
+      so an edited doc's stale vector is excluded from ranking and re-embedded on
+      the next "Build semantic index" (the unexposed `force` path is no longer
+      required to repair edits).
 
 ## M5 — Search perf: materialized tsvector + GIN index (slice 3) ✅ (2026-06-14)
 

@@ -9,6 +9,7 @@ import {
 } from "@/generated/prisma/client";
 import { EMBED_MODEL_DEFAULT, resolveCampaignEmbedder } from "@/server/ai";
 import { prisma } from "@/server/db";
+import { assertWithinSpendCap, recordAiUsage } from "@/server/services/ai-usage";
 import { EMBED_DIMENSIONS, searchVectorLiteral } from "@/server/services/embeddings";
 import {
   SEARCH_TARGET_ENTITY,
@@ -236,16 +237,35 @@ export async function searchCanon(
   // and search falls back to the exact full-text path. Embedding the query is
   // independent of visibility — the SQL/hydration projection below is unchanged,
   // so a player can never retrieve more than the full-text path would surface.
+  //
+  // This runs for any member (including players), so it spends the DM's BYO key
+  // on the request path: honor the spend cap here too (cap reached → throw →
+  // degrade to full-text), and record the query-embed cost so the Settings usage
+  // trail stays complete.
   let queryVector: number[] | null = null;
   let queryModel = EMBED_MODEL_DEFAULT;
   try {
     const embedder = await resolveCampaignEmbedder(campaignId);
     if (embedder) {
+      await assertWithinSpendCap(campaignId);
       const result = await embedder.embed([query]);
       const vector = result.vectors[0];
       if (vector && vector.length === EMBED_DIMENSIONS) {
         queryVector = vector;
         queryModel = result.model;
+        // Best-effort: never fail search over a usage-tracking write.
+        try {
+          await recordAiUsage({
+            campaignId,
+            userId,
+            providerId: embedder.id,
+            model: result.model,
+            generatorId: "search-query-embed",
+            usage: result.usage,
+          });
+        } catch {
+          // usage tracking is non-critical
+        }
       }
     }
   } catch {

@@ -4,7 +4,7 @@ import { Role } from "@/generated/prisma/client";
 import type { LLMProvider } from "@/server/ai/types";
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
-import { createGenericEntity } from "@/server/services/entities";
+import { createGenericEntity, updateEntity } from "@/server/services/entities";
 import {
   EMBED_DIMENSIONS,
   embedSearchDocs,
@@ -296,5 +296,117 @@ describe("hybrid semantic ranking in searchCanon", () => {
     const playerResult = await searchCanon(player.id, campaign.id, "beacon");
     expect(playerResult.role).toBe(Role.PLAYER);
     expect(playerResult.hits).toHaveLength(0);
+  });
+});
+
+describe("query-embed spend cap + usage trail (request path)", () => {
+  it("degrades to full-text once the campaign spend cap is reached", async () => {
+    const dm = await prisma.user.create({ data: { email: "dm@test.com" } });
+    const campaign = await createCampaign(dm.id, { name: "Dungeon" });
+    const beacon = await makeEntity(dm.id, campaign.id, {
+      name: "Alpha Beacon",
+      summary: "the shining tower",
+    });
+    const map = (text: string) =>
+      /beacon|lighthouse/.test(text.toLowerCase()) ? unit(0) : unit(2);
+    mockResolveEmbedder.mockResolvedValue(stubEmbedder(map));
+    await embedSearchDocs(dm.id, campaign.id);
+
+    // Under cap: the semantic query finds the beacon (no keyword overlap).
+    expect((await searchCanon(dm.id, campaign.id, "lighthouse")).hits.map((h) => h.targetId)).toEqual([
+      beacon.id,
+    ]);
+
+    // Cap reached → the request-path query embed is skipped → full-text only.
+    await prisma.campaign.update({ where: { id: campaign.id }, data: { spendCapUsd: 1 } });
+    await prisma.aiUsage.create({
+      data: {
+        campaignId: campaign.id,
+        createdById: dm.id,
+        providerId: "anthropic",
+        model: "claude-opus-4-8",
+        generatorId: "flesh-entity",
+        inputTokens: 1000,
+        outputTokens: 1000,
+        estimatedCostUsd: 2,
+      },
+    });
+    expect((await searchCanon(dm.id, campaign.id, "lighthouse")).hits).toHaveLength(0);
+  });
+
+  it("records the query-embed cost in the usage trail", async () => {
+    const dm = await prisma.user.create({ data: { email: "dm@test.com" } });
+    const campaign = await createCampaign(dm.id, { name: "Dungeon" });
+    await makeEntity(dm.id, campaign.id, { name: "Alpha Beacon", summary: "tower" });
+    mockResolveEmbedder.mockResolvedValue(stubEmbedder(() => unit(0)));
+    await embedSearchDocs(dm.id, campaign.id);
+
+    await searchCanon(dm.id, campaign.id, "lighthouse");
+    const queryUsage = await prisma.aiUsage.findMany({
+      where: { campaignId: campaign.id, generatorId: "search-query-embed" },
+    });
+    expect(queryUsage.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("content-change embedding invalidation", () => {
+  it("clears the embedding marker when a doc's content changes, re-embedding on next backfill", async () => {
+    const dm = await prisma.user.create({ data: { email: "dm@test.com" } });
+    const campaign = await createCampaign(dm.id, { name: "Dungeon" });
+    const entity = await makeEntity(dm.id, campaign.id, { name: "Knight", summary: "first" });
+    mockResolveEmbedder.mockResolvedValue(stubEmbedder(() => unit(0)));
+    await embedSearchDocs(dm.id, campaign.id);
+
+    const before = await prisma.searchDoc.findFirst({
+      where: { targetType: "ENTITY", targetId: entity.id },
+      select: { embeddingModel: true },
+    });
+    expect(before?.embeddingModel).toBe(EMBED_MODEL_DEFAULT);
+
+    await updateEntity(dm.id, campaign.id, entity.id, {
+      type: "NPC",
+      name: "Knight",
+      summary: "second changed",
+      description: "",
+      visibility: "PLAYER_VISIBLE",
+      tags: [],
+    });
+
+    const after = await prisma.searchDoc.findFirst({
+      where: { targetType: "ENTITY", targetId: entity.id },
+      select: { embeddingModel: true },
+    });
+    expect(after?.embeddingModel).toBeNull();
+    // The DM's manual rebuild now re-embeds the stale row.
+    expect((await embedSearchDocs(dm.id, campaign.id)).embedded).toBe(1);
+  });
+
+  it("preserves the embedding marker on a non-content change (visibility-only edit)", async () => {
+    const dm = await prisma.user.create({ data: { email: "dm@test.com" } });
+    const campaign = await createCampaign(dm.id, { name: "Dungeon" });
+    const entity = await makeEntity(dm.id, campaign.id, {
+      name: "Knight",
+      summary: "stable",
+      visibility: "PLAYER_VISIBLE",
+    });
+    mockResolveEmbedder.mockResolvedValue(stubEmbedder(() => unit(0)));
+    await embedSearchDocs(dm.id, campaign.id);
+
+    // Same name/summary/description/tags — only visibility flips → content same.
+    await updateEntity(dm.id, campaign.id, entity.id, {
+      type: "NPC",
+      name: "Knight",
+      summary: "stable",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    const after = await prisma.searchDoc.findFirst({
+      where: { targetType: "ENTITY", targetId: entity.id },
+      select: { embeddingModel: true },
+    });
+    expect(after?.embeddingModel).toBe(EMBED_MODEL_DEFAULT);
+    expect((await embedSearchDocs(dm.id, campaign.id)).embedded).toBe(0);
   });
 });
