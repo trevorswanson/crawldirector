@@ -1,6 +1,9 @@
 services:
   db:
-    image: postgres:18
+    # pgvector image (Postgres 18 + the `vector` extension) — the M5 semantic-
+    # search migration runs `CREATE EXTENSION vector`. A drop-in superset of the
+    # stock postgres:18 image.
+    image: pgvector/pgvector:pg18
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres

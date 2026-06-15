@@ -68,12 +68,21 @@
   can never retrieve DM-only or pending content.
 - **Provider-agnostic.** Embeddings and synthesis use the BYO-key abstraction; a
   campaign with no AI key still gets keyword/full-text search (semantic features
-  degrade gracefully).
+  degrade gracefully). *Implementation note (M5 slice 4a):* embeddings come from
+  an **OpenAI-compatible** provider (real OpenAI or a self-hosted/proxy endpoint)
+  — the Anthropic Messages API has no embeddings endpoint — so an Anthropic-only
+  campaign keeps full-text search until an OpenAI-compatible key is added.
 
 ## Data model touchpoints
 
 A search/embedding store (pgvector) keyed to entity/event/relationship ids plus a
 full-text index; an indexing `Job` kind. See [`09-data-schema.md`](./09-data-schema.md).
+*As built (M5 slice 4a):* one `SearchDoc` row per target carries `content`, a
+generated `searchVector` (tsvector + GIN), and an `embedding vector(1536)` +
+`embeddingModel`; the `EMBED_SEARCH_DOCS` job populates embeddings. No ANN
+(HNSW/IVFFlat) index yet — cosine over a campaign-scoped sequential scan is fast
+at search result sizes, and a pgvector index type can't be represented in the
+Prisma schema without tripping the migration-drift gate (deferred to a perf slice).
 
 ## Build sequencing
 

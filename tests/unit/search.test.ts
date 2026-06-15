@@ -189,6 +189,26 @@ describe("buildSearchDocSearchSql", () => {
     expect(text).toContain('"searchVector" @@ websearch_to_tsquery');
     expect(text).not.toContain("to_tsvector");
   });
+
+  it("adds a cosine-similarity term + semantic candidate arm when a query vector is given", () => {
+    const sql = buildSearchDocSearchSql({
+      campaignId: "campaign_1",
+      query: "lighthouse",
+      playerOnly: false,
+      limit: 10,
+      offset: 0,
+      queryVector: [0.1, 0.2, 0.3],
+      embedModel: "text-embedding-3-small",
+    });
+    const text = sql.strings.join("?");
+
+    // Hybrid: keeps the full-text rank/match and adds the pgvector cosine term
+    // and a same-model embedded-row candidate arm.
+    expect(text).toContain('ts_rank("searchVector", websearch_to_tsquery');
+    expect(text).toContain("embedding <=>");
+    expect(text).toContain('embedding IS NOT NULL AND "embeddingModel" =');
+    expect(text).toContain('"searchVector" @@ websearch_to_tsquery');
+  });
 });
 
 describe("search indexing on canon writes", () => {

@@ -7,7 +7,9 @@ import {
   Visibility,
   type ChangeSource,
 } from "@/generated/prisma/client";
+import { EMBED_MODEL_DEFAULT, resolveCampaignEmbedder } from "@/server/ai";
 import { prisma } from "@/server/db";
+import { EMBED_DIMENSIONS, searchVectorLiteral } from "@/server/services/embeddings";
 import {
   SEARCH_TARGET_ENTITY,
   SEARCH_TARGET_EVENT,
@@ -22,7 +24,12 @@ import {
 // Slice 2 broadens the index from ENTITY to RELATIONSHIP and EVENT targets.
 // Slice 3 moves ranking/filtering onto the generated `searchVector` column so
 // Postgres can use the SearchDoc GIN index instead of recomputing tsvectors per
-// query.
+// query. Slice 4a makes search **hybrid**: when the campaign has an embedding-
+// capable provider, the query is embedded once and ranking blends the full-text
+// `ts_rank` with the pgvector cosine similarity of `SearchDoc.embedding`, so a
+// natural-language query with no keyword overlap still retrieves the closest
+// docs. Semantic is purely additive — no embedder, no embeddings, or any embed
+// failure falls back to the exact slice-3 full-text behaviour.
 //
 // Two-layer visibility enforcement. The SQL pass filters on the SearchDoc's
 // `visibility` mirror (cheap: drops DM-only entities and secret edges/events).
@@ -90,6 +97,18 @@ export type SearchResult = {
 const MAX_LIMIT = 50;
 const DEFAULT_LIMIT = 25;
 
+// Weight on the semantic (cosine-similarity) term in the hybrid blend. `ts_rank`
+// values are small, so at 1.0 the cosine term (0–1 for normalized embeddings)
+// leads ranking while an exact keyword hit — which also scores high on cosine —
+// keeps its edge. A first-cut additive blend; RRF-style fusion + tuning are a
+// follow-up (docs/07-search-retrieval.md).
+const SEMANTIC_WEIGHT = 1.0;
+
+// A doc with no keyword hit is a *semantic* candidate only when its similarity
+// to the query clears this floor — so a query that matches nothing meaningful
+// doesn't drag in unrelated embedded docs at near-zero similarity. Tunable.
+const SEMANTIC_SIMILARITY_FLOOR = 0.2;
+
 const hitEntitySelect = {
   id: true,
   type: true,
@@ -129,16 +148,52 @@ export function buildSearchDocSearchSql({
   playerOnly,
   limit,
   offset,
+  queryVector,
+  embedModel,
 }: {
   campaignId: string;
   query: string;
   playerOnly: boolean;
   limit: number;
   offset: number;
+  // When set, search is hybrid: candidates also include same-model embedded rows
+  // and ranking adds the cosine-similarity term. Absent → slice-3 full-text only.
+  queryVector?: number[] | null;
+  embedModel?: string;
 }) {
   const visibilityClause = playerOnly
     ? Prisma.sql`AND "visibility" = ${Visibility.PLAYER_VISIBLE}::"Visibility"`
     : Prisma.empty;
+
+  if (queryVector && queryVector.length > 0) {
+    const literal = searchVectorLiteral(queryVector);
+    const model = embedModel ?? EMBED_MODEL_DEFAULT;
+    // The cosine term only applies to rows embedded with the *same* model (so
+    // mismatched-dimension vectors are never compared); an un-embedded row still
+    // ranks by its full-text term alone. Candidate set is the union of full-text
+    // matches and same-model embedded rows.
+    return Prisma.sql`
+      SELECT "targetId", "targetType",
+        ts_rank("searchVector", websearch_to_tsquery('english', ${query}))
+        + ${SEMANTIC_WEIGHT} * CASE
+            WHEN embedding IS NOT NULL AND "embeddingModel" = ${model}
+            THEN 1 - (embedding <=> ${literal}::vector)
+            ELSE 0
+          END AS rank
+      FROM "SearchDoc"
+      WHERE "campaignId" = ${campaignId}
+        ${visibilityClause}
+        AND (
+          "searchVector" @@ websearch_to_tsquery('english', ${query})
+          OR (
+            embedding IS NOT NULL AND "embeddingModel" = ${model}
+            AND 1 - (embedding <=> ${literal}::vector) > ${SEMANTIC_SIMILARITY_FLOOR}
+          )
+        )
+      ORDER BY rank DESC, "targetId" ASC
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+  }
 
   return Prisma.sql`
     SELECT "targetId", "targetType",
@@ -176,6 +231,27 @@ export async function searchCanon(
   const limit = Math.min(MAX_LIMIT, Math.max(1, options.limit ?? DEFAULT_LIMIT));
   const playerOnly = membership.role === Role.PLAYER;
 
+  // Embed the query once for hybrid ranking. Semantic is additive: no embedder,
+  // a wrong-dimension result, or any provider failure leaves `queryVector` null
+  // and search falls back to the exact full-text path. Embedding the query is
+  // independent of visibility — the SQL/hydration projection below is unchanged,
+  // so a player can never retrieve more than the full-text path would surface.
+  let queryVector: number[] | null = null;
+  let queryModel = EMBED_MODEL_DEFAULT;
+  try {
+    const embedder = await resolveCampaignEmbedder(campaignId);
+    if (embedder) {
+      const result = await embedder.embed([query]);
+      const vector = result.vectors[0];
+      if (vector && vector.length === EMBED_DIMENSIONS) {
+        queryVector = vector;
+        queryModel = result.model;
+      }
+    }
+  } catch {
+    queryVector = null;
+  }
+
   // `websearch_to_tsquery` safely parses arbitrary user input (quotes, OR, -),
   // so no query sanitising is needed. `searchVector` is generated from content
   // and GIN-indexed by the M5 slice 3 migration.
@@ -189,7 +265,17 @@ export async function searchCanon(
   while (hits.length < limit) {
     const rows = await prisma.$queryRaw<
       { targetId: string; targetType: string; rank: number }[]
-    >(buildSearchDocSearchSql({ campaignId, query, playerOnly, limit: BATCH_SIZE, offset }));
+    >(
+      buildSearchDocSearchSql({
+        campaignId,
+        query,
+        playerOnly,
+        limit: BATCH_SIZE,
+        offset,
+        queryVector,
+        embedModel: queryModel,
+      }),
+    );
 
     if (rows.length === 0) break;
 

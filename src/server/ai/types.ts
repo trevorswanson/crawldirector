@@ -54,6 +54,15 @@ export type StructuredResult<T> = {
   providerId: string;
 };
 
+// Result of embedding one or more texts (M5 semantic search). `vectors` preserves
+// input order, one row per input. `usage` reuses the disjoint-bucket convention
+// (embedding APIs only bill input tokens, so `inputTokens` carries them).
+export type EmbedResult = {
+  vectors: number[][];
+  model: string;
+  usage: LLMUsage;
+};
+
 export interface LLMProvider {
   readonly id: string;
   readonly model: string;
@@ -66,6 +75,14 @@ export interface LLMProvider {
    * they must return a parseable Change Set, never freeform prose.
    */
   generateStructured<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>>;
+  /**
+   * Embed texts into vectors for semantic retrieval (M5 — docs/07-search-
+   * retrieval.md). Not every provider supports embeddings: the Anthropic
+   * Messages API has none, so its adapter throws a `ProviderError`. Callers that
+   * need embeddings resolve an embedding-capable provider via
+   * `resolveCampaignEmbedder` and degrade to full-text search when none exists.
+   */
+  embed(texts: string[]): Promise<EmbedResult>;
 }
 
 export const DEFAULT_MAX_TOKENS = 4096;

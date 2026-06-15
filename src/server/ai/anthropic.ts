@@ -4,6 +4,7 @@ import {
   DEFAULT_MAX_TOKENS,
   ProviderError,
   emptyUsage,
+  type EmbedResult,
   type GenerateRequest,
   type GenerateResult,
   type LLMMessage,
@@ -116,6 +117,14 @@ export function createAnthropicProvider(opts: AnthropicAdapterOptions): LLMProvi
         }
         return { raw: toolUse.input, usage: readUsage(resp.usage), model, providerId };
       });
+    },
+
+    // The Anthropic Messages API has no embeddings endpoint. Semantic search
+    // resolves an OpenAI-compatible embedder instead (resolveCampaignEmbedder).
+    async embed(): Promise<EmbedResult> {
+      throw new ProviderError(
+        "This provider does not support embeddings — configure an OpenAI-compatible provider for semantic search.",
+      );
     },
   };
 }

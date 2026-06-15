@@ -16,7 +16,13 @@ vi.mock("@/server/services/ai-keys", () => ({ assertCampaignDm, getAiKeyConfig }
 vi.mock("@/server/ai/anthropic", () => ({ createAnthropicProvider }));
 vi.mock("@/server/ai/openai", () => ({ createOpenAiProvider }));
 
-import { getCampaignProvider, resolveCampaignProvider, testAiConnection } from "@/server/ai";
+import {
+  EMBED_MODEL_DEFAULT,
+  getCampaignProvider,
+  resolveCampaignEmbedder,
+  resolveCampaignProvider,
+  testAiConnection,
+} from "@/server/ai";
 
 function fakeProvider(over: Partial<{ model: string; generateStructured: ReturnType<typeof vi.fn> }> = {}) {
   return {
@@ -97,6 +103,43 @@ describe("resolveCampaignProvider", () => {
   it("returns null when no provider is configured", async () => {
     getAiKeyConfig.mockResolvedValue(null);
     expect(await resolveCampaignProvider("c1")).toBeNull();
+  });
+});
+
+describe("resolveCampaignEmbedder", () => {
+  it("skips Anthropic and builds an OpenAI embedder with the default embedding model", async () => {
+    // First lookup (the `openai` provider) is configured.
+    getAiKeyConfig.mockResolvedValueOnce({ apiKey: "sk-openai", baseUrl: null, model: null });
+    const embedder = await resolveCampaignEmbedder("c1");
+    expect(embedder).not.toBeNull();
+    // Anthropic (kind "anthropic") is never even queried for a key.
+    expect(getAiKeyConfig).toHaveBeenCalledTimes(1);
+    expect(getAiKeyConfig.mock.calls[0][1]).toBe("openai");
+    expect(createOpenAiProvider).toHaveBeenCalledWith(
+      expect.objectContaining({ providerId: "openai", embeddingModel: EMBED_MODEL_DEFAULT }),
+    );
+    expect(createAnthropicProvider).not.toHaveBeenCalled();
+  });
+
+  it("falls through to a self-hosted OpenAI-compatible endpoint", async () => {
+    getAiKeyConfig
+      .mockResolvedValueOnce(null) // openai
+      .mockResolvedValueOnce({ apiKey: "", baseUrl: "http://x/v1", model: "bge" }); // openai-compatible
+    await resolveCampaignEmbedder("c1");
+    expect(createOpenAiProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: "openai-compatible",
+        apiKey: "not-needed",
+        baseUrl: "http://x/v1",
+        embeddingModel: EMBED_MODEL_DEFAULT,
+      }),
+    );
+  });
+
+  it("returns null when no OpenAI-compatible key is configured", async () => {
+    getAiKeyConfig.mockResolvedValue(null);
+    expect(await resolveCampaignEmbedder("c1")).toBeNull();
+    expect(createOpenAiProvider).not.toHaveBeenCalled();
   });
 });
 

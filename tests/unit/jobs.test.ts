@@ -2,9 +2,10 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the generation module's provider seam — handler tests should not make
 // real network calls. Uses the same vi.hoisted + vi.mock pattern as generation.test.ts.
-const { resolveCampaignProvider, seedCampaignFromLore } = vi.hoisted(() => ({
+const { resolveCampaignProvider, seedCampaignFromLore, embedSearchDocs } = vi.hoisted(() => ({
   resolveCampaignProvider: vi.fn(),
   seedCampaignFromLore: vi.fn().mockResolvedValue({ count: 3 }),
+  embedSearchDocs: vi.fn().mockResolvedValue({ embedded: 5, model: "text-embedding-3-small" }),
 }));
 
 vi.mock("@/server/ai", () => ({
@@ -14,6 +15,12 @@ vi.mock("@/server/ai", () => ({
 
 vi.mock("@/server/services/seeding", () => ({
   seedCampaignFromLore,
+}));
+
+// Mock the embedding service whole so the handler test doesn't load its
+// @/server/ai dependency (mocked thin above) or touch a provider.
+vi.mock("@/server/services/embeddings", () => ({
+  embedSearchDocs,
 }));
 
 import { JobKind, JobStatus } from "@/generated/prisma/client";
@@ -308,5 +315,33 @@ describe("jobHandlers.LORE_SEED", () => {
     const result = await jobHandlers[JobKind.LORE_SEED](fakeJob);
     expect(seedCampaignFromLore).toHaveBeenCalledWith("u1", "c1");
     expect(result).toEqual({ count: 3 });
+  });
+});
+
+// ─── EMBED_SEARCH_DOCS handler ───────────────────────────────────────────────
+
+describe("jobHandlers.EMBED_SEARCH_DOCS", () => {
+  it("delegates to embedSearchDocs with the job's createdById and campaignId", async () => {
+    const fakeJob = {
+      id: "j3",
+      campaignId: "c1",
+      createdById: "u1",
+      kind: JobKind.EMBED_SEARCH_DOCS,
+      status: JobStatus.RUNNING,
+      payload: {},
+      result: null,
+      error: null,
+      attempts: 1,
+      maxAttempts: 1,
+      runAfter: new Date(),
+      startedAt: new Date(),
+      finishedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const result = await jobHandlers[JobKind.EMBED_SEARCH_DOCS](fakeJob);
+    expect(embedSearchDocs).toHaveBeenCalledWith("u1", "c1");
+    expect(result).toEqual({ embedded: 5, model: "text-embedding-3-small" });
   });
 });

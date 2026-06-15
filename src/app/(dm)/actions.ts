@@ -580,6 +580,32 @@ export async function enqueueBulkFleshAction(
   }
 }
 
+// Enqueue a semantic-index build (M5 slice 4a) to run off the request path in
+// the worker. Embeds the campaign's SearchDocs so search can rank by meaning,
+// not just keywords. DM/co-DM only (the service + enqueueJob enforce the role);
+// no payload (the handler embeds missing/stale docs). Safe messages only.
+export async function enqueueBuildSemanticIndexAction(
+  campaignId: string,
+  _prev: GenerateActionState,
+  _formData: FormData,
+): Promise<GenerateActionState> {
+  void _prev;
+  void _formData;
+  const user = await requireUser();
+  try {
+    await enqueueJob(user.id, campaignId, "EMBED_SEARCH_DOCS", {});
+    revalidatePath(`/campaigns/${campaignId}/search`);
+    return {
+      success: "Semantic index build queued — search will rank by meaning once the worker finishes.",
+      timestamp: Date.now(),
+    };
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    logActionError("Enqueue semantic index action failed", error);
+    return { error: "Failed to queue job. Please try again.", timestamp: Date.now() };
+  }
+}
+
 export async function approveChangeSetAction(
   campaignId: string,
   changeSetId: string,

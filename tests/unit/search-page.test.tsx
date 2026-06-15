@@ -2,20 +2,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
-const { requireUser, getCampaignForUser, searchCanon, notFound } = vi.hoisted(
-  () => ({
+const { requireUser, getCampaignForUser, searchCanon, resolveCampaignEmbedder, notFound } =
+  vi.hoisted(() => ({
     requireUser: vi.fn(),
     getCampaignForUser: vi.fn(),
     searchCanon: vi.fn(),
+    resolveCampaignEmbedder: vi.fn(),
     notFound: vi.fn(() => {
       throw new Error("NEXT_NOT_FOUND");
     }),
-  }),
-);
+  }));
 
 vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/campaigns", () => ({ getCampaignForUser }));
 vi.mock("@/server/services/search", () => ({ searchCanon }));
+vi.mock("@/server/ai", () => ({ resolveCampaignEmbedder }));
 vi.mock("next/navigation", () => ({ notFound }));
 vi.mock("next/link", () => ({
   default: ({ href, children }: { href: string; children: React.ReactNode }) => (
@@ -27,6 +28,11 @@ vi.mock("@/components/search/search-bar", () => ({
   SearchBar: ({ initialQuery }: { initialQuery: string }) => (
     <input data-testid="search-bar" defaultValue={initialQuery} />
   ),
+}));
+// The "Build semantic index" button is a client component (its own action test
+// covers it); here we only assert the page's DM/embedder gating renders it.
+vi.mock("@/components/search/build-semantic-index-button", () => ({
+  BuildSemanticIndexButton: () => <div data-testid="build-semantic-index" />,
 }));
 
 import CampaignSearchPage from "@/app/(dm)/campaigns/[id]/search/page";
@@ -79,7 +85,12 @@ function eventHit(id: string, title: string, summary: string | null) {
 beforeEach(() => {
   vi.clearAllMocks();
   requireUser.mockResolvedValue({ id: "u1" });
-  getCampaignForUser.mockResolvedValue({ id: "c1", name: "World One" });
+  getCampaignForUser.mockResolvedValue({
+    id: "c1",
+    name: "World One",
+    members: [{ role: "OWNER" }],
+  });
+  resolveCampaignEmbedder.mockResolvedValue(null);
 });
 
 afterEach(() => cleanup());
@@ -195,5 +206,48 @@ describe("CampaignSearchPage", () => {
       }),
     );
     expect(screen.getByText("1 result")).toBeDefined();
+  });
+
+  it("shows Build semantic index for a DM when an embedder is configured", async () => {
+    searchCanon.mockResolvedValue({ role: "OWNER", query: "", hits: [] });
+    resolveCampaignEmbedder.mockResolvedValue({ id: "openai" });
+    render(
+      await CampaignSearchPage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+    expect(screen.getByTestId("build-semantic-index")).toBeDefined();
+  });
+
+  it("hides Build semantic index when no embedder is configured", async () => {
+    searchCanon.mockResolvedValue({ role: "OWNER", query: "", hits: [] });
+    resolveCampaignEmbedder.mockResolvedValue(null);
+    render(
+      await CampaignSearchPage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+    expect(screen.queryByTestId("build-semantic-index")).toBeNull();
+  });
+
+  it("hides Build semantic index for a player even with an embedder", async () => {
+    getCampaignForUser.mockResolvedValue({
+      id: "c1",
+      name: "World One",
+      members: [{ role: "PLAYER" }],
+    });
+    searchCanon.mockResolvedValue({ role: "PLAYER", query: "", hits: [] });
+    resolveCampaignEmbedder.mockResolvedValue({ id: "openai" });
+    render(
+      await CampaignSearchPage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+    expect(screen.queryByTestId("build-semantic-index")).toBeNull();
+    // A player never triggers the embedder lookup.
+    expect(resolveCampaignEmbedder).not.toHaveBeenCalled();
   });
 });
