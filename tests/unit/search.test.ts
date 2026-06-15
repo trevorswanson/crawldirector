@@ -24,7 +24,7 @@ import {
   buildRelationshipContent,
   reindexCampaign,
 } from "@/server/services/search-index";
-import { searchCanon } from "@/server/services/search";
+import { buildSearchDocSearchSql, searchCanon } from "@/server/services/search";
 
 function makeUser(email: string) {
   return prisma.user.create({ data: { email } });
@@ -129,6 +129,65 @@ describe("buildEventContent", () => {
         description: null,
       }),
     ).toBe("The Grand Betrayal\nDonut is double-crossed");
+  });
+});
+
+describe("SearchDoc full-text storage", () => {
+  it("stores a generated tsvector column with a GIN index", async () => {
+    const [column] = await prisma.$queryRaw<
+      {
+        columnName: string;
+        udtName: string;
+        isGenerated: string;
+        generationExpression: string | null;
+      }[]
+    >`
+      SELECT
+        column_name AS "columnName",
+        udt_name AS "udtName",
+        is_generated AS "isGenerated",
+        generation_expression AS "generationExpression"
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'SearchDoc'
+        AND column_name = 'searchVector'
+    `;
+
+    expect(column).toMatchObject({
+      columnName: "searchVector",
+      udtName: "tsvector",
+      isGenerated: "ALWAYS",
+    });
+    expect(column.generationExpression).toContain("to_tsvector");
+    expect(column.generationExpression).toContain("content");
+
+    const [index] = await prisma.$queryRaw<{ indexdef: string }[]>`
+      SELECT indexdef
+      FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND tablename = 'SearchDoc'
+        AND indexname = 'SearchDoc_searchVector_idx'
+    `;
+
+    expect(index.indexdef).toContain("USING gin");
+    expect(index.indexdef).toContain('"searchVector"');
+  });
+});
+
+describe("buildSearchDocSearchSql", () => {
+  it("uses the materialized search vector instead of recomputing from content", () => {
+    const sql = buildSearchDocSearchSql({
+      campaignId: "campaign_1",
+      query: "donut OR mordecai",
+      playerOnly: true,
+      limit: 10,
+      offset: 0,
+    });
+    const text = sql.strings.join("?");
+
+    expect(text).toContain('ts_rank("searchVector", websearch_to_tsquery');
+    expect(text).toContain('"searchVector" @@ websearch_to_tsquery');
+    expect(text).not.toContain("to_tsvector");
   });
 });
 
