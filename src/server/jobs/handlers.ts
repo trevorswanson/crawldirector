@@ -1,6 +1,7 @@
 import type { Job } from "@/generated/prisma/client";
 import { JobKind } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
+import { embedSearchDocs } from "@/server/services/embeddings";
 import { fleshOutEntities } from "@/server/services/generation";
 import { seedCampaignFromLore } from "@/server/services/seeding";
 
@@ -30,5 +31,11 @@ export const jobHandlers: Record<JobKind, (job: Job) => Promise<unknown>> = {
     // server-side; nothing user-controlled flows in (clearExisting is deliberately
     // not reachable from here).
     return seedCampaignFromLore(job.createdById, job.campaignId);
+  },
+  [JobKind.EMBED_SEARCH_DOCS]: async (job: Job) => {
+    // Empty payload by design — embedSearchDocs re-checks DM membership with
+    // job.createdById and resolves the embedder server-side. `force` is not
+    // reachable from here (a routine backfill only embeds missing/stale docs).
+    return embedSearchDocs(job.createdById, job.campaignId);
   },
 };

@@ -309,16 +309,16 @@ model Entity {
   isStub       Boolean      @default(false)
   agentEnabled Boolean      @default(false)
 
-  campaign    Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  createdById String?
-  createdBy   User?              @relation("CreatedEntities", fields: [createdById], references: [id], onDelete: SetNull)
+  campaign       Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  createdById    String?
+  createdBy      User?              @relation("CreatedEntities", fields: [createdById], references: [id], onDelete: SetNull)
   // Campaigns pointing at this entity as their current floor (FLOOR entities).
-  currentFloorOf Campaign[]      @relation("CampaignCurrentFloor")
-  crawler     Crawler?
-  outEdges    Relationship[]     @relation("SourceEntity")
-  inEdges     Relationship[]     @relation("TargetEntity")
-  eventRoles  EventParticipant[]
-  provenance  Provenance[]
+  currentFloorOf Campaign[]         @relation("CampaignCurrentFloor")
+  crawler        Crawler?
+  outEdges       Relationship[]     @relation("SourceEntity")
+  inEdges        Relationship[]     @relation("TargetEntity")
+  eventRoles     EventParticipant[]
+  provenance     Provenance[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -623,6 +623,7 @@ enum JobStatus {
 enum JobKind {
   BULK_FLESH
   LORE_SEED
+  EMBED_SEARCH_DOCS
 }
 
 // Async work queue (M4 — docs/04-ai-integration.md §"Async / batching"): long
@@ -667,19 +668,19 @@ model Job {
 // like a card) so the DM can tell which key is configured without revealing it.
 // One key per (campaign, provider).
 model AiKey {
-  id          String @id @default(cuid())
-  campaignId  String
-  providerId  String // matches an id in src/lib/ai/providers.ts (e.g. "anthropic")
-  ciphertext  String // AES-256-GCM envelope-encrypted API key — never leaves the server
-  lastFour    String // non-secret hint: the key's last 4 chars
-  baseUrl     String? // OpenAI-compatible endpoint (self-hosted / proxy); non-secret config
-  model       String? // optional per-key model override; falls back to the provider default
+  id               String  @id @default(cuid())
+  campaignId       String
+  providerId       String // matches an id in src/lib/ai/providers.ts (e.g. "anthropic")
+  ciphertext       String // AES-256-GCM envelope-encrypted API key — never leaves the server
+  lastFour         String // non-secret hint: the key's last 4 chars
+  baseUrl          String? // OpenAI-compatible endpoint (self-hosted / proxy); non-secret config
+  model            String? // optional per-key model override; falls back to the provider default
   // Optional DM-supplied price (USD per 1M tokens) for usage/cost estimation. When
   // both are set they override the built-in price table (src/lib/ai/pricing.ts) —
   // the only way to cost a self-hosted/proxy model the table doesn't know. Non-secret.
   inputPerMTokUsd  Float?
   outputPerMTokUsd Float?
-  createdById String
+  createdById      String
 
   campaign  Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   createdBy User     @relation("CreatedAiKeys", fields: [createdById], references: [id])
@@ -699,7 +700,7 @@ model AiKey {
 // cost/usage record, NOT provenance, and it carries no secret: the API key is
 // never referenced here (invariant #6).
 model AiUsage {
-  id          String @id @default(cuid())
+  id          String  @id @default(cuid())
   campaignId  String
   // Who triggered the run, and what produced it.
   createdById String
@@ -733,20 +734,30 @@ model AiUsage {
 // except through the visibility mirror below. `content` is the searchable text
 // (name + summary + salient fields). `searchVector` is a database-generated
 // Postgres `tsvector` with a GIN index for keyword/full-text retrieval; Prisma
-// marks it Unsupported so the client never writes it directly. The semantic
-// layer (pgvector embeddings) lands in a later M5 slice. No FK to the source:
-// `targetId` is polymorphic and a SearchDoc is a regenerable mirror that should
-// outlive churn in canon.
+// marks it Unsupported so the client never writes it directly. `embedding` is a
+// pgvector semantic embedding of `content` (M5 slice 4a, hybrid search);
+// populated asynchronously by the embedding service through the Job worker and
+// written via raw SQL, so it is nullable and the typed client never sets it.
+// `embeddingModel` records which model produced the vector so the hybrid query
+// only compares same-model (same-dimension) rows. No ANN (HNSW/IVFFlat) index
+// this slice — campaign-scoped cosine over a sequential scan is fast at the
+// result sizes search returns, and Prisma's `@@index` can't represent a pgvector
+// index type without breaking the drift gate (the ANN index is a later perf
+// slice). No FK to the source: `targetId` is polymorphic and a SearchDoc is a
+// regenerable mirror that should outlive churn in canon.
 model SearchDoc {
-  id           String                   @id @default(cuid())
-  campaignId   String
-  targetType   String // ENTITY | RELATIONSHIP | EVENT
-  targetId     String
-  content      String // denormalized name + summary + salient fields
+  id             String                       @id @default(cuid())
+  campaignId     String
+  targetType     String // ENTITY | RELATIONSHIP | EVENT
+  targetId       String
+  content        String // denormalized name + summary + salient fields
   // Generated from content; GIN-indexed in migration.
-  searchVector Unsupported("tsvector")? @default(dbgenerated("to_tsvector('english'::regconfig, content)"))
-  visibility   Visibility               @default(DM_ONLY) // mirror of source, for scoped retrieval
-  updatedAt    DateTime                 @updatedAt
+  searchVector   Unsupported("tsvector")?     @default(dbgenerated("to_tsvector('english'::regconfig, content)"))
+  // Semantic layer (M5 slice 4a). Written via raw SQL; null = not yet embedded.
+  embedding      Unsupported("vector(1536)")?
+  embeddingModel String?
+  visibility     Visibility                   @default(DM_ONLY) // mirror of source, for scoped retrieval
+  updatedAt      DateTime                     @updatedAt
 
   @@unique([targetType, targetId])
   @@index([campaignId, targetType])

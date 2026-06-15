@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "JobKind" ADD VALUE 'EMBED_SEARCH_DOCS';

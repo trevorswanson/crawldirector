@@ -4,17 +4,22 @@ import { z } from "zod";
 // Mock both vendor SDKs so the adapters can be exercised without network. Each
 // mock's default export is the client class; instances expose the one method the
 // adapter calls.
-const { anthropicCreate, openaiCreate, AnthropicCtor, OpenAICtor } = vi.hoisted(() => {
+const { anthropicCreate, openaiCreate, openaiEmbed, AnthropicCtor, OpenAICtor } = vi.hoisted(() => {
   const anthropicCreate = vi.fn();
   const openaiCreate = vi.fn();
+  const openaiEmbed = vi.fn();
   return {
     anthropicCreate,
     openaiCreate,
+    openaiEmbed,
     AnthropicCtor: vi.fn(function () {
       return { messages: { create: anthropicCreate } };
     }),
     OpenAICtor: vi.fn(function () {
-      return { chat: { completions: { create: openaiCreate } } };
+      return {
+        chat: { completions: { create: openaiCreate } },
+        embeddings: { create: openaiEmbed },
+      };
     }),
   };
 });
@@ -185,6 +190,16 @@ describe("Anthropic adapter", () => {
     expect(result.text).toBe("Hello world");
     expect(result.usage.inputTokens).toBe(0);
   });
+
+  it("embed() throws ProviderError — the Messages API has no embeddings", async () => {
+    const provider = createAnthropicProvider({
+      providerId: "anthropic",
+      apiKey: "sk-ant-test",
+      baseUrl: null,
+      model: "claude-opus-4-8",
+    });
+    await expect(provider.embed(["anything"])).rejects.toBeInstanceOf(ProviderError);
+  });
 });
 
 describe("OpenAI / OpenAI-compatible adapter", () => {
@@ -292,5 +307,64 @@ describe("OpenAI / OpenAI-compatible adapter", () => {
     const result = await provider.generate({ messages: [{ role: "user", content: "hi" }] });
     expect(result.text).toBe("plain text");
     expect(result.usage.outputTokens).toBe(0);
+  });
+
+  it("embed() requests the embedding model, orders by index, and maps usage", async () => {
+    openaiEmbed.mockResolvedValue({
+      // Returned out of order to prove we sort by `index`.
+      data: [
+        { index: 1, embedding: [0.3, 0.4] },
+        { index: 0, embedding: [0.1, 0.2] },
+      ],
+      usage: { prompt_tokens: 9, total_tokens: 9 },
+    });
+    const provider = createOpenAiProvider({
+      providerId: "openai",
+      apiKey: "sk-openai",
+      baseUrl: null,
+      model: "gpt-4o-mini",
+      embeddingModel: "text-embedding-3-small",
+    });
+
+    const result = await provider.embed(["first", "second"]);
+    expect(result.vectors).toEqual([
+      [0.1, 0.2],
+      [0.3, 0.4],
+    ]);
+    expect(result.model).toBe("text-embedding-3-small");
+    expect(result.usage).toEqual({
+      inputTokens: 9,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    });
+    expect(openaiEmbed.mock.calls[0][0]).toEqual({
+      model: "text-embedding-3-small",
+      input: ["first", "second"],
+      encoding_format: "float",
+    });
+  });
+
+  it("embed() short-circuits an empty input without calling the API", async () => {
+    const provider = createOpenAiProvider({
+      providerId: "openai",
+      apiKey: "sk-openai",
+      baseUrl: null,
+      model: "gpt-4o-mini",
+      embeddingModel: "text-embedding-3-small",
+    });
+    const result = await provider.embed([]);
+    expect(result.vectors).toEqual([]);
+    expect(openaiEmbed).not.toHaveBeenCalled();
+  });
+
+  it("embed() throws when no embedding model is configured", async () => {
+    const provider = createOpenAiProvider({
+      providerId: "openai",
+      apiKey: "sk-openai",
+      baseUrl: null,
+      model: "gpt-4o-mini",
+    });
+    await expect(provider.embed(["x"])).rejects.toBeInstanceOf(ProviderError);
   });
 });

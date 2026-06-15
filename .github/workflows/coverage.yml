@@ -40,7 +40,9 @@ jobs:
 
     services:
       postgres:
-        image: postgres:18
+        # pgvector image (Postgres 18 + the `vector` extension) — the M5
+        # semantic-search migration runs `CREATE EXTENSION vector`.
+        image: pgvector/pgvector:pg18
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres

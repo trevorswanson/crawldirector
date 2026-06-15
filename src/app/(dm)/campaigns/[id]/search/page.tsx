@@ -2,11 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CalendarClock, Search, Share2 } from "lucide-react";
 
+import { Role } from "@/generated/prisma/client";
 import { requireUser } from "@/server/auth/session";
+import { resolveCampaignEmbedder } from "@/server/ai";
 import { getCampaignForUser } from "@/server/services/campaigns";
 import { searchCanon, type SearchHit } from "@/server/services/search";
 import { PageContainer } from "@/components/console/page-container";
 import { SearchBar } from "@/components/search/search-bar";
+import { BuildSemanticIndexButton } from "@/components/search/build-semantic-index-button";
 import { Kicker } from "@/components/ui/kicker";
 import { TypeDot } from "@/components/ui/type-dot";
 import { SourceBadge } from "@/components/ui/source-badge";
@@ -114,6 +117,14 @@ export default async function CampaignSearchPage({
   const rawQuery = q ?? "";
   const { query, hits } = await searchCanon(user.id, id, rawQuery);
 
+  // The "Build semantic index" control is DM-only and only meaningful when an
+  // embedding-capable provider is configured (semantic search degrades to
+  // full-text otherwise — doc 07). Resolve it only for DMs to avoid a needless
+  // key lookup on player requests.
+  const role = campaign.members[0]?.role;
+  const isDm = role === Role.OWNER || role === Role.CO_DM;
+  const canBuildSemanticIndex = isDm && (await resolveCampaignEmbedder(id)) !== null;
+
   return (
     <PageContainer>
       <Kicker dim noLead className="mb-2">
@@ -123,10 +134,18 @@ export default async function CampaignSearchPage({
         Search the campaign
       </h1>
       <p className="mb-5 max-w-2xl text-[13px] leading-[1.6] text-[var(--ink-dim)]">
-        Full-text search across every entity, relationship, and event you can
-        see — names, summaries, descriptions, tags, and connections. Semantic
-        search and Ask the Campaign arrive in a later M5 slice.
+        Hybrid search across every entity, relationship, and event you can see —
+        full-text over names, summaries, descriptions, tags, and connections,
+        blended with semantic meaning when a semantic index is built. With no
+        embedding provider configured it stays keyword-only. Ask the Campaign
+        arrives in a later M5 slice.
       </p>
+
+      {canBuildSemanticIndex && (
+        <div className="mb-5">
+          <BuildSemanticIndexButton campaignId={id} />
+        </div>
+      )}
 
       <SearchBar campaignId={id} initialQuery={rawQuery} autoFocus />
 

@@ -4,6 +4,7 @@ import {
   DEFAULT_MAX_TOKENS,
   ProviderError,
   emptyUsage,
+  type EmbedResult,
   type GenerateRequest,
   type GenerateResult,
   type LLMMessage,
@@ -30,7 +31,22 @@ export type OpenAiAdapterOptions = {
   apiKey: string;
   baseUrl: string | null;
   model: string;
+  // Embedding model for `embed()`. Separate from the chat `model`; only set when
+  // this adapter is constructed as an embedder (resolveCampaignEmbedder). When
+  // absent, `embed()` throws — chat callers never call it.
+  embeddingModel?: string | null;
 };
+
+function readEmbedUsage(usage: OpenAI.CreateEmbeddingResponse.Usage | undefined): LLMUsage {
+  if (!usage) return emptyUsage();
+  // Embeddings only bill input tokens; `LLMUsage.inputTokens` carries them.
+  return {
+    inputTokens: usage.prompt_tokens ?? 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+  };
+}
 
 function buildMessages(
   system: GenerateRequest["system"],
@@ -111,6 +127,28 @@ export function createOpenAiProvider(opts: OpenAiAdapterOptions): LLMProvider {
         }
         return { raw, usage: readUsage(resp.usage), model, providerId };
       });
+    },
+
+    async embed(texts: string[]): Promise<EmbedResult> {
+      const embeddingModel = opts.embeddingModel;
+      if (!embeddingModel) {
+        throw new ProviderError("No embedding model is configured for this provider.");
+      }
+      if (texts.length === 0) return { vectors: [], model: embeddingModel, usage: emptyUsage() };
+
+      // Force `float`: the SDK otherwise defaults to base64, which an
+      // OpenAI-*compatible* endpoint (Ollama, vLLM, llama.cpp) may not honor —
+      // returning a plain float array the SDK then mis-decodes as bytes.
+      const resp = await client.embeddings.create({
+        model: embeddingModel,
+        input: texts,
+        encoding_format: "float",
+      });
+      // The API returns rows in input order, but sort on `index` to be safe.
+      const vectors = [...resp.data]
+        .sort((a, b) => a.index - b.index)
+        .map((row) => row.embedding as number[]);
+      return { vectors, model: embeddingModel, usage: readEmbedUsage(resp.usage) };
     },
   };
 }

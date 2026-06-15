@@ -36,7 +36,25 @@ keyword-scanning every doc.
             stays clean.
       - [ ] **Slice 4 — semantic layer (pgvector).** Enable the extension, embed
             SearchDocs via the BYO-key provider, async re-embed on canon change
-            via the `Job` worker, hybrid ranking.
+            via the `Job` worker, hybrid ranking. Decomposed:
+            - [x] **Slice 4a — pgvector foundation + hybrid search.** ✅
+                  (2026-06-15) — see the section below. pgvector extension +
+                  `SearchDoc.embedding`; provider `embed()` (OpenAI-compatible;
+                  Anthropic unsupported); a DM "Build semantic index" backfill via
+                  a new `EMBED_SEARCH_DOCS` `Job`; `searchCanon` blends full-text
+                  `ts_rank` with pgvector cosine similarity. Degrades to full-text
+                  when no embedder is configured.
+            - [ ] **Slice 4b — auto re-embed on canon change.** Content-change
+                  *invalidation* already lands in 4a (the index write paths clear
+                  `embeddingModel` so the next backfill re-embeds). 4b proper:
+                  auto-enqueue an `EMBED_SEARCH_DOCS` re-embed on canon writes so
+                  the index self-heals without a manual rebuild.
+            - [ ] **Slice 4c — ANN index perf + configurable model.** Add an
+                  HNSW/IVFFlat index on `SearchDoc.embedding` once campaigns grow
+                  past sequential-scan sizes (needs an `Unsupported`/out-of-schema
+                  decision vs. the drift gate — Prisma's `@@index` can't represent
+                  pgvector index types); plus a configurable embedding
+                  model/dimension.
       - [ ] **Slice 5 — Ask the Campaign.** Retrieval-augmented Q&A with citations
             (read-only), DM + scoped player variants.
       - [ ] **Slice 6 — wire retrieval into generator context-building.** Replace
@@ -158,6 +176,84 @@ keyword-scanning every doc.
 - [x] `CreateCampaignForm` has an unchecked-by-default native checkbox (`name="seedLore"`, no `value` attribute); submits `"on"` when checked.
 - [x] `createCampaignAction`: after campaign creation, if `seedLore === "on"` enqueues a `LORE_SEED` job in its own try/catch — enqueue failure never blocks the redirect.
 - [x] Tests: seeding ServiceError assertions updated; non-empty campaign guard test added; LORE_SEED handler delegation test (mocked seeding module); dm-actions tests for seedLore=on/off/enqueue-throw; form checkbox test.
+
+## M5 — Semantic layer: pgvector + hybrid search (slice 4a) ✅ (2026-06-15)
+
+**Goal:** add the semantic half of the hybrid retrieval in
+[`07-search-retrieval.md`](./07-search-retrieval.md) — embed the `SearchDoc`
+index and let `searchCanon` rank by *meaning*, not just keywords. Scoped to the
+foundation + hybrid query; auto re-embed on canon change (4b) and an ANN index
+(4c) are deferred. Still degrades cleanly: a campaign with no embedding-capable
+key keeps the exact slice-3 full-text behaviour. Branch: `feat/m5-search-slice4a-pgvector`.
+
+- [x] **Infra: pgvector.** Switched the Postgres image from `postgres:18` to
+      `pgvector/pgvector:pg18` in `docker-compose.yml` and all three CI service
+      definitions (`ci.yml` ×2, `coverage.yml`). The stock image lacks the
+      `vector` extension the migration enables. Local `dcc` DB recreated on the
+      same image.
+- [x] **Schema + migrations.** `20260615120000_m5_pgvector_embeddings`:
+      `CREATE EXTENSION IF NOT EXISTS vector` + `SearchDoc.embedding vector(1536)`
+      and `embeddingModel text` (both nullable). `20260615120100_add_embed_search_docs_job_kind`:
+      additive `EMBED_SEARCH_DOCS` `JobKind`. In [`schema.prisma`](../prisma/schema.prisma)
+      the vector is `Unsupported("vector(1536)")?` (written via raw SQL, never by
+      the typed client) and `embeddingModel String?`. **No ANN index this slice**
+      — campaign-scoped cosine over a sequential scan is fast at search result
+      sizes, and Prisma's `@@index` can't represent an HNSW/IVFFlat type without
+      breaking the drift gate (same deferral reasoning slice 1 used for GIN). Drift
+      gate verified clean.
+- [x] **Provider `embed()`** ([`types.ts`](../src/server/ai/types.ts),
+      [`openai.ts`](../src/server/ai/openai.ts), [`anthropic.ts`](../src/server/ai/anthropic.ts)):
+      new `EmbedResult` + `embed(texts)` on `LLMProvider`. The OpenAI adapter calls
+      `client.embeddings.create` (separate `embeddingModel`, order-preserving,
+      usage mapped); the Anthropic adapter **throws a safe `ProviderError`** — the
+      Messages API has no embeddings endpoint. `resolveCampaignEmbedder`
+      ([`index.ts`](../src/server/ai/index.ts)) returns the first OpenAI-compatible
+      provider with a usable key configured for `EMBED_MODEL_DEFAULT`
+      (`text-embedding-3-small`, 1536-dim), else null → graceful degrade.
+- [x] **Embedding service** ([`embeddings.ts`](../src/server/services/embeddings.ts)):
+      `embedSearchDocs(userId, campaignId, { force? })` — DM-only, cap-checked.
+      Embeds docs missing/stale for the current model (or all with `force`) in
+      batches, writes each vector via raw SQL, records `AiUsage` (tokens; embedding
+      models are usually unpriced → null cost). A wrong-dimension model is rejected
+      with a clear message; provider failures become safe `ServiceError`s
+      (invariant #6). Pure helpers `embeddingInputForDoc` / `searchVectorLiteral`.
+- [x] **Hybrid ranking** ([`search.ts`](../src/server/services/search.ts)):
+      `searchCanon` embeds the query once when an embedder is configured and
+      `buildSearchDocSearchSql` blends `ts_rank` with `1 - (embedding <=> q)` for
+      same-model rows, with the candidate set = full-text matches **OR** same-model
+      embedded rows above a similarity floor. Any embed failure (or no embedder)
+      falls back to the unchanged full-text path. The visibility pre-filter +
+      two-layer hydration projection are **untouched** — semantic only changes
+      candidate selection/ordering, so a player can never retrieve more than
+      full-text would surface (invariant #5).
+- [x] **Job + action + UI.** `EMBED_SEARCH_DOCS` handler delegates to
+      `embedSearchDocs` ([`handlers.ts`](../src/server/jobs/handlers.ts));
+      `enqueueBuildSemanticIndexAction` queues it; a DM-only **Build semantic
+      index** button ([`build-semantic-index-button.tsx`](../src/components/search/build-semantic-index-button.tsx))
+      renders on the search page only when an embedder is configured. Intro copy
+      now describes hybrid + the graceful-degrade note.
+- [x] **Tests:** new `embeddings.test.ts` (pure helpers; DB-backed `embedSearchDocs`
+      writes 1536-dim vectors + model + usage, default-skip vs. `force`, DM-only,
+      no-embedder/wrong-dim/spend-cap rejections; hybrid `searchCanon` surfaces a
+      non-keyword query's closest doc, keeps exact keyword hits, and **never lets a
+      player's semantic query retrieve a DM-only doc — invariant #5**). Extended
+      `search.test.ts` (hybrid SQL shape), `ai-provider-adapters.test.ts` (OpenAI
+      embed mapping + Anthropic-unsupported throw), `ai-provider-factory.test.ts`
+      (`resolveCampaignEmbedder`), `jobs.test.ts` (handler delegation),
+      `dm-actions.test.ts` (action), `search-page.test.tsx` (button gating), +
+      `build-semantic-index-button.test.tsx`. lint (0 errors; pre-existing settings
+      warnings only), typecheck, build, and the full coverage gate green (1256
+      tests; statements 95.73%, branches 89.12%, functions 97.89%, lines 97.61%;
+      `embeddings.ts` 96.96%, `search.ts` 98.61%, `ai/index.ts` 100%).
+- [x] **Review fixes (Codex on PR #124).** (1) The request-path query embed now
+      honors the spend cap (cap reached → degrade to full-text) and records its
+      cost as a `search-query-embed` `AiUsage` row, so a player/repeated search
+      can't spend past the cap untracked. (2) The in-transaction index write paths
+      now clear `embeddingModel` when a doc's `content` changes (shared
+      `upsertSearchDoc` helper in [`search-index.ts`](../src/server/services/search-index.ts)),
+      so an edited doc's stale vector is excluded from ranking and re-embedded on
+      the next "Build semantic index" (the unexposed `force` path is no longer
+      required to repair edits).
 
 ## M5 — Search perf: materialized tsvector + GIN index (slice 3) ✅ (2026-06-14)
 

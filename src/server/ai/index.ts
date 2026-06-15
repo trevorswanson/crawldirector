@@ -63,6 +63,39 @@ export async function resolveCampaignProvider(
   return null;
 }
 
+// Default embedding model (M5 — docs/07-search-retrieval.md). 1536-dimensional,
+// matching the `SearchDoc.embedding vector(1536)` column. A per-key/per-campaign
+// embedding-model override is a follow-up; for now every embedder uses this.
+export const EMBED_MODEL_DEFAULT = "text-embedding-3-small";
+
+// Resolve an embedding-capable provider for a campaign. Only OpenAI-compatible
+// providers (real OpenAI or a self-hosted/proxy endpoint) expose an embeddings
+// API — the Anthropic Messages API has none — so we skip the Anthropic adapter
+// here. Returns null when the campaign has no usable OpenAI-compatible key, so
+// the semantic layer degrades gracefully to full-text search (doc 07).
+export async function resolveCampaignEmbedder(
+  campaignId: string,
+): Promise<LLMProvider | null> {
+  for (const provider of AI_PROVIDERS) {
+    if (provider.kind !== "openai-compatible") continue;
+    const config = await getAiKeyConfig(campaignId, provider.id);
+    if (!config) continue;
+
+    // Custom endpoints may run without auth; the SDK still needs a non-empty key.
+    const apiKey = config.apiKey || "not-needed";
+    return createOpenAiProvider({
+      providerId: provider.id,
+      apiKey,
+      baseUrl: config.baseUrl,
+      // The chat model is unused by embed(); fall back to the embedding model so
+      // the adapter always has a non-null `model`.
+      model: resolveAiModel(provider.id, config.model) ?? EMBED_MODEL_DEFAULT,
+      embeddingModel: EMBED_MODEL_DEFAULT,
+    });
+  }
+  return null;
+}
+
 const pingSchema = z.object({ ok: z.boolean() });
 
 export type AiConnectionResult = {

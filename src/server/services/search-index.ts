@@ -93,19 +93,40 @@ export async function indexEntity(
     return;
   }
 
-  const content = buildEntityContent(entity);
+  await upsertSearchDoc(db, SEARCH_TARGET_ENTITY, campaignId, entityId, buildEntityContent(entity), entity.visibility);
+}
+
+/**
+ * Upsert one SearchDoc's denormalized text + visibility mirror. When the
+ * searchable `content` changes, clear the `embeddingModel` marker so the next
+ * "Build semantic index" re-embeds the row (M5 slice 4a). The stale vector is
+ * left in place but ignored by hybrid ranking, which requires a matching
+ * `embeddingModel` (search.ts) — so an edited doc never ranks on its old
+ * embedding. Embeddings are written out-of-band (embeddings.ts); this
+ * in-transaction path only ever *invalidates*, never re-embeds.
+ */
+async function upsertSearchDoc(
+  db: Db,
+  targetType: string,
+  campaignId: string,
+  targetId: string,
+  content: string,
+  visibility: Visibility,
+): Promise<void> {
+  const existing = await db.searchDoc.findUnique({
+    where: { targetType_targetId: { targetType, targetId } },
+    select: { content: true },
+  });
+  const contentChanged = !existing || existing.content !== content;
   await db.searchDoc.upsert({
-    where: {
-      targetType_targetId: { targetType: SEARCH_TARGET_ENTITY, targetId: entityId },
-    },
-    create: {
+    where: { targetType_targetId: { targetType, targetId } },
+    create: { campaignId, targetType, targetId, content, visibility },
+    update: {
       campaignId,
-      targetType: SEARCH_TARGET_ENTITY,
-      targetId: entityId,
       content,
-      visibility: entity.visibility,
+      visibility,
+      ...(contentChanged ? { embeddingModel: null } : {}),
     },
-    update: { campaignId, content, visibility: entity.visibility },
   });
 }
 
@@ -183,24 +204,14 @@ export async function indexRelationship(
     return;
   }
 
-  const content = relationshipContentFrom(relationship);
-  const visibility = visibilityForSecret(relationship.secret);
-  await db.searchDoc.upsert({
-    where: {
-      targetType_targetId: {
-        targetType: SEARCH_TARGET_RELATIONSHIP,
-        targetId: relationshipId,
-      },
-    },
-    create: {
-      campaignId,
-      targetType: SEARCH_TARGET_RELATIONSHIP,
-      targetId: relationshipId,
-      content,
-      visibility,
-    },
-    update: { campaignId, content, visibility },
-  });
+  await upsertSearchDoc(
+    db,
+    SEARCH_TARGET_RELATIONSHIP,
+    campaignId,
+    relationshipId,
+    relationshipContentFrom(relationship),
+    visibilityForSecret(relationship.secret),
+  );
 }
 
 // ─────────────────────────────── Events ─────────────────────────────
@@ -252,21 +263,14 @@ export async function indexEvent(
     return;
   }
 
-  const content = buildEventContent(event);
-  const visibility = visibilityForSecret(event.secret);
-  await db.searchDoc.upsert({
-    where: {
-      targetType_targetId: { targetType: SEARCH_TARGET_EVENT, targetId: eventId },
-    },
-    create: {
-      campaignId,
-      targetType: SEARCH_TARGET_EVENT,
-      targetId: eventId,
-      content,
-      visibility,
-    },
-    update: { campaignId, content, visibility },
-  });
+  await upsertSearchDoc(
+    db,
+    SEARCH_TARGET_EVENT,
+    campaignId,
+    eventId,
+    buildEventContent(event),
+    visibilityForSecret(event.secret),
+  );
 }
 
 // ─────────────────────────── Shared helpers ─────────────────────────

@@ -213,6 +213,7 @@ import {
   fleshOutEntityAction,
   fleshOutEntitiesAction,
   enqueueBulkFleshAction,
+  enqueueBuildSemanticIndexAction,
   inferRelationshipsForEntityAction,
   scaffoldStubsAction,
 } from "@/app/(dm)/actions";
@@ -2275,6 +2276,31 @@ describe("enqueueBulkFleshAction", () => {
 
     enqueueJob.mockRejectedValueOnce(new Error("db down"));
     expect((await enqueueBulkFleshAction("c1", undefined, idsForm(["e1"])))?.error).toBe(
+      "Failed to queue job. Please try again.",
+    );
+  });
+});
+
+describe("enqueueBuildSemanticIndexAction", () => {
+  it("enqueues an EMBED_SEARCH_DOCS job and revalidates the search page", async () => {
+    enqueueJob.mockResolvedValue({ id: "j1" });
+
+    const result = await enqueueBuildSemanticIndexAction("c1", undefined, new FormData());
+
+    expect(enqueueJob).toHaveBeenCalledWith("u1", "c1", "EMBED_SEARCH_DOCS", {});
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/search");
+    expect(result?.success).toContain("Semantic index build queued");
+    expect(result?.error).toBeUndefined();
+  });
+
+  it("surfaces a ServiceError message and a generic fallback for unexpected errors", async () => {
+    enqueueJob.mockRejectedValueOnce(new ServiceError("You do not have permission."));
+    expect((await enqueueBuildSemanticIndexAction("c1", undefined, new FormData()))?.error).toBe(
+      "You do not have permission.",
+    );
+
+    enqueueJob.mockRejectedValueOnce(new Error("db down"));
+    expect((await enqueueBuildSemanticIndexAction("c1", undefined, new FormData()))?.error).toBe(
       "Failed to queue job. Please try again.",
     );
   });

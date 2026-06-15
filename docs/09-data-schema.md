@@ -417,22 +417,27 @@ model Job {              // async generation / bulk + simulation + indexing runs
 }
 
 // ───────────── Search & retrieval (doc 07) ─────────────
-// Full-text now and vector later over canon. Derived data, regenerable,
-// never part of provenance. The semantic slice adds pgvector embeddings.
+// Hybrid full-text + semantic retrieval over canon. Derived data, regenerable,
+// never part of provenance. `embedding` is a pgvector semantic embedding added
+// in M5 slice 4a (populated async by the EMBED_SEARCH_DOCS job).
 model SearchDoc {
-  id           String                 @id @default(cuid())
-  campaignId   String
-  targetType   String                 // ENTITY | RELATIONSHIP | EVENT
-  targetId     String
-  content      String                 // denormalized name + summary + salient fields
+  id             String                       @id @default(cuid())
+  campaignId     String
+  targetType     String                       // ENTITY | RELATIONSHIP | EVENT
+  targetId       String
+  content        String                       // denormalized name + summary + salient fields
   // Generated from content; GIN-indexed in migration.
-  searchVector Unsupported("tsvector")? @default(dbgenerated("to_tsvector('english'::regconfig, content)"))
-  // embedding Unsupported("vector(1536)")    // pgvector; dims per embed model
-  visibility   Visibility             @default(DM_ONLY) // mirror of source, for scoped retrieval
-  updatedAt    DateTime               @updatedAt
+  searchVector   Unsupported("tsvector")?     @default(dbgenerated("to_tsvector('english'::regconfig, content)"))
+  embedding      Unsupported("vector(1536)")? // written via raw SQL; null = not yet embedded
+  embeddingModel String?                      // model that produced `embedding`
+  visibility     Visibility                   @default(DM_ONLY) // mirror of source, for scoped retrieval
+  updatedAt      DateTime                     @updatedAt
   @@unique([targetType, targetId])
   @@index([campaignId, targetType])
   @@index([searchVector], type: Gin, map: "SearchDoc_searchVector_idx")
+  // No ANN index on `embedding` yet — cosine over a campaign-scoped seq scan is
+  // fast at search result sizes, and a pgvector index type can't be represented
+  // here without tripping the drift gate (deferred to a perf slice).
 }
 
 // ───────────── Knowledge / reveals (fog of war) ─────────────
@@ -527,8 +532,10 @@ model SessionLogEntry {             // real-time capture; NOT canon until promot
   before hydration; relationship/event results still re-apply endpoint/
   participant visibility against live canon because that projection can change
   without an edge/event write. `searchVector` is generated from `content` and
-  GIN-indexed for keyword/full-text search. Enable the `pgvector` extension in
-  the first migration that adds embeddings (M5 semantic slice).
+  GIN-indexed for keyword/full-text search. The M5 slice-4a migration enables the
+  `pgvector` extension and adds `embedding`/`embeddingModel`; `searchCanon` blends
+  full-text `ts_rank` with cosine similarity (hybrid) but never changes what a
+  player may see — the visibility pre-filter + hydration projection are unchanged.
 - **Export/import** (doc 02, M9) serializes campaign canon + provenance to
   JSON/Markdown; import re-creates it as `IMPORT` change sets. No new tables —
   it reads/writes the existing model.
