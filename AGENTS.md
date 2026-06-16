@@ -48,7 +48,7 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
 - **Cross-cutting ✅.** Visibility collapsed to a binary `DM_ONLY`/`PLAYER_VISIBLE`
   (subset access via `KnowledgeGrant`, not a tier); entity-kind registry (ADR 0009)
   derives validation/data-keys/reviewable-set/form/display from per-type descriptors.
-- **M5 — Search & retrieval 🚧.** Slices 1–4a done. Slice 1 (full-text foundation):
+- **M5 — Search & retrieval 🚧.** Slices 1–4b done. Slice 1 (full-text foundation):
   a `SearchDoc` index kept in sync inside entity canon-write transactions + a DM
   backfill; `searchCanon` runs visibility-scoped Postgres full-text (players see
   only `PLAYER_VISIBLE` — invariant #5); a `/campaigns/[id]/search` page wired from
@@ -61,13 +61,16 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
   database-generated `SearchDoc.searchVector` column with a GIN index, represented
   in Prisma as optional `Unsupported("tsvector")` so the client never writes it
   and the migration-drift gate stays clean. Slice 4a added the **semantic
-  layer**: a pgvector `SearchDoc.embedding` (built off the request path by a DM
-  "Build semantic index" `EMBED_SEARCH_DOCS` job, embedded via an
-  OpenAI-compatible provider — Anthropic has no embeddings API), and `searchCanon`
+  layer**: a pgvector `SearchDoc.embedding`, populated off the request path by
+  `EMBED_SEARCH_DOCS` jobs (with a DM "Build semantic index" backfill) via an
+  OpenAI-compatible provider — Anthropic has no embeddings API — and `searchCanon`
   now blends full-text `ts_rank` with cosine similarity (**hybrid**). Full-text
-  still works with **no AI key**; semantic degrades off gracefully. Remaining
-  slices (auto re-embed on canon change, an ANN index, "Ask the Campaign",
-  retrieval-fed generator context) are in the backlog.
+  still works with **no AI key**; semantic degrades off gracefully. Slice 4b added
+  automatic, deduped `EMBED_SEARCH_DOCS` enqueueing when canon writes change
+  searchable content in campaigns with an embedding-capable key, while full-text-only
+  campaigns and visibility-only mirror refreshes stay cheap. Remaining slices
+  (an ANN index, "Ask the Campaign", retrieval-fed generator context) are in the
+  backlog.
 
 For per-slice detail (files, tests, decisions) see
 [`docs/PROGRESS.md`](./docs/PROGRESS.md) — its "Open backlog" section is the

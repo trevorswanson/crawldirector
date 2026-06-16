@@ -626,8 +626,9 @@ export async function applyAutoApprovedEntityChangeSet(
     });
 
     const appliedIds: string[] = [];
+    const applyingChangeSet = { ...changeSet, reviewedById: userId };
     for (const operation of changeSet.operations) {
-      const targetId = await applyEntityOperation(tx, changeSet, operation);
+      const targetId = await applyEntityOperation(tx, applyingChangeSet, operation);
       appliedIds.push(targetId);
       await tx.changeOperation.update({
         where: { id: operation.id },
@@ -693,8 +694,9 @@ export async function applyAutoApprovedRelationshipChangeSet(
     });
 
     const appliedIds: string[] = [];
+    const applyingChangeSet = { ...changeSet, reviewedById: userId };
     for (const operation of changeSet.operations) {
-      const targetId = await applyRelationshipOperation(tx, changeSet, operation);
+      const targetId = await applyRelationshipOperation(tx, applyingChangeSet, operation);
       appliedIds.push(targetId);
       await tx.changeOperation.update({
         where: { id: operation.id },
@@ -838,7 +840,7 @@ export async function applyAutoApprovedEventChangeSet(
         }),
       );
     }
-    const changeSetWithOperations = { ...changeSet, operations };
+    const changeSetWithOperations = { ...changeSet, reviewedById: userId, operations };
     const appliedIds: string[] = [];
     for (const operation of operations) {
       const targetId = await applyEventOperation(
@@ -1525,10 +1527,11 @@ export async function approveChangeSet(
     }
 
     const appliedIds: string[] = [];
+    const applyingChangeSet = { ...changeSet, reviewedById: userId };
     for (const operation of applicableOperations) {
       const targetId = await applyReviewOperation(
         tx,
-        changeSet,
+        applyingChangeSet,
         operation,
         effectiveOperationPatch(operation),
       );
@@ -1606,6 +1609,15 @@ async function applyReviewOperation(
     return applyEventOperation(tx, changeSet, operation, patchOverride);
   }
   throw new ServiceError("Unsupported operation target.");
+}
+
+function reembedIndexOptions(changeSet: {
+  reviewedById: string | null;
+  actorUserId: string | null;
+}) {
+  return {
+    reembedRequestedById: changeSet.reviewedById ?? changeSet.actorUserId,
+  };
 }
 
 export type ChangeSetRunReviewResult = {
@@ -2464,7 +2476,7 @@ async function applyCreateEntity(
   });
   // Mirror the new canon into the search index (M5, search-index.ts) in the
   // same transaction so retrieval is fresh the moment the write commits.
-  await indexEntity(tx, changeSet.campaignId, entity.id);
+  await indexEntity(tx, changeSet.campaignId, entity.id, reembedIndexOptions(changeSet));
   return entity.id;
 }
 
@@ -2586,7 +2598,7 @@ async function applyUpdateEntity(
   });
   // Refresh the search index from the entity's final persisted state (a restore
   // re-adds it; a content edit re-indexes; a visibility change re-mirrors).
-  await indexEntity(tx, changeSet.campaignId, entityId);
+  await indexEntity(tx, changeSet.campaignId, entityId, reembedIndexOptions(changeSet));
   return entityId;
 }
 
@@ -2646,7 +2658,7 @@ async function applyDeleteEntity(
   });
   // The entity is now ARCHIVED, so indexEntity drops its SearchDoc — archived
   // canon must not surface in search (it's hidden everywhere else too).
-  await indexEntity(tx, changeSet.campaignId, entityId);
+  await indexEntity(tx, changeSet.campaignId, entityId, reembedIndexOptions(changeSet));
   return entityId;
 }
 
@@ -2881,7 +2893,12 @@ async function applyCreateRelationship(
   });
 
   await writeRelationshipProvenance(tx, changeSet, relationship.id, patch);
-  await indexRelationship(tx, changeSet.campaignId, relationship.id);
+  await indexRelationship(
+    tx,
+    changeSet.campaignId,
+    relationship.id,
+    reembedIndexOptions(changeSet),
+  );
   await tx.auditLog.create({
     data: {
       campaignId: changeSet.campaignId,
@@ -2980,7 +2997,12 @@ async function applyUpdateRelationship(
     select: { id: true },
   });
   await writeRelationshipProvenance(tx, changeSet, relationshipId, patch);
-  await indexRelationship(tx, changeSet.campaignId, relationshipId);
+  await indexRelationship(
+    tx,
+    changeSet.campaignId,
+    relationshipId,
+    reembedIndexOptions(changeSet),
+  );
   await tx.auditLog.create({
     data: {
       campaignId: changeSet.campaignId,
@@ -3043,7 +3065,12 @@ async function applyDeleteRelationship(
     select: { id: true },
   });
   // The edge is now ARCHIVED, so indexRelationship drops its SearchDoc.
-  await indexRelationship(tx, changeSet.campaignId, relationshipId);
+  await indexRelationship(
+    tx,
+    changeSet.campaignId,
+    relationshipId,
+    reembedIndexOptions(changeSet),
+  );
   await tx.auditLog.create({
     data: {
       campaignId: changeSet.campaignId,
@@ -3858,7 +3885,7 @@ async function applyCreateEvent(
   });
 
   await writeEventProvenance(tx, changeSet, event.id, patch);
-  await indexEvent(tx, changeSet.campaignId, event.id);
+  await indexEvent(tx, changeSet.campaignId, event.id, reembedIndexOptions(changeSet));
   await tx.auditLog.create({
     data: {
       campaignId: changeSet.campaignId,
@@ -4052,7 +4079,7 @@ async function applyUpdateEvent(
   await writeEventProvenance(tx, changeSet, eventId, patch);
   // UPDATE_EVENT covers field edits and soft-archive (a status change); either
   // way indexEvent refreshes or drops the event's SearchDoc to match.
-  await indexEvent(tx, changeSet.campaignId, eventId);
+  await indexEvent(tx, changeSet.campaignId, eventId, reembedIndexOptions(changeSet));
   await tx.auditLog.create({
     data: {
       campaignId: changeSet.campaignId,

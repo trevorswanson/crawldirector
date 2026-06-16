@@ -1,5 +1,13 @@
-import { CanonStatus, Prisma, Role, Visibility } from "@/generated/prisma/client";
+import {
+  CanonStatus,
+  JobKind,
+  JobStatus,
+  Prisma,
+  Role,
+  Visibility,
+} from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
+import { AI_PROVIDERS, resolveEmbeddingModel } from "@/lib/ai/providers";
 import { relationshipTypeMeta } from "@/lib/relationship-types";
 import { prisma } from "@/server/db";
 
@@ -21,9 +29,16 @@ import { prisma } from "@/server/db";
 export const SEARCH_TARGET_ENTITY = "ENTITY";
 export const SEARCH_TARGET_RELATIONSHIP = "RELATIONSHIP";
 export const SEARCH_TARGET_EVENT = "EVENT";
+const EMBEDDING_PROVIDER_IDS = AI_PROVIDERS
+  .filter((provider) => provider.kind === "openai-compatible")
+  .map((provider) => provider.id);
 
 // The full client and a transaction client both satisfy this for our needs.
 type Db = Prisma.TransactionClient;
+
+type IndexSearchDocOptions = {
+  reembedRequestedById?: string | null;
+};
 
 /** Map a `secret` flag to the visibility mirror (the coarse retrieval pre-filter). */
 function visibilityForSecret(secret: boolean): Visibility {
@@ -78,6 +93,7 @@ export async function indexEntity(
   db: Db,
   campaignId: string,
   entityId: string,
+  options: IndexSearchDocOptions = {},
 ): Promise<void> {
   const entity = (await db.entity.findUnique({
     where: { id: entityId },
@@ -93,17 +109,26 @@ export async function indexEntity(
     return;
   }
 
-  await upsertSearchDoc(db, SEARCH_TARGET_ENTITY, campaignId, entityId, buildEntityContent(entity), entity.visibility);
+  await upsertSearchDoc(
+    db,
+    SEARCH_TARGET_ENTITY,
+    campaignId,
+    entityId,
+    buildEntityContent(entity),
+    entity.visibility,
+    options,
+  );
 }
 
 /**
  * Upsert one SearchDoc's denormalized text + visibility mirror. When the
- * searchable `content` changes, clear the `embeddingModel` marker so the next
- * "Build semantic index" re-embeds the row (M5 slice 4a). The stale vector is
+ * searchable `content` changes, clear the `embeddingModel` marker and, when the
+ * campaign has an embedding-capable key, enqueue one campaign-level
+ * `EMBED_SEARCH_DOCS` job (deduped while queued). The stale vector is
  * left in place but ignored by hybrid ranking, which requires a matching
  * `embeddingModel` (search.ts) — so an edited doc never ranks on its old
  * embedding. Embeddings are written out-of-band (embeddings.ts); this
- * in-transaction path only ever *invalidates*, never re-embeds.
+ * in-transaction path only ever *invalidates and schedules*, never re-embeds.
  */
 async function upsertSearchDoc(
   db: Db,
@@ -112,6 +137,7 @@ async function upsertSearchDoc(
   targetId: string,
   content: string,
   visibility: Visibility,
+  options: IndexSearchDocOptions = {},
 ): Promise<void> {
   const existing = await db.searchDoc.findUnique({
     where: { targetType_targetId: { targetType, targetId } },
@@ -128,6 +154,9 @@ async function upsertSearchDoc(
       ...(contentChanged ? { embeddingModel: null } : {}),
     },
   });
+  if (contentChanged && options.reembedRequestedById) {
+    await enqueueSearchDocEmbeddingJob(db, campaignId, options.reembedRequestedById);
+  }
 }
 
 // ─────────────────────────── Relationships ──────────────────────────
@@ -189,6 +218,7 @@ export async function indexRelationship(
   db: Db,
   campaignId: string,
   relationshipId: string,
+  options: IndexSearchDocOptions = {},
 ): Promise<void> {
   const relationship = await db.relationship.findUnique({
     where: { id: relationshipId },
@@ -211,6 +241,7 @@ export async function indexRelationship(
     relationshipId,
     relationshipContentFrom(relationship),
     visibilityForSecret(relationship.secret),
+    options,
   );
 }
 
@@ -248,6 +279,7 @@ export async function indexEvent(
   db: Db,
   campaignId: string,
   eventId: string,
+  options: IndexSearchDocOptions = {},
 ): Promise<void> {
   const event = await db.event.findUnique({
     where: { id: eventId },
@@ -270,6 +302,7 @@ export async function indexEvent(
     eventId,
     buildEventContent(event),
     visibilityForSecret(event.secret),
+    options,
   );
 }
 
@@ -282,6 +315,42 @@ export async function removeSearchDoc(
   targetId: string,
 ): Promise<void> {
   await db.searchDoc.deleteMany({ where: { targetType, targetId } });
+}
+
+async function enqueueSearchDocEmbeddingJob(
+  db: Db,
+  campaignId: string,
+  createdById: string,
+): Promise<void> {
+  if (!(await campaignHasEmbeddingConfig(db, campaignId))) return;
+
+  const existing = await db.job.findFirst({
+    where: {
+      campaignId,
+      kind: JobKind.EMBED_SEARCH_DOCS,
+      status: JobStatus.QUEUED,
+    },
+    select: { id: true },
+  });
+  if (existing) return;
+
+  await db.job.create({
+    data: {
+      campaignId,
+      createdById,
+      kind: JobKind.EMBED_SEARCH_DOCS,
+      status: JobStatus.QUEUED,
+      payload: {},
+    },
+  });
+}
+
+async function campaignHasEmbeddingConfig(db: Db, campaignId: string): Promise<boolean> {
+  const keys = await db.aiKey.findMany({
+    where: { campaignId, providerId: { in: EMBEDDING_PROVIDER_IDS } },
+    select: { providerId: true, embeddingModel: true },
+  });
+  return keys.some((key) => resolveEmbeddingModel(key.providerId, key.embeddingModel) !== null);
 }
 
 /**

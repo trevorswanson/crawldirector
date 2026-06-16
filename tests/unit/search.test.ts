@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
-import { Role } from "@/generated/prisma/client";
+import { JobKind, JobStatus, Role } from "@/generated/prisma/client";
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
 import {
@@ -60,8 +60,22 @@ function makeEntity(
   });
 }
 
+async function addEmbeddingKey(campaignId: string, userId: string) {
+  await prisma.aiKey.create({
+    data: {
+      campaignId,
+      createdById: userId,
+      providerId: "openai",
+      ciphertext: "not-used-by-search-index",
+      lastFour: "test",
+    },
+  });
+}
+
 beforeEach(async () => {
+  await prisma.job.deleteMany();
   await prisma.searchDoc.deleteMany();
+  await prisma.aiKey.deleteMany();
   await prisma.eventCausality.deleteMany();
   await prisma.eventParticipant.deleteMany();
   await prisma.event.deleteMany();
@@ -212,6 +226,17 @@ describe("buildSearchDocSearchSql", () => {
 });
 
 describe("search indexing on canon writes", () => {
+  async function queuedEmbedJobs(campaignId: string) {
+    return prisma.job.findMany({
+      where: {
+        campaignId,
+        kind: JobKind.EMBED_SEARCH_DOCS,
+        status: JobStatus.QUEUED,
+      },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
   it("indexes a created entity so it is findable", async () => {
     const dm = await makeUser("dm@test.com");
     const campaign = await createCampaign(dm.id, { name: "Dungeon" });
@@ -228,6 +253,81 @@ describe("search indexing on canon writes", () => {
 
     const { hits } = await searchCanon(dm.id, campaign.id, "royal cat");
     expect(hits.map((h) => h.targetId)).toContain(entity.id);
+  });
+
+  it("queues one semantic re-embed job for changed entity docs while a refresh is already pending", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Dungeon" });
+    await addEmbeddingKey(campaign.id, dm.id);
+
+    await makeEntity(dm.id, campaign.id, {
+      name: "Princess Donut",
+      summary: "A royal cat crawler with attitude",
+    });
+
+    let jobs = await queuedEmbedJobs(campaign.id);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({
+      campaignId: campaign.id,
+      createdById: dm.id,
+      kind: JobKind.EMBED_SEARCH_DOCS,
+      payload: {},
+      status: JobStatus.QUEUED,
+    });
+
+    await makeEntity(dm.id, campaign.id, {
+      name: "Mordecai",
+      summary: "Trains crawlers in the saferoom",
+    });
+
+    jobs = await queuedEmbedJobs(campaign.id);
+    expect(jobs).toHaveLength(1);
+  });
+
+  it("queues a follow-up semantic refresh when content changes while a refresh is running", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Dungeon" });
+    await addEmbeddingKey(campaign.id, dm.id);
+    const entity = await makeEntity(dm.id, campaign.id, {
+      name: "Running Refresh",
+      summary: "old searchable text",
+    });
+    await prisma.job.updateMany({
+      where: { campaignId: campaign.id, kind: JobKind.EMBED_SEARCH_DOCS },
+      data: { status: JobStatus.RUNNING, startedAt: new Date() },
+    });
+
+    await updateEntity(dm.id, campaign.id, entity.id, {
+      type: "NPC",
+      name: "Running Refresh",
+      summary: "new searchable text",
+      description: "",
+      visibility: "PLAYER_VISIBLE",
+      tags: [],
+    });
+
+    expect(await queuedEmbedJobs(campaign.id)).toHaveLength(1);
+    expect(
+      await prisma.job.count({
+        where: {
+          campaignId: campaign.id,
+          kind: JobKind.EMBED_SEARCH_DOCS,
+          status: JobStatus.RUNNING,
+        },
+      }),
+    ).toBe(1);
+  });
+
+  it("does not queue semantic refresh work when no embedding-capable key is configured", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Dungeon" });
+
+    await makeEntity(dm.id, campaign.id, {
+      name: "Keyword Only",
+      summary: "Full-text still works",
+    });
+
+    expect(await queuedEmbedJobs(campaign.id)).toHaveLength(0);
   });
 
   it("re-indexes an updated entity (new text becomes searchable)", async () => {
@@ -250,6 +350,32 @@ describe("search indexing on canon writes", () => {
     expect(hits.map((h) => h.targetId)).toEqual([entity.id]);
   });
 
+  it("does not queue semantic refresh work when only the visibility mirror changes", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Dungeon" });
+    await addEmbeddingKey(campaign.id, dm.id);
+    const entity = await makeEntity(dm.id, campaign.id, {
+      name: "Mirror Only",
+      summary: "Searchable text stays put",
+      visibility: "PLAYER_VISIBLE",
+    });
+    await prisma.job.updateMany({
+      where: { campaignId: campaign.id, kind: JobKind.EMBED_SEARCH_DOCS },
+      data: { status: JobStatus.SUCCEEDED, finishedAt: new Date() },
+    });
+
+    await updateEntity(dm.id, campaign.id, entity.id, {
+      type: "NPC",
+      name: "Mirror Only",
+      summary: "Searchable text stays put",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    expect(await queuedEmbedJobs(campaign.id)).toHaveLength(0);
+  });
+
   it("drops an archived entity from the index", async () => {
     const dm = await makeUser("dm@test.com");
     const campaign = await createCampaign(dm.id, { name: "Dungeon" });
@@ -269,6 +395,23 @@ describe("search indexing on canon writes", () => {
 });
 
 describe("relationship indexing on canon writes", () => {
+  async function finishEmbedJobs(campaignId: string) {
+    await prisma.job.updateMany({
+      where: { campaignId, kind: JobKind.EMBED_SEARCH_DOCS },
+      data: { status: JobStatus.SUCCEEDED, finishedAt: new Date() },
+    });
+  }
+
+  async function queuedEmbedJobCount(campaignId: string) {
+    return prisma.job.count({
+      where: {
+        campaignId,
+        kind: JobKind.EMBED_SEARCH_DOCS,
+        status: JobStatus.QUEUED,
+      },
+    });
+  }
+
   it("indexes a created relationship so it is findable", async () => {
     const dm = await makeUser("dm@test.com");
     const campaign = await createCampaign(dm.id, { name: "Dungeon" });
@@ -297,6 +440,32 @@ describe("relationship indexing on canon writes", () => {
     expect(hit.relationship.sourceEntity.name).toBe("Princess Donut");
     expect(hit.relationship.targetEntity.name).toBe("Mordecai");
     expect(hit.relationship.type).toBe("ALLY_OF");
+  });
+
+  it("queues semantic refresh jobs for relationship and event docs", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Dungeon" });
+    await addEmbeddingKey(campaign.id, dm.id);
+    const donut = await makeEntity(dm.id, campaign.id, { name: "Princess Donut" });
+    const mordecai = await makeEntity(dm.id, campaign.id, { name: "Mordecai" });
+
+    await finishEmbedJobs(campaign.id);
+    await createRelationship(dm.id, campaign.id, donut.id, {
+      type: "ALLY_OF",
+      targetId: mordecai.id,
+      notes: "semantic edge text",
+      secret: false,
+    });
+    expect(await queuedEmbedJobCount(campaign.id)).toBe(1);
+
+    await finishEmbedJobs(campaign.id);
+    await createEvent(dm.id, campaign.id, {
+      title: "Semantic Event",
+      summary: "semantic event text",
+      participants: [{ entityId: donut.id, role: "ACTOR" }],
+      secret: false,
+    });
+    expect(await queuedEmbedJobCount(campaign.id)).toBe(1);
   });
 
   it("re-indexes an updated relationship (new notes become searchable)", async () => {

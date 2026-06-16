@@ -44,11 +44,14 @@ keyword-scanning every doc.
                   a new `EMBED_SEARCH_DOCS` `Job`; `searchCanon` blends full-text
                   `ts_rank` with pgvector cosine similarity. Degrades to full-text
                   when no embedder is configured.
-            - [ ] **Slice 4b — auto re-embed on canon change.** Content-change
-                  *invalidation* already lands in 4a (the index write paths clear
-                  `embeddingModel` so the next backfill re-embeds). 4b proper:
-                  auto-enqueue an `EMBED_SEARCH_DOCS` re-embed on canon writes so
-                  the index self-heals without a manual rebuild.
+            - [x] **Slice 4b — auto re-embed on canon change.** ✅
+                  (2026-06-16) — see the section below. The in-transaction
+                  SearchDoc write paths now enqueue one deduped
+                  `EMBED_SEARCH_DOCS` job when searchable content changes and the
+                  campaign has an embedding-capable key, so stale embeddings
+                  self-heal through the worker without a manual rebuild.
+                  Full-text-only campaigns and visibility-only mirror refreshes
+                  do not enqueue.
             - [ ] **Slice 4c — ANN index perf + configurable model.** Add an
                   HNSW/IVFFlat index on `SearchDoc.embedding` once campaigns grow
                   past sequential-scan sizes (needs an `Unsupported`/out-of-schema
@@ -177,14 +180,58 @@ keyword-scanning every doc.
 - [x] `createCampaignAction`: after campaign creation, if `seedLore === "on"` enqueues a `LORE_SEED` job in its own try/catch — enqueue failure never blocks the redirect.
 - [x] Tests: seeding ServiceError assertions updated; non-empty campaign guard test added; LORE_SEED handler delegation test (mocked seeding module); dm-actions tests for seedLore=on/off/enqueue-throw; form checkbox test.
 
+## M5 — Semantic layer: auto re-embed on canon change (slice 4b) ✅ (2026-06-16)
+
+**Goal:** finish the semantic-index freshness loop from
+[`07-search-retrieval.md`](./07-search-retrieval.md): when approved canon changes
+the denormalized `SearchDoc.content`, schedule the existing worker-based embed
+job automatically instead of requiring a DM to click **Build semantic index**.
+The explicit button remains useful as a recovery/backfill action.
+
+- [x] **Indexer scheduling** ([`search-index.ts`](../src/server/services/search-index.ts)):
+      `upsertSearchDoc` still invalidates changed content by clearing
+      `embeddingModel`, and now also creates a campaign-level
+      `EMBED_SEARCH_DOCS` job inside the same transaction when an embedding-
+      capable key is configured. Queue rows are deduped while an embed job for
+      the campaign is `QUEUED`, but not while one is `RUNNING`: a content change
+      during an in-flight worker pass records a follow-up refresh.
+- [x] **Review apply paths** ([`review.ts`](../src/server/services/review.ts)):
+      entity, relationship, and event canon writes pass the applying DM/co-DM
+      into the indexer so the worker can later re-check job permissions with
+      `job.createdById`. Auto-approved DM writes and pending proposal approvals
+      both use the same path.
+- [x] **No noisy visibility refreshes.** SearchDoc visibility mirrors still
+      update in transaction, but unchanged searchable content does not enqueue
+      semantic work. Archived targets drop their SearchDoc and do not enqueue,
+      because there is nothing to embed.
+- [x] **Review fix (PR #126).** A `RUNNING` embed job no longer suppresses a
+      queued follow-up, and `embedSearchDocs` writes a vector/model marker only
+      when the row's current `content` still matches the worker snapshot it
+      embedded. If canon changes under a running worker, the stale write is
+      skipped and the queued follow-up embeds the new content.
+- [x] **Tests:** `tests/unit/search.test.ts` covers the RED/GREEN slice:
+      changed entity docs enqueue exactly one pending semantic refresh while one
+      is already queued; relationship and event docs enqueue after previous jobs
+      finish; full-text-only campaigns and visibility-only reindexing do not
+      enqueue; review regressions cover the `RUNNING` follow-up and stale worker
+      snapshot race.
+- [x] **Verification:** targeted RED/GREEN for the new search cases, then
+      `npm run test -- tests/unit/search.test.ts` (34 tests),
+      `npm run test -- tests/unit/embeddings.test.ts` (19 tests), sequential
+      `jobs.test.ts` and `review.test.ts`, `npm run lint` (0 errors; existing
+      settings-action warnings), `npm run typecheck`, `npm run build`, and
+      `npm run test:coverage` (93 files / 1271 tests; statements 95.76%,
+      branches 88.97%, functions 97.91%, lines 97.63%).
+
 ## M5 — Semantic layer: pgvector + hybrid search (slice 4a) ✅ (2026-06-15)
 
 **Goal:** add the semantic half of the hybrid retrieval in
 [`07-search-retrieval.md`](./07-search-retrieval.md) — embed the `SearchDoc`
 index and let `searchCanon` rank by *meaning*, not just keywords. Scoped to the
-foundation + hybrid query; auto re-embed on canon change (4b) and an ANN index
-(4c) are deferred. Still degrades cleanly: a campaign with no embedding-capable
-key keeps the exact slice-3 full-text behaviour. Branch: `feat/m5-search-slice4a-pgvector`.
+foundation + hybrid query; auto re-embed on canon change landed in slice 4b, and
+the ANN index (4c) remains deferred. Still degrades cleanly: a campaign with no
+embedding-capable key keeps the exact slice-3 full-text behaviour. Branch:
+`feat/m5-search-slice4a-pgvector`.
 
 - [x] **Infra: pgvector.** Switched the Postgres image from `postgres:18` to
       `pgvector/pgvector:pg18` in `docker-compose.yml` and all three CI service
