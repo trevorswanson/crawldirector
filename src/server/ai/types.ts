@@ -66,6 +66,13 @@ export type EmbedResult = {
 export interface LLMProvider {
   readonly id: string;
   readonly model: string;
+  /**
+   * The model `embed()` will call, or null when this adapter is chat-only. Set
+   * when constructed as an embedder (`resolveCampaignEmbedder`). Lets the
+   * embedding service know the target model *before* a call — to skip docs
+   * already embedded with it — rather than learning it only from the result.
+   */
+  readonly embeddingModel?: string | null;
   /** Free-text completion. */
   generate(req: GenerateRequest): Promise<GenerateResult>;
   /**

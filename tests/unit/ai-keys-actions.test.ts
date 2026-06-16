@@ -49,6 +49,7 @@ describe("setAiKeyAction", () => {
       apiKey: "sk-ant-secret-9999",
       baseUrl: "",
       model: "",
+      embeddingModel: "",
       inputPerMTokUsd: null,
       outputPerMTokUsd: null,
     });
@@ -76,6 +77,7 @@ describe("setAiKeyAction", () => {
       apiKey: "",
       baseUrl: "http://localhost:11434/v1",
       model: "llama3.1",
+      embeddingModel: "",
       inputPerMTokUsd: 0.5,
       outputPerMTokUsd: 1.5,
     });
@@ -98,11 +100,36 @@ describe("setAiKeyAction", () => {
       apiKey: "",
       baseUrl: "http://localhost:11434/v1",
       model: "llama3.1",
+      embeddingModel: "",
       inputPerMTokUsd: null,
       outputPerMTokUsd: null,
     });
     // No last-four hint when the key is blank — the message omits it cleanly.
     expect(result?.success).toMatch(/Saved OpenAI-compatible\./);
+  });
+
+  it("passes a bring-your-own embedding model through to the service", async () => {
+    setAiKey.mockResolvedValue({ providerId: "openai-compatible", label: "OpenAI-compatible", lastFour: "" });
+    await setAiKeyAction(
+      "camp1",
+      undefined,
+      formData({
+        providerId: "openai-compatible",
+        apiKey: "",
+        baseUrl: "https://api.mistral.ai/v1",
+        model: "mistral-large-latest",
+        embeddingModel: "codestral-embed",
+      }),
+    );
+    expect(setAiKey).toHaveBeenCalledWith("dm1", "camp1", {
+      providerId: "openai-compatible",
+      apiKey: "",
+      baseUrl: "https://api.mistral.ai/v1",
+      model: "mistral-large-latest",
+      embeddingModel: "codestral-embed",
+      inputPerMTokUsd: null,
+      outputPerMTokUsd: null,
+    });
   });
 
   it("returns a validation error without calling the service", async () => {

@@ -29,6 +29,7 @@ const anthropicKey: AiKeyView = {
   lastFour: "9999",
   baseUrl: null,
   model: null,
+  embeddingModel: null,
   inputPerMTokUsd: null,
   outputPerMTokUsd: null,
   createdAt: new Date("2026-06-01T00:00:00Z"),
@@ -41,6 +42,7 @@ const compatibleKey: AiKeyView = {
   lastFour: "",
   baseUrl: "http://localhost:11434/v1",
   model: "llama3.1",
+  embeddingModel: "codestral-embed",
   inputPerMTokUsd: 0.5,
   outputPerMTokUsd: 1.5,
   createdAt: new Date("2026-06-01T00:00:00Z"),
@@ -85,14 +87,20 @@ describe("AiKeysPanel", () => {
     // Only the compatible provider exposes endpoint/model fields, prefilled.
     const endpoint = screen.getByLabelText(/endpoint URL/i) as HTMLInputElement;
     expect(endpoint.value).toBe("http://localhost:11434/v1");
-    const model = screen.getByLabelText(/OpenAI-compatible.*model/i) as HTMLInputElement;
+    const model = screen.getByLabelText(/OpenAI-compatible.*chat model/i) as HTMLInputElement;
     expect(model.value).toBe("llama3.1");
+
+    // The BYO embedding model (M5) is prefilled too, for semantic search.
+    const embed = screen.getByLabelText(/OpenAI-compatible.*embedding model/i) as HTMLInputElement;
+    expect(embed.value).toBe("codestral-embed");
 
     // First-party providers don't show endpoint fields.
     expect(screen.getAllByLabelText(/endpoint URL/i)).toHaveLength(1);
 
     // The configured (keyless) compatible row reads "Configured" + shows the model/endpoint.
-    expect(screen.getByText(/Configured · llama3.1 · http:\/\/localhost:11434\/v1/)).toBeTruthy();
+    expect(
+      screen.getByText(/Configured · llama3.1 · embed: codestral-embed · http:\/\/localhost:11434\/v1/),
+    ).toBeTruthy();
   });
 
   it("exposes per-token price inputs for every provider, prefilled when configured", () => {

@@ -92,6 +92,7 @@ export function createOpenAiProvider(opts: OpenAiAdapterOptions): LLMProvider {
   return {
     id: providerId,
     model,
+    embeddingModel: opts.embeddingModel ?? null,
 
     async generate(req: GenerateRequest): Promise<GenerateResult> {
       const resp = await client.chat.completions.create({

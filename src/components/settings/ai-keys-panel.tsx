@@ -76,6 +76,7 @@ function ProviderRow({
             <p className="mt-1 font-mono text-[11px] text-[var(--ink-faint)]">
               {configured.lastFour ? `Key set · ends ••${configured.lastFour}` : "Configured"}
               {configured.model ? ` · ${configured.model}` : ""}
+              {configured.embeddingModel ? ` · embed: ${configured.embeddingModel}` : ""}
               {configured.baseUrl ? ` · ${configured.baseUrl}` : ""}
               {configured.inputPerMTokUsd != null && configured.outputPerMTokUsd != null
                 ? ` · $${configured.inputPerMTokUsd}/$${configured.outputPerMTokUsd} per 1M tok`
@@ -129,9 +130,35 @@ function ProviderRow({
             name="model"
             autoComplete="off"
             defaultValue={configured?.model ?? ""}
-            placeholder="Model name (e.g. llama3.1)"
-            aria-label={`${provider.label} model`}
+            placeholder="Chat model name (e.g. mistral-large-latest)"
+            aria-label={`${provider.label} chat model`}
           />
+        )}
+        {provider.kind === "openai-compatible" && (
+          <>
+            <Input
+              type="text"
+              name="embeddingModel"
+              autoComplete="off"
+              defaultValue={configured?.embeddingModel ?? ""}
+              placeholder={
+                provider.defaultEmbeddingModel
+                  ? `Embedding model (optional, default ${provider.defaultEmbeddingModel})`
+                  : "Embedding model for search (optional, e.g. codestral-embed)"
+              }
+              aria-label={`${provider.label} embedding model`}
+            />
+            <p className="text-[10.5px] leading-[1.4] text-[var(--ink-faint)]">
+              Enables semantic search through this provider. The model must return
+              1536-dimensional vectors — e.g. Mistral&rsquo;s{" "}
+              <code>codestral-embed</code>, not <code>mistral-embed</code> (1024).
+              Leave blank for keyword-only search
+              {provider.defaultEmbeddingModel
+                ? ` (defaults to ${provider.defaultEmbeddingModel})`
+                : ""}
+              .
+            </p>
+          </>
         )}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Input

@@ -674,7 +674,12 @@ model AiKey {
   ciphertext       String // AES-256-GCM envelope-encrypted API key — never leaves the server
   lastFour         String // non-secret hint: the key's last 4 chars
   baseUrl          String? // OpenAI-compatible endpoint (self-hosted / proxy); non-secret config
-  model            String? // optional per-key model override; falls back to the provider default
+  model            String? // optional per-key chat model override; falls back to the provider default
+  // Optional bring-your-own embedding model for semantic search (M5 — docs/07-
+  // search-retrieval.md). OpenAI-compatible providers only; must return 1536-dim
+  // vectors (e.g. Mistral's codestral-embed). Null → the provider's embedding
+  // default (OpenAI) or no semantic search (custom endpoint). Non-secret config.
+  embeddingModel   String?
   // Optional DM-supplied price (USD per 1M tokens) for usage/cost estimation. When
   // both are set they override the built-in price table (src/lib/ai/pricing.ts) —
   // the only way to cost a self-hosted/proxy model the table doesn't know. Non-secret.
