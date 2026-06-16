@@ -374,6 +374,10 @@ export const setAiKeySchema = z.object({
   apiKey: z.string().trim().max(500).optional().default(""),
   baseUrl: z.string().trim().max(500).optional().default(""),
   model: z.string().trim().max(200).optional().default(""),
+  // Optional BYO embedding model for semantic search (M5 — OpenAI-compatible
+  // only). Must return 1536-dim vectors (e.g. codestral-embed); enforced at
+  // embed time, not here.
+  embeddingModel: z.string().trim().max(200).optional().default(""),
   // DM-supplied price (USD per 1M tokens). Both must be set for the override to
   // apply to usage/cost estimation; blank clears them. See src/lib/ai/pricing.ts.
   inputPerMTokUsd: optionalUsdAmount("That price is unreasonably high."),

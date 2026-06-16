@@ -108,8 +108,13 @@ describe("resolveCampaignProvider", () => {
 
 describe("resolveCampaignEmbedder", () => {
   it("skips Anthropic and builds an OpenAI embedder with the default embedding model", async () => {
-    // First lookup (the `openai` provider) is configured.
-    getAiKeyConfig.mockResolvedValueOnce({ apiKey: "sk-openai", baseUrl: null, model: null });
+    // First lookup (the `openai` provider) is configured, no embedding override.
+    getAiKeyConfig.mockResolvedValueOnce({
+      apiKey: "sk-openai",
+      baseUrl: null,
+      model: null,
+      embeddingModel: null,
+    });
     const embedder = await resolveCampaignEmbedder("c1");
     expect(embedder).not.toBeNull();
     // Anthropic (kind "anthropic") is never even queried for a key.
@@ -121,19 +126,37 @@ describe("resolveCampaignEmbedder", () => {
     expect(createAnthropicProvider).not.toHaveBeenCalled();
   });
 
-  it("falls through to a self-hosted OpenAI-compatible endpoint", async () => {
+  it("uses a self-hosted endpoint's bring-your-own embedding model", async () => {
     getAiKeyConfig
       .mockResolvedValueOnce(null) // openai
-      .mockResolvedValueOnce({ apiKey: "", baseUrl: "http://x/v1", model: "bge" }); // openai-compatible
+      .mockResolvedValueOnce({
+        apiKey: "",
+        baseUrl: "http://x/v1",
+        model: "mistral-large-latest",
+        embeddingModel: "codestral-embed",
+      }); // openai-compatible
     await resolveCampaignEmbedder("c1");
     expect(createOpenAiProvider).toHaveBeenCalledWith(
       expect.objectContaining({
         providerId: "openai-compatible",
         apiKey: "not-needed",
         baseUrl: "http://x/v1",
-        embeddingModel: EMBED_MODEL_DEFAULT,
+        embeddingModel: "codestral-embed",
       }),
     );
+  });
+
+  it("skips a self-hosted endpoint that names no embedding model (can't embed)", async () => {
+    getAiKeyConfig
+      .mockResolvedValueOnce(null) // openai
+      .mockResolvedValueOnce({
+        apiKey: "",
+        baseUrl: "http://x/v1",
+        model: "mistral-large-latest",
+        embeddingModel: null,
+      }); // openai-compatible, chat configured but no embedding model
+    expect(await resolveCampaignEmbedder("c1")).toBeNull();
+    expect(createOpenAiProvider).not.toHaveBeenCalled();
   });
 
   it("returns null when no OpenAI-compatible key is configured", async () => {

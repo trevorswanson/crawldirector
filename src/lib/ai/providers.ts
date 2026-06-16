@@ -12,6 +12,13 @@
 // just the same wire protocol pointed at a different base URL.
 export type AiProviderKind = "anthropic" | "openai-compatible";
 
+// The embedding model real OpenAI uses when a key sets no override. 1536-dim,
+// matching the SearchDoc.embedding vector(1536) column (M5 — docs/07-search-
+// retrieval.md). A bring-your-own embedding model (e.g. Mistral's
+// `codestral-embed` on an OpenAI-compatible endpoint) overrides this per key,
+// but must also return 1536-dimensional vectors or the embed backfill rejects it.
+export const OPENAI_DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small";
+
 export type AiProviderInfo = {
   /** Stable id stored on AiKey.providerId and used by the provider abstraction. */
   id: string;
@@ -29,6 +36,15 @@ export type AiProviderInfo = {
    * models), so the DM must supply one — see `requiresModel`.
    */
   defaultModel: string | null;
+  /**
+   * Embedding model used for semantic search when the key sets no explicit
+   * embedding-model override (M5 — docs/07-search-retrieval.md). `null` means no
+   * built-in embedding default: real OpenAI has one (text-embedding-3-small);
+   * a custom endpoint serves unknown models, so the DM must name one before
+   * semantic search can use it; Anthropic has no embeddings API at all. Any model
+   * used must return 1536-dim vectors (the SearchDoc.embedding column width).
+   */
+  defaultEmbeddingModel: string | null;
   /** Custom HTTP endpoint required (OpenAI-compatible self-host / proxy). */
   requiresBaseUrl: boolean;
   /** An explicit model name is required (we can't infer it for a custom endpoint). */
@@ -45,6 +61,8 @@ export const AI_PROVIDERS: readonly AiProviderInfo[] = [
     consoleUrl: "https://console.anthropic.com/settings/keys",
     keyPrefix: "sk-ant-",
     defaultModel: "claude-opus-4-8",
+    // The Anthropic Messages API has no embeddings endpoint.
+    defaultEmbeddingModel: null,
     requiresBaseUrl: false,
     requiresModel: false,
     keyOptional: false,
@@ -56,6 +74,7 @@ export const AI_PROVIDERS: readonly AiProviderInfo[] = [
     consoleUrl: "https://platform.openai.com/api-keys",
     keyPrefix: "sk-",
     defaultModel: "gpt-4o-mini",
+    defaultEmbeddingModel: OPENAI_DEFAULT_EMBEDDING_MODEL,
     requiresBaseUrl: false,
     requiresModel: false,
     keyOptional: false,
@@ -69,6 +88,9 @@ export const AI_PROVIDERS: readonly AiProviderInfo[] = [
     consoleUrl: "https://github.com/openai/openai-openapi",
     keyPrefix: "",
     defaultModel: null,
+    // Unknown endpoint — the DM names the embedding model (e.g. codestral-embed)
+    // to enable semantic search; left blank, the layer stays full-text only.
+    defaultEmbeddingModel: null,
     requiresBaseUrl: true,
     requiresModel: true,
     keyOptional: true,
@@ -96,4 +118,15 @@ export function resolveAiModel(id: string, model?: string | null): string | null
   const trimmed = model?.trim();
   if (trimmed) return trimmed;
   return getAiProvider(id)?.defaultModel ?? null;
+}
+
+// Resolve the embedding model a campaign's key should use for semantic search:
+// the per-key override if set, else the provider's built-in embedding default.
+// Returns null when neither exists (a custom endpoint with no embedding model
+// named), which `resolveCampaignEmbedder` treats as "can't embed through this
+// provider" — the search layer then degrades to full-text. Pure.
+export function resolveEmbeddingModel(id: string, model?: string | null): string | null {
+  const trimmed = model?.trim();
+  if (trimmed) return trimmed;
+  return getAiProvider(id)?.defaultEmbeddingModel ?? null;
 }

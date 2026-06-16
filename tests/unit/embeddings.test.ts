@@ -39,16 +39,18 @@ function unit(index: number, dims = EMBED_DIMENSIONS): number[] {
  */
 function stubEmbedder(
   mapText: (text: string) => number[],
-  opts: { id?: string } = {},
+  opts: { id?: string; embeddingModel?: string } = {},
 ): LLMProvider {
+  const embeddingModel = opts.embeddingModel ?? EMBED_MODEL_DEFAULT;
   return {
     id: opts.id ?? "openai",
     model: "gpt-4o-mini",
+    embeddingModel,
     generate: vi.fn(),
     generateStructured: vi.fn(),
     embed: vi.fn(async (texts: string[]) => ({
       vectors: texts.map(mapText),
-      model: EMBED_MODEL_DEFAULT,
+      model: embeddingModel,
       usage: {
         inputTokens: texts.length * 5,
         outputTokens: 0,
@@ -140,6 +142,30 @@ describe("embedSearchDocs", () => {
     expect(usage).toHaveLength(1);
     expect(usage[0]).toMatchObject({ generatorId: "embed-search", model: EMBED_MODEL_DEFAULT });
     expect(usage[0].inputTokens).toBeGreaterThan(0);
+  });
+
+  it("tags docs with the embedder's bring-your-own model and treats it as the current model", async () => {
+    const dm = await prisma.user.create({ data: { email: "dm@test.com" } });
+    const campaign = await createCampaign(dm.id, { name: "Dungeon" });
+    const alpha = await makeEntity(dm.id, campaign.id, { name: "Alpha", summary: "one" });
+    mockResolveEmbedder.mockResolvedValue(
+      stubEmbedder(() => unit(0), { id: "openai-compatible", embeddingModel: "codestral-embed" }),
+    );
+
+    const result = await embedSearchDocs(dm.id, campaign.id);
+    expect(result).toEqual({ embedded: 1, model: "codestral-embed" });
+
+    const doc = await prisma.searchDoc.findFirst({
+      where: { targetId: alpha.id },
+      select: { embeddingModel: true },
+    });
+    expect(doc?.embeddingModel).toBe("codestral-embed");
+
+    const usage = await prisma.aiUsage.findMany({ where: { campaignId: campaign.id } });
+    expect(usage[0]).toMatchObject({ generatorId: "embed-search", model: "codestral-embed" });
+
+    // A second default run sees the doc as already embedded with this model.
+    expect((await embedSearchDocs(dm.id, campaign.id)).embedded).toBe(0);
   });
 
   it("only re-embeds missing/stale docs by default; force re-embeds all", async () => {

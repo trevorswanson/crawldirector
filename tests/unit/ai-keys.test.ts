@@ -217,7 +217,12 @@ describe("OpenAI-compatible providers", () => {
     expect(view.lastFour).toBe("");
 
     const config = await getAiKeyConfig(campaign.id, "openai-compatible");
-    expect(config).toEqual({ apiKey: "", baseUrl: "http://localhost:11434/v1", model: "llama3.1" });
+    expect(config).toEqual({
+      apiKey: "",
+      baseUrl: "http://localhost:11434/v1",
+      model: "llama3.1",
+      embeddingModel: null,
+    });
 
     const audit = await prisma.auditLog.findFirstOrThrow({ where: { action: "SET_AI_KEY" } });
     expect((audit.detail as { baseUrl?: string }).baseUrl).toBe("http://localhost:11434/v1");
@@ -225,6 +230,39 @@ describe("OpenAI-compatible providers", () => {
 
     const views = await listAiKeys(dm.id, campaign.id);
     expect(views[0]).toMatchObject({ baseUrl: "http://localhost:11434/v1", model: "llama3.1" });
+  });
+
+  it("stores a bring-your-own embedding model and surfaces it in the safe views", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+
+    const view = await setAiKey(dm.id, campaign.id, {
+      providerId: "openai-compatible",
+      apiKey: "",
+      baseUrl: "https://api.mistral.ai/v1",
+      model: "mistral-large-latest",
+      embeddingModel: "codestral-embed",
+    });
+    expect(view.embeddingModel).toBe("codestral-embed");
+
+    // Available to the embedder resolver (internal config) and the list view.
+    const config = await getAiKeyConfig(campaign.id, "openai-compatible");
+    expect(config?.embeddingModel).toBe("codestral-embed");
+    const views = await listAiKeys(dm.id, campaign.id);
+    expect(views[0]).toMatchObject({ embeddingModel: "codestral-embed" });
+
+    // The non-secret audit detail records it; clearing it (blank) removes it.
+    const audit = await prisma.auditLog.findFirstOrThrow({ where: { action: "SET_AI_KEY" } });
+    expect((audit.detail as { embeddingModel?: string | null }).embeddingModel).toBe("codestral-embed");
+
+    const cleared = await setAiKey(dm.id, campaign.id, {
+      providerId: "openai-compatible",
+      apiKey: "",
+      baseUrl: "https://api.mistral.ai/v1",
+      model: "mistral-large-latest",
+      embeddingModel: "",
+    });
+    expect(cleared.embeddingModel).toBeNull();
   });
 
   it("stores DM-supplied per-token price overrides and projects them in the safe view", async () => {

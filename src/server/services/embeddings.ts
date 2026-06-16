@@ -66,10 +66,13 @@ export async function embedSearchDocs(
 
   await assertWithinSpendCap(campaignId);
 
-  // `embeddingModel` is a normal (queryable) column written alongside `embedding`,
-  // so "missing or stale" can be expressed without touching the Unsupported
-  // vector column: model is null (never embedded) or differs from the current one.
-  const targetModel = EMBED_MODEL_DEFAULT;
+  // The model this embedder will use — a per-key bring-your-own override or the
+  // provider's embedding default. Drives both the "already embedded with this
+  // model?" filter below and the returned model; `result.model` matches it after
+  // the call. `embeddingModel` is a normal (queryable) column written alongside
+  // `embedding`, so "missing or stale" can be expressed without touching the
+  // Unsupported vector column: model is null (never embedded) or differs from it.
+  const targetModel = embedder.embeddingModel ?? EMBED_MODEL_DEFAULT;
   const docs = await prisma.searchDoc.findMany({
     where: {
       campaignId,

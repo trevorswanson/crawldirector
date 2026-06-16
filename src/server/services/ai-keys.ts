@@ -42,6 +42,8 @@ export type AiKeyView = {
   // providers). Safe to render — neither carries the key.
   baseUrl: string | null;
   model: string | null;
+  // Optional BYO embedding model for semantic search (M5); null when unset.
+  embeddingModel: string | null;
   // DM-supplied price override (USD per 1M tokens); null when unset. Non-secret.
   inputPerMTokUsd: number | null;
   outputPerMTokUsd: number | null;
@@ -69,6 +71,7 @@ export async function setAiKey(
     apiKey: string;
     baseUrl?: string;
     model?: string;
+    embeddingModel?: string;
     inputPerMTokUsd?: number | null;
     outputPerMTokUsd?: number | null;
   },
@@ -104,6 +107,12 @@ export async function setAiKey(
     throw new ServiceError("Enter the model name this endpoint serves.");
   }
   if (rawModel) model = rawModel;
+
+  // Optional BYO embedding model for semantic search (M5). Stored as-is; the
+  // embedder resolver applies it, and the embed backfill enforces 1536 dims.
+  let embeddingModel: string | null = null;
+  const rawEmbeddingModel = (input.embeddingModel ?? "").trim();
+  if (rawEmbeddingModel) embeddingModel = rawEmbeddingModel;
 
   const existing = await prisma.aiKey.findUnique({
     where: { campaignId_providerId: { campaignId, providerId } },
@@ -142,16 +151,18 @@ export async function setAiKey(
         lastFour,
         baseUrl,
         model,
+        embeddingModel,
         inputPerMTokUsd,
         outputPerMTokUsd,
         createdById: userId,
       },
-      update: { ciphertext, lastFour, baseUrl, model, inputPerMTokUsd, outputPerMTokUsd },
+      update: { ciphertext, lastFour, baseUrl, model, embeddingModel, inputPerMTokUsd, outputPerMTokUsd },
       select: {
         providerId: true,
         lastFour: true,
         baseUrl: true,
         model: true,
+        embeddingModel: true,
         inputPerMTokUsd: true,
         outputPerMTokUsd: true,
         createdAt: true,
@@ -167,7 +178,7 @@ export async function setAiKey(
         targetType: "AI_KEY",
         targetId: providerId,
         // Never the key itself — only non-secret hints + whether we replaced one.
-        detail: { providerId, lastFour, baseUrl, model, inputPerMTokUsd, outputPerMTokUsd, replaced: !!existing },
+        detail: { providerId, lastFour, baseUrl, model, embeddingModel, inputPerMTokUsd, outputPerMTokUsd, replaced: !!existing },
       },
     });
 
@@ -180,6 +191,7 @@ export async function setAiKey(
     lastFour: saved.lastFour,
     baseUrl: saved.baseUrl,
     model: saved.model,
+    embeddingModel: saved.embeddingModel,
     inputPerMTokUsd: saved.inputPerMTokUsd,
     outputPerMTokUsd: saved.outputPerMTokUsd,
     createdAt: saved.createdAt,
@@ -228,6 +240,7 @@ export async function listAiKeys(userId: string, campaignId: string): Promise<Ai
       lastFour: true,
       baseUrl: true,
       model: true,
+      embeddingModel: true,
       inputPerMTokUsd: true,
       outputPerMTokUsd: true,
       createdAt: true,
@@ -241,6 +254,7 @@ export async function listAiKeys(userId: string, campaignId: string): Promise<Ai
     lastFour: k.lastFour,
     baseUrl: k.baseUrl,
     model: k.model,
+    embeddingModel: k.embeddingModel,
     inputPerMTokUsd: k.inputPerMTokUsd,
     outputPerMTokUsd: k.outputPerMTokUsd,
     createdAt: k.createdAt,
@@ -256,13 +270,23 @@ export async function listAiKeys(userId: string, campaignId: string): Promise<Ai
 export async function getAiKeyConfig(
   campaignId: string,
   providerId: string,
-): Promise<{ apiKey: string; baseUrl: string | null; model: string | null } | null> {
+): Promise<{
+  apiKey: string;
+  baseUrl: string | null;
+  model: string | null;
+  embeddingModel: string | null;
+} | null> {
   const key = await prisma.aiKey.findUnique({
     where: { campaignId_providerId: { campaignId, providerId } },
-    select: { ciphertext: true, baseUrl: true, model: true },
+    select: { ciphertext: true, baseUrl: true, model: true, embeddingModel: true },
   });
   if (!key) return null;
-  return { apiKey: decryptSecret(key.ciphertext), baseUrl: key.baseUrl, model: key.model };
+  return {
+    apiKey: decryptSecret(key.ciphertext),
+    baseUrl: key.baseUrl,
+    model: key.model,
+    embeddingModel: key.embeddingModel,
+  };
 }
 
 // INTERNAL — server-only. Resolve and decrypt a campaign's provider key for an
