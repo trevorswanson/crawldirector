@@ -43,8 +43,9 @@
   },
   "overrides": {
     "postcss": "8.5.15",
+    "hono": "^4.12.25",
     "@prisma/dev": {
-      "@hono/node-server": "2.0.5"
+      "@hono/node-server": "1.19.13"
     }
   },
   "devDependencies": {
