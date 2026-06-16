@@ -19,8 +19,8 @@ import { assertWithinSpendCap, recordAiUsage } from "@/server/services/ai-usage"
 //
 // Embeddings need an OpenAI-compatible provider (the Anthropic API has none);
 // `resolveCampaignEmbedder` returns null otherwise and the layer degrades to
-// full-text search. Deferred to slice 4b: auto-enqueuing a re-embed on each
-// canon write (this slice rebuilds on an explicit DM "Build semantic index").
+// full-text search. SearchDoc content changes enqueue this job automatically;
+// the explicit DM "Build semantic index" action remains a recovery/backfill path.
 
 // How many docs to embed per provider call. Embedding APIs accept large batches;
 // 64 keeps each request modest while cutting round-trips on a big campaign.
