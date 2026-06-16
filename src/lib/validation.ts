@@ -366,6 +366,19 @@ const optionalUsdAmount = (tooHigh: string) =>
     .default("")
     .transform((v) => (v === "" ? null : v));
 
+const optionalEmbeddingDimensions = z
+  .union([
+    z.literal(""),
+    z.coerce
+      .number({ message: "Enter a whole-number vector dimension, or leave blank for the default." })
+      .int("Enter a whole-number vector dimension.")
+      .min(1, "Embedding dimensions must be at least 1.")
+      .max(16_000, "Embedding dimensions can't exceed pgvector's 16,000-dimension limit."),
+  ])
+  .optional()
+  .default("")
+  .transform((v) => (v === "" ? null : v));
+
 export const setAiKeySchema = z.object({
   providerId: z.string().trim().min(1, "Pick a provider."),
   // The key may be optional (local/compatible servers) and the endpoint/model
@@ -375,9 +388,9 @@ export const setAiKeySchema = z.object({
   baseUrl: z.string().trim().max(500).optional().default(""),
   model: z.string().trim().max(200).optional().default(""),
   // Optional BYO embedding model for semantic search (M5 — OpenAI-compatible
-  // only). Must return 1536-dim vectors (e.g. codestral-embed); enforced at
-  // embed time, not here.
+  // only). Dimension can be set separately for non-default embedders.
   embeddingModel: z.string().trim().max(200).optional().default(""),
+  embeddingDimensions: optionalEmbeddingDimensions,
   // DM-supplied price (USD per 1M tokens). Both must be set for the override to
   // apply to usage/cost estimation; blank clears them. See src/lib/ai/pricing.ts.
   inputPerMTokUsd: optionalUsdAmount("That price is unreasonably high."),

@@ -35,6 +35,7 @@ export type OpenAiAdapterOptions = {
   // this adapter is constructed as an embedder (resolveCampaignEmbedder). When
   // absent, `embed()` throws — chat callers never call it.
   embeddingModel?: string | null;
+  embeddingDimensions?: number | null;
 };
 
 function readEmbedUsage(usage: OpenAI.CreateEmbeddingResponse.Usage | undefined): LLMUsage {
@@ -93,6 +94,7 @@ export function createOpenAiProvider(opts: OpenAiAdapterOptions): LLMProvider {
     id: providerId,
     model,
     embeddingModel: opts.embeddingModel ?? null,
+    embeddingDimensions: opts.embeddingDimensions ?? null,
 
     async generate(req: GenerateRequest): Promise<GenerateResult> {
       const resp = await client.chat.completions.create({

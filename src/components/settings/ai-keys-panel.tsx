@@ -61,6 +61,13 @@ function ProviderRow({
     undefined,
   );
   const deleteAction = deleteAiKeyAction.bind(null, campaignId, provider.id);
+  const embeddingSummary = configured?.embeddingModel
+    ? ` · embed: ${configured.embeddingModel}${
+        configured.embeddingDimensions ? ` (${configured.embeddingDimensions}d)` : ""
+      }`
+    : configured?.embeddingDimensions
+      ? ` · embed: ${provider.defaultEmbeddingModel ?? "configured"} (${configured.embeddingDimensions}d)`
+      : "";
 
   return (
     <div className="border-b border-[var(--line)] px-[18px] py-4 last:border-b-0">
@@ -76,7 +83,7 @@ function ProviderRow({
             <p className="mt-1 font-mono text-[11px] text-[var(--ink-faint)]">
               {configured.lastFour ? `Key set · ends ••${configured.lastFour}` : "Configured"}
               {configured.model ? ` · ${configured.model}` : ""}
-              {configured.embeddingModel ? ` · embed: ${configured.embeddingModel}` : ""}
+              {embeddingSummary}
               {configured.baseUrl ? ` · ${configured.baseUrl}` : ""}
               {configured.inputPerMTokUsd != null && configured.outputPerMTokUsd != null
                 ? ` · $${configured.inputPerMTokUsd}/$${configured.outputPerMTokUsd} per 1M tok`
@@ -136,23 +143,39 @@ function ProviderRow({
         )}
         {provider.kind === "openai-compatible" && (
           <>
-            <Input
-              type="text"
-              name="embeddingModel"
-              autoComplete="off"
-              defaultValue={configured?.embeddingModel ?? ""}
-              placeholder={
-                provider.defaultEmbeddingModel
-                  ? `Embedding model (optional, default ${provider.defaultEmbeddingModel})`
-                  : "Embedding model for search (optional, e.g. codestral-embed)"
-              }
-              aria-label={`${provider.label} embedding model`}
-            />
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Input
+                type="text"
+                name="embeddingModel"
+                autoComplete="off"
+                defaultValue={configured?.embeddingModel ?? ""}
+                placeholder={
+                  provider.defaultEmbeddingModel
+                    ? `Embedding model (optional, default ${provider.defaultEmbeddingModel})`
+                    : "Embedding model for search (optional, e.g. codestral-embed)"
+                }
+                aria-label={`${provider.label} embedding model`}
+                className="sm:flex-1"
+              />
+              <Input
+                type="number"
+                name="embeddingDimensions"
+                min="1"
+                max="16000"
+                step="1"
+                inputMode="numeric"
+                autoComplete="off"
+                defaultValue={configured?.embeddingDimensions ?? ""}
+                placeholder={`Dimensions (default ${provider.defaultEmbeddingDimensions ?? 1536})`}
+                aria-label={`${provider.label} embedding dimensions`}
+                className="sm:w-48"
+              />
+            </div>
             <p className="text-[10.5px] leading-[1.4] text-[var(--ink-faint)]">
-              Enables semantic search through this provider. The model must return
-              1536-dimensional vectors — e.g. Mistral&rsquo;s{" "}
-              <code>codestral-embed</code>, not <code>mistral-embed</code> (1024).
-              Leave blank for keyword-only search
+              Enables semantic search through this provider. Leave the dimension
+              blank for 1536-dimensional models, or set the model&rsquo;s vector width.
+              The ANN index accelerates 1536-dimensional embeddings; other widths
+              still search exactly.
               {provider.defaultEmbeddingModel
                 ? ` (defaults to ${provider.defaultEmbeddingModel})`
                 : ""}

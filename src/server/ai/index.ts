@@ -3,10 +3,12 @@ import { z } from "zod";
 import { ServiceError } from "@/lib/errors";
 import {
   AI_PROVIDERS,
+  OPENAI_DEFAULT_EMBEDDING_DIMENSIONS,
   OPENAI_DEFAULT_EMBEDDING_MODEL,
   getAiProvider,
   isAiProviderId,
   resolveAiModel,
+  resolveEmbeddingDimensions,
   resolveEmbeddingModel,
 } from "@/lib/ai/providers";
 import { assertCampaignDm, getAiKeyConfig } from "@/server/services/ai-keys";
@@ -65,12 +67,12 @@ export async function resolveCampaignProvider(
   return null;
 }
 
-// Default embedding model for the real OpenAI provider (M5 — docs/07-search-
-// retrieval.md). 1536-dimensional, matching the `SearchDoc.embedding vector(1536)`
-// column. A per-key bring-your-own embedding model (e.g. `codestral-embed` on an
-// OpenAI-compatible endpoint) takes precedence — see `resolveEmbeddingModel` —
-// but must also return 1536-dim vectors or the backfill rejects it.
+// Default embedding model/dimension for the real OpenAI provider (M5 — docs/07-
+// search-retrieval.md). A per-key bring-your-own embedding model/dimension (e.g.
+// `codestral-embed` on an OpenAI-compatible endpoint) takes precedence — see
+// `resolveEmbeddingModel` / `resolveEmbeddingDimensions`.
 export const EMBED_MODEL_DEFAULT = OPENAI_DEFAULT_EMBEDDING_MODEL;
+export const EMBED_DIMENSIONS_DEFAULT = OPENAI_DEFAULT_EMBEDDING_DIMENSIONS;
 
 // Resolve an embedding-capable provider for a campaign. Only OpenAI-compatible
 // providers (real OpenAI or a self-hosted/proxy endpoint) expose an embeddings
@@ -91,6 +93,10 @@ export async function resolveCampaignEmbedder(
 
     const embeddingModel = resolveEmbeddingModel(provider.id, config.embeddingModel);
     if (!embeddingModel) continue;
+    const embeddingDimensions = resolveEmbeddingDimensions(
+      provider.id,
+      config.embeddingDimensions,
+    );
 
     // Custom endpoints may run without auth; the SDK still needs a non-empty key.
     const apiKey = config.apiKey || "not-needed";
@@ -102,6 +108,7 @@ export async function resolveCampaignEmbedder(
       // the adapter always has a non-null `model`.
       model: resolveAiModel(provider.id, config.model) ?? embeddingModel,
       embeddingModel,
+      embeddingDimensions,
     });
   }
   return null;

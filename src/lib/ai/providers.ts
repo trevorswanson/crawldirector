@@ -12,12 +12,11 @@
 // just the same wire protocol pointed at a different base URL.
 export type AiProviderKind = "anthropic" | "openai-compatible";
 
-// The embedding model real OpenAI uses when a key sets no override. 1536-dim,
-// matching the SearchDoc.embedding vector(1536) column (M5 — docs/07-search-
-// retrieval.md). A bring-your-own embedding model (e.g. Mistral's
-// `codestral-embed` on an OpenAI-compatible endpoint) overrides this per key,
-// but must also return 1536-dimensional vectors or the embed backfill rejects it.
+// The embedding model real OpenAI uses when a key sets no override. A bring-your-
+// own embedding model (e.g. Mistral's `codestral-embed` on an OpenAI-compatible
+// endpoint) overrides this per key.
 export const OPENAI_DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small";
+export const OPENAI_DEFAULT_EMBEDDING_DIMENSIONS = 1536;
 
 export type AiProviderInfo = {
   /** Stable id stored on AiKey.providerId and used by the provider abstraction. */
@@ -41,10 +40,15 @@ export type AiProviderInfo = {
    * embedding-model override (M5 — docs/07-search-retrieval.md). `null` means no
    * built-in embedding default: real OpenAI has one (text-embedding-3-small);
    * a custom endpoint serves unknown models, so the DM must name one before
-   * semantic search can use it; Anthropic has no embeddings API at all. Any model
-   * used must return 1536-dim vectors (the SearchDoc.embedding column width).
+   * semantic search can use it; Anthropic has no embeddings API at all.
    */
   defaultEmbeddingModel: string | null;
+  /**
+   * Vector dimensions for the default embedding model. A per-key override can
+   * name a different dimension; null means the app falls back to the legacy
+   * 1536-dim expectation unless the DM specifies one.
+   */
+  defaultEmbeddingDimensions: number | null;
   /** Custom HTTP endpoint required (OpenAI-compatible self-host / proxy). */
   requiresBaseUrl: boolean;
   /** An explicit model name is required (we can't infer it for a custom endpoint). */
@@ -63,6 +67,7 @@ export const AI_PROVIDERS: readonly AiProviderInfo[] = [
     defaultModel: "claude-opus-4-8",
     // The Anthropic Messages API has no embeddings endpoint.
     defaultEmbeddingModel: null,
+    defaultEmbeddingDimensions: null,
     requiresBaseUrl: false,
     requiresModel: false,
     keyOptional: false,
@@ -75,6 +80,7 @@ export const AI_PROVIDERS: readonly AiProviderInfo[] = [
     keyPrefix: "sk-",
     defaultModel: "gpt-4o-mini",
     defaultEmbeddingModel: OPENAI_DEFAULT_EMBEDDING_MODEL,
+    defaultEmbeddingDimensions: OPENAI_DEFAULT_EMBEDDING_DIMENSIONS,
     requiresBaseUrl: false,
     requiresModel: false,
     keyOptional: false,
@@ -91,6 +97,7 @@ export const AI_PROVIDERS: readonly AiProviderInfo[] = [
     // Unknown endpoint — the DM names the embedding model (e.g. codestral-embed)
     // to enable semantic search; left blank, the layer stays full-text only.
     defaultEmbeddingModel: null,
+    defaultEmbeddingDimensions: null,
     requiresBaseUrl: true,
     requiresModel: true,
     keyOptional: true,
@@ -129,4 +136,12 @@ export function resolveEmbeddingModel(id: string, model?: string | null): string
   const trimmed = model?.trim();
   if (trimmed) return trimmed;
   return getAiProvider(id)?.defaultEmbeddingModel ?? null;
+}
+
+export function resolveEmbeddingDimensions(
+  id: string,
+  dimensions?: number | null,
+): number | null {
+  if (dimensions != null) return dimensions;
+  return getAiProvider(id)?.defaultEmbeddingDimensions ?? null;
 }

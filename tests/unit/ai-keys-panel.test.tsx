@@ -30,6 +30,7 @@ const anthropicKey: AiKeyView = {
   baseUrl: null,
   model: null,
   embeddingModel: null,
+  embeddingDimensions: null,
   inputPerMTokUsd: null,
   outputPerMTokUsd: null,
   createdAt: new Date("2026-06-01T00:00:00Z"),
@@ -43,6 +44,7 @@ const compatibleKey: AiKeyView = {
   baseUrl: "http://localhost:11434/v1",
   model: "llama3.1",
   embeddingModel: "codestral-embed",
+  embeddingDimensions: 768,
   inputPerMTokUsd: 0.5,
   outputPerMTokUsd: 1.5,
   createdAt: new Date("2026-06-01T00:00:00Z"),
@@ -93,13 +95,15 @@ describe("AiKeysPanel", () => {
     // The BYO embedding model (M5) is prefilled too, for semantic search.
     const embed = screen.getByLabelText(/OpenAI-compatible.*embedding model/i) as HTMLInputElement;
     expect(embed.value).toBe("codestral-embed");
+    const dimensions = screen.getByLabelText(/OpenAI-compatible.*embedding dimensions/i) as HTMLInputElement;
+    expect(dimensions.value).toBe("768");
 
     // First-party providers don't show endpoint fields.
     expect(screen.getAllByLabelText(/endpoint URL/i)).toHaveLength(1);
 
     // The configured (keyless) compatible row reads "Configured" + shows the model/endpoint.
     expect(
-      screen.getByText(/Configured · llama3.1 · embed: codestral-embed · http:\/\/localhost:11434\/v1/),
+      screen.getByText(/Configured · llama3.1 · embed: codestral-embed \(768d\) · http:\/\/localhost:11434\/v1/),
     ).toBeTruthy();
   });
 

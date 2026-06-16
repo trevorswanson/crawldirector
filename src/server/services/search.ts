@@ -29,8 +29,10 @@ import {
 // capable provider, the query is embedded once and ranking blends the full-text
 // `ts_rank` with the pgvector cosine similarity of `SearchDoc.embedding`, so a
 // natural-language query with no keyword overlap still retrieves the closest
-// docs. Semantic is purely additive — no embedder, no embeddings, or any embed
-// failure falls back to the exact slice-3 full-text behaviour.
+// docs. Slice 4c makes the semantic candidate arm ANN-friendly by ordering a
+// nearest-neighbor CTE on the raw pgvector distance expression before blending
+// candidates. Semantic is purely additive — no embedder, no embeddings, or any
+// embed failure falls back to the exact slice-3 full-text behaviour.
 //
 // Two-layer visibility enforcement. The SQL pass filters on the SearchDoc's
 // `visibility` mirror (cheap: drops DM-only entities and secret edges/events).
@@ -151,6 +153,7 @@ export function buildSearchDocSearchSql({
   offset,
   queryVector,
   embedModel,
+  embedDimensions,
 }: {
   campaignId: string;
   query: string;
@@ -161,6 +164,7 @@ export function buildSearchDocSearchSql({
   // and ranking adds the cosine-similarity term. Absent → slice-3 full-text only.
   queryVector?: number[] | null;
   embedModel?: string;
+  embedDimensions?: number;
 }) {
   const visibilityClause = playerOnly
     ? Prisma.sql`AND "visibility" = ${Visibility.PLAYER_VISIBLE}::"Visibility"`
@@ -169,28 +173,54 @@ export function buildSearchDocSearchSql({
   if (queryVector && queryVector.length > 0) {
     const literal = searchVectorLiteral(queryVector);
     const model = embedModel ?? EMBED_MODEL_DEFAULT;
-    // The cosine term only applies to rows embedded with the *same* model (so
-    // mismatched-dimension vectors are never compared); an un-embedded row still
-    // ranks by its full-text term alone. Candidate set is the union of full-text
-    // matches and same-model embedded rows.
+    const dimensions = embedDimensions ?? EMBED_DIMENSIONS;
+    const semanticCandidateLimit = limit + offset;
+    const distanceExpr =
+      dimensions === EMBED_DIMENSIONS
+        ? Prisma.sql`embedding::vector(1536) <=> ${literal}::vector(1536)`
+        : Prisma.sql`embedding <=> ${literal}::vector`;
+
+    // The semantic arm orders by the raw distance operator with LIMIT, which is
+    // the shape pgvector can accelerate with HNSW. Only after candidate
+    // selection do we convert distance to similarity and blend it with full-text
+    // rank. Compare only rows embedded with the same model and vector dimension.
     return Prisma.sql`
+      WITH full_text_candidates AS MATERIALIZED (
+        SELECT "targetId", "targetType",
+          ts_rank("searchVector", websearch_to_tsquery('english', ${query})) AS text_rank,
+          0::double precision AS similarity
+        FROM "SearchDoc"
+        WHERE "campaignId" = ${campaignId}
+          ${visibilityClause}
+          AND "searchVector" @@ websearch_to_tsquery('english', ${query})
+        ORDER BY text_rank DESC, "targetId" ASC
+        LIMIT ${semanticCandidateLimit}
+      ),
+      semantic_candidates AS MATERIALIZED (
+        SELECT "targetId", "targetType",
+          0::double precision AS text_rank,
+          1 - distance AS similarity
+        FROM (
+          SELECT "targetId", "targetType", ${distanceExpr} AS distance
+          FROM "SearchDoc"
+          WHERE "campaignId" = ${campaignId}
+            ${visibilityClause}
+            AND embedding IS NOT NULL
+            AND "embeddingModel" = ${model}
+            AND "embeddingDimensions" = ${dimensions}
+          ORDER BY ${distanceExpr}
+          LIMIT ${semanticCandidateLimit}
+        ) nearest
+        WHERE 1 - distance > ${SEMANTIC_SIMILARITY_FLOOR}
+      )
       SELECT "targetId", "targetType",
-        ts_rank("searchVector", websearch_to_tsquery('english', ${query}))
-        + ${SEMANTIC_WEIGHT} * CASE
-            WHEN embedding IS NOT NULL AND "embeddingModel" = ${model}
-            THEN 1 - (embedding <=> ${literal}::vector)
-            ELSE 0
-          END AS rank
-      FROM "SearchDoc"
-      WHERE "campaignId" = ${campaignId}
-        ${visibilityClause}
-        AND (
-          "searchVector" @@ websearch_to_tsquery('english', ${query})
-          OR (
-            embedding IS NOT NULL AND "embeddingModel" = ${model}
-            AND 1 - (embedding <=> ${literal}::vector) > ${SEMANTIC_SIMILARITY_FLOOR}
-          )
-        )
+        max(text_rank) + ${SEMANTIC_WEIGHT} * max(similarity) AS rank
+      FROM (
+        SELECT * FROM full_text_candidates
+        UNION ALL
+        SELECT * FROM semantic_candidates
+      ) candidates
+      GROUP BY "targetId", "targetType"
       ORDER BY rank DESC, "targetId" ASC
       LIMIT ${limit} OFFSET ${offset}
     `;
@@ -244,15 +274,18 @@ export async function searchCanon(
   // trail stays complete.
   let queryVector: number[] | null = null;
   let queryModel = EMBED_MODEL_DEFAULT;
+  let queryDimensions = EMBED_DIMENSIONS;
   try {
     const embedder = await resolveCampaignEmbedder(campaignId);
     if (embedder) {
       await assertWithinSpendCap(campaignId);
       const result = await embedder.embed([query]);
       const vector = result.vectors[0];
-      if (vector && vector.length === EMBED_DIMENSIONS) {
+      const expectedDimensions = embedder.embeddingDimensions ?? EMBED_DIMENSIONS;
+      if (vector && vector.length === expectedDimensions) {
         queryVector = vector;
         queryModel = result.model;
+        queryDimensions = expectedDimensions;
         // Best-effort: never fail search over a usage-tracking write.
         try {
           await recordAiUsage({
@@ -294,6 +327,7 @@ export async function searchCanon(
         offset,
         queryVector,
         embedModel: queryModel,
+        embedDimensions: queryDimensions,
       }),
     );
 

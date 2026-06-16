@@ -126,9 +126,10 @@ export async function indexEntity(
  * campaign has an embedding-capable key, enqueue one campaign-level
  * `EMBED_SEARCH_DOCS` job (deduped while queued). The stale vector is
  * left in place but ignored by hybrid ranking, which requires a matching
- * `embeddingModel` (search.ts) — so an edited doc never ranks on its old
- * embedding. Embeddings are written out-of-band (embeddings.ts); this
- * in-transaction path only ever *invalidates and schedules*, never re-embeds.
+ * `embeddingModel` and `embeddingDimensions` (search.ts) — so an edited doc
+ * never ranks on its old embedding. Embeddings are written out-of-band
+ * (embeddings.ts); this in-transaction path only ever *invalidates and
+ * schedules*, never re-embeds.
  */
 async function upsertSearchDoc(
   db: Db,
@@ -151,7 +152,7 @@ async function upsertSearchDoc(
       campaignId,
       content,
       visibility,
-      ...(contentChanged ? { embeddingModel: null } : {}),
+      ...(contentChanged ? { embeddingModel: null, embeddingDimensions: null } : {}),
     },
   });
   if (contentChanged && options.reembedRequestedById) {

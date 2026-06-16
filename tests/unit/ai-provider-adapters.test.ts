@@ -324,9 +324,11 @@ describe("OpenAI / OpenAI-compatible adapter", () => {
       baseUrl: null,
       model: "gpt-4o-mini",
       embeddingModel: "text-embedding-3-small",
+      embeddingDimensions: 1536,
     });
 
     const result = await provider.embed(["first", "second"]);
+    expect(provider.embeddingDimensions).toBe(1536);
     expect(result.vectors).toEqual([
       [0.1, 0.2],
       [0.3, 0.4],
