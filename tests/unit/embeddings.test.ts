@@ -202,6 +202,42 @@ describe("embedSearchDocs", () => {
     expect(embedder.embed).toHaveBeenCalledTimes(2);
   });
 
+  it("does not mark an embedding current when content changes after the worker snapshot", async () => {
+    const dm = await prisma.user.create({ data: { email: "dm@test.com" } });
+    const campaign = await createCampaign(dm.id, { name: "Dungeon" });
+    const entity = await makeEntity(dm.id, campaign.id, {
+      name: "Racing Doc",
+      summary: "old content",
+    });
+    const embedder = stubEmbedder(() => unit(0));
+    embedder.embed = vi.fn(async () => {
+      await prisma.searchDoc.update({
+        where: { targetType_targetId: { targetType: "ENTITY", targetId: entity.id } },
+        data: { content: "Racing Doc\nnew content", embeddingModel: null },
+      });
+      return {
+        vectors: [unit(0)],
+        model: EMBED_MODEL_DEFAULT,
+        usage: {
+          inputTokens: 5,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+        },
+      };
+    });
+    mockResolveEmbedder.mockResolvedValue(embedder);
+
+    const result = await embedSearchDocs(dm.id, campaign.id);
+
+    expect(result).toEqual({ embedded: 0, model: EMBED_MODEL_DEFAULT });
+    const doc = await prisma.searchDoc.findUniqueOrThrow({
+      where: { targetType_targetId: { targetType: "ENTITY", targetId: entity.id } },
+      select: { content: true, embeddingModel: true },
+    });
+    expect(doc).toEqual({ content: "Racing Doc\nnew content", embeddingModel: null });
+  });
+
   it("returns 0 without calling the embedder when there are no docs", async () => {
     const dm = await prisma.user.create({ data: { email: "dm@test.com" } });
     const campaign = await createCampaign(dm.id, { name: "Empty" });

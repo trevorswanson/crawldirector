@@ -99,12 +99,12 @@ export async function embedSearchDocs(
               `semantic search expects ${EMBED_DIMENSIONS}. Configure a ${EMBED_DIMENSIONS}-dimensional model.`,
           );
         }
-        await prisma.$executeRaw(
+        const updated = await prisma.$executeRaw(
           Prisma.sql`UPDATE "SearchDoc"
             SET embedding = ${searchVectorLiteral(vector)}::vector, "embeddingModel" = ${result.model}
-            WHERE id = ${batch[j].id}`,
+            WHERE id = ${batch[j].id} AND content = ${batch[j].content}`,
         );
-        embedded += 1;
+        if (updated > 0) embedded += 1;
       }
 
       // Cost/usage trail (tokens authoritative; embedding models are usually

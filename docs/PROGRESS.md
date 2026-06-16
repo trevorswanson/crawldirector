@@ -193,8 +193,8 @@ The explicit button remains useful as a recovery/backfill action.
       `embeddingModel`, and now also creates a campaign-level
       `EMBED_SEARCH_DOCS` job inside the same transaction when an embedding-
       capable key is configured. Queue rows are deduped while an embed job for
-      the campaign is `QUEUED` or `RUNNING`, because the handler embeds all
-      missing/stale docs in that campaign.
+      the campaign is `QUEUED`, but not while one is `RUNNING`: a content change
+      during an in-flight worker pass records a follow-up refresh.
 - [x] **Review apply paths** ([`review.ts`](../src/server/services/review.ts)):
       entity, relationship, and event canon writes pass the applying DM/co-DM
       into the indexer so the worker can later re-check job permissions with
@@ -204,16 +204,23 @@ The explicit button remains useful as a recovery/backfill action.
       update in transaction, but unchanged searchable content does not enqueue
       semantic work. Archived targets drop their SearchDoc and do not enqueue,
       because there is nothing to embed.
+- [x] **Review fix (PR #126).** A `RUNNING` embed job no longer suppresses a
+      queued follow-up, and `embedSearchDocs` writes a vector/model marker only
+      when the row's current `content` still matches the worker snapshot it
+      embedded. If canon changes under a running worker, the stale write is
+      skipped and the queued follow-up embeds the new content.
 - [x] **Tests:** `tests/unit/search.test.ts` covers the RED/GREEN slice:
       changed entity docs enqueue exactly one pending semantic refresh while one
       is already queued; relationship and event docs enqueue after previous jobs
       finish; full-text-only campaigns and visibility-only reindexing do not
-      enqueue.
+      enqueue; review regressions cover the `RUNNING` follow-up and stale worker
+      snapshot race.
 - [x] **Verification:** targeted RED/GREEN for the new search cases, then
-      `npm run test -- tests/unit/search.test.ts` (33 tests), sequential
+      `npm run test -- tests/unit/search.test.ts` (34 tests),
+      `npm run test -- tests/unit/embeddings.test.ts` (19 tests), sequential
       `jobs.test.ts` and `review.test.ts`, `npm run lint` (0 errors; existing
       settings-action warnings), `npm run typecheck`, `npm run build`, and
-      `npm run test:coverage` (93 files / 1269 tests; statements 95.76%,
+      `npm run test:coverage` (93 files / 1271 tests; statements 95.76%,
       branches 88.97%, functions 97.91%, lines 97.63%).
 
 ## M5 — Semantic layer: pgvector + hybrid search (slice 4a) ✅ (2026-06-15)

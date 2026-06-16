@@ -124,7 +124,7 @@ export async function indexEntity(
  * Upsert one SearchDoc's denormalized text + visibility mirror. When the
  * searchable `content` changes, clear the `embeddingModel` marker and, when the
  * campaign has an embedding-capable key, enqueue one campaign-level
- * `EMBED_SEARCH_DOCS` job (deduped while queued/running). The stale vector is
+ * `EMBED_SEARCH_DOCS` job (deduped while queued). The stale vector is
  * left in place but ignored by hybrid ranking, which requires a matching
  * `embeddingModel` (search.ts) — so an edited doc never ranks on its old
  * embedding. Embeddings are written out-of-band (embeddings.ts); this
@@ -328,7 +328,7 @@ async function enqueueSearchDocEmbeddingJob(
     where: {
       campaignId,
       kind: JobKind.EMBED_SEARCH_DOCS,
-      status: { in: [JobStatus.QUEUED, JobStatus.RUNNING] },
+      status: JobStatus.QUEUED,
     },
     select: { id: true },
   });

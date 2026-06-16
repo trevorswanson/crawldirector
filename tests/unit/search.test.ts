@@ -75,6 +75,7 @@ async function addEmbeddingKey(campaignId: string, userId: string) {
 beforeEach(async () => {
   await prisma.job.deleteMany();
   await prisma.searchDoc.deleteMany();
+  await prisma.aiKey.deleteMany();
   await prisma.eventCausality.deleteMany();
   await prisma.eventParticipant.deleteMany();
   await prisma.event.deleteMany();
@@ -281,6 +282,40 @@ describe("search indexing on canon writes", () => {
 
     jobs = await queuedEmbedJobs(campaign.id);
     expect(jobs).toHaveLength(1);
+  });
+
+  it("queues a follow-up semantic refresh when content changes while a refresh is running", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Dungeon" });
+    await addEmbeddingKey(campaign.id, dm.id);
+    const entity = await makeEntity(dm.id, campaign.id, {
+      name: "Running Refresh",
+      summary: "old searchable text",
+    });
+    await prisma.job.updateMany({
+      where: { campaignId: campaign.id, kind: JobKind.EMBED_SEARCH_DOCS },
+      data: { status: JobStatus.RUNNING, startedAt: new Date() },
+    });
+
+    await updateEntity(dm.id, campaign.id, entity.id, {
+      type: "NPC",
+      name: "Running Refresh",
+      summary: "new searchable text",
+      description: "",
+      visibility: "PLAYER_VISIBLE",
+      tags: [],
+    });
+
+    expect(await queuedEmbedJobs(campaign.id)).toHaveLength(1);
+    expect(
+      await prisma.job.count({
+        where: {
+          campaignId: campaign.id,
+          kind: JobKind.EMBED_SEARCH_DOCS,
+          status: JobStatus.RUNNING,
+        },
+      }),
+    ).toBe(1);
   });
 
   it("does not queue semantic refresh work when no embedding-capable key is configured", async () => {
