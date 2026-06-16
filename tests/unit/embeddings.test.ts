@@ -39,18 +39,22 @@ function unit(index: number, dims = EMBED_DIMENSIONS): number[] {
  */
 function stubEmbedder(
   mapText: (text: string) => number[],
-  opts: { id?: string; embeddingModel?: string } = {},
+  opts: { id?: string; embeddingModel?: string | null } = {},
 ): LLMProvider {
-  const embeddingModel = opts.embeddingModel ?? EMBED_MODEL_DEFAULT;
+  // `null` models an embedder that advertises no embedding model, exercising the
+  // service's defensive `?? EMBED_MODEL_DEFAULT` fallback; the embed call still
+  // returns a concrete model so the column write succeeds.
+  const advertised = opts.embeddingModel === undefined ? EMBED_MODEL_DEFAULT : opts.embeddingModel;
+  const resultModel = advertised ?? EMBED_MODEL_DEFAULT;
   return {
     id: opts.id ?? "openai",
     model: "gpt-4o-mini",
-    embeddingModel,
+    embeddingModel: advertised,
     generate: vi.fn(),
     generateStructured: vi.fn(),
     embed: vi.fn(async (texts: string[]) => ({
       vectors: texts.map(mapText),
-      model: embeddingModel,
+      model: resultModel,
       usage: {
         inputTokens: texts.length * 5,
         outputTokens: 0,
@@ -166,6 +170,16 @@ describe("embedSearchDocs", () => {
 
     // A second default run sees the doc as already embedded with this model.
     expect((await embedSearchDocs(dm.id, campaign.id)).embedded).toBe(0);
+  });
+
+  it("falls back to the default model when the embedder advertises none", async () => {
+    const dm = await prisma.user.create({ data: { email: "dm@test.com" } });
+    const campaign = await createCampaign(dm.id, { name: "Dungeon" });
+    await makeEntity(dm.id, campaign.id, { name: "Alpha", summary: "one" });
+    mockResolveEmbedder.mockResolvedValue(stubEmbedder(() => unit(0), { embeddingModel: null }));
+
+    const result = await embedSearchDocs(dm.id, campaign.id);
+    expect(result).toEqual({ embedded: 1, model: EMBED_MODEL_DEFAULT });
   });
 
   it("only re-embeds missing/stale docs by default; force re-embeds all", async () => {
