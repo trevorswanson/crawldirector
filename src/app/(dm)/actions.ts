@@ -62,6 +62,7 @@ import {
   inferRelationshipsForEntity,
   scaffoldStubEntities,
 } from "@/server/services/generation";
+import { askCampaign, type AskSource } from "@/server/services/ask";
 import { enqueueJob } from "@/server/services/jobs";
 import { isLoreSeedDatasetAvailable } from "@/server/services/seeding";
 import {
@@ -488,6 +489,45 @@ export async function scaffoldStubsAction(
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
     logActionError("Scaffold stubs action failed", error);
     return { error: "Generation failed. Please try again.", timestamp: Date.now() };
+  }
+}
+
+export type AskActionState =
+  | {
+      answer?: string;
+      grounded?: boolean;
+      sources?: AskSource[];
+      model?: string | null;
+      error?: string;
+      timestamp?: number;
+    }
+  | undefined;
+
+// Ask the Campaign: a read-only, retrieval-augmented answer with citations
+// (M5 slice 5 — docs/07-search-retrieval.md). Never writes canon (invariant #1),
+// so no revalidate. Retrieval is role-scoped in the service (invariant #5).
+// Errors are safe messages (no key/raw provider text — invariant #6).
+export async function askCampaignAction(
+  campaignId: string,
+  _prev: AskActionState,
+  formData: FormData,
+): Promise<AskActionState> {
+  void _prev;
+  const user = await requireUser();
+  const question = String(formData.get("question") ?? "");
+  try {
+    const result = await askCampaign(user.id, campaignId, question);
+    return {
+      answer: result.answer,
+      grounded: result.grounded,
+      sources: result.sources,
+      model: result.model,
+      timestamp: Date.now(),
+    };
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    logActionError("Ask campaign action failed", error);
+    return { error: "The campaign couldn't answer that. Please try again.", timestamp: Date.now() };
   }
 }
 

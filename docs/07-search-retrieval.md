@@ -40,6 +40,15 @@
   link back to the source entities/events. Strictly **read-only** — answering a
   question never writes canon. Player "Ask" retrieves only player-visible canon.
   Because answers cite sources, the DM can trust and verify them.
+  *As built (M5 slice 5):* `askCampaign` (`src/server/services/ask.ts`) retrieves
+  the top-k hits with `searchCanon` (so visibility is enforced **at retrieval** —
+  invariant #5), hands the model the retrieved `SearchDoc.content` as numbered
+  sources, and parses the model's inline `[n]` markers back to per-source links
+  (entity detail / graph / timeline). It needs a **chat** provider (full-text
+  search still works with none); with no matching canon it answers "the canon is
+  silent" without spending a provider call. The page lives at
+  `/campaigns/[id]/ask`. The role-aware service is the single seam the future M7
+  player "Ask" reuses.
 
 ### 2. Retrieval-augmented context (generators & agents)
 - The AI orchestrator's context-building step uses retrieval to assemble the

@@ -7,6 +7,7 @@ import {
   Layers,
   ListChecks,
   Search,
+  Sparkles,
   SlidersHorizontal,
   Workflow,
   Network,
@@ -55,6 +56,13 @@ const NAV: NavItem[] = [
     group: "dm",
     href: (campaignId) => (campaignId ? `/campaigns/${campaignId}/search` : "/dashboard"),
     match: (p) => /^\/campaigns\/[^/]+\/search/.test(p),
+  },
+  {
+    label: "Ask the Campaign",
+    icon: Sparkles,
+    group: "dm",
+    href: (campaignId) => (campaignId ? `/campaigns/${campaignId}/ask` : "/dashboard"),
+    match: (p) => /^\/campaigns\/[^/]+\/ask/.test(p),
   },
   {
     label: "Review Queue",
