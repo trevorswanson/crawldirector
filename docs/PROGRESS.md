@@ -94,10 +94,10 @@ non-milestone-blocking follow-ups and deferrals live in the subsections below.)
       application records an auto-approved `DM` `APPLY_EVENT_EFFECTS` change set
       instead of filing a pending Review Queue item, Floor entity detail pages show
       floor number/theme/open/collapse metadata, unhandled entity `data.*` fields
-      render in an Additional data panel, queued/running jobs can be canceled from
-      the full job-history page, event search hits deep-link to their timeline
-      event, and the topbar search box now performs debounced inline preview with
-      an `Ask the campaign "<query>"` handoff to `/ask?q=...`.
+      render in an Additional data panel, queued jobs can be canceled from the
+      full job-history page, event search hits deep-link to their timeline event,
+      and the topbar search box now performs debounced inline preview with an
+      `Ask the campaign "<query>"` handoff to `/ask?q=...`.
 - [x] **Event effect Review Queue deep-links.** Pending effect badges/status
       labels on both the entity timeline panel and campaign timeline now link to
       `/campaigns/[id]/review?selected=<changeSetId>` when an effect carries a

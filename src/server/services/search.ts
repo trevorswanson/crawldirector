@@ -37,8 +37,8 @@ import {
 // Two-layer visibility enforcement. The SQL pass filters on the SearchDoc's
 // `visibility` mirror (cheap: drops DM-only entities and secret edges/events).
 // But relationship/event player-visibility is *derived* — an edge needs both
-// endpoints visible, an event needs ≥1 visible participant, and those can change
-// without an edge/event write — so the hydration pass below re-applies the
+// endpoints visible, and an event needs no participants or ≥1 visible participant.
+// Those can change without an edge/event write, so the hydration pass re-applies the
 // authoritative projection against *live* canon, exactly as graph/timeline do.
 // A stale index row therefore can never leak: even if the mirror says
 // PLAYER_VISIBLE, hydration drops a hit whose endpoints/participants are hidden.
@@ -373,8 +373,8 @@ export async function searchCanon(
 
     // Hydrate display fields from live canon. The where-clauses re-confirm the
     // requester's projection (entities: not archived; relationships: both
-    // endpoints player-visible; events: ≥1 player-visible participant) so a stale
-    // index row is dropped rather than leaked.
+    // endpoints player-visible; events: no participants or ≥1 player-visible
+    // participant) so a stale index row is dropped rather than leaked.
     const [entities, relationships, events] = await Promise.all([
       entityIds.length === 0
         ? []
@@ -411,11 +411,19 @@ export async function searchCanon(
               ...(playerOnly
                 ? {
                     secret: false,
-                    participants: {
-                      some: {
-                        entity: { status: { not: CanonStatus.ARCHIVED }, visibility: Visibility.PLAYER_VISIBLE },
+                    OR: [
+                      { participants: { none: {} } },
+                      {
+                        participants: {
+                          some: {
+                            entity: {
+                              status: { not: CanonStatus.ARCHIVED },
+                              visibility: Visibility.PLAYER_VISIBLE,
+                            },
+                          },
+                        },
                       },
-                    },
+                    ],
                   }
                 : {}),
             },

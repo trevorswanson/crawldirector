@@ -365,7 +365,10 @@ function isPlayerVisibleEvent(
   if (!isPlayer) return true;
   if (event.status === CanonStatus.ARCHIVED) return false;
   if (event.secret) return false;
-  return event.participants.some((p) => isPlayerVisible(p.entity));
+  return (
+    event.participants.length === 0 ||
+    event.participants.some((p) => isPlayerVisible(p.entity))
+  );
 }
 
 /**
@@ -673,8 +676,8 @@ export type CampaignTimelineResult = {
 /**
  * Campaign-wide event timeline for the dedicated M3 timeline page. Players get
  * the same visibility projection as entity timelines: secret events are hidden,
- * invisible co-participants are dropped, and a public event with no visible
- * participants is omitted rather than leaking orphaned canon.
+ * invisible co-participants are dropped, participantless public events are shown,
+ * and a public event with participants is omitted when none of them are visible.
  *
  * When `limit` is set, only the newest `limit` events are returned (ordering is
  * already newest-first). The `totalEvents` count and `truncated` flag let the
@@ -683,8 +686,8 @@ export type CampaignTimelineResult = {
  * Player-projection invariant: the `totalEvents` count is built from the same
  * player-projected `where` clause as the query, so it never reveals the existence
  * of secret or hidden-participant events to players. This is achieved by pushing
- * the JS post-filter's "at least one player-visible participant" rule into SQL for
- * players via a `participants: { some: ... }` clause.
+ * the JS post-filter's "no participants OR at least one player-visible
+ * participant" rule into SQL for players.
  *
  * isPlayerVisible conditions (from the `isPlayerVisible` helper above):
  *   entity.status !== ARCHIVED && entity.visibility === PLAYER_VISIBLE
@@ -700,25 +703,28 @@ export async function listCampaignTimeline(
   const isPlayer = membership.role === Role.PLAYER;
 
   // Player-projected WHERE: SQL filters out secret events AND (for players only)
-  // events whose only participants are DM-only or archived — mirroring the JS
-  // post-filter `if (isPlayer && participants.length === 0) continue`. This keeps
-  // totalEvents and the `take` window projection-correct.
+  // events whose declared participants are all DM-only or archived. Events with
+  // no participants are campaign-wide public notes when `secret` is false.
+  // Keeping this in SQL makes totalEvents and the `take` window projection-correct.
   const where: Prisma.EventWhereInput = {
     campaignId,
     status: { not: CanonStatus.ARCHIVED },
     ...(isPlayer
       ? {
           secret: false,
-          // Keep only events that have at least one player-visible participant,
-          // matching isPlayerVisible(entity): status !== ARCHIVED && visibility === PLAYER_VISIBLE.
-          participants: {
-            some: {
-              entity: {
-                status: { not: CanonStatus.ARCHIVED },
-                visibility: Visibility.PLAYER_VISIBLE,
+          OR: [
+            { participants: { none: {} } },
+            {
+              participants: {
+                some: {
+                  entity: {
+                    status: { not: CanonStatus.ARCHIVED },
+                    visibility: Visibility.PLAYER_VISIBLE,
+                  },
+                },
               },
             },
-          },
+          ],
         }
       : {}),
   };
@@ -810,10 +816,10 @@ export async function listCampaignTimeline(
         type: participant.entity.type,
         role: participant.role,
       }));
-    // Belt-and-braces guard: the SQL `participants: { some: ... }` clause above
-    // makes projection-correct so windowed player queries fill correctly, but we
-    // keep this JS guard in place for non-windowed paths and defensive safety.
-    if (isPlayer && participants.length === 0) continue;
+    // Belt-and-braces guard: events with declared participants must still retain
+    // at least one visible participant after projection. Participantless public
+    // notes remain visible as campaign-wide timeline entries.
+    if (isPlayer && event.participants.length > 0 && participants.length === 0) continue;
 
     timeline.push({
       id: event.id,
@@ -1045,15 +1051,16 @@ export async function listCampaignFloors(
   let maxEventFloor = 0;
 
   if (isPlayer) {
-    // Apply participant-visibility projection: skip events where all
-    // participants are invisible to the player (same rule as listCampaignTimeline).
+    // Apply participant-visibility projection: participantless public notes count
+    // as campaign-wide events, but events with participants need at least one
+    // player-visible participant (same rule as listCampaignTimeline).
     for (const event of eventCountResult as Array<{
       orderKey: number;
       participants: Array<{ entity: { status: CanonStatus; visibility: Visibility } }>;
     }>) {
-      const hasVisibleParticipant = event.participants.some((p) =>
-        isPlayerVisible(p.entity),
-      );
+      const hasVisibleParticipant =
+        event.participants.length === 0 ||
+        event.participants.some((p) => isPlayerVisible(p.entity));
       if (!hasVisibleParticipant) continue;
       countByFloor.set(event.orderKey, (countByFloor.get(event.orderKey) ?? 0) + 1);
       if (event.orderKey > maxEventFloor) maxEventFloor = event.orderKey;
@@ -1125,7 +1132,8 @@ export async function listCampaignFloors(
         .filter(
           (event) =>
             event.orderKey === currentFloorNumber &&
-            event.participants.some((p) => isPlayerVisible(p.entity)),
+            (event.participants.length === 0 ||
+              event.participants.some((p) => isPlayerVisible(p.entity))),
         )
         .sort(
           (a, b) =>

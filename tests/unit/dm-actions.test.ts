@@ -2557,7 +2557,7 @@ describe("enqueueBuildSemanticIndexAction", () => {
 });
 
 describe("cancelJobAction", () => {
-  it("cancels a queued/running job and revalidates job/search surfaces", async () => {
+  it("cancels a queued job and revalidates job/search surfaces", async () => {
     cancelJob.mockResolvedValue({
       id: "j1",
       kind: "EMBED_SEARCH_DOCS",
@@ -2579,10 +2579,10 @@ describe("cancelJobAction", () => {
 
   it("surfaces ServiceError messages and hides unexpected failures", async () => {
     cancelJob.mockRejectedValueOnce(
-      new ServiceError("Only queued or running jobs can be canceled."),
+      new ServiceError("Only queued jobs can be canceled."),
     );
     expect((await cancelJobAction("c1", "j1"))?.error).toBe(
-      "Only queued or running jobs can be canceled.",
+      "Only queued jobs can be canceled.",
     );
 
     cancelJob.mockRejectedValueOnce(new Error("db down"));

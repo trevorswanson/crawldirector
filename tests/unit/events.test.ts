@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
-import { CanonStatus, Prisma, Role } from "@/generated/prisma/client";
+import { CanonStatus, ChangeSetStatus, Prisma, Role } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 import {
@@ -348,12 +348,27 @@ describe("event service", () => {
       secret: true,
       participants: [{ entityId: publicEntity.id, role: "ACTOR" }],
     });
+    await createEvent(owner.id, campaign.id, {
+      title: "Campaign-wide public note",
+      floor: 5,
+      secret: false,
+      participants: [],
+    });
+    await createEvent(owner.id, campaign.id, {
+      title: "Campaign-wide secret note",
+      floor: 6,
+      secret: true,
+      participants: [],
+    });
 
     const { events: timeline } = await listCampaignTimeline(player.id, campaign.id);
 
-    expect(timeline).toHaveLength(1);
-    expect(timeline[0].title).toBe("Public scene");
-    expect(timeline[0].participants.map((p) => p.name)).toEqual([
+    expect(timeline.map((event) => event.title)).toEqual([
+      "Campaign-wide public note",
+      "Public scene",
+    ]);
+    expect(timeline[0].participants).toEqual([]);
+    expect(timeline[1].participants.map((p) => p.name)).toEqual([
       "Public crawler",
     ]);
   });
@@ -1428,6 +1443,55 @@ describe("updateEvent", () => {
     expect(rows.map((row) => `${row.entityId}:${row.role}`).sort()).toEqual(
       [`${crawler.id}:AFFECTED`, `${hiddenNpc.id}:ACTOR`].sort(),
     );
+  });
+
+  it("auto-approves DM-applied event effects and mutates crawler stats", async () => {
+    const owner = await makeUser("owner-auto-apply-fx@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const crawler = await makeCrawler(owner.id, campaign.id, "Carl");
+    await prisma.crawler.update({
+      where: { id: crawler.id },
+      data: { hp: 100 },
+    });
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "Trap consequence",
+      secret: false,
+      participants: [{ entityId: crawler.id, role: "ACTOR" }],
+      effects: [
+        {
+          kind: "ADJUST_STAT",
+          targetEntityId: crawler.id,
+          stat: "hp",
+          delta: 10,
+        },
+      ],
+    });
+
+    const result = await applyEventEffects(owner.id, campaign.id, event.id, {
+      autoApprove: true,
+    });
+
+    expect(result.operationId).toBeNull();
+    await expect(
+      prisma.crawler.findUniqueOrThrow({ where: { id: crawler.id } }),
+    ).resolves.toMatchObject({ hp: 110 });
+    await expect(
+      prisma.changeSet.findUniqueOrThrow({ where: { id: result.changeSetId } }),
+    ).resolves.toMatchObject({
+      status: ChangeSetStatus.APPROVED,
+      reviewedById: owner.id,
+    });
+    const updated = await prisma.event.findUniqueOrThrow({
+      where: { id: event.id },
+      select: { effects: true },
+    });
+    expect(updated.effects).toEqual([
+      expect.objectContaining({
+        applied: true,
+        reviewStatus: "APPLIED",
+        appliedChangeSetId: result.changeSetId,
+      }),
+    ]);
   });
 
   it("allows participant-free edits but rejects a non-canon participant", async () => {
@@ -2838,12 +2902,13 @@ describe("listCampaignTimeline — limit / truncation", () => {
   });
 
   it("player count via prisma.event.count never reveals secret or hidden-participant events (projection regression)", async () => {
-    // Scenario: 3 events —
+    // Scenario: 4 events —
     //   (a) non-secret, PLAYER_VISIBLE participant → visible to player
-    //   (b) secret,     PLAYER_VISIBLE participant → hidden from player
-    //   (c) non-secret, DM_ONLY-only participant   → hidden from player
+    //   (b) non-secret, no participants            → visible to player
+    //   (c) secret,     PLAYER_VISIBLE participant → hidden from player
+    //   (d) non-secret, DM_ONLY-only participant   → hidden from player
     // Calling with { limit: 10 } forces the prisma.event.count path. The
-    // player's totalEvents must be 1, not 2 or 3.
+    // player's totalEvents must be 2, not 3 or 4.
     const owner = await makeUser("player-proj-count-owner@test.com");
     const player = await makeUser("player-proj-count-player@test.com");
     const campaign = await createCampaign(owner.id, { name: "Dungeon" });
@@ -2860,31 +2925,40 @@ describe("listCampaignTimeline — limit / truncation", () => {
       secret: false,
       participants: [{ entityId: publicEntity.id, role: "ACTOR" }],
     });
-    // (b) Hidden from player: secret event, but has a PLAYER_VISIBLE participant.
+    // (b) Visible to player: non-secret, no participants.
+    await createEvent(owner.id, campaign.id, {
+      title: "Campaign-wide public event",
+      secret: false,
+      participants: [],
+    });
+    // (c) Hidden from player: secret event, but has a PLAYER_VISIBLE participant.
     await createEvent(owner.id, campaign.id, {
       title: "Secret event",
       secret: true,
       participants: [{ entityId: publicEntity.id, role: "ACTOR" }],
     });
-    // (c) Hidden from player: non-secret, but the only participant is DM_ONLY.
+    // (d) Hidden from player: non-secret, but the only participant is DM_ONLY.
     await createEvent(owner.id, campaign.id, {
       title: "Hidden-participant event",
       secret: false,
       participants: [{ entityId: hiddenEntity.id, role: "ACTOR" }],
     });
 
-    // DM: all 3 events visible; count path exercised with limit.
+    // DM: all 4 events visible; count path exercised with limit.
     const dmResult = await listCampaignTimeline(owner.id, campaign.id, { limit: 10 });
-    expect(dmResult.events).toHaveLength(3);
-    expect(dmResult.totalEvents).toBe(3);
+    expect(dmResult.events).toHaveLength(4);
+    expect(dmResult.totalEvents).toBe(4);
     expect(dmResult.truncated).toBe(false);
 
-    // Player: only event (a) is visible; count must also be 1, not 2 or 3.
+    // Player: events (a) and (b) are visible; count must also be 2, not 3 or 4.
     const playerResult = await listCampaignTimeline(player.id, campaign.id, { limit: 10 });
-    expect(playerResult.events).toHaveLength(1);
-    expect(playerResult.totalEvents).toBe(1);
+    expect(playerResult.events).toHaveLength(2);
+    expect(playerResult.totalEvents).toBe(2);
     expect(playerResult.truncated).toBe(false);
-    expect(playerResult.events[0].title).toBe("Visible event");
+    expect(playerResult.events.map((event) => event.title)).toEqual([
+      "Campaign-wide public event",
+      "Visible event",
+    ]);
   });
 
   it("SQL-level player projection fills the take-window with visible events, not partially with hidden rows", async () => {

@@ -69,6 +69,24 @@ describe("AskPanel", () => {
     expect(action.mock.calls[0][0].get("question")).toBe("Who knows Mordecai?");
   });
 
+  it("updates the draft and submits again when the search handoff query changes", async () => {
+    const action = vi.fn();
+    mockUseActionState.mockImplementation(() => [undefined, action, false]);
+
+    const { rerender } = render(
+      <AskPanel campaignId="c1" initialQuestion="Who knows Mordecai?" />,
+    );
+    await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
+
+    rerender(<AskPanel campaignId="c1" initialQuestion="Where is Donut?" />);
+
+    expect(
+      (screen.getByLabelText(/ask the campaign a question/i) as HTMLTextAreaElement).value,
+    ).toBe("Where is Donut?");
+    await waitFor(() => expect(action).toHaveBeenCalledTimes(2));
+    expect(action.mock.calls[1][0].get("question")).toBe("Where is Donut?");
+  });
+
   it("renders a grounded answer with the cited marker linked and a sources list", () => {
     mockState({
       answer: "The Maestro pulls the strings [1].",

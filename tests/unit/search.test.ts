@@ -715,7 +715,7 @@ describe("event indexing on canon writes", () => {
     expect((await searchCanon(dm.id, campaign.id, "vanishingsoon")).hits).toHaveLength(0);
   });
 
-  it("hides secret events and events with only hidden participants from players (invariant #5)", async () => {
+  it("shows public participantless events but hides secret and hidden-participant events from players (invariant #5)", async () => {
     const dm = await makeUser("dm@test.com");
     const campaign = await createCampaign(dm.id, { name: "Dungeon" });
     const player = await addPlayer(campaign.id, "player@test.com");
@@ -732,6 +732,12 @@ describe("event indexing on canon writes", () => {
       participants: [{ entityId: visible.id, role: "ACTOR" }],
       secret: false,
     });
+    const campaignWide = await createEvent(dm.id, campaign.id, {
+      title: "Campaign Wide Bulletin",
+      summary: "eventword",
+      participants: [],
+      secret: false,
+    });
     await createEvent(dm.id, campaign.id, {
       title: "Hidden Meeting",
       summary: "eventword",
@@ -746,10 +752,12 @@ describe("event indexing on canon writes", () => {
     });
 
     const dmResult = await searchCanon(dm.id, campaign.id, "eventword");
-    expect(dmResult.hits).toHaveLength(3);
+    expect(dmResult.hits).toHaveLength(4);
 
     const playerResult = await searchCanon(player.id, campaign.id, "eventword");
-    expect(playerResult.hits.map((h) => h.targetId)).toEqual([open.id]);
+    expect(playerResult.hits.map((h) => h.targetId).sort()).toEqual(
+      [campaignWide.id, open.id].sort(),
+    );
   });
 });
 

@@ -143,9 +143,11 @@ export async function listRecentJobs(
   });
 }
 
-// Cancel a queued/running job from the DM console. Cancellation is represented
-// as a safe FAILED terminal state so the existing worker lifecycle and history
-// display do not need a new schema enum value.
+// Cancel a queued job from the DM console. Cancellation is represented as a
+// safe FAILED terminal state so the existing worker lifecycle and history
+// display do not need a new schema enum value. RUNNING jobs are deliberately
+// excluded: the worker has already claimed the row and may still perform
+// provider calls or write side effects before it tries to complete the job.
 export async function cancelJob(
   userId: string,
   campaignId: string,
@@ -159,15 +161,15 @@ export async function cancelJob(
   if (!job) {
     throw new ServiceError("Job not found.");
   }
-  if (job.status !== JobStatus.QUEUED && job.status !== JobStatus.RUNNING) {
-    throw new ServiceError("Only queued or running jobs can be canceled.");
+  if (job.status !== JobStatus.QUEUED) {
+    throw new ServiceError("Only queued jobs can be canceled.");
   }
 
   const { count } = await prisma.job.updateMany({
     where: {
       id: jobId,
       campaignId,
-      status: { in: [JobStatus.QUEUED, JobStatus.RUNNING] },
+      status: JobStatus.QUEUED,
     },
     data: {
       status: JobStatus.FAILED,
@@ -176,7 +178,7 @@ export async function cancelJob(
     },
   });
   if (count !== 1) {
-    throw new ServiceError("Only queued or running jobs can be canceled.");
+    throw new ServiceError("Only queued jobs can be canceled.");
   }
 
   return prisma.job.findUniqueOrThrow({

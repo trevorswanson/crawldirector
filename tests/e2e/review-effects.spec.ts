@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { signUpAndCreateCampaign } from "./helpers";
 
-test("event effect lands PENDING in the Review Queue and approving it applies the stat change", async ({
+test("DM-applied event effect immediately applies the stat change", async ({
   page,
 }) => {
   const { campaignId } = await signUpAndCreateCampaign(page);
@@ -37,31 +37,38 @@ test("event effect lands PENDING in the Review Queue and approving it applies th
   // ── Step 2: Go to timeline and create an event with an ADJUST_STAT effect ─
   await page.goto(`/campaigns/${campaignId}/timeline`);
   await page.getByRole("button", { name: "Log event" }).click();
+  const logForm = page.locator("form").filter({
+    has: page.getByPlaceholder("What happened?"),
+  });
 
   const eventTitle = `E2E Event ${suffix}`;
-  await page.getByPlaceholder("What happened?").fill(eventTitle);
+  await logForm.getByPlaceholder("What happened?").fill(eventTitle);
 
-  // The form requires at least one participant — search for the crawler
-  await page.getByLabel("Search participant...").fill(crawlerName);
+  // Add the crawler as a participant so its entity timeline includes the event.
+  await logForm.getByLabel("Search participant...").fill(crawlerName);
   // Select from the typeahead dropdown (a button with the crawler name)
-  await page.getByRole("button", { name: crawlerName }).first().click();
+  await logForm.getByRole("button", { name: crawlerName }).first().click();
+  await expect(logForm.locator('input[name="participantId_0"]')).toHaveValue(entityId);
 
   // Add a structured effect
-  await page.getByRole("button", { name: "Add effect" }).click();
+  await logForm.getByRole("button", { name: "Add effect" }).click();
 
   // The effect row appears: set kind to ADJUST_STAT (default), target to crawler
-  await page.getByLabel("Search crawler...").fill(crawlerName);
+  await logForm.getByLabel("Search crawler...").fill(crawlerName);
   // Select from the typeahead dropdown in the effect section
-  await page.getByRole("button", { name: crawlerName }).first().click();
+  await logForm.getByRole("button", { name: crawlerName }).first().click();
+  await expect(logForm.locator('input[name="effectTarget_0"]')).toHaveValue(entityId);
 
   // Choose HP as the stat
-  await page.locator("select[aria-label='Stat to adjust']").selectOption("hp");
+  await logForm.locator("select[aria-label='Stat to adjust']").selectOption("hp");
+  await expect(logForm.locator('select[name="effectStat_0"]')).toHaveValue("hp");
 
   // Set delta to 10
-  await page.getByRole("spinbutton", { name: "Delta" }).fill("10");
+  await logForm.getByRole("spinbutton", { name: "Delta" }).fill("10");
+  await expect(logForm.locator('input[name="effectDelta_0"]')).toHaveValue("10");
 
   // Submit the event
-  await page.getByRole("button", { name: "Log event" }).click();
+  await logForm.getByRole("button", { name: "Log event" }).click();
 
   // The form should close and the event should appear in the timeline
   await expect(page.getByText(eventTitle)).toBeVisible();
@@ -69,30 +76,13 @@ test("event effect lands PENDING in the Review Queue and approving it applies th
   // The effect chip should show the Apply button (unapplied effects)
   await expect(page.getByRole("button", { name: "Apply" })).toBeVisible();
 
-  // Click Apply to route through the review pipeline
+  // Click Apply. DM-applied effects are auto-approved, so no Review Queue step is needed.
   await page.getByRole("button", { name: "Apply" }).click();
 
-  // The effect status should now show "pending review" in the chip
-  await expect(page.getByText("pending review")).toBeVisible();
+  // The effect status should now show "applied" in the chip.
+  await expect(page.getByText("applied", { exact: true })).toBeVisible();
 
-  // ── Step 3: Verify Review Queue shows PENDING APPLY_EVENT_EFFECTS ─────────
-  await page.goto(`/campaigns/${campaignId}/review`);
-
-  // The queue should have a change set with the Apply effects title
-  await expect(page.getByText("Apply effects")).toBeVisible();
-
-  // ── Step 4: Approve the change set ──────────────────────────────────────
-  // The first change set in the queue should already be selected (the sidebar
-  // auto-selects the first item). Click "Accept all" on the operation row.
-  await page.getByRole("button", { name: "Accept all" }).click();
-
-  // Then click the "Approve N accepted" button in the header
-  await page.getByRole("button", { name: /Approve \d+ accepted/ }).click();
-
-  // Post-approval: the "Committed to canon" confirmation should appear
-  await expect(page.getByText("Committed to canon")).toBeVisible();
-
-  // ── Step 5: Verify the crawler's HP was updated ───────────────────────────
+  // ── Step 3: Verify the crawler's HP was updated ───────────────────────────
   await page.goto(`/campaigns/${campaignId}/entities/${entityId}`);
 
   // HP should now be 110 (100 + 10)

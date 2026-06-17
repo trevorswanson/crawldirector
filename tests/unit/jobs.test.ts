@@ -361,20 +361,21 @@ describe("cancelJob", () => {
     });
   });
 
-  it("prevents a canceled running job from being overwritten by worker completion", async () => {
+  it("rejects cancellation of a running job so side effects cannot continue under a failed row", async () => {
     const { dmId, campaignId } = await seed();
     const { id } = await enqueueJob(dmId, campaignId, JobKind.BULK_FLESH, {
       entityIds: ["e1"],
     });
     await claimNextJob();
-    await cancelJob(dmId, campaignId, id);
+
+    await expect(cancelJob(dmId, campaignId, id)).rejects.toThrow(/Only queued jobs/);
 
     await completeJob(id, { proposedCount: 1 });
 
     await expect(prisma.job.findUniqueOrThrow({ where: { id } })).resolves.toMatchObject({
-      status: JobStatus.FAILED,
-      error: "Canceled by DM.",
-      result: null,
+      status: JobStatus.SUCCEEDED,
+      error: null,
+      result: { proposedCount: 1 },
     });
   });
 
@@ -386,7 +387,7 @@ describe("cancelJob", () => {
     await claimNextJob();
     await completeJob(id, { proposedCount: 1 });
 
-    await expect(cancelJob(dmId, campaignId, id)).rejects.toThrow(/Only queued or running/);
+    await expect(cancelJob(dmId, campaignId, id)).rejects.toThrow(/Only queued jobs/);
   });
 });
 

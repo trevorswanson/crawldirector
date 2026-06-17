@@ -109,14 +109,19 @@ export function AskPanel({
     askCampaignAction.bind(null, campaignId),
     undefined,
   );
-  const [question, setQuestion] = useState(initialQuestion);
+  const [questionDraft, setQuestionDraft] = useState(() => ({
+    source: initialQuestion,
+    value: initialQuestion,
+  }));
+  const question =
+    questionDraft.source === initialQuestion ? questionDraft.value : initialQuestion;
   const [, startTransition] = useTransition();
-  const submittedInitial = useRef(false);
+  const lastSubmittedInitial = useRef<string | null>(null);
 
   useEffect(() => {
     const trimmed = initialQuestion.trim();
-    if (!trimmed || submittedInitial.current) return;
-    submittedInitial.current = true;
+    if (!trimmed || lastSubmittedInitial.current === trimmed) return;
+    lastSubmittedInitial.current = trimmed;
     const formData = new FormData();
     formData.set("question", trimmed);
     startTransition(() => {
@@ -133,7 +138,9 @@ export function AskPanel({
           required
           autoFocus
           value={question}
-          onChange={(event) => setQuestion(event.target.value)}
+          onChange={(event) =>
+            setQuestionDraft({ source: initialQuestion, value: event.target.value })
+          }
           placeholder="Ask anything about this campaign's canon — e.g. “Which NPCs has Carl wronged, and why?”"
           className="field-shell w-full resize-y rounded-[2px] border border-[var(--line-strong)] bg-[var(--bg)] px-[14px] py-[11px] text-[14px] text-[var(--ink)] outline-none placeholder:text-[var(--ink-faint)] focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--ring)]"
           aria-label="Ask the campaign a question"

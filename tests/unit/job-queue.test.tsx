@@ -81,7 +81,7 @@ describe("JobQueueList", () => {
     expect(screen.getByText(/Dataset unavailable/i)).toBeTruthy();
   });
 
-  it("renders cancel controls for queued and running jobs when a campaign id is available", () => {
+  it("renders cancel controls only for queued jobs when a campaign id is available", () => {
     render(
       <JobQueueList
         campaignId="c1"
@@ -94,6 +94,16 @@ describe("JobQueueList", () => {
             result: null,
             createdAt: new Date("2026-06-16T11:55:00Z"),
             startedAt: null,
+            finishedAt: null,
+          },
+          {
+            id: "running",
+            kind: "LORE_SEED",
+            status: "RUNNING",
+            error: null,
+            result: null,
+            createdAt: new Date("2026-06-16T11:45:00Z"),
+            startedAt: new Date("2026-06-16T11:46:00Z"),
             finishedAt: null,
           },
           {
@@ -111,6 +121,7 @@ describe("JobQueueList", () => {
     );
 
     expect(screen.getByRole("button", { name: "Cancel Semantic index job" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Cancel Lore seed job" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Cancel Bulk flesh-out job" })).toBeNull();
   });
 });

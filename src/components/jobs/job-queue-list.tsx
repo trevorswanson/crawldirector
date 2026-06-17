@@ -117,7 +117,7 @@ export function JobQueueList({
                 >
                   {job.status}
                 </span>
-                {campaignId && (job.status === "QUEUED" || job.status === "RUNNING") && (
+                {campaignId && job.status === "QUEUED" && (
                   <form
                     action={async () => {
                       "use server";
