@@ -61,4 +61,45 @@ describe("logActionError", () => {
     expect(firstArg).toContain("non-Error thrown");
     expect(firstArg).not.toContain("boom");
   });
+
+  it("redacts a provided secret from the message but keeps the rest diagnosable", () => {
+    const redact = (text: string) => text.split("sk-secret-123").join("[redacted]");
+    logActionError(
+      "ctx",
+      new Error("connect failed: Authorization: Bearer sk-secret-123"),
+      redact,
+    );
+    expect(spy).toHaveBeenCalledOnce();
+    for (const arg of spy.mock.calls[0]!) {
+      expect(String(arg)).not.toContain("sk-secret-123");
+    }
+    // The non-secret part of the message survives so the failure stays diagnosable.
+    expect(String(spy.mock.calls[0]![0])).toContain("connect failed");
+    expect(String(spy.mock.calls[0]![0])).toContain("[redacted]");
+  });
+
+  it("redacts a provided secret from cause-chain messages", () => {
+    const redact = (text: string) => text.split("sk-secret-123").join("[redacted]");
+    const root = new Error("undici: invalid response — sk-secret-123 echoed back");
+    const err = new Error("Connection error.", { cause: root });
+    logActionError("ctx", err, redact);
+    expect(spy).toHaveBeenCalledOnce();
+    for (const arg of spy.mock.calls[0]!) {
+      expect(String(arg)).not.toContain("sk-secret-123");
+    }
+    // The cause link itself is still surfaced (its name + a redacted message).
+    expect(String(spy.mock.calls[0]![1])).toContain("caused by [Error]");
+  });
+
+  it("redacts a secret straddling the 500-char message cutoff", () => {
+    const redact = (text: string) => text.split("sk-secret-123").join("[redacted]");
+    // Place the secret so it begins before char 500 and ends after it; redaction
+    // must run before the slice, or fragments of the key would survive.
+    const message = "x".repeat(495) + "sk-secret-123" + "y".repeat(100);
+    logActionError("ctx", new Error(message), redact);
+    expect(spy).toHaveBeenCalledOnce();
+    for (const arg of spy.mock.calls[0]!) {
+      expect(String(arg)).not.toContain("sk-secret");
+    }
+  });
 });

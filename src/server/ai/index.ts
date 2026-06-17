@@ -12,6 +12,7 @@ import {
   resolveEmbeddingModel,
 } from "@/lib/ai/providers";
 import { assertCampaignDm, getAiKeyConfig } from "@/server/services/ai-keys";
+import { logActionError } from "@/server/log";
 import { createAnthropicProvider } from "./anthropic";
 import { createOpenAiProvider } from "./openai";
 import type { LLMProvider } from "./types";
@@ -174,6 +175,12 @@ export async function testAiConnection(
       messages: [{ role: "user", content: 'Respond with {"ok": true} and nothing else.' }],
     });
   } catch (error) {
+    // The wrapped message below is deliberately vague (key-safe). Log the real
+    // error server-side so a failing BYO setup is diagnosable — walking the
+    // `.cause` chain surfaces the network errno, and the provider's redactor
+    // scrubs the decrypted key (a malformed endpoint can echo the Authorization
+    // header) while leaving errno/host intact (invariant #6).
+    logActionError(`AI connection test failed (provider=${providerId})`, error, provider.redactSecrets);
     throw new ServiceError(describeProviderError(error));
   }
 
