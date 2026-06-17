@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   Layers,
   ListChecks,
+  ListTodo,
   Search,
   Sparkles,
   SlidersHorizontal,
@@ -70,6 +71,13 @@ const NAV: NavItem[] = [
     group: "dm",
     href: (campaignId) => (campaignId ? `/campaigns/${campaignId}/review` : "/dashboard"),
     match: (p) => /^\/campaigns\/[^/]+\/review/.test(p),
+  },
+  {
+    label: "Job Queue",
+    icon: ListTodo,
+    group: "dm",
+    href: (campaignId) => (campaignId ? `/campaigns/${campaignId}/jobs` : "/dashboard"),
+    match: (p) => /^\/campaigns\/[^/]+\/jobs/.test(p),
   },
   {
     label: "Relationship Graph",

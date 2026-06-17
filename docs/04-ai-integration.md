@@ -158,6 +158,10 @@ When assembling context for a generation:
 - Start synchronous (request → wait → proposal) for single-entity generation.
 - Introduce a `Job` table + worker for bulk runs and long generations so the UI
   isn't blocked; jobs land Change Sets in the queue and notify the DM when ready.
+  As built, `/campaigns/[id]/jobs` shows the DM recent queued/running/succeeded/
+  failed jobs across bulk flesh-out, lore seed, and semantic indexing. Manual
+  semantic-index rebuilds reuse an active QUEUED/RUNNING rebuild instead of
+  enqueueing overlapping paid embedding work.
 - Track per-run **cost/usage** (tokens, estimated $) for the DM's awareness;
   store on the run/provenance record (not the key).
 

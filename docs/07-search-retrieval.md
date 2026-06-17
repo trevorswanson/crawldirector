@@ -62,11 +62,15 @@
 
 - On canon change (a Change Set approved, an entity/event/edge created or
   updated), enqueue a re-embed of the affected records via the `Job` worker.
+  Manual "Build semantic index" clicks are guarded separately: if an
+  `EMBED_SEARCH_DOCS` job is already QUEUED or RUNNING for the campaign, the
+  action returns that active job instead of enqueueing another paid rebuild.
 - Store embeddings alongside a denormalized search document (name + summary +
   salient fields). Re-embedding is idempotent and async; stale-but-close is
   acceptable between writes and re-index.
 - Embeddings are derived data — **never part of provenance**, never shown to
-  players, regenerable from canon at any time.
+  players, regenerable from canon at any time. DMs can inspect the background
+  status in `/campaigns/[id]/jobs`.
 
 ## Trust & safety
 

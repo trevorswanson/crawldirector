@@ -63,7 +63,7 @@ import {
   scaffoldStubEntities,
 } from "@/server/services/generation";
 import { askCampaign, type AskSource } from "@/server/services/ask";
-import { enqueueJob } from "@/server/services/jobs";
+import { enqueueBuildSemanticIndexJob, enqueueJob } from "@/server/services/jobs";
 import { isLoreSeedDatasetAvailable } from "@/server/services/seeding";
 import {
   approveChangeSet,
@@ -405,7 +405,13 @@ export async function restoreEntityAction(
 }
 
 export type GenerateActionState =
-  | { error?: string; success?: string; changeSetId?: string; timestamp?: number }
+  | {
+      error?: string;
+      success?: string;
+      changeSetId?: string;
+      activeJobStatus?: "QUEUED" | "RUNNING";
+      timestamp?: number;
+    }
   | undefined;
 
 // Flesh out an entity with AI. The result lands as a PENDING proposal in the
@@ -633,10 +639,20 @@ export async function enqueueBuildSemanticIndexAction(
   void _formData;
   const user = await requireUser();
   try {
-    await enqueueJob(user.id, campaignId, "EMBED_SEARCH_DOCS", {});
+    const result = await enqueueBuildSemanticIndexJob(user.id, campaignId);
     revalidatePath(`/campaigns/${campaignId}/search`);
+    revalidatePath(`/campaigns/${campaignId}/jobs`);
+    if (!result.created) {
+      const status = result.status === "RUNNING" ? "running" : "queued";
+      return {
+        success: `Semantic index build is already ${status}. Check the Job Queue for status.`,
+        activeJobStatus: result.status,
+        timestamp: Date.now(),
+      };
+    }
     return {
       success: "Semantic index build queued — search will rank by meaning once the worker finishes.",
+      activeJobStatus: result.status,
       timestamp: Date.now(),
     };
   } catch (error) {
