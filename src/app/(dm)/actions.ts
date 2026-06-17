@@ -1579,3 +1579,9 @@ export async function getCampaignCanonIntegrityAction(campaignId: string) {
   const { getCampaignCanonIntegrity } = await import("@/server/services/campaigns");
   return getCampaignCanonIntegrity(user.id, campaignId);
 }
+
+export async function getCampaignHeaderStatusAction(campaignId: string) {
+  const user = await requireUser();
+  const { getCampaignHeaderStatus } = await import("@/server/services/campaigns");
+  return getCampaignHeaderStatus(user.id, campaignId);
+}

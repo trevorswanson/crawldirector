@@ -48,24 +48,9 @@ non-milestone-blocking follow-ups and deferrals live in the subsections below.)
 - [ ] **Scale refinements for pickers and graph labels.** Revisit connection /
       timeline target lists with M5 search/typeahead, and revisit relationship
       graph label crowding with M12 graph analytics.
-- [ ] **Global current floor & day HUD.** Render the current campaign floor (from `Campaign.currentFloorId`) in the top-right of the global header on all pages (matching the mockup design). If a current day can be inferred (the absolute day of the most recent event using `resolveAbsoluteDay`), render it next to the floor (e.g., "Floor 9 · Day 12").
 - [ ] **M8/M12 broadcast HUD chrome.** Add a live broadcast ticker with session
       events/reveals in M8, and at-a-glance audience-rating tickers with M12
       broadcast/fan-economy modeling.
-- [ ] **Scaffold-stubs dedup at scale (M5 slice 6 follow-up).** The bulk-stub
-      scaffolding generator (`scaffoldStubEntities` in
-      [`generation.ts`](../src/server/services/generation.ts)) dedupes by stuffing
-      **every** existing entity name in the campaign into the prompt
-      (`existingNames`, a `findMany` with no `take:` limit) so the model avoids
-      minting duplicates. That prompt input grows unbounded with the world and
-      eventually blows the token budget. Retrieval deliberately can't fix it —
-      dedup needs the *exhaustive* name set, not a relevance subset (this is why
-      scaffold-stubs was out of scope for slice 6). The fix is a different
-      technique: let the model propose freely against a *bounded* context, then
-      **post-hoc dedupe** the proposed names against canon in the service
-      (normalize + lookup, drop/flag collisions before filing the change set) —
-      cheap and bounded regardless of campaign size. Not yet pressing (campaigns
-      are small today); revisit when entity counts climb.
 
 ### Deferred design options, not current blockers
 
@@ -94,6 +79,21 @@ non-milestone-blocking follow-ups and deferrals live in the subsections below.)
       - **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
+
+### Done — non-M6 backlog follow-ups (2026-06-17)
+
+- [x] **Global current floor & day HUD.** Added a route-aware topbar HUD
+      (`GlobalCampaignStatus`) that fetches through `getCampaignHeaderStatusAction`
+      / `getCampaignHeaderStatus` and renders the current floor from
+      `Campaign.currentFloorId`; when event times resolve via `resolveAbsoluteDay`,
+      it appends the latest inferred absolute day (e.g. `Floor 9 · Day 52`). The
+      read model is membership-scoped and mirrors timeline player projection for
+      floor/event visibility.
+- [x] **Scaffold-stubs dedup at scale.** `scaffoldStubEntities` now keeps the
+      prompt's existing-name sample bounded while retaining the full live canon
+      name set for service-side post-hoc exact-name collision filtering before
+      filing `CREATE_ENTITY` operations. `SCAFFOLD_STUBS_GENERATOR.version` is
+      now `2` because the prompt contract changed.
 
 ### Done — DM job queue + semantic rebuild duplicate guard (2026-06-17)
 
@@ -234,14 +234,14 @@ genuinely related entities rarely fell inside that window. Branch:
       coverage and the never-empty guard is unchanged. Retrieval is therefore purely
       **additive** — it can only re-order and widen which related entities the model
       sees, never narrow below the old behavior.
-- [x] **Deliberate deferrals (documented).** Flesh-out and scaffold-stubs are *not*
-      rewired this slice. Flesh-out loads only its own target — there is no
-      cross-canon dump to replace; adding related-canon *reference* context is
-      additive enrichment (and, with an embedder, a paid per-run query embed), so it
-      is tracked as a follow-up rather than bundled here. Scaffold-stubs needs an
-      *exhaustive* existing-name set for dedup, which a relevance subset can't safely
-      replace — its scaling fix is a different technique (post-hoc dedup), out of
-      scope for "retrieval context."
+- [x] **Deliberate deferrals (documented).** Flesh-out and scaffold-stubs were *not*
+      rewired in this part. Flesh-out loaded only its own target at the time — there
+      was no cross-canon dump to replace; adding related-canon *reference* context
+      was additive enrichment (and, with an embedder, a paid per-run query embed), so
+      it was tracked separately and delivered in slice 6 part 2. Scaffold-stubs
+      deliberately remains not retrieval-fed because dedup needs an *exhaustive*
+      existing-name check, not a relevance subset; its scaling fix is now the
+      post-hoc service dedupe noted in the 2026-06-17 non-M6 backlog follow-ups.
 - [x] **Tests:** new pure + DB-backed
       [`retrieval.test.ts`](../tests/unit/retrieval.test.ts) (query builder OR-join /
       trim / empty; term-sharing retrieval returns the related id and excludes the
@@ -981,12 +981,14 @@ usable with no key.
       `isStub`, kind-data defaults).
 - [x] **Service** (`src/server/services/generation.ts`): `scaffoldStubEntities`
       — DM/co-DM only — validates the instruction (non-empty, ≤2000 chars),
-      resolves the provider (graceful `ServiceError` when none), gathers existing
-      names + tags + the campaign style guide, calls `generateStructured`,
-      normalizes to specs (refuses an empty/no-op result), and files them via
-      `createPendingEntityChangeSet` with `source: AI` + provider/model/prompt
-      metadata. Provider failures become safe `ServiceError`s (ProviderError
-      message preserved; raw SDK text never reflected — invariant #6).
+      resolves the provider (graceful `ServiceError` when none), gathers tags + a
+      bounded existing-name sample + the campaign style guide, calls
+      `generateStructured`, normalizes to specs, post-hoc filters proposed names
+      against the full live canon name set (refuses an empty/no-op result), and
+      files them via `createPendingEntityChangeSet` with `source: AI` +
+      provider/model/prompt metadata. Provider failures become safe
+      `ServiceError`s (ProviderError message preserved; raw SDK text never
+      reflected — invariant #6).
 - [x] **Action + UI:** `scaffoldStubsAction` returns a safe success (with a link
       to the proposed change set) / error state and revalidates the queue + world
       browser. A DM-only **`ScaffoldStubsPanel`** ("Scaffold with AI") sits in the
@@ -996,10 +998,11 @@ usable with no key.
 - [x] **Tests:** pure generator unit (prompt framing/style-guide/existing-names/
       tags/CRAWLER-exclusion; spec normalize/dedupe/blank-drop; schema bounds +
       CRAWLER/unknown-type rejection); DB-backed `scaffoldStubEntities` (PENDING AI
-      change set of CREATE_ENTITY ops + provenance metadata, prompt context,
-      existing-name dedupe, empty/over-long instruction + no-provider + no-usable +
-      ProviderError + player rejections, AI provenance + AI-sourced stub on
-      approval); action coverage (success/link/revalidate + singular noun +
+      change set of CREATE_ENTITY ops + provenance metadata, bounded prompt
+      context + full-set post-hoc existing-name dedupe, empty/over-long
+      instruction + no-provider + no-usable + ProviderError + player rejections,
+      AI provenance + AI-sourced stub on approval); action coverage
+      (success/link/revalidate + singular noun +
       ServiceError/generic); `ScaffoldStubsPanel` component (collapsed→open,
       success-link, error); campaign-page gating (panel shown with a key, hidden
       without). lint (0 errors; 2 pre-existing settings warnings), typecheck,

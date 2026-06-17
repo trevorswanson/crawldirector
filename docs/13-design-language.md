@@ -111,8 +111,9 @@ They are **subtle and optional**:
 Desktop-first console (collapses below `md`): a 232px left nav + 52px topbar.
 
 - **Brand:** boxed gold "C" + "CrawlDirector" (`(dm)/layout.tsx`).
-- **Topbar:** campaign switcher, global "Search · Ask the Campaign" (planned, M5),
-  FX toggle, user avatar, sign-out.
+- **Topbar:** campaign switcher, global "Search · Ask the Campaign", current
+  floor/day HUD (`Floor N · Day N` when resolvable), FX toggle, user avatar,
+  sign-out.
 - **Left nav** (`DmNav`): grouped **DM Console** / **Player-facing**. Built screens
   link normally with a gold left-accent active state; **unbuilt screens are shown
   disabled with a "Planned · Mn" tooltip** so the nav doubles as a roadmap without

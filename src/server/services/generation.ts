@@ -30,6 +30,7 @@ import {
   buildScaffoldStubsPrompt,
   scaffoldStubsOutputSchema,
   scaffoldStubsToSpecs,
+  type StubSpec,
 } from "@/server/ai/generators/scaffold-stubs";
 import { buildStubCreatePatch } from "@/server/services/entities";
 import { retrieveRelatedEntityIds } from "@/server/services/retrieval";
@@ -79,6 +80,26 @@ export type ScaffoldStubsResult = {
 
 const MAX_SCAFFOLD_INSTRUCTION = 2000;
 const MAX_BULK_FLESH = 20;
+const SCAFFOLD_EXISTING_NAME_PROMPT_LIMIT = 80;
+
+function entityNameKey(name: string) {
+  return name.trim().toLowerCase();
+}
+
+function dropExistingNameCollisions(
+  specs: StubSpec[],
+  existingNames: string[],
+): StubSpec[] {
+  const taken = new Set(existingNames.map(entityNameKey).filter(Boolean));
+  const filtered: StubSpec[] = [];
+  for (const spec of specs) {
+    const key = entityNameKey(spec.name);
+    if (!key || taken.has(key)) continue;
+    taken.add(key);
+    filtered.push(spec);
+  }
+  return filtered;
+}
 
 // How many entities to offer the relationship-inference generator as candidate
 // edge endpoints. Retrieval picks the most relevant ones; the alphabetical
@@ -691,21 +712,23 @@ async function scaffoldStubEntitiesLocked(
 
   await assertWithinSpendCap(campaignId);
 
-  // Existing entity names (to dedupe against) and campaign tags (to encourage
-  // reuse), scoped to live (non-archived) canon.
+  // Existing entity names are kept in full for service-side collision filtering,
+  // while the prompt receives only a bounded sample so large campaigns do not
+  // spend unbounded tokens just listing canon names.
   const existing = await prisma.entity.findMany({
     where: { campaignId, status: { not: CanonStatus.ARCHIVED } },
     select: { name: true, tags: true },
     orderBy: { name: "asc" },
   });
   const existingNames = existing.map((e) => e.name);
+  const promptExistingNames = existingNames.slice(0, SCAFFOLD_EXISTING_NAME_PROMPT_LIMIT);
   const campaignTags = Array.from(new Set(existing.flatMap((e) => e.tags))).sort();
 
   const context = {
     campaignName: campaign.name,
     styleGuide: campaign.styleGuide,
     instruction: trimmed,
-    existingNames,
+    existingNames: promptExistingNames,
     campaignTags,
   };
   const { system, messages } = buildScaffoldStubsPrompt(context);
@@ -741,7 +764,10 @@ async function scaffoldStubEntitiesLocked(
     usage,
   });
 
-  const specs = scaffoldStubsToSpecs(context, output);
+  const specs = dropExistingNameCollisions(
+    scaffoldStubsToSpecs(context, output),
+    existingNames,
+  );
   if (specs.length === 0) {
     throw new ServiceError("The model did not propose any usable new entities.");
   }

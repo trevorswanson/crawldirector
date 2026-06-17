@@ -5,6 +5,7 @@ const {
   createCampaign,
   isLoreSeedDatasetAvailable,
   getCampaignCanonIntegrity,
+  getCampaignHeaderStatus,
   setCampaignCurrentFloor,
   createCrawler,
   createGenericEntity,
@@ -54,6 +55,7 @@ const {
   createCampaign: vi.fn(),
   isLoreSeedDatasetAvailable: vi.fn().mockReturnValue(true),
   getCampaignCanonIntegrity: vi.fn(),
+  getCampaignHeaderStatus: vi.fn(),
   setCampaignCurrentFloor: vi.fn(),
   createCrawler: vi.fn(),
   createGenericEntity: vi.fn(),
@@ -106,6 +108,7 @@ vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/campaigns", () => ({
   createCampaign,
   getCampaignCanonIntegrity,
+  getCampaignHeaderStatus,
   setCampaignCurrentFloor,
 }));
 vi.mock("@/server/services/entities", () => ({
@@ -174,6 +177,7 @@ import {
   createGenericEntityAction,
   quickCreateEntityAction,
   getCampaignCanonIntegrityAction,
+  getCampaignHeaderStatusAction,
   editChangeOperationFieldAction,
   editEventEffectsOperationAction,
   rejectChangeSetAction,
@@ -471,6 +475,21 @@ describe("getCampaignCanonIntegrityAction", () => {
 
     expect(getCampaignCanonIntegrity).toHaveBeenCalledWith("u1", "c1");
     expect(result).toBe(integrity);
+  });
+});
+
+describe("getCampaignHeaderStatusAction", () => {
+  it("delegates to the campaigns service for the current user", async () => {
+    const status = {
+      currentFloor: { id: "f9", name: "Larracos", floorNumber: 9 },
+      currentDay: 52,
+    };
+    getCampaignHeaderStatus.mockResolvedValue(status);
+
+    const result = await getCampaignHeaderStatusAction("c1");
+
+    expect(getCampaignHeaderStatus).toHaveBeenCalledWith("u1", "c1");
+    expect(result).toBe(status);
   });
 });
 
