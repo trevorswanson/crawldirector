@@ -50,15 +50,29 @@ describe("CampaignSearch", () => {
     vi.useRealTimers();
   });
 
+  it("does not push when the debounced value still matches the initial query", () => {
+    vi.useFakeTimers();
+    render(<CampaignSearch initialQuery="initial" />);
+
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+
+    expect(pushMock).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
   it("retains existing filters in URL search params", async () => {
     vi.useFakeTimers();
     render(
       <CampaignSearch
         initialQuery=""
+        activeTag="faction"
         activeType="NPC"
         activeStatus="CANON"
         activeSource="DM"
         lockedOnly={true}
+        aiUntouched={true}
       />
     );
     const input = screen.getByPlaceholderText(/Search entities/i);
@@ -70,7 +84,7 @@ describe("CampaignSearch", () => {
     });
 
     expect(pushMock).toHaveBeenCalledWith(
-      "/campaigns/c1?q=hello&type=NPC&status=CANON&source=DM&locked=1"
+      "/campaigns/c1?q=hello&tag=faction&type=NPC&status=CANON&source=DM&locked=1&aiUntouched=1"
     );
     vi.useRealTimers();
   });

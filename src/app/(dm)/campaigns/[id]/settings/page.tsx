@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
 
 import { JobKind } from "@/generated/prisma/client";
+import { resolveEmbeddingModel } from "@/lib/ai/providers";
 import { requireUser } from "@/server/auth/session";
-import { resolveCampaignEmbedder } from "@/server/ai";
 import { getCampaignForUser } from "@/server/services/campaigns";
 import { listAiKeys } from "@/server/services/ai-keys";
 import { getCampaignAiUsage } from "@/server/services/ai-usage";
@@ -29,16 +29,20 @@ export default async function CampaignSettingsPage({
   const role = campaign.members[0]?.role;
   if (role !== "OWNER" && role !== "CO_DM") notFound();
 
-  const [configured, usage, embedder] = await Promise.all([
+  const [configured, usage] = await Promise.all([
     listAiKeys(user.id, id),
     getCampaignAiUsage(user.id, id),
-    resolveCampaignEmbedder(id),
   ]);
 
   // Semantic index rebuild is only meaningful when an embedding-capable provider
-  // is configured (search degrades to full-text otherwise — doc 07). The manual
-  // rebuild is disabled while one is already QUEUED/RUNNING.
-  const canBuildSemanticIndex = embedder !== null;
+  // is configured (search degrades to full-text otherwise — doc 07). This check
+  // intentionally uses the safe settings projection instead of decrypting the key:
+  // DMs must still be able to open this page and replace a key after secret
+  // rotation or ciphertext corruption.
+  const canBuildSemanticIndex = configured.some(
+    (key) => resolveEmbeddingModel(key.providerId, key.embeddingModel) !== null,
+  );
+  // The manual rebuild is disabled while one is already QUEUED/RUNNING.
   const activeSemanticJobRow = canBuildSemanticIndex
     ? await getActiveCampaignJob(user.id, id, JobKind.EMBED_SEARCH_DOCS)
     : null;

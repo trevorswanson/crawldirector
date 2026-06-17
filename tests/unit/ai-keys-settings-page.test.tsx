@@ -83,14 +83,14 @@ describe("CampaignSettingsPage", () => {
   });
 
   it("shows Build semantic index when an embedder is configured", async () => {
-    resolveCampaignEmbedder.mockResolvedValue({ id: "openai" });
+    listAiKeys.mockResolvedValue([{ providerId: "openai", label: "OpenAI", lastFour: "9999" }]);
     render(await CampaignSettingsPage({ params: Promise.resolve({ id: "c1" }) }));
     expect(screen.getByTestId("build-semantic-index").textContent).toBe("idle");
     expect(getActiveCampaignJob).toHaveBeenCalledWith("u1", "c1", "EMBED_SEARCH_DOCS");
   });
 
   it("passes the active semantic job to the build button", async () => {
-    resolveCampaignEmbedder.mockResolvedValue({ id: "openai" });
+    listAiKeys.mockResolvedValue([{ providerId: "openai", label: "OpenAI", lastFour: "9999" }]);
     getActiveCampaignJob.mockResolvedValue({
       id: "j1",
       kind: "EMBED_SEARCH_DOCS",
@@ -106,11 +106,20 @@ describe("CampaignSettingsPage", () => {
   });
 
   it("shows a hint instead of the button when no embedder is configured", async () => {
-    resolveCampaignEmbedder.mockResolvedValue(null);
     render(await CampaignSettingsPage({ params: Promise.resolve({ id: "c1" }) }));
     expect(screen.queryByTestId("build-semantic-index")).toBeNull();
     expect(screen.getByText(/to enable semantic search/i)).toBeTruthy();
     expect(getActiveCampaignJob).not.toHaveBeenCalled();
+  });
+
+  it("still renders key management when the semantic capability check fails", async () => {
+    resolveCampaignEmbedder.mockRejectedValue(new Error("invalid encrypted key"));
+    render(await CampaignSettingsPage({ params: Promise.resolve({ id: "c1" }) }));
+    expect(screen.getByTestId("ai-keys-panel").textContent).toBe("panel:c1:1");
+    expect(screen.queryByTestId("build-semantic-index")).toBeNull();
+    expect(screen.getByText(/to enable semantic search/i)).toBeTruthy();
+    expect(getActiveCampaignJob).not.toHaveBeenCalled();
+    expect(resolveCampaignEmbedder).not.toHaveBeenCalled();
   });
 
   it("404s when the campaign is not visible to the user", async () => {

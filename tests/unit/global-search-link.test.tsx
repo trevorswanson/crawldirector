@@ -14,14 +14,40 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/app/(dm)/actions", () => ({ searchCampaignPreviewAction }));
 vi.mock("next/link", () => ({
-  default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => (
-    <a href={href} {...rest}>
+  default: ({
+    href,
+    children,
+    onClick,
+    ...rest
+  }: {
+    href: string;
+    children: React.ReactNode;
+    onClick?: React.MouseEventHandler<HTMLAnchorElement>;
+  }) => (
+    <a
+      href={href}
+      onClick={(event) => {
+        event.preventDefault();
+        onClick?.(event);
+      }}
+      {...rest}
+    >
       {children}
     </a>
   ),
 }));
 
 import { GlobalSearchLink } from "@/components/console/global-search-link";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
 afterEach(() => {
   cleanup();
@@ -87,6 +113,15 @@ describe("GlobalSearchLink", () => {
     expect(pushMock).toHaveBeenCalledWith("/campaigns/c1/search?q=mordecai");
   });
 
+  it("does not navigate to search when Enter is pressed without a query", () => {
+    usePathnameMock.mockReturnValue("/campaigns/c1/entities/e9");
+    render(<GlobalSearchLink />);
+
+    fireEvent.keyDown(screen.getByLabelText("Search or ask the campaign"), { key: "Enter" });
+
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
   it("hides the dropdown when focus leaves the search box", () => {
     usePathnameMock.mockReturnValue("/campaigns/c1/entities/e9");
     render(<GlobalSearchLink />);
@@ -98,6 +133,20 @@ describe("GlobalSearchLink", () => {
     // Focus moves out of the box (relatedTarget defaults to null → outside).
     fireEvent.focusOut(input);
     expect(screen.queryByRole("link", { name: /See all results/ })).toBeNull();
+  });
+
+  it("closes the dropdown after footer links are clicked", () => {
+    usePathnameMock.mockReturnValue("/campaigns/c1/entities/e9");
+    render(<GlobalSearchLink />);
+
+    const input = screen.getByLabelText("Search or ask the campaign");
+    fireEvent.change(input, { target: { value: "mordecai" } });
+    fireEvent.click(screen.getByRole("link", { name: /See all results/ }));
+    expect(screen.queryByRole("link", { name: /See all results/ })).toBeNull();
+
+    fireEvent.focus(input);
+    fireEvent.click(screen.getByRole("link", { name: 'Ask the campaign "mordecai"' }));
+    expect(screen.queryByRole("link", { name: 'Ask the campaign "mordecai"' })).toBeNull();
   });
 
   it("shows a safe unavailable state when preview search fails", async () => {
@@ -121,5 +170,83 @@ describe("GlobalSearchLink", () => {
         .getByRole("link", { name: 'Ask the campaign "mordecai"' })
         .getAttribute("href"),
     ).toBe("/campaigns/c1/ask?q=mordecai");
+  });
+
+  it("ignores fulfilled preview results after the query changes", async () => {
+    vi.useFakeTimers();
+    usePathnameMock.mockReturnValue("/campaigns/c1/search");
+    const first = deferred<Awaited<ReturnType<typeof searchCampaignPreviewAction>>>();
+    const second = deferred<Awaited<ReturnType<typeof searchCampaignPreviewAction>>>();
+    searchCampaignPreviewAction
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+
+    render(<GlobalSearchLink />);
+    const input = screen.getByLabelText("Search or ask the campaign");
+    fireEvent.change(input, { target: { value: "mor" } });
+    await act(async () => {
+      vi.advanceTimersByTime(260);
+      await Promise.resolve();
+    });
+
+    fireEvent.change(input, { target: { value: "mordecai" } });
+    await act(async () => {
+      vi.advanceTimersByTime(260);
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      first.resolve([
+        { id: "old", label: "Old result", meta: "NPC", excerpt: null, href: "/old" },
+      ]);
+      await Promise.resolve();
+    });
+    expect(screen.queryByText("Old result")).toBeNull();
+
+    await act(async () => {
+      second.resolve([
+        { id: "new", label: "Mordecai", meta: "NPC", excerpt: null, href: "/new" },
+      ]);
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("link", { name: /Mordecai/ })).toBeTruthy();
+  });
+
+  it("ignores rejected preview results after the query changes", async () => {
+    vi.useFakeTimers();
+    usePathnameMock.mockReturnValue("/campaigns/c1/search");
+    const first = deferred<Awaited<ReturnType<typeof searchCampaignPreviewAction>>>();
+    const second = deferred<Awaited<ReturnType<typeof searchCampaignPreviewAction>>>();
+    searchCampaignPreviewAction
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+
+    render(<GlobalSearchLink />);
+    const input = screen.getByLabelText("Search or ask the campaign");
+    fireEvent.change(input, { target: { value: "mor" } });
+    await act(async () => {
+      vi.advanceTimersByTime(260);
+      await Promise.resolve();
+    });
+
+    fireEvent.change(input, { target: { value: "mordecai" } });
+    await act(async () => {
+      vi.advanceTimersByTime(260);
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      first.reject(new Error("stale failure"));
+      await Promise.resolve();
+    });
+    expect(screen.queryByText("Search unavailable.")).toBeNull();
+
+    await act(async () => {
+      second.resolve([
+        { id: "new", label: "Mordecai", meta: "NPC", excerpt: null, href: "/new" },
+      ]);
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("link", { name: /Mordecai/ })).toBeTruthy();
   });
 });
