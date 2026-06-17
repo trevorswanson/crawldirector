@@ -6,6 +6,7 @@ import {
   getCampaignForUser,
   listCampaignsForUser,
   getCampaignCanonIntegrity,
+  getCampaignHeaderStatus,
 } from "@/server/services/campaigns";
 import {
   CanonStatus,
@@ -112,6 +113,97 @@ describe("getCampaignForUser", () => {
     const campaign = await createCampaign(a.id, { name: "Secret" });
 
     expect(await getCampaignForUser(b.id, campaign.id)).toBeNull();
+  });
+});
+
+describe("getCampaignHeaderStatus", () => {
+  it("returns the current floor and latest resolvable absolute day for a member", async () => {
+    const owner = await makeUser("hud-owner@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon run" });
+    const floor = await prisma.entity.create({
+      data: {
+        campaignId: campaign.id,
+        type: EntityType.FLOOR,
+        name: "The Hunting Grounds",
+        data: { floorNumber: 9, startDay: 40, collapseDay: 70 },
+        visibility: Visibility.DM_ONLY,
+        source: ChangeSource.DM,
+        status: CanonStatus.CANON,
+      },
+    });
+    await prisma.campaign.update({
+      where: { id: campaign.id },
+      data: { currentFloorId: floor.id },
+    });
+    await prisma.event.createMany({
+      data: [
+        {
+          campaignId: campaign.id,
+          title: "Older scene",
+          inGameTime: { basis: "FLOOR_START", floor: 9, offset: 2, unit: "DAY" },
+          orderKey: 9,
+          rank: "a0",
+          status: CanonStatus.CANON,
+        },
+        {
+          campaignId: campaign.id,
+          title: "Latest scene",
+          inGameTime: { basis: "FLOOR_START", floor: 9, offset: 12, unit: "DAY" },
+          orderKey: 9,
+          rank: "b0",
+          status: CanonStatus.CANON,
+        },
+      ],
+    });
+
+    await expect(getCampaignHeaderStatus(owner.id, campaign.id)).resolves.toEqual({
+      currentFloor: { id: floor.id, name: "The Hunting Grounds", floorNumber: 9 },
+      currentDay: 52,
+    });
+  });
+
+  it("defaults floor 1 to day 1 so FLOOR_START events resolve without an explicit startDay", async () => {
+    const owner = await makeUser("hud-floor1@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Tutorial run" });
+    const floor = await prisma.entity.create({
+      data: {
+        campaignId: campaign.id,
+        type: EntityType.FLOOR,
+        name: "Tutorial",
+        // No startDay set — the resolution layer should treat floor 1 as day 1.
+        data: { floorNumber: 1 },
+        visibility: Visibility.DM_ONLY,
+        source: ChangeSource.DM,
+        status: CanonStatus.CANON,
+      },
+    });
+    await prisma.campaign.update({
+      where: { id: campaign.id },
+      data: { currentFloorId: floor.id },
+    });
+    await prisma.event.create({
+      data: {
+        campaignId: campaign.id,
+        title: "Three days in",
+        inGameTime: { basis: "FLOOR_START", floor: 1, offset: 3, unit: "DAY" },
+        orderKey: 1,
+        rank: "a0",
+        status: CanonStatus.CANON,
+      },
+    });
+
+    await expect(getCampaignHeaderStatus(owner.id, campaign.id)).resolves.toEqual({
+      currentFloor: { id: floor.id, name: "Tutorial", floorNumber: 1 },
+      currentDay: 4,
+    });
+  });
+
+  it("returns null for a non-member without leaking campaign status", async () => {
+    const owner = await makeUser("hud-owner2@test.com");
+    const outsider = await makeUser("hud-outsider@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Private crawl" });
+
+    await expect(getCampaignHeaderStatus(outsider.id, campaign.id)).resolves.toBeNull();
   });
 });
 
@@ -383,4 +475,3 @@ describe("getCampaignCanonIntegrity", () => {
     });
   });
 });
-

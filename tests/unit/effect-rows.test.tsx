@@ -138,15 +138,35 @@ describe("EffectRows", () => {
     expect(field(container, "effectCount").value).toBe("0");
   });
 
-  it("disables adding and explains when there are no crawler candidates", () => {
+  it("explains the crawler-less case but still allows adding a (floor) effect", () => {
     render(
       <form>
         <EffectRows candidates={[]} />
       </form>,
     );
-    expect(screen.getByText(/No crawlers in this campaign/)).toBeDefined();
+    // No crawlers to stat-target, but floor effects (COLLAPSE_FLOOR) need none,
+    // so adding stays enabled.
+    expect(screen.getByText(/only floor effects can be applied/)).toBeDefined();
     expect(
       (screen.getByRole("button", { name: /Add effect/ }) as HTMLButtonElement).disabled,
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  it("hides the crawler target + stat inputs for a floor-collapse effect row", () => {
+    render(
+      <form>
+        <EffectRows
+          candidates={[{ id: "c1", name: "Carl", type: "CRAWLER" }]}
+        />
+      </form>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Add effect/ }));
+    fireEvent.change(screen.getByLabelText("Effect kind"), {
+      target: { value: "COLLAPSE_FLOOR" },
+    });
+    // The collapse row derives its subject from the event — no crawler target,
+    // no stat selector.
+    expect(screen.queryByLabelText("Stat to adjust")).toBeNull();
+    expect(screen.getByText(/Acts on this event/)).toBeDefined();
   });
 });

@@ -206,6 +206,64 @@ describe("event effects", () => {
     ]);
   });
 
+  it("does not mark a freshly applied HP effect proposal stale after queue refresh", async () => {
+    const { owner, campaign, carl, event } = await setup("fresh-hp-effect@test.com");
+    await prisma.crawler.update({
+      where: { id: carl.id },
+      data: { hp: 10 },
+    });
+    await declareEffect(owner.id, campaign.id, event.id, [
+      { kind: "ADJUST_STAT", targetEntityId: carl.id, stat: "hp", delta: 5 },
+    ]);
+
+    const result = await applyEventEffects(owner.id, campaign.id, event.id);
+    const queue = await listPendingChangeSetsForUser(owner.id, campaign.id);
+
+    expect(queue[0].operations[0]).toMatchObject({
+      id: result.operationId,
+      blockedByLock: false,
+      isStale: false,
+    });
+    expect(queue[0].operations[0].effectPreviews).toEqual([
+      expect.objectContaining({
+        targetEntityId: carl.id,
+        before: 10,
+        after: 15,
+      }),
+    ]);
+  });
+
+  it("treats unset HP as zero when previewing and applying an HP delta", async () => {
+    const { owner, campaign, carl, event } = await setup("fresh-null-hp-effect@test.com");
+    await prisma.crawler.update({
+      where: { id: carl.id },
+      data: { hp: null },
+    });
+    await declareEffect(owner.id, campaign.id, event.id, [
+      { kind: "ADJUST_STAT", targetEntityId: carl.id, stat: "hp", delta: 5 },
+    ]);
+
+    const result = await applyEventEffects(owner.id, campaign.id, event.id);
+    const queue = await listPendingChangeSetsForUser(owner.id, campaign.id);
+
+    expect(queue[0].operations[0]).toMatchObject({
+      id: result.operationId,
+      blockedByLock: false,
+      isStale: false,
+    });
+    expect(queue[0].operations[0].effectPreviews).toEqual([
+      expect.objectContaining({
+        targetEntityId: carl.id,
+        before: null,
+        after: 5,
+      }),
+    ]);
+
+    await approveAcceptedChangeSet(owner.id, campaign.id, result.changeSetId);
+    const crawler = await prisma.crawler.findUnique({ where: { id: carl.id } });
+    expect(crawler?.hp).toBe(5);
+  });
+
   it("previews set-stat and alive effects while omitting unresolved deltas", async () => {
     const { owner, campaign, carl, event } = await setup("preview-effects@test.com");
     await declareEffect(owner.id, campaign.id, event.id, [

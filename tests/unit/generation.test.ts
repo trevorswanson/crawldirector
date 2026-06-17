@@ -669,7 +669,7 @@ describe("scaffoldStubEntities", () => {
     expect(changeSet?.status).toBe("PENDING");
     expect(changeSet?.source).toBe("AI");
     expect(changeSet?.promptId).toBe("scaffold-stubs");
-    expect(changeSet?.promptVersion).toBe("1");
+    expect(changeSet?.promptVersion).toBe("2");
     expect(changeSet?.operations).toHaveLength(2);
     expect(changeSet?.operations.every((o) => o.op === "CREATE_ENTITY")).toBe(true);
     // Operations come back without a stable sort key (no orderBy), so assert on
@@ -716,6 +716,44 @@ describe("scaffoldStubEntities", () => {
     expect(result.stubCount).toBe(1);
     const ops = await prisma.changeOperation.findMany({ where: { changeSetId: result.changeSetId } });
     expect((ops[0].patch as Record<string, { to: unknown }>).name.to).toBe("Brand New");
+  });
+
+  it("bounds existing-name prompt context but still drops post-hoc canon duplicates", async () => {
+    const { dmId, campaignId } = await seed();
+    await prisma.entity.createMany({
+      data: [
+        ...Array.from({ length: 120 }, (_, index) => ({
+          campaignId,
+          type: "NPC" as const,
+          name: `Existing ${String(index).padStart(3, "0")}`,
+          tags: ["bulk"],
+        })),
+        {
+          campaignId,
+          type: "NPC" as const,
+          name: "Zzz Out Of Prompt",
+          tags: ["late"],
+        },
+      ],
+    });
+    const provider = fakeStubProvider([
+      { type: "NPC", name: "zzz out of prompt" },
+      { type: "NPC", name: "Fresh Late" },
+    ]);
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    const result = await scaffoldStubEntities(dmId, campaignId, "More late NPCs.");
+
+    const user = provider.generateStructured.mock.calls[0][0].messages[0].content;
+    expect(user).toContain("Existing 000");
+    expect(user).not.toContain("Zzz Out Of Prompt");
+    expect(result.stubCount).toBe(1);
+    const ops = await prisma.changeOperation.findMany({
+      where: { changeSetId: result.changeSetId },
+    });
+    expect(ops.map((op) => (op.patch as Record<string, { to: unknown }>).name.to)).toEqual([
+      "Fresh Late",
+    ]);
   });
 
   it("rejects an empty instruction without calling the provider", async () => {

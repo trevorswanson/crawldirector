@@ -5,6 +5,7 @@ const {
   createCampaign,
   isLoreSeedDatasetAvailable,
   getCampaignCanonIntegrity,
+  getCampaignHeaderStatus,
   setCampaignCurrentFloor,
   createCrawler,
   createGenericEntity,
@@ -44,6 +45,7 @@ const {
   inferRelationshipsForEntity,
   scaffoldStubEntities,
   askCampaign,
+  searchEntityCandidates,
   enqueueJob,
   enqueueBuildSemanticIndexJob,
   signOut,
@@ -54,6 +56,7 @@ const {
   createCampaign: vi.fn(),
   isLoreSeedDatasetAvailable: vi.fn().mockReturnValue(true),
   getCampaignCanonIntegrity: vi.fn(),
+  getCampaignHeaderStatus: vi.fn(),
   setCampaignCurrentFloor: vi.fn(),
   createCrawler: vi.fn(),
   createGenericEntity: vi.fn(),
@@ -93,6 +96,7 @@ const {
   inferRelationshipsForEntity: vi.fn(),
   scaffoldStubEntities: vi.fn(),
   askCampaign: vi.fn(),
+  searchEntityCandidates: vi.fn(),
   enqueueJob: vi.fn(),
   enqueueBuildSemanticIndexJob: vi.fn(),
   signOut: vi.fn(),
@@ -106,6 +110,7 @@ vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/campaigns", () => ({
   createCampaign,
   getCampaignCanonIntegrity,
+  getCampaignHeaderStatus,
   setCampaignCurrentFloor,
 }));
 vi.mock("@/server/services/entities", () => ({
@@ -158,6 +163,7 @@ vi.mock("@/server/services/generation", () => ({
   scaffoldStubEntities,
 }));
 vi.mock("@/server/services/ask", () => ({ askCampaign }));
+vi.mock("@/server/services/search", () => ({ searchEntityCandidates }));
 vi.mock("@/server/services/jobs", () => ({ enqueueJob, enqueueBuildSemanticIndexJob }));
 vi.mock("@/server/services/seeding", () => ({ isLoreSeedDatasetAvailable }));
 vi.mock("@/server/auth", () => ({ signOut }));
@@ -174,6 +180,7 @@ import {
   createGenericEntityAction,
   quickCreateEntityAction,
   getCampaignCanonIntegrityAction,
+  getCampaignHeaderStatusAction,
   editChangeOperationFieldAction,
   editEventEffectsOperationAction,
   rejectChangeSetAction,
@@ -220,6 +227,7 @@ import {
   enqueueBulkFleshAction,
   enqueueBuildSemanticIndexAction,
   askCampaignAction,
+  searchEntityCandidatesAction,
   inferRelationshipsForEntityAction,
   scaffoldStubsAction,
 } from "@/app/(dm)/actions";
@@ -471,6 +479,21 @@ describe("getCampaignCanonIntegrityAction", () => {
 
     expect(getCampaignCanonIntegrity).toHaveBeenCalledWith("u1", "c1");
     expect(result).toBe(integrity);
+  });
+});
+
+describe("getCampaignHeaderStatusAction", () => {
+  it("delegates to the campaigns service for the current user", async () => {
+    const status = {
+      currentFloor: { id: "f9", name: "Larracos", floorNumber: 9 },
+      currentDay: 52,
+    };
+    getCampaignHeaderStatus.mockResolvedValue(status);
+
+    const result = await getCampaignHeaderStatusAction("c1");
+
+    expect(getCampaignHeaderStatus).toHaveBeenCalledWith("u1", "c1");
+    expect(result).toBe(status);
   });
 });
 
@@ -2215,6 +2238,36 @@ describe("askCampaignAction", () => {
     expect((await askCampaignAction("c1", undefined, form({ question: "x" })))?.error).toBe(
       "The campaign couldn't answer that. Please try again.",
     );
+  });
+});
+
+describe("searchEntityCandidatesAction", () => {
+  it("uses the authenticated user and clamps search picker options", async () => {
+    searchEntityCandidates.mockResolvedValue([
+      { id: "e1", name: "Carl", type: "CRAWLER" },
+    ]);
+
+    const result = await searchEntityCandidatesAction("c1", "Carl", {
+      limit: 100,
+      types: ["CRAWLER"],
+      excludeIds: ["self"],
+    });
+
+    expect(searchEntityCandidates).toHaveBeenCalledWith("u1", "c1", "Carl", {
+      limit: 20,
+      types: ["CRAWLER"],
+      excludeIds: ["self"],
+    });
+    expect(result).toEqual([{ id: "e1", name: "Carl", type: "CRAWLER" }]);
+  });
+
+  it("returns an empty picker result for invalid options", async () => {
+    await expect(
+      searchEntityCandidatesAction("c1", "Carl", {
+        types: ["NOT_A_TYPE"],
+      } as never),
+    ).resolves.toEqual([]);
+    expect(searchEntityCandidates).not.toHaveBeenCalled();
   });
 });
 

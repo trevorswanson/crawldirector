@@ -97,6 +97,23 @@ export type SearchResult = {
   hits: SearchHit[];
 };
 
+export type SearchCanonOptions = {
+  limit?: number;
+  targetTypes?: string[];
+  /**
+   * Semantic ranking is on by default for the full search experience. Picker
+   * callers pass `false` so keystrokes stay local Postgres full-text only and
+   * never spend a BYO embedding call.
+   */
+  semantic?: boolean;
+};
+
+export type EntitySearchCandidate = {
+  id: string;
+  name: string;
+  type: EntityType;
+};
+
 const MAX_LIMIT = 50;
 const DEFAULT_LIMIT = 25;
 
@@ -260,7 +277,7 @@ export async function searchCanon(
   userId: string,
   campaignId: string,
   rawQuery: string,
-  options: { limit?: number; targetTypes?: string[] } = {},
+  options: SearchCanonOptions = {},
 ): Promise<SearchResult> {
   const membership = await prisma.membership.findUnique({
     where: { userId_campaignId: { userId, campaignId } },
@@ -287,34 +304,36 @@ export async function searchCanon(
   let queryVector: number[] | null = null;
   let queryModel = EMBED_MODEL_DEFAULT;
   let queryDimensions = EMBED_DIMENSIONS;
-  try {
-    const embedder = await resolveCampaignEmbedder(campaignId);
-    if (embedder) {
-      await assertWithinSpendCap(campaignId);
-      const result = await embedder.embed([query]);
-      const vector = result.vectors[0];
-      const expectedDimensions = embedder.embeddingDimensions ?? EMBED_DIMENSIONS;
-      if (vector && vector.length === expectedDimensions) {
-        queryVector = vector;
-        queryModel = result.model;
-        queryDimensions = expectedDimensions;
-        // Best-effort: never fail search over a usage-tracking write.
-        try {
-          await recordAiUsage({
-            campaignId,
-            userId,
-            providerId: embedder.id,
-            model: result.model,
-            generatorId: "search-query-embed",
-            usage: result.usage,
-          });
-        } catch {
-          // usage tracking is non-critical
+  if (options.semantic !== false) {
+    try {
+      const embedder = await resolveCampaignEmbedder(campaignId);
+      if (embedder) {
+        await assertWithinSpendCap(campaignId);
+        const result = await embedder.embed([query]);
+        const vector = result.vectors[0];
+        const expectedDimensions = embedder.embeddingDimensions ?? EMBED_DIMENSIONS;
+        if (vector && vector.length === expectedDimensions) {
+          queryVector = vector;
+          queryModel = result.model;
+          queryDimensions = expectedDimensions;
+          // Best-effort: never fail search over a usage-tracking write.
+          try {
+            await recordAiUsage({
+              campaignId,
+              userId,
+              providerId: embedder.id,
+              model: result.model,
+              generatorId: "search-query-embed",
+              usage: result.usage,
+            });
+          } catch {
+            // usage tracking is non-critical
+          }
         }
       }
+    } catch {
+      queryVector = null;
     }
-  } catch {
-    queryVector = null;
   }
 
   // `websearch_to_tsquery` safely parses arbitrary user input (quotes, OR, -),
@@ -428,4 +447,43 @@ export async function searchCanon(
   }
 
   return { role: membership.role, query, hits };
+}
+
+export async function searchEntityCandidates(
+  userId: string,
+  campaignId: string,
+  rawQuery: string,
+  options: {
+    limit?: number;
+    types?: EntityType[];
+    excludeIds?: string[];
+  } = {},
+): Promise<EntitySearchCandidate[]> {
+  const query = rawQuery.trim();
+  if (!query) return [];
+
+  const limit = Math.min(20, Math.max(1, options.limit ?? 8));
+  const types = options.types ? new Set<EntityType>(options.types) : null;
+  const excludeIds = new Set(options.excludeIds ?? []);
+  const result = await searchCanon(userId, campaignId, query, {
+    // Over-fetch a little so type/exclusion filtering does not starve the picker
+    // when the top few entity hits are not valid for this target field.
+    limit: Math.min(MAX_LIMIT, limit * 3),
+    targetTypes: [SEARCH_TARGET_ENTITY],
+    semantic: false,
+  });
+
+  const candidates: EntitySearchCandidate[] = [];
+  for (const hit of result.hits) {
+    if (hit.targetType !== SEARCH_TARGET_ENTITY) continue;
+    if (excludeIds.has(hit.entity.id)) continue;
+    if (types && !types.has(hit.entity.type)) continue;
+    candidates.push({
+      id: hit.entity.id,
+      name: hit.entity.name,
+      type: hit.entity.type,
+    });
+    if (candidates.length >= limit) break;
+  }
+  return candidates;
 }

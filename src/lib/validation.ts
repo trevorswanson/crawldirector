@@ -1,6 +1,11 @@
 import { z } from "zod";
 
 import { allKindDataKeys, allKindDataShape, dataKeysFor } from "@/lib/entity-kinds";
+import {
+  eventEffectKindValues,
+  eventEffectRequiresTarget,
+  eventEffectStatValues,
+} from "@/lib/event-effect-kinds";
 import { optionalInt, optionalText } from "@/lib/zod-field-helpers";
 
 // Shared Zod schemas. Per docs/02-architecture.md every Server Action validates
@@ -426,20 +431,14 @@ const eventParticipantSchema = z.object({
 // stat, or sets the alive flag; applying routes APPLY_EVENT_EFFECTS through the
 // review pipeline. Generic-entity / disposition / PERSONA_SHIFT effects are
 // follow-ups.
-export const eventEffectKindValues = ["ADJUST_STAT", "SET_STAT", "SET_ALIVE"] as const;
-export type EventEffectKind = (typeof eventEffectKindValues)[number];
-
-// Crawler numeric fields an event effect can update — these map to the review
-// service's `crawler.*` patch fields.
-export const eventEffectStatValues = [
-  "gold",
-  "hp",
-  "mp",
-  "level",
-  "killCount",
-  "currentFloor",
-] as const;
-export type EventEffectStat = (typeof eventEffectStatValues)[number];
+// Effect kind/stat values + per-kind metadata live in the shared registry so
+// new kinds slot in without re-deriving the per-kind branching here.
+export {
+  eventEffectKindValues,
+  eventEffectStatValues,
+  type EventEffectKind,
+  type EventEffectStat,
+} from "@/lib/event-effect-kinds";
 
 export const eventEffectSchema = z
   .object({
@@ -447,7 +446,10 @@ export const eventEffectSchema = z
     // newly declared effects); present when editing an existing effect.
     id: z.string().trim().max(60).optional(),
     kind: z.enum(eventEffectKindValues),
-    targetEntityId: z.string().trim().min(1, "Effect target is required."),
+    // Optional at the field level — kinds that derive their subject from the
+    // event (e.g. COLLAPSE_FLOOR) carry no target. `superRefine` requires it for
+    // kinds whose registry meta says they target an entity.
+    targetEntityId: z.string().trim().min(1).optional(),
     stat: z.enum(eventEffectStatValues).optional(),
     delta: z.preprocess(
       (value) =>
@@ -470,6 +472,13 @@ export const eventEffectSchema = z
     note: optionalText(200),
   })
   .superRefine((effect, ctx) => {
+    if (eventEffectRequiresTarget(effect.kind) && !effect.targetEntityId) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Effect target is required.",
+        path: ["targetEntityId"],
+      });
+    }
     if (effect.kind === "ADJUST_STAT") {
       if (!effect.stat) {
         ctx.addIssue({ code: "custom", message: "Choose a stat to adjust.", path: ["stat"] });

@@ -23,17 +23,20 @@ import {
   archiveCampaignEventAction,
   archiveCampaignEventCausalityAction,
   createCampaignEventAction,
+  createCampaignFloorEntityAction,
   linkCampaignEventCauseAction,
   orderEventsFromCausalityAction,
   reorderEventAction,
   restoreCampaignEventAction,
   restoreCampaignEventCausalityAction,
+  searchEntityCandidatesAction,
   setCampaignCurrentFloorAction,
   setCampaignEventLockAction,
   updateCampaignEventAction,
   type EventActionState,
   type EventCausalityActionState,
 } from "@/app/(dm)/actions";
+import { invalidateCampaignStatus } from "@/lib/campaign-events";
 import {
   EntityTypeahead,
   type EntityCandidate,
@@ -59,6 +62,7 @@ import { describeEffect } from "@/lib/event-effects";
 import { floorRelativeSortKey } from "@/lib/time-ref";
 import {
   computeFloorDayRanges,
+  resolveAbsoluteDay,
   type FloorAnchors,
 } from "@/lib/time-resolve";
 import { eventParticipantRoleValues } from "@/lib/validation";
@@ -178,12 +182,16 @@ function NewEventForm({
   candidates,
   crawlerCandidates,
   anchorCandidates,
+  searchParticipants,
+  searchCrawlers,
   onClose,
 }: {
   campaignId: string;
   candidates: EntityCandidate[];
   crawlerCandidates: EntityCandidate[];
   anchorCandidates: { id: string; title: string }[];
+  searchParticipants?: (query: string) => Promise<EntityCandidate[]>;
+  searchCrawlers?: (query: string) => Promise<EntityCandidate[]>;
   onClose: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -215,6 +223,7 @@ function NewEventForm({
       setError(result.error);
       return;
     }
+    invalidateCampaignStatus();
     onClose();
   };
 
@@ -263,6 +272,11 @@ function NewEventForm({
             <EntityTypeahead
               name={`participantId_${index}`}
               candidates={pickable}
+              searchCandidates={
+                searchParticipants
+                  ? async (query) => withoutFloorCandidates(await searchParticipants(query))
+                  : undefined
+              }
               value={row.entity}
               onChange={(entity) =>
                 setRows((current) =>
@@ -321,7 +335,10 @@ function NewEventForm({
         )}
       </div>
 
-      <EffectRows candidates={crawlerCandidates} />
+      <EffectRows
+        candidates={crawlerCandidates}
+        searchCandidates={searchCrawlers}
+      />
 
       {error && (
         <p role="alert" className="text-[11px] text-[var(--no)]">
@@ -357,6 +374,8 @@ function EditEventForm({
   anchorCandidates,
   resolveName,
   causeCandidates,
+  searchParticipants,
+  searchCrawlers,
   onFocusEvent,
   onRemoveCausality,
   onClose,
@@ -368,6 +387,8 @@ function EditEventForm({
   anchorCandidates: { id: string; title: string }[];
   resolveName: (targetId: string) => string;
   causeCandidates: { id: string; title: string }[];
+  searchParticipants?: (query: string) => Promise<EntityCandidate[]>;
+  searchCrawlers?: (query: string) => Promise<EntityCandidate[]>;
   onFocusEvent: (eventId: string) => void;
   onRemoveCausality: (linkId: string) => void;
   onClose: () => void;
@@ -388,12 +409,13 @@ function EditEventForm({
     .map((effect) => ({
       id: effect.id,
       kind: effect.kind,
-      target:
-        crawlerCandidates.find((candidate) => candidate.id === effect.targetId) ?? {
-          id: effect.targetId,
-          name: resolveName(effect.targetId),
-          type: "CRAWLER",
-        },
+      target: effect.targetId
+        ? crawlerCandidates.find((candidate) => candidate.id === effect.targetId) ?? {
+            id: effect.targetId,
+            name: resolveName(effect.targetId),
+            type: "CRAWLER",
+          }
+        : null,
       stat: effect.stat ?? "gold",
       delta: effect.delta != null ? String(effect.delta) : "",
       valueNumber: effect.valueNumber != null ? String(effect.valueNumber) : "",
@@ -416,6 +438,7 @@ function EditEventForm({
         setError(result.error);
         return;
       }
+      invalidateCampaignStatus();
       onClose();
     });
   };
@@ -453,8 +476,16 @@ function EditEventForm({
           excludeEventId={event.id}
         />
 
-        <ParticipantRows candidates={candidates} initial={initialParticipants} />
-        <EffectRows candidates={crawlerCandidates} initial={initialEffects} />
+        <ParticipantRows
+          candidates={candidates}
+          initial={initialParticipants}
+          searchCandidates={searchParticipants}
+        />
+        <EffectRows
+          candidates={crawlerCandidates}
+          initial={initialEffects}
+          searchCandidates={searchCrawlers}
+        />
       </form>
 
       {(event.causedBy.length > 0 ||
@@ -523,11 +554,13 @@ function EditEventForm({
 // EventEffectsSection (applyCampaignEventEffectsAction routes through the review
 // pipeline) — restyled to the broadcast-HUD diff chips the timeline calls for.
 function TimelineEffects({
+  campaignId,
   effects,
   resolveName,
   onApply,
   canEdit,
 }: {
+  campaignId: string;
   effects: EventEffectView[];
   resolveName: (targetId: string) => string;
   onApply: () => Promise<EventActionState>;
@@ -546,7 +579,11 @@ function TimelineEffects({
     setPending(true);
     const result = await onApply();
     setPending(false);
-    if (result?.error) setError(result.error);
+    if (result?.error) {
+      setError(result.error);
+    } else {
+      invalidateCampaignStatus();
+    }
   };
 
   return (
@@ -558,21 +595,35 @@ function TimelineEffects({
       <div className="flex flex-wrap items-center gap-[7px]">
         {effects.map((effect) => {
           const diff = effectDiff(effect);
+          const status = effectStatusLabel(effect);
+          const statusClassName = "text-[8.5px] uppercase tracking-[.06em]";
+          const statusStyle = {
+            color: effect.applied ? "var(--ok)" : "var(--ink-faint)",
+          };
           return (
             <span
               key={effect.id}
-              title={effectStatusLabel(effect)}
+              title={status}
               className="inline-flex items-center gap-[7px] border border-[var(--line)] bg-[var(--bg-2)] px-[8px] py-[3px] font-mono text-[11px] whitespace-nowrap"
             >
-              <span className="text-[var(--ink-dim)]">{resolveName(effect.targetId)}</span>
+              {effect.targetId && (
+                <span className="text-[var(--ink-dim)]">{resolveName(effect.targetId)}</span>
+              )}
               {effect.stat && <span className="text-[var(--ink-faint)]">{effect.stat}</span>}
               <span style={{ color: diff.color, fontWeight: 600 }}>{diff.text}</span>
-              <span
-                className="text-[8.5px] uppercase tracking-[.06em]"
-                style={{ color: effect.applied ? "var(--ok)" : "var(--ink-faint)" }}
-              >
-                {effectStatusLabel(effect)}
-              </span>
+              {effect.reviewStatus === "PENDING" && effect.pendingChangeSetId ? (
+                <Link
+                  href={`/campaigns/${campaignId}/review?selected=${effect.pendingChangeSetId}`}
+                  className={statusClassName}
+                  style={statusStyle}
+                >
+                  {status}
+                </Link>
+              ) : (
+                <span className={statusClassName} style={statusStyle}>
+                  {status}
+                </span>
+              )}
             </span>
           );
         })}
@@ -756,6 +807,7 @@ export function CampaignTimeline({
   const [reordering, startReorder] = useTransition();
   const [ordering, startOrdering] = useTransition();
   const [, startFloorChange] = useTransition();
+  const [creatingFloor, startFloorCreate] = useTransition();
   const router = useRouter();
 
   // Scroll to + briefly highlight an event; clears any provenance filter that
@@ -817,6 +869,12 @@ export function CampaignTimeline({
   const crawlerCandidates = candidates.filter(
     (candidate) => candidate.type === "CRAWLER",
   );
+  const searchParticipants = (query: string) =>
+    searchEntityCandidatesAction(campaignId, query);
+  const searchCrawlers = (query: string) =>
+    searchEntityCandidatesAction(campaignId, query, {
+      types: ["CRAWLER"],
+    });
   const nameById = new Map(
     candidates.map((candidate) => [candidate.id, candidate.name] as const),
   );
@@ -847,6 +905,15 @@ export function CampaignTimeline({
     })),
     floorAnchorsByNumber,
   );
+  const timeByEventId = new Map(events.map((event) => [event.id, event.time] as const));
+  const absoluteDayByEventId = new Map<string, number>();
+  for (const event of events) {
+    const day = resolveAbsoluteDay(event.time, {
+      eventTimeById: (eventId) => timeByEventId.get(eventId),
+      floorAnchors: (floor) => floorAnchorsByNumber.get(floor),
+    });
+    if (day !== null) absoluteDayByEventId.set(event.id, day);
+  }
 
   const liveEvents = removedEventId
     ? events.filter((event) => event.id !== removedEventId)
@@ -928,7 +995,20 @@ export function CampaignTimeline({
   const handleFloorChange = (floorEntityId: string) => {
     startFloorChange(async () => {
       await setCampaignCurrentFloorAction(campaignId, floorEntityId || null);
+      invalidateCampaignStatus();
       router.refresh();
+    });
+  };
+
+  // Spin up the FLOOR entity for a floor that has events but no backing entity,
+  // then drop the DM on its detail page to name/theme it.
+  const handleCreateFloor = (floorNumber: number) => {
+    startFloorCreate(async () => {
+      const result = await createCampaignFloorEntityAction(campaignId, floorNumber);
+      if ("entityId" in result) {
+        invalidateCampaignStatus();
+        router.push(`/campaigns/${campaignId}/entities/${result.entityId}`);
+      }
     });
   };
 
@@ -964,6 +1044,12 @@ export function CampaignTimeline({
     const causeCandidates = events
       .filter((candidate) => !linkedIds.has(candidate.id))
       .map((candidate) => ({ id: candidate.id, title: candidate.title }));
+    const participantHref = (participantId: string) => {
+      const params = new URLSearchParams({ event: event.id });
+      const day = absoluteDayByEventId.get(event.id);
+      if (day !== undefined) params.set("rosterDay", String(day));
+      return `/campaigns/${campaignId}/entities/${participantId}?${params.toString()}`;
+    };
 
     return (
       <article
@@ -1119,6 +1205,8 @@ export function CampaignTimeline({
               anchorCandidates={anchorCandidates}
               resolveName={resolveName}
               causeCandidates={causeCandidates}
+              searchParticipants={searchParticipants}
+              searchCrawlers={searchCrawlers}
               onFocusEvent={focusEvent}
               onRemoveCausality={setRemovedCausalityId}
               onClose={() => setEditingId(null)}
@@ -1136,7 +1224,7 @@ export function CampaignTimeline({
               {event.participants.map((participant) => (
                 <Link
                   key={`${event.id}-${participant.id}-${participant.role}`}
-                  href={`/campaigns/${campaignId}/entities/${participant.id}?event=${event.id}`}
+                  href={participantHref(participant.id)}
                   className="inline-flex items-center gap-[6px] border border-[var(--line)] bg-[var(--bg-2)] px-[7px] py-[3px] text-[11.5px] text-[var(--ink-dim)] hover:border-[var(--line-strong)]"
                 >
                   <TypeDot type={participant.type} size={7} />
@@ -1178,6 +1266,7 @@ export function CampaignTimeline({
 
           {event.effects.length > 0 && (
             <TimelineEffects
+              campaignId={campaignId}
               effects={event.effects}
               resolveName={resolveName}
               canEdit={canEdit}
@@ -1348,12 +1437,6 @@ export function CampaignTimeline({
               </h1>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {floors.currentFloorNumber != null && (
-                <HudTag>
-                  <span className="live-dot" />
-                  Floor {floors.currentFloorNumber}
-                </HudTag>
-              )}
               <HudTag>
                 {shownEvents.length} / {events.length} shown
               </HudTag>
@@ -1447,6 +1530,8 @@ export function CampaignTimeline({
                   candidates={candidates}
                   crawlerCandidates={crawlerCandidates}
                   anchorCandidates={anchorCandidates}
+                  searchParticipants={searchParticipants}
+                  searchCrawlers={searchCrawlers}
                   onClose={() => setOpen(false)}
                 />
               </div>
@@ -1537,6 +1622,18 @@ export function CampaignTimeline({
                               <span className="live-dot" />
                               On air
                             </span>
+                          )}
+                          {canEdit && !descriptor?.entityId && (
+                            <button
+                              type="button"
+                              onClick={() => handleCreateFloor(floorNumber)}
+                              disabled={creatingFloor}
+                              title={`Create a FLOOR entity for floor ${floorNumber}`}
+                              className="inline-flex items-center gap-[5px] whitespace-nowrap border border-[var(--line-strong)] px-[8px] py-[3px] font-mono text-[9px] uppercase tracking-[.1em] text-[var(--ink-faint)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-50"
+                            >
+                              <Plus aria-hidden size={11} />
+                              Create floor
+                            </button>
                           )}
                         </div>
                         <div className="mt-[5px] flex flex-wrap gap-[14px] font-mono text-[10.5px] text-[var(--ink-faint)]">

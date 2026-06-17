@@ -1,6 +1,16 @@
 import { prisma } from "@/server/db";
-import { Role, CanonStatus, ChangeSource, EntityType } from "@/generated/prisma/client";
+import {
+  Role,
+  CanonStatus,
+  ChangeSource,
+  EntityType,
+  Prisma,
+  Visibility,
+} from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
+import { effectiveFloorStartDay, readFloorData } from "@/lib/floor";
+import { resolveAbsoluteDay } from "@/lib/time-resolve";
+import { readTimeRef } from "@/lib/time-ref";
 import { createCampaignSchema, type CreateCampaignInput } from "@/lib/validation";
 
 // Creating a campaign also makes the creator its OWNER member. Tenancy is
@@ -55,6 +65,106 @@ export async function getCampaignForUser(userId: string, campaignId: string) {
       _count: { select: { members: true, entities: true } },
     },
   });
+}
+
+export type CampaignHeaderStatus = {
+  currentFloor: {
+    id: string;
+    name: string;
+    floorNumber: number | null;
+  } | null;
+  currentDay: number | null;
+};
+
+export async function getCampaignHeaderStatus(
+  userId: string,
+  campaignId: string,
+): Promise<CampaignHeaderStatus | null> {
+  const membership = await prisma.membership.findUnique({
+    where: { userId_campaignId: { userId, campaignId } },
+    select: { role: true },
+  });
+  if (!membership) return null;
+
+  const isPlayer = membership.role === Role.PLAYER;
+  const floorWhere: Prisma.EntityWhereInput = {
+    campaignId,
+    type: EntityType.FLOOR,
+    status: { not: CanonStatus.ARCHIVED },
+    ...(isPlayer ? { visibility: Visibility.PLAYER_VISIBLE } : {}),
+  };
+  const eventWhere: Prisma.EventWhereInput = {
+    campaignId,
+    status: { not: CanonStatus.ARCHIVED },
+    ...(isPlayer
+      ? {
+          secret: false,
+          participants: {
+            some: {
+              entity: {
+                status: { not: CanonStatus.ARCHIVED },
+                visibility: Visibility.PLAYER_VISIBLE,
+              },
+            },
+          },
+        }
+      : {}),
+  };
+
+  const [campaign, floorRows, eventRows] = await Promise.all([
+    prisma.campaign.findUnique({
+      where: { id: campaignId },
+      select: { currentFloorId: true },
+    }),
+    prisma.entity.findMany({
+      where: floorWhere,
+      select: { id: true, name: true, data: true },
+    }),
+    prisma.event.findMany({
+      where: eventWhere,
+      select: { id: true, inGameTime: true },
+    }),
+  ]);
+  if (!campaign) return null;
+
+  const floorAnchorsByNumber = new Map<
+    number,
+    { startDay: number | null; collapseDay: number | null }
+  >();
+  let currentFloor: CampaignHeaderStatus["currentFloor"] = null;
+  for (const floor of floorRows) {
+    const data = readFloorData(floor.data);
+    if (typeof data.floorNumber === "number") {
+      floorAnchorsByNumber.set(data.floorNumber, {
+        startDay: effectiveFloorStartDay(data.floorNumber, data.startDay),
+        collapseDay: data.collapseDay,
+      });
+    }
+    if (floor.id === campaign.currentFloorId) {
+      currentFloor = {
+        id: floor.id,
+        name: floor.name,
+        floorNumber: data.floorNumber,
+      };
+    }
+  }
+
+  const eventTimesById = new Map(
+    eventRows.map((event) => [event.id, readTimeRef(event.inGameTime)]),
+  );
+  const context = {
+    eventTimeById: (eventId: string) => eventTimesById.get(eventId),
+    floorAnchors: (floor: number) => floorAnchorsByNumber.get(floor),
+  };
+  let currentDay: number | null = null;
+  for (const time of eventTimesById.values()) {
+    const day = resolveAbsoluteDay(time, context);
+    if (day != null && (currentDay == null || day > currentDay)) {
+      currentDay = day;
+    }
+  }
+
+  return { currentFloor, currentDay };
 }
 
 // Point the campaign's "current floor" at a DM-chosen FLOOR entity (or clear it
@@ -312,4 +422,3 @@ export async function getCampaignCanonIntegrity(
     totalFields,
   };
 }
-

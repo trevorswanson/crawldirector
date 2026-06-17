@@ -20,7 +20,7 @@ import type { LLMMessage, LLMSystemBlock } from "../types";
 // changes meaningfully.
 export const SCAFFOLD_STUBS_GENERATOR = {
   id: "scaffold-stubs",
-  version: "1",
+  version: "2",
 } as const;
 
 // CRAWLERs (player protagonists) are created deliberately via the dedicated
@@ -105,7 +105,8 @@ export function buildScaffoldStubsPrompt(ctx: ScaffoldStubsContext): {
         "- Keep the summary to one sentence; do not write descriptions.",
         "- Keep tags lowercase and hyphenated; reuse the campaign's existing tags",
         "  when they fit rather than inventing near-duplicates.",
-        "- Do not duplicate entities that already exist (listed below).",
+        "- Avoid duplicating existing entities. A bounded sample may be listed",
+        "  below, and exact canon-name collisions are filtered after generation.",
         "- Propose only what the instruction asks for; prefer a focused set over",
         "  padding the list with filler.",
         "- Everything you produce is a *proposal* a human DM reviews before it",
@@ -134,7 +135,7 @@ export function buildScaffoldStubsPrompt(ctx: ScaffoldStubsContext): {
   if (ctx.existingNames && ctx.existingNames.length) {
     lines.push(
       "",
-      "Existing entities — do NOT propose duplicates of these:",
+      "Existing entities sample — do NOT propose duplicates of these:",
       ctx.existingNames.join(", "),
     );
   }

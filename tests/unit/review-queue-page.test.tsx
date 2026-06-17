@@ -351,6 +351,77 @@ describe("ReviewQueuePage", () => {
     expect(screen.getByText("No effects in this proposal.")).toBeDefined();
   });
 
+  it("keeps stale APPLY_EVENT_EFFECTS ops on the structured renderer instead of the JSON conflict panel", async () => {
+    listEntitiesForUser.mockResolvedValue({
+      entities: [{ id: "crawler-1", name: "Carl", type: "CRAWLER" }],
+    });
+    listPendingChangeSetsForUser.mockResolvedValue([
+      {
+        id: "cs-fx",
+        campaignId: "c1",
+        source: "DM",
+        title: "Apply event effects",
+        summary: null,
+        status: "PENDING",
+        actorUserId: "u1",
+        providerId: null,
+        model: null,
+        promptId: null,
+        promptVersion: null,
+        runId: null,
+        baseVersions: {},
+        reviewedById: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        operations: [
+          {
+            id: "op-fx",
+            changeSetId: "cs-fx",
+            op: "APPLY_EVENT_EFFECTS",
+            targetType: "EVENT",
+            targetId: "event-1",
+            targetLabel: "Floor 9 boss falls",
+            targetEntityType: "EVENT",
+            targetLocked: false,
+            lockedFields: [],
+            currentValues: {},
+            effectPreviews: [],
+            patch: {
+              effects: {
+                to: [
+                  {
+                    id: "fx-1",
+                    kind: "ADJUST_STAT",
+                    targetEntityId: "crawler-1",
+                    stat: "hp",
+                    delta: 5,
+                    applied: false,
+                    reviewStatus: "PENDING",
+                    pendingChangeSetId: "cs-fx",
+                    pendingOperationId: "op-fx",
+                  },
+                ],
+              },
+            },
+            editedPatch: null,
+            decision: "PENDING",
+            blockedByLock: false,
+            isStale: true,
+          },
+        ],
+      },
+    ]);
+
+    render(await ReviewQueuePage({ params: Promise.resolve({ id: "c1" }) }));
+
+    expect(screen.getByText("Carl")).toBeDefined();
+    expect(screen.getByText("HP +5")).toBeDefined();
+    expect(screen.queryByText(/Conflict on effects/)).toBeNull();
+    expect(screen.queryByText(/\"targetEntityId\":\"crawler-1\"/)).toBeNull();
+  });
+
   it("skips the entity lookup when no structured entity field is pending", async () => {
     listPendingChangeSetsForUser.mockResolvedValue([
       {

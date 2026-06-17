@@ -19,6 +19,7 @@ const {
   archiveEventCausalityAction,
   restoreEventCausalityAction,
   applyEventEffectsAction,
+  searchEntityCandidatesAction,
 } = vi.hoisted(() => ({
   createEventAction: vi.fn(),
   updateEventAction: vi.fn(),
@@ -29,6 +30,7 @@ const {
   archiveEventCausalityAction: vi.fn(),
   restoreEventCausalityAction: vi.fn(),
   applyEventEffectsAction: vi.fn(),
+  searchEntityCandidatesAction: vi.fn(),
 }));
 
 vi.mock("@/app/(dm)/actions", () => ({
@@ -41,6 +43,7 @@ vi.mock("@/app/(dm)/actions", () => ({
   archiveEventCausalityAction,
   restoreEventCausalityAction,
   applyEventEffectsAction,
+  searchEntityCandidatesAction,
 }));
 vi.mock("next/link", () => ({
   default: ({ href, children }: { href: string; children: React.ReactNode }) => (
@@ -94,6 +97,7 @@ function event(overrides: Partial<EntityEvent> = {}): EntityEvent {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  searchEntityCandidatesAction.mockResolvedValue([]);
 });
 
 afterEach(cleanup);
@@ -669,7 +673,7 @@ describe("TimelinePanel", () => {
     expect(screen.queryByText("DM-only (secret)")).toBeNull();
   });
 
-  it("does not offer FLOOR entities as event participants (ADR 0008 §3)", () => {
+  it("does not offer FLOOR entities as event participants (ADR 0008 §3)", async () => {
     render(
       <TimelinePanel
         campaignId="c1"
@@ -690,7 +694,9 @@ describe("TimelinePanel", () => {
     });
     // The floor is filtered out of the participant pool; a real crawler still is.
     expect(screen.queryByRole("button", { name: /Gloomdeep/ })).toBeNull();
-    expect(screen.getByText("No matching entities.")).toBeDefined();
+    await waitFor(() =>
+      expect(screen.getByText("No matching entities.")).toBeDefined(),
+    );
   });
 
   it("falls back to the floor when no time label is set", () => {

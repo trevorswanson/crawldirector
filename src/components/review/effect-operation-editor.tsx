@@ -18,7 +18,8 @@ import type { EventEffectKind, EventEffectStat } from "@/lib/validation";
 export type ReviewEffectSeed = {
   id: string;
   kind: EventEffectKind;
-  targetEntityId: string;
+  // Null for subject-derived kinds (COLLAPSE_FLOOR) that carry no crawler target.
+  targetEntityId: string | null;
   stat: EventEffectStat | null;
   delta: number | null;
   valueNumber: number | null;
@@ -37,11 +38,13 @@ function toRow(
     kind: seed.kind,
     // Unresolved targets (e.g. an archived crawler) fall back to a bare id so
     // the typeahead still submits the original target rather than dropping it.
-    target:
-      candidatesById.get(seed.targetEntityId) ??
-      (seed.targetEntityId
-        ? { id: seed.targetEntityId, name: seed.targetEntityId, type: "CRAWLER" }
-        : null),
+    target: seed.targetEntityId
+      ? candidatesById.get(seed.targetEntityId) ?? {
+          id: seed.targetEntityId,
+          name: seed.targetEntityId,
+          type: "CRAWLER",
+        }
+      : null,
     stat: seed.stat ?? "gold",
     delta: seed.delta != null ? String(seed.delta) : "",
     valueNumber: seed.valueNumber != null ? String(seed.valueNumber) : "",
@@ -60,6 +63,9 @@ function toRow(
 // Compact, target-prefixed description of one effect for the read-only summary,
 // e.g. "Gold +500", "HP = 40", "Marked dead".
 function describeSeed(seed: ReviewEffectSeed): string {
+  if (seed.kind === "COLLAPSE_FLOOR") {
+    return "Floor collapses — closes the current floor and opens the next the same day";
+  }
   if (seed.before !== undefined && seed.after !== undefined) {
     const label =
       seed.kind === "SET_ALIVE"
@@ -118,10 +124,14 @@ export function EffectOperationEditor({
                 className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-3 px-3 py-[9px] text-[12.5px] leading-[1.5]"
               >
                 <div className="min-w-0">
-                  <span className="font-semibold text-[var(--ink)]">
-                    {candidatesById.get(seed.targetEntityId)?.name ?? seed.targetEntityId}
+                  {seed.targetEntityId && (
+                    <span className="font-semibold text-[var(--ink)]">
+                      {candidatesById.get(seed.targetEntityId)?.name ?? seed.targetEntityId}
+                    </span>
+                  )}
+                  <span className={`text-[var(--add)]${seed.targetEntityId ? " mx-[7px]" : ""}`}>
+                    {describeSeed(seed)}
                   </span>
-                  <span className="mx-[7px] text-[var(--add)]">{describeSeed(seed)}</span>
                   {seed.note && (
                     <span className="text-[var(--ink-faint)]">— {seed.note}</span>
                   )}

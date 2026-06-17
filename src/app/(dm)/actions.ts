@@ -15,6 +15,7 @@ import {
   createGenericEntitySchema,
   createRelationshipSchema,
   changeOperationDecisionSchema,
+  entityTypeValues,
   eventEffectSchema,
   eventParticipantRoleValues,
   grantKnowledgeSchema,
@@ -24,6 +25,10 @@ import {
   updateEventSchema,
   updateRelationshipSchema,
 } from "@/lib/validation";
+import {
+  eventEffectKindValues,
+  eventEffectRequiresTarget,
+} from "@/lib/event-effect-kinds";
 import {
   archiveRelationship,
   createRelationship,
@@ -63,6 +68,10 @@ import {
   scaffoldStubEntities,
 } from "@/server/services/generation";
 import { askCampaign, type AskSource } from "@/server/services/ask";
+import {
+  searchEntityCandidates,
+  type EntitySearchCandidate,
+} from "@/server/services/search";
 import { enqueueBuildSemanticIndexJob, enqueueJob } from "@/server/services/jobs";
 import { isLoreSeedDatasetAvailable } from "@/server/services/seeding";
 import {
@@ -255,6 +264,38 @@ export async function quickCreateEntityAction(
   }
 
   redirect(`/campaigns/${campaignId}/entities/${entityId}`);
+}
+
+// Create the FLOOR entity for a floor number that has timeline events but no
+// backing entity yet (the timeline "Create" affordance). Returns the new id so
+// the client can route the DM to the detail page to flesh out name/theme/days.
+export async function createCampaignFloorEntityAction(
+  campaignId: string,
+  floorNumber: number,
+): Promise<{ entityId: string } | { error: string }> {
+  const user = await requireUser();
+  const parsed = createGenericEntitySchema.safeParse({
+    type: "FLOOR",
+    name: `Floor ${floorNumber}`,
+    summary: "",
+    description: "",
+    visibility: "DM_ONLY",
+    tags: "",
+    isStub: true,
+    floorNumber,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  try {
+    const entity = await createGenericEntity(user.id, campaignId, parsed.data);
+    revalidatePath(`/campaigns/${campaignId}/timeline`);
+    return { entityId: entity.id };
+  } catch (error) {
+    logActionError("Create floor entity failed", error);
+    if (error instanceof ServiceError) return { error: error.message };
+    return { error: "Could not create the floor. Please try again." };
+  }
 }
 
 export async function updateEntityAction(
@@ -537,6 +578,27 @@ export async function askCampaignAction(
   }
 }
 
+const searchEntityCandidateOptionsSchema = z.object({
+  limit: z.number().int().min(1).max(100).optional(),
+  types: z.array(z.enum(entityTypeValues)).max(entityTypeValues.length).optional(),
+  excludeIds: z.array(z.string()).max(50).optional(),
+}).optional();
+
+export async function searchEntityCandidatesAction(
+  campaignId: string,
+  query: string,
+  rawOptions?: unknown,
+): Promise<EntitySearchCandidate[]> {
+  const parsed = searchEntityCandidateOptionsSchema.safeParse(rawOptions);
+  if (!parsed.success) return [];
+  const user = await requireUser();
+  const options = parsed.data ?? {};
+  return searchEntityCandidates(user.id, campaignId, query, {
+    ...options,
+    limit: Math.min(20, options.limit ?? 8),
+  });
+}
+
 export type BulkGenerateActionState =
   | {
       error?: string;
@@ -667,9 +729,29 @@ export async function approveChangeSetAction(
   changeSetId: string,
 ): Promise<void> {
   const user = await requireUser();
-  await approveChangeSet(user.id, campaignId, changeSetId);
+  // Approval applies the change set in one transaction; if an operation throws
+  // (e.g. a floor collapse whose day became unresolvable), the whole thing rolls
+  // back and stays pending. Surface that as a banner on the queue instead of an
+  // unhandled error page. `redirect` throws to unwind, so it must run outside the
+  // try/catch that handles the *approval* failure.
+  let errorMessage: string | null = null;
+  try {
+    await approveChangeSet(user.id, campaignId, changeSetId);
+  } catch (error) {
+    if (error instanceof ServiceError) {
+      errorMessage = error.message;
+    } else {
+      logActionError("Approve change set failed", error);
+      errorMessage = "Could not approve this proposal. Please try again.";
+    }
+  }
   revalidatePath(`/campaigns/${campaignId}`);
   revalidatePath(`/campaigns/${campaignId}/review`);
+  if (errorMessage) {
+    redirect(
+      `/campaigns/${campaignId}/review?selected=${changeSetId}&error=${encodeURIComponent(errorMessage)}`,
+    );
+  }
   redirect(`/campaigns/${campaignId}/review?done=${changeSetId}`);
 }
 
@@ -1065,13 +1147,20 @@ function parseEffectRows(formData: FormData) {
   const count = Number(formData.get("effectCount") ?? 0);
   const effects: Record<string, unknown>[] = [];
   for (let index = 0; index < Math.min(count, 20); index += 1) {
+    const kind = formData.get(`effectKind_${index}`)?.toString();
     const targetEntityId = formData.get(`effectTarget_${index}`)?.toString().trim();
-    if (!targetEntityId) continue;
+    // Skip empty trailing rows: a target-requiring kind with no target picked.
+    // Subject-derived kinds (e.g. COLLAPSE_FLOOR) are kept even without a target.
+    const requiresTarget =
+      kind == null ||
+      !eventEffectKindValues.includes(kind as never) ||
+      eventEffectRequiresTarget(kind as never);
+    if (requiresTarget && !targetEntityId) continue;
     const effect: Record<string, unknown> = {
-      kind: formData.get(`effectKind_${index}`)?.toString(),
-      targetEntityId,
+      kind,
       note: formData.get(`effectNote_${index}`)?.toString() ?? "",
     };
+    if (targetEntityId) effect.targetEntityId = targetEntityId;
     const id = formData.get(`effectId_${index}`)?.toString().trim();
     if (id) effect.id = id;
     const stat = formData.get(`effectStat_${index}`)?.toString();
@@ -1578,4 +1667,10 @@ export async function getCampaignCanonIntegrityAction(campaignId: string) {
   const user = await requireUser();
   const { getCampaignCanonIntegrity } = await import("@/server/services/campaigns");
   return getCampaignCanonIntegrity(user.id, campaignId);
+}
+
+export async function getCampaignHeaderStatusAction(campaignId: string) {
+  const user = await requireUser();
+  const { getCampaignHeaderStatus } = await import("@/server/services/campaigns");
+  return getCampaignHeaderStatus(user.id, campaignId);
 }

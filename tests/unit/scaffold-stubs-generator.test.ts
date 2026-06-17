@@ -143,6 +143,6 @@ describe("scaffoldableTypeValues", () => {
 describe("SCAFFOLD_STUBS_GENERATOR", () => {
   it("has a stable id + version for provenance", () => {
     expect(SCAFFOLD_STUBS_GENERATOR.id).toBe("scaffold-stubs");
-    expect(SCAFFOLD_STUBS_GENERATOR.version).toBe("1");
+    expect(SCAFFOLD_STUBS_GENERATOR.version).toBe("2");
   });
 });

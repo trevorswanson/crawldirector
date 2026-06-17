@@ -99,9 +99,11 @@ function MembersTree({
 export function RosterPanel({
   campaignId,
   roster,
+  asOfDay,
 }: {
   campaignId: string;
   roster: GroupRoster;
+  asOfDay?: number;
 }) {
   const { leaders, members, rolledUpMemberCount } = roster;
   const empty = leaders.length === 0 && members.length === 0;
@@ -113,6 +115,7 @@ export function RosterPanel({
         <Kicker dim noLead>
           Roster · {rolledUpMemberCount}{" "}
           {rolledUpMemberCount === 1 ? "member" : "members"}
+          {asOfDay !== undefined ? ` · Day ${asOfDay}` : ""}
         </Kicker>
       </div>
 

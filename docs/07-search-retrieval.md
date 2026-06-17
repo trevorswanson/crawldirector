@@ -77,8 +77,10 @@ calls for — flesh-out only proposes against its own target, so it can't violat
 the lock invariant). Both re-check the spend cap after retrieval, since the
 query-embed inside `searchCanon` can itself spend. The third generator,
 scaffold-stubs, is deliberately *not* retrieval-fed: its dedup needs an
-*exhaustive* existing-name set, which a relevance subset can't safely replace
-(its scaling fix is post-hoc dedup, a different technique).
+*exhaustive* existing-name check, which a relevance subset can't safely replace.
+Its scaling fix is separate from retrieval: the prompt receives only a bounded
+sample of existing names, then `scaffoldStubEntities` filters proposed names
+against the full live canon set before filing review operations.
 
 ## Indexing pipeline
 
@@ -107,6 +109,10 @@ scaffold-stubs, is deliberately *not* retrieval-fed: its dedup needs an
   an **OpenAI-compatible** provider (real OpenAI or a self-hosted/proxy endpoint)
   — the Anthropic Messages API has no embeddings endpoint — so an Anthropic-only
   campaign keeps full-text search until an OpenAI-compatible key is added.
+- **Keyword-only callers can opt out of semantic search.** Search-backed UI
+  pickers use `searchEntityCandidates`, which calls
+  `searchCanon(..., { semantic: false })`; these lookups run against scoped
+  Postgres full-text search and never embed the query or call an AI provider.
 
 ## Data model touchpoints
 

@@ -4,6 +4,7 @@ import { requireUser } from "@/server/auth/session";
 import { listCampaignsForUser } from "@/server/services/campaigns";
 import { DmNav } from "@/components/console/dm-nav";
 import { CampaignSwitcher } from "@/components/console/campaign-switcher";
+import { GlobalCampaignStatus } from "@/components/console/global-campaign-status";
 import { GlobalSearchLink } from "@/components/console/global-search-link";
 import { UserMenu } from "@/components/console/user-menu";
 
@@ -43,6 +44,7 @@ export default async function DmLayout({
           <GlobalSearchLink />
 
           <div className="ml-auto flex items-center gap-3">
+            <GlobalCampaignStatus />
             <UserMenu
               user={{ name: user.name ?? null, email: user.email ?? "" }}
               initials={initials}

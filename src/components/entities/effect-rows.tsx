@@ -9,11 +9,13 @@ import {
 } from "@/components/entities/entity-typeahead";
 import { effectStatLabels } from "@/lib/event-effects";
 import {
+  eventEffectKindMeta,
   eventEffectKindValues,
+  eventEffectRequiresTarget,
   eventEffectStatValues,
   type EventEffectKind,
   type EventEffectStat,
-} from "@/lib/validation";
+} from "@/lib/event-effect-kinds";
 
 export type EffectRowValue = {
   id?: string;
@@ -27,11 +29,6 @@ export type EffectRowValue = {
   note: string;
 };
 
-const kindLabels: Record<EventEffectKind, string> = {
-  ADJUST_STAT: "Adjust stat",
-  SET_STAT: "Set stat",
-  SET_ALIVE: "Set alive/dead",
-};
 
 function emptyRow(): EffectRowValue {
   return {
@@ -56,10 +53,12 @@ export function EffectRows({
   candidates,
   initial,
   allowAdd = true,
+  searchCandidates,
 }: {
   candidates: EntityCandidate[];
   initial?: EffectRowValue[];
   allowAdd?: boolean;
+  searchCandidates?: (query: string) => Promise<EntityCandidate[]>;
 }) {
   const [rows, setRows] = useState(
     (initial ?? []).map((row, index) => ({ key: index, ...row })),
@@ -93,7 +92,7 @@ export function EffectRows({
           <button
             type="button"
             onClick={addRow}
-            disabled={rows.length >= 20 || candidates.length === 0}
+            disabled={rows.length >= 20}
             className="inline-flex items-center gap-[6px] border border-[var(--line)] px-[8px] py-[5px] font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)] hover:text-[var(--ink-dim)] disabled:opacity-50"
           >
             <Plus aria-hidden size={11} />
@@ -103,7 +102,7 @@ export function EffectRows({
       </div>
       {candidates.length === 0 && (
         <p className="text-[10.5px] text-[var(--ink-faint)]">
-          No crawlers in this campaign to apply effects to.
+          No crawlers in this campaign — only floor effects can be applied.
         </p>
       )}
       {rows.map((row, index) => (
@@ -126,17 +125,24 @@ export function EffectRows({
             >
               {eventEffectKindValues.map((kind) => (
                 <option key={kind} value={kind}>
-                  {kindLabels[kind]}
+                  {eventEffectKindMeta[kind].label}
                 </option>
               ))}
             </select>
-            <EntityTypeahead
-              name={`effectTarget_${index}`}
-              candidates={candidates}
-              value={row.target}
-              onChange={(target) => patchRow(row.key, { target })}
-              placeholder="Search crawler..."
-            />
+            {eventEffectRequiresTarget(row.kind) ? (
+              <EntityTypeahead
+                name={`effectTarget_${index}`}
+                candidates={candidates}
+                searchCandidates={searchCandidates}
+                value={row.target}
+                onChange={(target) => patchRow(row.key, { target })}
+                placeholder="Search crawler..."
+              />
+            ) : (
+              <span className="self-center font-mono text-[10.5px] text-[var(--ink-faint)]">
+                Acts on this event&rsquo;s floor
+              </span>
+            )}
             <button
               type="button"
               title="Remove effect row"
@@ -146,7 +152,7 @@ export function EffectRows({
               <Trash2 aria-hidden size={12} />
             </button>
           </div>
-          {row.kind !== "SET_ALIVE" ? (
+          {eventEffectKindMeta[row.kind].usesStat ? (
             <div className="grid gap-2 sm:grid-cols-[150px_120px]">
               <select
                 name={`effectStat_${index}`}
@@ -184,7 +190,7 @@ export function EffectRows({
                 className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
               />
             </div>
-          ) : (
+          ) : eventEffectKindMeta[row.kind].usesAlive ? (
             <select
               name={`effectValue_${index}`}
               aria-label="Alive or dead"
@@ -197,7 +203,7 @@ export function EffectRows({
               <option value="dead">Mark dead</option>
               <option value="alive">Mark alive</option>
             </select>
-          )}
+          ) : null}
           <input
             name={`effectNote_${index}`}
             maxLength={200}

@@ -25,3 +25,15 @@ export function readFloorData(value: unknown): FloorData {
     collapseDay: typeof record.collapseDay === "number" ? record.collapseDay : null,
   };
 }
+
+// Floor 1 is the crawl's origin: absent an explicit `startDay`, it opens on day
+// 1 so FLOOR_START-relative event times resolve out of the box (ADR 0008). This
+// default is applied only at the day-resolution / anchor layer — `readFloorData`
+// stays a faithful parser so the FLOOR edit form still shows an unset start as
+// blank. Deeper floors with no anchor stay `null` (unresolvable until set).
+export function effectiveFloorStartDay(
+  floorNumber: number | null,
+  startDay: number | null,
+): number | null {
+  return startDay ?? (floorNumber === 1 ? 1 : null);
+}

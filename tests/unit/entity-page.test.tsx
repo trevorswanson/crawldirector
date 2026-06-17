@@ -11,6 +11,8 @@ const {
   listConnectionsForEntity,
   listEventsForEntity,
   resolveFloorEntity,
+  getGroupRoster,
+  isGroupEntityType,
   listKnowledgeOfEntity,
   listKnowledgeHeldByEntity,
   getEntityProvenance,
@@ -25,6 +27,8 @@ const {
   listConnectionsForEntity: vi.fn(),
   listEventsForEntity: vi.fn(),
   resolveFloorEntity: vi.fn(),
+  getGroupRoster: vi.fn(),
+  isGroupEntityType: vi.fn(),
   listKnowledgeOfEntity: vi.fn(),
   listKnowledgeHeldByEntity: vi.fn(),
   getEntityProvenance: vi.fn(),
@@ -43,6 +47,7 @@ vi.mock("@/server/services/entities", () => ({
 }));
 vi.mock("@/server/services/relationships", () => ({ listConnectionsForEntity }));
 vi.mock("@/server/services/events", () => ({ listEventsForEntity, resolveFloorEntity }));
+vi.mock("@/server/services/groups", () => ({ getGroupRoster, isGroupEntityType }));
 vi.mock("@/server/services/review", () => ({ getEntityProvenance }));
 vi.mock("@/server/services/ai-keys", () => ({ listAiKeys }));
 vi.mock("@/server/services/knowledge", () => ({
@@ -64,6 +69,20 @@ vi.mock("@/components/entities/knowledge-panel", () => ({
   }) => (
     <div>
       Knowledge panel ({knownTo.length}/{knowsAbout.length})
+    </div>
+  ),
+}));
+vi.mock("@/components/entities/roster-panel", () => ({
+  RosterPanel: ({
+    roster,
+    asOfDay,
+  }: {
+    roster: { rolledUpMemberCount: number };
+    asOfDay?: number;
+  }) => (
+    <div>
+      Roster panel ({roster.rolledUpMemberCount})
+      {asOfDay !== undefined ? ` as of day ${asOfDay}` : ""}
     </div>
   ),
 }));
@@ -155,6 +174,10 @@ beforeEach(() => {
   listConnectionsForEntity.mockResolvedValue([]);
   listEventsForEntity.mockResolvedValue([]);
   resolveFloorEntity.mockResolvedValue(null);
+  getGroupRoster.mockResolvedValue(null);
+  isGroupEntityType.mockImplementation((type: string) =>
+    ["PARTY", "GUILD", "FACTION", "ORGANIZATION"].includes(type),
+  );
   listKnowledgeOfEntity.mockResolvedValue([]);
   listKnowledgeHeldByEntity.mockResolvedValue([]);
   listAiKeys.mockResolvedValue([]);
@@ -199,11 +222,18 @@ function crawler(overrides = {}) {
   };
 }
 
-async function renderPage(entityId = "e1", edit?: string) {
+async function renderPage(
+  entityId = "e1",
+  editOrSearchParams?: string | { edit?: string; event?: string; rosterDay?: string },
+) {
+  const searchParams =
+    typeof editOrSearchParams === "string"
+      ? { edit: editOrSearchParams }
+      : editOrSearchParams ?? {};
   return render(
     await EntityPage({
       params: Promise.resolve({ id: "c1", entityId }),
-      searchParams: Promise.resolve(edit ? { edit } : {}),
+      searchParams: Promise.resolve(searchParams),
     }),
   );
 }
@@ -316,6 +346,30 @@ describe("EntityPage", () => {
     await renderPage();
 
     expect(screen.queryByText("Generate panel")).toBeNull();
+  });
+
+  it("passes rosterDay into group roster snapshots", async () => {
+    getEntityForUser.mockResolvedValue(
+      crawler({
+        id: "party1",
+        type: "PARTY",
+        name: "Desperado Club",
+        crawler: null,
+      }),
+    );
+    getGroupRoster.mockResolvedValue({
+      group: { id: "party1", name: "Desperado Club", type: "PARTY" },
+      leaders: [],
+      members: [],
+      rolledUpMemberCount: 3,
+    });
+
+    await renderPage("party1", { rosterDay: "52" });
+
+    expect(getGroupRoster).toHaveBeenCalledWith("u1", "c1", "party1", {
+      asOfDay: 52,
+    });
+    expect(screen.getByText("Roster panel (3) as of day 52")).toBeDefined();
   });
 
   it("offers lock toggles for summary and description in the read view", async () => {

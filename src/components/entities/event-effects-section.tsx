@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Zap } from "lucide-react";
 
 import type { EventActionState } from "@/app/(dm)/actions";
 import { describeEffect } from "@/lib/event-effects";
 import type { EventEffectView } from "@/server/services/events";
+import { invalidateCampaignStatus } from "@/lib/campaign-events";
 
 /**
  * Read-side display of an event's declared effects plus an Apply control. Shared
@@ -15,10 +17,12 @@ import type { EventEffectView } from "@/server/services/events";
  * error (e.g. a locked target), which is surfaced without losing the list.
  */
 export function EventEffectsSection({
+  campaignId,
   effects,
   resolveName,
   onApply,
 }: {
+  campaignId?: string;
   effects: EventEffectView[];
   resolveName: (targetId: string) => string;
   onApply: () => Promise<EventActionState>;
@@ -36,7 +40,11 @@ export function EventEffectsSection({
     setPending(true);
     const result = await onApply();
     setPending(false);
-    if (result?.error) setError(result.error);
+    if (result?.error) {
+      setError(result.error);
+    } else {
+      invalidateCampaignStatus();
+    }
   };
 
   return (
@@ -45,25 +53,44 @@ export function EventEffectsSection({
         Effects
       </span>
       <ul className="flex flex-col gap-[4px]">
-        {effects.map((effect) => (
-          <li
-            key={effect.id}
-            className="flex flex-wrap items-center gap-x-[7px] gap-y-[2px] text-[11px] text-[var(--ink-dim)]"
-          >
-            <span className="text-[var(--ink)]">{resolveName(effect.targetId)}</span>
-            <span className="text-[var(--ink-faint)]">·</span>
-            <span>{describeEffect(effect)}</span>
-            <span
-              className="font-mono text-[8.5px] uppercase tracking-[.06em]"
-              style={{ color: effect.applied ? "var(--ok)" : "var(--ink-faint)" }}
+        {effects.map((effect) => {
+          const status = effectStatusLabel(effect);
+          const statusClassName =
+            "font-mono text-[8.5px] uppercase tracking-[.06em]";
+          const statusStyle = {
+            color: effect.applied ? "var(--ok)" : "var(--ink-faint)",
+          };
+          return (
+            <li
+              key={effect.id}
+              className="flex flex-wrap items-center gap-x-[7px] gap-y-[2px] text-[11px] text-[var(--ink-dim)]"
             >
-              {effectStatusLabel(effect)}
-            </span>
-            {effect.note && (
-              <span className="text-[var(--ink-faint)]">— {effect.note}</span>
-            )}
-          </li>
-        ))}
+              {effect.targetId && (
+                <>
+                  <span className="text-[var(--ink)]">{resolveName(effect.targetId)}</span>
+                  <span className="text-[var(--ink-faint)]">·</span>
+                </>
+              )}
+              <span>{describeEffect(effect)}</span>
+              {campaignId && effect.reviewStatus === "PENDING" && effect.pendingChangeSetId ? (
+                <Link
+                  href={`/campaigns/${campaignId}/review?selected=${effect.pendingChangeSetId}`}
+                  className={statusClassName}
+                  style={statusStyle}
+                >
+                  {status}
+                </Link>
+              ) : (
+                <span className={statusClassName} style={statusStyle}>
+                  {status}
+                </span>
+              )}
+              {effect.note && (
+                <span className="text-[var(--ink-faint)]">— {effect.note}</span>
+              )}
+            </li>
+          );
+        })}
       </ul>
       {unapplied.length > 0 && (
         <button

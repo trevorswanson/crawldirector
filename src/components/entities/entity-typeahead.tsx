@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { Search, X } from "lucide-react";
 
 import { TypeDot } from "@/components/ui/type-dot";
@@ -20,6 +20,7 @@ export function EntityTypeahead({
   candidates,
   value,
   onChange,
+  searchCandidates,
   placeholder = "Search entity…",
   emptyLabel = "No matching entities.",
   autoFocus = false,
@@ -28,20 +29,73 @@ export function EntityTypeahead({
   candidates: EntityCandidate[];
   value: EntityCandidate | null;
   onChange: (candidate: EntityCandidate | null) => void;
+  searchCandidates?: (query: string) => Promise<EntityCandidate[]>;
   placeholder?: string;
   emptyLabel?: string;
   autoFocus?: boolean;
 }) {
   const [query, setQuery] = useState("");
+  const [remoteResult, setRemoteResult] = useState<{
+    query: string;
+    matches: EntityCandidate[];
+    error: boolean;
+  } | null>(null);
   const listId = useId();
 
+  // Debounce remote search so rapid keystrokes don't fire a server action per
+  // character. Local candidate filtering (below) is instant and unaffected.
+  useEffect(() => {
+    if (!searchCandidates) return;
+    const q = query.trim();
+    if (!q) return;
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      searchCandidates(q)
+        .then((results) => {
+          if (cancelled) return;
+          setRemoteResult({
+            query: q,
+            matches: results.slice(0, 8),
+            error: false,
+          });
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setRemoteResult({ query: q, matches: [], error: true });
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, searchCandidates]);
+
+  const trimmedQuery = query.trim();
+  const activeRemoteResult =
+    trimmedQuery && searchCandidates && remoteResult?.query === trimmedQuery
+      ? remoteResult
+      : null;
+  const remoteLoading = Boolean(
+    trimmedQuery && searchCandidates && remoteResult?.query !== trimmedQuery,
+  );
+  const remoteError = activeRemoteResult?.error ?? false;
+
   const matches = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = trimmedQuery.toLowerCase();
     const pool = q
       ? candidates.filter((c) => c.name.toLowerCase().includes(q))
       : candidates;
+    if (q && activeRemoteResult) {
+      const seen = new Set(pool.map((candidate) => candidate.id));
+      return [
+        ...pool,
+        ...activeRemoteResult.matches.filter((candidate) => !seen.has(candidate.id)),
+      ].slice(0, 8);
+    }
     return pool.slice(0, 8);
-  }, [candidates, query]);
+  }, [activeRemoteResult, candidates, trimmedQuery]);
 
   return (
     <div className="flex flex-col gap-1">
@@ -88,7 +142,11 @@ export function EntityTypeahead({
           >
             {matches.length === 0 ? (
               <p className="px-2 py-[7px] font-mono text-[10px] text-[var(--ink-faint)]">
-                {emptyLabel}
+                {remoteLoading
+                  ? "Searching..."
+                  : remoteError
+                    ? "Search unavailable."
+                    : emptyLabel}
               </p>
             ) : (
               matches.map((candidate) => (

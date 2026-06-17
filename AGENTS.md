@@ -86,9 +86,11 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
   endpoints by relevance (scoped + lock-aware) instead of an alphabetical dump, and
   flesh-out enrichment hands the model the relevant slice of surrounding canon as
   read-only reference (locked items included) instead of writing in isolation.
-  Scaffold-stubs is deliberately out of scope (its dedup needs an exhaustive name
-  set, not a relevance subset). With search + Ask + retrieval-fed generators, M5's
-  "done when" bar is met.
+  Scaffold-stubs deliberately stays non-retrieval-fed because duplicate avoidance
+  needs an exhaustive name check, not a relevance subset; its prompt now receives a
+  bounded existing-name sample and the service performs post-hoc canon-name
+  collision filtering before filing proposals. With search + Ask + retrieval-fed
+  generators, M5's "done when" bar is met.
 
 For per-slice detail (files, tests, decisions) see
 [`docs/PROGRESS.md`](./docs/PROGRESS.md) — its "Open backlog" section is the
