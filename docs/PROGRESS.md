@@ -167,6 +167,29 @@ keyword-scanning every doc.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
 
+### Done — DM job queue + semantic rebuild duplicate guard (2026-06-17)
+
+- [x] **DM job queue page.** Added `/campaigns/[id]/jobs`, linked from the DM nav,
+      showing the recent safe job display fields across `BULK_FLESH`,
+      `LORE_SEED`, and `EMBED_SEARCH_DOCS`: kind, status, timing, safe failure
+      text, and known success summaries such as semantic docs embedded.
+- [x] **Semantic rebuild guard.** Added `enqueueBuildSemanticIndexJob()` in
+      `src/server/services/jobs.ts`; manual **Build semantic index** clicks
+      serialize on the campaign row and return an existing active
+      `EMBED_SEARCH_DOCS` job when one is already `QUEUED` or `RUNNING`, instead
+      of queueing overlapping paid embedding work. This deliberately does not
+      change the auto re-embed scheduler's ability to queue a follow-up while a
+      worker is running and canon content changes underneath it.
+- [x] **Search page UI.** The build button receives the active semantic job,
+      disables itself while a rebuild is queued/running, and points the DM to the
+      Job Queue for status. The server action revalidates both the search page
+      and the jobs page after enqueue/duplicate detection.
+- [x] **Tests:** `jobs.test.ts` covers active semantic job dedupe (`QUEUED` and
+      `RUNNING`) plus new active-job lookup; `dm-actions.test.ts`,
+      `build-semantic-index-button.test.tsx`, and `search-page.test.tsx` cover
+      action/UI disable behavior; `job-queue.test.tsx`, `jobs-page.test.tsx`, and
+      `console-shell.test.tsx` cover the queue surface and nav link.
+
 ### Done — bring-your-own lore dataset + seed-checkbox gating (2026-06-13)
 
 - [x] `resolveLoreSeedPath()` and `isLoreSeedDatasetAvailable()` exported from `seeding.ts`; `seedCampaignFromLore` uses the resolver (respects `LORE_SEED_FILE` env var).

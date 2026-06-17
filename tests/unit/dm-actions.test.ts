@@ -45,6 +45,7 @@ const {
   scaffoldStubEntities,
   askCampaign,
   enqueueJob,
+  enqueueBuildSemanticIndexJob,
   signOut,
   redirect,
   revalidatePath,
@@ -93,6 +94,7 @@ const {
   scaffoldStubEntities: vi.fn(),
   askCampaign: vi.fn(),
   enqueueJob: vi.fn(),
+  enqueueBuildSemanticIndexJob: vi.fn(),
   signOut: vi.fn(),
   redirect: vi.fn(() => {
     throw new Error("NEXT_REDIRECT");
@@ -156,7 +158,7 @@ vi.mock("@/server/services/generation", () => ({
   scaffoldStubEntities,
 }));
 vi.mock("@/server/services/ask", () => ({ askCampaign }));
-vi.mock("@/server/services/jobs", () => ({ enqueueJob }));
+vi.mock("@/server/services/jobs", () => ({ enqueueJob, enqueueBuildSemanticIndexJob }));
 vi.mock("@/server/services/seeding", () => ({ isLoreSeedDatasetAvailable }));
 vi.mock("@/server/auth", () => ({ signOut }));
 vi.mock("next/navigation", () => ({ redirect }));
@@ -2334,23 +2336,45 @@ describe("enqueueBulkFleshAction", () => {
 
 describe("enqueueBuildSemanticIndexAction", () => {
   it("enqueues an EMBED_SEARCH_DOCS job and revalidates the search page", async () => {
-    enqueueJob.mockResolvedValue({ id: "j1" });
+    enqueueBuildSemanticIndexJob.mockResolvedValue({
+      id: "j1",
+      status: "QUEUED",
+      created: true,
+    });
 
     const result = await enqueueBuildSemanticIndexAction("c1", undefined, new FormData());
 
-    expect(enqueueJob).toHaveBeenCalledWith("u1", "c1", "EMBED_SEARCH_DOCS", {});
+    expect(enqueueBuildSemanticIndexJob).toHaveBeenCalledWith("u1", "c1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/search");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/jobs");
     expect(result?.success).toContain("Semantic index build queued");
+    expect(result?.activeJobStatus).toBe("QUEUED");
+    expect(result?.error).toBeUndefined();
+  });
+
+  it("does not treat an already active semantic job as a new queued rebuild", async () => {
+    enqueueBuildSemanticIndexJob.mockResolvedValue({
+      id: "j1",
+      status: "RUNNING",
+      created: false,
+    });
+
+    const result = await enqueueBuildSemanticIndexAction("c1", undefined, new FormData());
+
+    expect(result?.success).toContain("Semantic index build is already running");
+    expect(result?.activeJobStatus).toBe("RUNNING");
     expect(result?.error).toBeUndefined();
   });
 
   it("surfaces a ServiceError message and a generic fallback for unexpected errors", async () => {
-    enqueueJob.mockRejectedValueOnce(new ServiceError("You do not have permission."));
+    enqueueBuildSemanticIndexJob.mockRejectedValueOnce(
+      new ServiceError("You do not have permission."),
+    );
     expect((await enqueueBuildSemanticIndexAction("c1", undefined, new FormData()))?.error).toBe(
       "You do not have permission.",
     );
 
-    enqueueJob.mockRejectedValueOnce(new Error("db down"));
+    enqueueBuildSemanticIndexJob.mockRejectedValueOnce(new Error("db down"));
     expect((await enqueueBuildSemanticIndexAction("c1", undefined, new FormData()))?.error).toBe(
       "Failed to queue job. Please try again.",
     );

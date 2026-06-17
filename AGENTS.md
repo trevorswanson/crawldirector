@@ -68,7 +68,10 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
   still works with **no AI key**; semantic degrades off gracefully. Slice 4b added
   automatic, deduped `EMBED_SEARCH_DOCS` enqueueing when canon writes change
   searchable content in campaigns with an embedding-capable key, while full-text-only
-  campaigns and visibility-only mirror refreshes stay cheap. Slice 4c widened
+  campaigns and visibility-only mirror refreshes stay cheap; the manual **Build
+  semantic index** action now reuses an active QUEUED/RUNNING semantic job instead
+  of creating overlapping paid rebuilds, and DMs can inspect background work in
+  `/campaigns/[id]/jobs`. Slice 4c widened
   embeddings to configurable dimensions (`SearchDoc.embeddingDimensions` +
   `AiKey.embeddingDimensions`), added a raw-SQL HNSW cosine expression index for
   the default 1536-dim path, and reshaped hybrid search to preselect ANN-friendly

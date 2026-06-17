@@ -9,6 +9,21 @@ import { prisma } from "@/server/db";
 
 export type { JobKind, JobStatus };
 
+const jobDisplaySelect = {
+  id: true,
+  kind: true,
+  status: true,
+  error: true,
+  result: true,
+  createdAt: true,
+  startedAt: true,
+  finishedAt: true,
+} satisfies Prisma.JobSelect;
+
+type Db = Prisma.TransactionClient;
+type JobDisplay = Prisma.JobGetPayload<{ select: typeof jobDisplaySelect }>;
+type ActiveJobStatus = "QUEUED" | "RUNNING";
+
 async function assertCampaignDm(userId: string, campaignId: string) {
   const membership = await prisma.membership.findUnique({
     where: { userId_campaignId: { userId, campaignId } },
@@ -42,6 +57,63 @@ export async function enqueueJob(
   return { id: job.id };
 }
 
+async function findActiveCampaignJob(
+  db: Db,
+  campaignId: string,
+  kind: JobKind,
+): Promise<JobDisplay | null> {
+  const active = await db.job.findMany({
+    where: {
+      campaignId,
+      kind,
+      status: { in: [JobStatus.QUEUED, JobStatus.RUNNING] },
+    },
+    orderBy: { createdAt: "asc" },
+    take: 10,
+    select: jobDisplaySelect,
+  });
+  return active.find((job) => job.status === JobStatus.RUNNING) ?? active[0] ?? null;
+}
+
+// Enqueue the manual semantic-index rebuild once per active campaign run.
+// Unlike the automatic search-index scheduler, this guards both QUEUED and
+// RUNNING jobs: a repeated button click should point at the active rebuild
+// rather than queue overlapping paid embedding work.
+export async function enqueueBuildSemanticIndexJob(
+  userId: string,
+  campaignId: string,
+): Promise<{ id: string; status: ActiveJobStatus; created: boolean }> {
+  await assertCampaignDm(userId, campaignId);
+
+  return prisma.$transaction(async (tx) => {
+    // Serialize manual enqueue attempts for one campaign without changing the
+    // broader job table constraints. Content-change auto-refresh can still queue
+    // a follow-up while a worker is RUNNING.
+    await tx.$queryRaw`SELECT id FROM "Campaign" WHERE id = ${campaignId} FOR UPDATE`;
+
+    const active = await findActiveCampaignJob(tx, campaignId, JobKind.EMBED_SEARCH_DOCS);
+    if (active) {
+      return {
+        id: active.id,
+        status: active.status as ActiveJobStatus,
+        created: false,
+      };
+    }
+
+    const job = await tx.job.create({
+      data: {
+        campaignId,
+        createdById: userId,
+        kind: JobKind.EMBED_SEARCH_DOCS,
+        status: JobStatus.QUEUED,
+        payload: {},
+      },
+      select: { id: true },
+    });
+    return { id: job.id, status: JobStatus.QUEUED, created: true };
+  });
+}
+
 // List the most recent jobs for a campaign (DM/co-DM only). Returns display
 // fields only — no payload or internals.
 export async function listRecentJobs(
@@ -54,16 +126,19 @@ export async function listRecentJobs(
     where: { campaignId },
     orderBy: { createdAt: "desc" },
     take,
-    select: {
-      id: true,
-      kind: true,
-      status: true,
-      error: true,
-      result: true,
-      createdAt: true,
-      finishedAt: true,
-    },
+    select: jobDisplaySelect,
   });
+}
+
+// Return the active job for one kind, if any (DM/co-DM only). Used by pages that
+// need to disable duplicate controls while background work is queued/running.
+export async function getActiveCampaignJob(
+  userId: string,
+  campaignId: string,
+  kind: JobKind,
+): Promise<JobDisplay | null> {
+  await assertCampaignDm(userId, campaignId);
+  return findActiveCampaignJob(prisma, campaignId, kind);
 }
 
 // Worker-internal: claim the oldest due QUEUED job and flip it to RUNNING.

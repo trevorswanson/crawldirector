@@ -46,12 +46,17 @@ describe("BuildSemanticIndexButton", () => {
 
   it("shows the success message after a successful enqueue", () => {
     mockUseActionState.mockReturnValue([
-      { success: "Semantic index build queued — search will rank by meaning once the worker finishes." },
+      {
+        success: "Semantic index build queued — search will rank by meaning once the worker finishes.",
+        activeJobStatus: "QUEUED",
+      },
       vi.fn(),
       false,
     ]);
     render(<BuildSemanticIndexButton campaignId="c1" />);
     expect(screen.getByText(/Semantic index build queued/i)).toBeTruthy();
+    expect((screen.getByRole("button") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("button").textContent).toMatch(/queued/i);
   });
 
   it("shows an error message in an alert", () => {
@@ -62,5 +67,19 @@ describe("BuildSemanticIndexButton", () => {
     ]);
     render(<BuildSemanticIndexButton campaignId="c1" />);
     expect(screen.getByRole("alert").textContent).toMatch(/No embedding-capable/i);
+  });
+
+  it("disables rebuild while a semantic index job is already active", () => {
+    render(
+      <BuildSemanticIndexButton
+        campaignId="c1"
+        activeJob={{ id: "j1", status: "RUNNING", createdAt: new Date(), startedAt: new Date() }}
+      />,
+    );
+
+    const button = screen.getByRole("button");
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(button.textContent).toMatch(/running/i);
+    expect(screen.getByText(/Semantic index job is running/i)).toBeTruthy();
   });
 });

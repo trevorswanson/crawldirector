@@ -30,8 +30,10 @@ import { createCampaign } from "@/server/services/campaigns";
 import {
   claimNextJob,
   completeJob,
+  enqueueBuildSemanticIndexJob,
   enqueueJob,
   failJob,
+  getActiveCampaignJob,
   listRecentJobs,
 } from "@/server/services/jobs";
 import { jobHandlers } from "@/server/jobs/handlers";
@@ -87,6 +89,58 @@ describe("enqueueJob", () => {
   });
 });
 
+// ─── enqueueBuildSemanticIndexJob ───────────────────────────────────────────
+
+describe("enqueueBuildSemanticIndexJob", () => {
+  it("returns the existing QUEUED semantic job instead of creating a duplicate", async () => {
+    const { dmId, campaignId } = await seed();
+
+    const first = await enqueueBuildSemanticIndexJob(dmId, campaignId);
+    const second = await enqueueBuildSemanticIndexJob(dmId, campaignId);
+
+    expect(second).toEqual({
+      id: first.id,
+      status: JobStatus.QUEUED,
+      created: false,
+    });
+    await expect(
+      prisma.job.count({ where: { campaignId, kind: JobKind.EMBED_SEARCH_DOCS } }),
+    ).resolves.toBe(1);
+  });
+
+  it("returns the existing RUNNING semantic job instead of queuing overlapping paid work", async () => {
+    const { dmId, campaignId } = await seed();
+
+    const first = await enqueueBuildSemanticIndexJob(dmId, campaignId);
+    await claimNextJob();
+    const second = await enqueueBuildSemanticIndexJob(dmId, campaignId);
+
+    expect(second).toEqual({
+      id: first.id,
+      status: JobStatus.RUNNING,
+      created: false,
+    });
+    await expect(
+      prisma.job.count({ where: { campaignId, kind: JobKind.EMBED_SEARCH_DOCS } }),
+    ).resolves.toBe(1);
+  });
+
+  it("allows a fresh semantic rebuild after the previous one finishes", async () => {
+    const { dmId, campaignId } = await seed();
+
+    const first = await enqueueBuildSemanticIndexJob(dmId, campaignId);
+    await claimNextJob();
+    await completeJob(first.id, { embedded: 0, model: "text-embedding-3-small" });
+    const second = await enqueueBuildSemanticIndexJob(dmId, campaignId);
+
+    expect(second.created).toBe(true);
+    expect(second.id).not.toBe(first.id);
+    await expect(
+      prisma.job.count({ where: { campaignId, kind: JobKind.EMBED_SEARCH_DOCS } }),
+    ).resolves.toBe(2);
+  });
+});
+
 // ─── listRecentJobs ──────────────────────────────────────────────────────────
 
 describe("listRecentJobs", () => {
@@ -100,13 +154,53 @@ describe("listRecentJobs", () => {
     // Newest first — second enqueue was more recent.
     const first = jobs[0];
     expect(Object.keys(first).sort()).toEqual(
-      ["id", "kind", "status", "error", "result", "createdAt", "finishedAt"].sort(),
+      ["id", "kind", "status", "error", "result", "createdAt", "startedAt", "finishedAt"].sort(),
     );
   });
 
   it("throws ServiceError for a PLAYER", async () => {
     const { playerId, campaignId } = await seed();
     await expect(listRecentJobs(playerId, campaignId)).rejects.toThrow(ServiceError);
+  });
+});
+
+// ─── getActiveCampaignJob ───────────────────────────────────────────────────
+
+describe("getActiveCampaignJob", () => {
+  it("returns the active semantic job display fields for a DM", async () => {
+    const { dmId, campaignId } = await seed();
+    const { id } = await enqueueBuildSemanticIndexJob(dmId, campaignId);
+
+    const active = await getActiveCampaignJob(dmId, campaignId, JobKind.EMBED_SEARCH_DOCS);
+
+    expect(active).toMatchObject({
+      id,
+      kind: JobKind.EMBED_SEARCH_DOCS,
+      status: JobStatus.QUEUED,
+      error: null,
+      finishedAt: null,
+    });
+    expect(Object.keys(active!).sort()).toEqual(
+      ["id", "kind", "status", "error", "result", "createdAt", "startedAt", "finishedAt"].sort(),
+    );
+  });
+
+  it("returns null when the latest semantic job is finished", async () => {
+    const { dmId, campaignId } = await seed();
+    const { id } = await enqueueBuildSemanticIndexJob(dmId, campaignId);
+    await claimNextJob();
+    await completeJob(id, { embedded: 0, model: "text-embedding-3-small" });
+
+    await expect(
+      getActiveCampaignJob(dmId, campaignId, JobKind.EMBED_SEARCH_DOCS),
+    ).resolves.toBeNull();
+  });
+
+  it("throws ServiceError for a PLAYER", async () => {
+    const { playerId, campaignId } = await seed();
+    await expect(
+      getActiveCampaignJob(playerId, campaignId, JobKind.EMBED_SEARCH_DOCS),
+    ).rejects.toThrow(ServiceError);
   });
 });
 
