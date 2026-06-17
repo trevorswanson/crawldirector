@@ -151,6 +151,20 @@ keyword-scanning every doc.
 - [ ] **M8/M12 broadcast HUD chrome.** Add a live broadcast ticker with session
       events/reveals in M8, and at-a-glance audience-rating tickers with M12
       broadcast/fan-economy modeling.
+- [ ] **Scaffold-stubs dedup at scale (M5 slice 6 follow-up).** The bulk-stub
+      scaffolding generator (`scaffoldStubEntities` in
+      [`generation.ts`](../src/server/services/generation.ts)) dedupes by stuffing
+      **every** existing entity name in the campaign into the prompt
+      (`existingNames`, a `findMany` with no `take:` limit) so the model avoids
+      minting duplicates. That prompt input grows unbounded with the world and
+      eventually blows the token budget. Retrieval deliberately can't fix it —
+      dedup needs the *exhaustive* name set, not a relevance subset (this is why
+      scaffold-stubs was out of scope for slice 6). The fix is a different
+      technique: let the model propose freely against a *bounded* context, then
+      **post-hoc dedupe** the proposed names against canon in the service
+      (normalize + lookup, drop/flag collisions before filing the change set) —
+      cheap and bounded regardless of campaign size. Not yet pressing (campaigns
+      are small today); revisit when entity counts climb.
 
 ### Deferred design options, not current blockers
 
