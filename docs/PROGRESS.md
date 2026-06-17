@@ -13,114 +13,21 @@ keyword-scanning every doc.
 
 ### Active next slices
 
-- [ ] **M5 — Search & retrieval ([11-roadmap.md](./11-roadmap.md),
-      [07-search-retrieval.md](./07-search-retrieval.md)).** Hybrid full-text +
-      semantic search over scoped canon, "Ask the Campaign", and retrieval-fed
-      generator context. Decomposed into vertical slices:
-      - [x] **Slice 1 — full-text foundation (entities).** ✅ (2026-06-14) — see
-            the section below. `SearchDoc` index + indexer hooked into the entity
-            write paths + a DM backfill; `searchCanon` full-text service
-            (visibility-scoped); a `/campaigns/[id]/search` page wired from the
-            topbar + nav. Keyword/full-text works with no AI key.
-      - [x] **Slice 2 — index relationships + events.** ✅ (2026-06-14) — see the
-            section below. The indexer/search now cover `RELATIONSHIP` and `EVENT`
-            targets; the edge/event apply paths hook the indexer in-transaction;
-            search returns a typed hit union (entity/relationship/event cards).
-            Visibility is two-layer: the doc `visibility` mirrors `secret`, and
-            the endpoint/participant projection is re-applied at retrieval.
-      - [x] **Slice 3 — perf: materialized `tsvector` + GIN index.** ✅
-            (2026-06-14) — see the section below. Replaced query-time
-            `to_tsvector` with a database-generated `SearchDoc.searchVector`
-            column plus GIN index; Prisma represents it as optional
-            `Unsupported("tsvector")` with the mapped GIN index so the drift gate
-            stays clean.
-      - [x] **Slice 4 — semantic layer (pgvector).** ✅ Enable the extension, embed
-            SearchDocs via the BYO-key provider, async re-embed on canon change
-            via the `Job` worker, hybrid ranking. Decomposed:
-            - [x] **Slice 4a — pgvector foundation + hybrid search.** ✅
-                  (2026-06-15) — see the section below. pgvector extension +
-                  `SearchDoc.embedding`; provider `embed()` (OpenAI-compatible;
-                  Anthropic unsupported); a DM "Build semantic index" backfill via
-                  a new `EMBED_SEARCH_DOCS` `Job`; `searchCanon` blends full-text
-                  `ts_rank` with pgvector cosine similarity. Degrades to full-text
-                  when no embedder is configured.
-            - [x] **Slice 4b — auto re-embed on canon change.** ✅
-                  (2026-06-16) — see the section below. The in-transaction
-                  SearchDoc write paths now enqueue one deduped
-                  `EMBED_SEARCH_DOCS` job when searchable content changes and the
-                  campaign has an embedding-capable key, so stale embeddings
-                  self-heal through the worker without a manual rebuild.
-                  Full-text-only campaigns and visibility-only mirror refreshes
-                  do not enqueue.
-            - [x] **Slice 4c — ANN index perf + configurable model/dimension.**
-                  ✅ (2026-06-16) — see the section below. SearchDoc embeddings
-                  now record dimensions and default 1536-dimensional rows have a
-                  raw-SQL HNSW cosine expression index; hybrid search preselects
-                  nearest semantic candidates with an indexable distance
-                  expression before blending with full-text rank. DMs can set an
-                  embedding dimension with their BYO embedding model.
-      - [x] **Slice 5 — Ask the Campaign.** ✅ (2026-06-16) — see the section
-            below. Retrieval-augmented Q&A with inline citations (read-only):
-            retrieve the top-k visibility-scoped canon via `searchCanon`, hand it
-            to the BYO-key chat model as numbered sources, and return a grounded
-            answer whose `[n]` markers link back to the source entity/edge/event.
-            Never writes canon (invariant #1); retrieval scoping enforces
-            invariant #5 (a player's ask can't reach DM-only canon); provider
-            errors stay safe (invariant #6). The scoped *player* variant is the
-            same role-aware service, surfaced when the M7 player UI lands.
-      - [~] **Slice 6 — wire retrieval into generator context-building.** Replace
-            ad-hoc canon-dumping in the M4 generators; honor locks + scope.
-            **Relationship inference done** (2026-06-17 — see the section below): a
-            `retrieval.ts` seam over `searchCanon` now selects candidate edge
-            endpoints by relevance instead of an alphabetical dump, scoped to the
-            requester and lock-aware. Remaining (tracked, lower-value): flesh-out
-            related-canon *enrichment* (it loads only its target today — no dump to
-            replace) and scaffold-stubs (its exhaustive dedup name set is not a
-            relevance problem retrieval can safely replace).
-- [ ] **Entity-kind registry ([ADR 0009](./adr/0009-entity-kind-registry.md),
-      accepted).** Consolidate per-type bespoke `data.*` fields into one
-      `EntityKind` descriptor per type and derive validation, data-key lists, the
-      reviewable/lockable field set, the form, and the detail display from it —
-      retiring the `type === "X"` branches in `validation.ts`, `entities.ts`,
-      `review.ts`, the entity form, and the detail page. Pure app-layer refactor;
-      **no schema change / migration** (bespoke fields already live in
-      `Entity.data`). Phased, each behavior-preserving:
-      - [x] **Slice 1 — registry scaffold + FLOOR.** ✅ (2026-06-07) — see the
-            section below.
-      - [x] **Slice 2 — ITEM + derive the reviewable-field set wholesale.** ✅
-            (2026-06-07) — see the section below.
-      - [x] **Slice 3a — registry-driven apply-path `data` builder.** ✅
-            (2026-06-07) — retired the last three hardcoded `data.*` switches in
-            [`review.ts`](../src/server/services/review.ts) (`applyCreateEntity`,
-            the update `buildEntityData`, and `currentEntityValue`/`getCurrentValue`)
-            in favour of `buildKindData` / `normalizeKindFieldValue` derived from
-            the descriptors. See the section below.
-      - [x] **Slice 3b — display + form slots (the remaining client branches).** ✅
-            (2026-06-08) — see the section below. ADR 0009 is now **fully
-            delivered**; the brand-new-EntityType "proof" remains deferred to M7's
-            BOX (one descriptor file then), per project norm (no stub features).
-- [x] **M4 generator expansion.** ✅ All items delivered.
-      - [x] **Bulk-stub scaffolding generator.** ✅ (2026-06-08) — see the section
-            below. A DM scaffolds a batch of stub entities from a free-text
-            instruction; they land as one PENDING `CREATE_ENTITY` change set.
-      - [x] **Usage tracking + spend caps.** ✅ (2026-06-11) — see the section
-            below. Every generation records token usage + an estimated cost; the
-            Settings page shows campaign spend; a DM-set spend cap blocks
-            generation once known spend reaches it.
-      - [x] **Bulk multi-entity flesh-out panel.** ✅ (2026-06-11) — see the
-            section below. A DM selects several stub entities in the World Browser
-            and fleshes them in one synchronous batch; each lands as its own
-            PENDING `UPDATE_ENTITY` proposal, with a per-entity proposed/skipped
-            summary.
-      - [x] **Async `Job` table + worker.** ✅ (2026-06-13) — see the section
-            below. A `Job` model + single-worker loop (`npm run worker`) runs
-            long bulk-flesh batches off the request path. A "Run in background"
-            button in the bulk-flesh panel enqueues a `BULK_FLESH` job; proposals
-            land in the Review Queue when the worker finishes; raw provider/error
-            text is never persisted (invariant #6).
-- [x] **Visibility model simplification.** ✅ (2026-06-10) — collapsed the
-      three-state enum (`DM_ONLY`/`SHARED_WITH_PLAYERS`/`PLAYER_FACING`) to a clean
-      binary `DM_ONLY`/`PLAYER_VISIBLE`. See the section below.
+All milestones through **M5 — Search & retrieval** are complete; per-slice detail
+lives in the dated sections below (and older milestones in
+[`PROGRESS-archive.md`](./PROGRESS-archive.md)). The cross-cutting **ADR 0009
+entity-kind registry** is also fully delivered — only the brand-new-`EntityType`
+"proof" remains, and it rides along with M7's `BOX` (see the game-progression item
+under *Deferred design options*). So is the **visibility-model simplification** and
+the full **M4 generator expansion** (scaffolding, usage/cost + spend caps, bulk
+flesh-out, async `Job` worker).
+
+**Next milestone: M6 — System AI persona engine**
+([11-roadmap.md](./11-roadmap.md),
+[05-system-ai-persona.md](./05-system-ai-persona.md)) — not yet started or
+decomposed into slices. Decompose it into vertical slices per
+[`12-working-sessions.md`](./12-working-sessions.md) when picking it up. (Open,
+non-milestone-blocking follow-ups and deferrals live in the subsections below.)
 
 ### Follow-ups captured from delivered slices
 
@@ -145,6 +52,20 @@ keyword-scanning every doc.
 - [ ] **M8/M12 broadcast HUD chrome.** Add a live broadcast ticker with session
       events/reveals in M8, and at-a-glance audience-rating tickers with M12
       broadcast/fan-economy modeling.
+- [ ] **Scaffold-stubs dedup at scale (M5 slice 6 follow-up).** The bulk-stub
+      scaffolding generator (`scaffoldStubEntities` in
+      [`generation.ts`](../src/server/services/generation.ts)) dedupes by stuffing
+      **every** existing entity name in the campaign into the prompt
+      (`existingNames`, a `findMany` with no `take:` limit) so the model avoids
+      minting duplicates. That prompt input grows unbounded with the world and
+      eventually blows the token budget. Retrieval deliberately can't fix it —
+      dedup needs the *exhaustive* name set, not a relevance subset (this is why
+      scaffold-stubs was out of scope for slice 6). The fix is a different
+      technique: let the model propose freely against a *bounded* context, then
+      **post-hoc dedupe** the proposed names against canon in the service
+      (normalize + lookup, drop/flag collisions before filing the change set) —
+      cheap and bounded regardless of campaign size. Not yet pressing (campaigns
+      are small today); revisit when entity counts climb.
 
 ### Deferred design options, not current blockers
 
@@ -217,6 +138,67 @@ keyword-scanning every doc.
 - [x] `CreateCampaignForm` has an unchecked-by-default native checkbox (`name="seedLore"`, no `value` attribute); submits `"on"` when checked.
 - [x] `createCampaignAction`: after campaign creation, if `seedLore === "on"` enqueues a `LORE_SEED` job in its own try/catch — enqueue failure never blocks the redirect.
 - [x] Tests: seeding ServiceError assertions updated; non-empty campaign guard test added; LORE_SEED handler delegation test (mocked seeding module); dm-actions tests for seedLore=on/off/enqueue-throw; form checkbox test.
+
+## M5 — Retrieval-fed generator context: flesh-out enrichment (slice 6, part 2) ✅ (2026-06-17)
+
+**Goal:** the second consumer in [`07-search-retrieval.md`](./07-search-retrieval.md)
+§"Retrieval-augmented context" — give the entity flesh-out generator the *relevant*
+slice of surrounding canon as read-only reference so its proposed summary/
+description stay consistent with the world, instead of writing in isolation
+(today it sees only its own target + the campaign's tag vocabulary). This is
+additive enrichment, not a dump replacement, which is why it was tracked separately
+from part 1. With both retrieval-shaped generators wired, **M5's "done when" bar is
+met**. Branch: `feat/m5-search-slice6-flesh-enrichment`. No schema change.
+
+- [x] **Flesh-out rewired** ([`generation.ts`](../src/server/services/generation.ts)):
+      `fleshOutEntityLocked` now calls `retrieveRelatedEntityIds` (the existing
+      slice 6 seam) for the target, hydrates the top `FLESH_RELATED_LIMIT` (8)
+      relevant CANON entities preserving retrieval rank order, and passes them to
+      the prompt as `relatedCanon`. **Locked entities are intentionally kept** as
+      reference (doc 07: "locked items relevant to the task are retrieved and
+      included as read-only do-not-modify context") — unlike relationship inference,
+      which excludes locked endpoints from its *proposable* set; flesh-out only ever
+      proposes against its own target, so referencing locked canon can't violate
+      invariant #2. Because `bulk-flesh` calls `fleshOutEntity` per entity, the bulk
+      panel and the `BULK_FLESH` job inherit the enrichment with no extra wiring.
+- [x] **Prompt builder** ([`flesh-entity.ts`](../src/server/ai/generators/flesh-entity.ts)):
+      `FleshEntityContext` gains an optional `relatedCanon`; the volatile user
+      message lists each related entity (`type · name: summary [tags]`, honest
+      `(no summary yet)` fallback) under a "reference — keep your additions
+      consistent with this; do not restate or modify it" header, and the cacheable
+      system block gains a read-only-reference rule. `FLESH_ENTITY_GENERATOR.version`
+      bumped **1 → 2** (the prompt framing changed meaningfully — provenance now
+      distinguishes enriched runs).
+- [x] **Cost discipline.** The query-embed inside `searchCanon` is already metered
+      + cap-gated (slice 4a), and `fleshOutEntityLocked` now **re-checks the spend
+      cap after retrieval** and before the chat call (mirrors
+      `inferRelationshipsForEntityLocked`), so a campaign just under its cap can't
+      incur the extra paid generation call after a paid query-embed. With no
+      embedder, retrieval is free full-text and the prompt still gains relevant
+      reference context.
+- [x] **Tests:** pure
+      [`flesh-entity-generator.test.ts`](../tests/unit/flesh-entity-generator.test.ts)
+      gains related-canon rendering (present → reference block + system rule;
+      no-summary fallback; absent → no section) and the v2 provenance assertion.
+      DB-backed [`generation.test.ts`](../tests/unit/generation.test.ts) gains a
+      real-Postgres + real-`searchCanon` case that a term-sharing entity is surfaced
+      into the prompt while an unrelated one is excluded, and that a **fully locked**
+      related entity is still offered as read-only reference (the doc-07 contract
+      that distinguishes flesh-out from inference). The existing flesh-out cases
+      (style guide, campaign tags, locked-field exclusion, usage/cap) stay green.
+- [x] **Verification:** RED/GREEN, then `npm run test -- tests/unit/retrieval.test.ts
+      tests/unit/search.test.ts tests/unit/embeddings.test.ts
+      tests/unit/dm-actions.test.ts tests/unit/flesh-entity-generator.test.ts
+      tests/unit/generation.test.ts` (259 tests), `npm run lint` (0 errors;
+      pre-existing settings-action warnings only), `npm run typecheck`,
+      `npm run build`, and the full coverage gate green (100 files / 1356 tests;
+      statements 95.82%, branches 88.94%, functions 97.98%, lines 97.65%). The
+      retrieval → prompt assembly runs end-to-end against **real Postgres + the real
+      `searchCanon`**; the provider call stays the documented key-gated M4/M5
+      boundary (a synthesized run needs the DM's own valid BYO key + spend), covered
+      by the mocked-provider service tests. **No new UI surface** (flesh-out is
+      triggered from existing buttons and the enrichment changes only the prompt the
+      server builds), so — as with slice 6 part 1 — no browser smoke this slice.
 
 ## M5 — Retrieval-fed generator context: relationship inference (slice 6, part 1) ✅ (2026-06-17)
 

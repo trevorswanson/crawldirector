@@ -85,6 +85,12 @@ const MAX_BULK_FLESH = 20;
 // baseline fills any remaining budget (see `inferRelationshipsForEntityLocked`).
 const CANDIDATE_LIMIT = 40;
 
+// How many related canon entities the flesh-out generator carries as read-only
+// reference context. Smaller than CANDIDATE_LIMIT: this is consistency context,
+// not a candidate pool, so a focused, token-cheap set of the most relevant
+// entities serves better than a long list.
+const FLESH_RELATED_LIMIT = 8;
+
 const candidateSelect = {
   id: true,
   type: true,
@@ -174,15 +180,58 @@ async function fleshOutEntityLocked(
     (FLESHABLE_FIELDS as string[]).includes(f),
   );
 
-  // Gather existing campaign tags so the generator reuses them rather than
-  // minting near-duplicates.
-  const tagRows = await prisma.entity.findMany({
-    where: { campaignId, status: { not: CanonStatus.ARCHIVED }, NOT: { id: entityId } },
-    select: { tags: true },
-  });
+  // Build context: (1) the relevant slice of surrounding canon via retrieval, so
+  // the model's additions stay consistent with the world instead of being written
+  // in isolation (M5 slice 6 — docs/07-search-retrieval.md §"Retrieval-augmented
+  // context"); and (2) existing campaign tags so it reuses them rather than
+  // minting near-duplicates. Retrieval reuses `searchCanon`, so it is scoped to
+  // the DM's full canon and degrades to full-text when no embedder is configured.
+  // Unlike relationship inference, locked entities are intentionally KEPT as
+  // reference here (doc 07: locked items relevant to the task are included as
+  // read-only "do not modify" context) — flesh-out only ever proposes against its
+  // own target, so referencing locked canon can't violate invariant #2.
+  const [relatedIds, tagRows] = await Promise.all([
+    retrieveRelatedEntityIds(
+      userId,
+      campaignId,
+      { id: entityId, name: entity.name, tags: entity.tags },
+      { limit: FLESH_RELATED_LIMIT },
+    ),
+    prisma.entity.findMany({
+      where: { campaignId, status: { not: CanonStatus.ARCHIVED }, NOT: { id: entityId } },
+      select: { tags: true },
+    }),
+  ]);
   const campaignTags = Array.from(
     new Set(tagRows.flatMap((r) => r.tags)),
   ).sort();
+
+  const relatedRows =
+    relatedIds.length === 0
+      ? []
+      : await prisma.entity.findMany({
+          where: { id: { in: relatedIds }, campaignId, status: CanonStatus.CANON },
+          select: { id: true, type: true, name: true, summary: true, description: true, tags: true },
+        });
+  // findMany doesn't guarantee order; restore retrieval's relevance ranking.
+  const relatedById = new Map(relatedRows.map((r) => [r.id, r] as const));
+  const relatedCanon = relatedIds
+    .map((id) => relatedById.get(id))
+    .filter((r): r is (typeof relatedRows)[number] => r !== undefined)
+    .map((r) => ({
+      type: r.type,
+      name: r.name,
+      summary: r.summary,
+      description: r.description,
+      tags: r.tags,
+    }));
+
+  // Re-check the cap after retrieval: with an embedding-capable key, searchCanon
+  // spent (and recorded) a paid query-embedding above, which can bring known
+  // spend to the cap. The early check ran before retrieval, so without this a
+  // campaign just under its cap could still incur the extra paid generation call.
+  // (Mirrors inferRelationshipsForEntityLocked.)
+  await assertWithinSpendCap(campaignId);
 
   const { system, messages } = buildFleshEntityPrompt({
     campaignName: campaign.name,
@@ -196,6 +245,7 @@ async function fleshOutEntityLocked(
       isStub: entity.isStub,
     },
     campaignTags,
+    relatedCanon,
     lockedFields,
   });
 

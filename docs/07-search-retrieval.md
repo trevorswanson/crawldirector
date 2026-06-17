@@ -58,19 +58,27 @@
 - **Scope honored:** agent runs in *in-character* mode retrieve only what the
   entity plausibly knows (fog of war — [`06-entity-agents.md`](./06-entity-agents.md)).
 
-*As built (M5 slice 6, part 1):* a `retrieval.ts` seam
+*As built (M5 slice 6):* a `retrieval.ts` seam
 (`src/server/services/retrieval.ts`) wraps `searchCanon` for context-building.
 `retrieveRelatedEntityIds(userId, campaignId, seed)` builds an OR-joined seed
 query from an entity's name + tags (so the full-text arm matches *any* shared
 term — `websearch_to_tsquery` would otherwise AND the words) and returns the
 relevance-ranked ids of the canon entities most related to the seed, scoped to
 the requester's role (so scope/fog-of-war is enforced by reusing `searchCanon`)
-and degrading to full-text when no embedder is configured. The relationship-
-inference generator (`generation.ts`) now picks its candidate edge endpoints
-from this seam — relevance-ranked, with an alphabetical baseline as a coverage
-floor — instead of dumping the first N entities alphabetically; locked endpoints
-stay out of the proposable set. Wiring the remaining generators (flesh-out
-enrichment, scaffold-stubs dedup) is tracked in the backlog.
+and degrading to full-text when no embedder is configured. Two generators draw on
+it (`generation.ts`): **relationship inference** picks its candidate edge
+endpoints from the seam — relevance-ranked, with an alphabetical baseline as a
+coverage floor — instead of dumping the first N entities alphabetically, keeping
+locked endpoints out of the *proposable* set; and **flesh-out enrichment** hands
+the model the relevant slice of surrounding canon as read-only reference so its
+proposed prose stays consistent with the world, *including* locked items (locked
+canon relevant to the task is exactly the do-not-modify context this paragraph
+calls for — flesh-out only proposes against its own target, so it can't violate
+the lock invariant). Both re-check the spend cap after retrieval, since the
+query-embed inside `searchCanon` can itself spend. The third generator,
+scaffold-stubs, is deliberately *not* retrieval-fed: its dedup needs an
+*exhaustive* existing-name set, which a relevance subset can't safely replace
+(its scaling fix is post-hoc dedup, a different technique).
 
 ## Indexing pipeline
 

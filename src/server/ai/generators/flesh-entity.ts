@@ -18,7 +18,9 @@ import type { LLMMessage, LLMSystemBlock } from "../types";
 // changes meaningfully.
 export const FLESH_ENTITY_GENERATOR = {
   id: "flesh-entity",
-  version: "1",
+  // v2 (M5 slice 6): the prompt now offers retrieval-surfaced related canon as
+  // read-only reference context, with a rule framing how to use it.
+  version: "2",
 } as const;
 
 // The fields this generator may propose. Deliberately limited to the freeform
@@ -64,6 +66,20 @@ export type FleshEntityContext = {
   };
   /** Existing campaign tags, offered to the model to encourage reuse. */
   campaignTags?: string[];
+  /**
+   * Other canon entities surfaced by retrieval as the *relevant* slice of the
+   * world (M5 slice 6 — docs/07-search-retrieval.md §"Retrieval-augmented
+   * context"). Shown as read-only reference so the model's additions stay
+   * consistent with surrounding canon; this generator only ever proposes against
+   * its target, so this is never a modifiable set.
+   */
+  relatedCanon?: Array<{
+    type: string;
+    name: string;
+    summary: string | null;
+    description: string | null;
+    tags: string[];
+  }>;
   /** Fields the DM has locked — excluded from the proposal. */
   lockedFields?: FleshableField[];
 };
@@ -73,6 +89,26 @@ const FLESHABLE_FIELDS: FleshableField[] = ["summary", "description", "tags"];
 function writableFields(locked: FleshableField[] | undefined): FleshableField[] {
   const lockedSet = new Set(locked ?? []);
   return FLESHABLE_FIELDS.filter((f) => !lockedSet.has(f));
+}
+
+// Cap the related-canon reference excerpt. Summaries are already ≤ 280 chars
+// (schema), but retrieval matches against the doc's full content (incl.
+// description), so an entity can be surfaced for a description-only fact. When it
+// has no summary, fall back to a bounded slice of the description so that fact
+// still reaches the model instead of being withheld behind "(no summary yet)".
+const RELATED_REFERENCE_MAX = 300;
+
+function relatedReference(related: {
+  summary: string | null;
+  description: string | null;
+}): string {
+  const summary = related.summary?.trim();
+  if (summary) return summary;
+  const description = related.description?.trim();
+  if (!description) return "(no summary yet)";
+  return description.length > RELATED_REFERENCE_MAX
+    ? `${description.slice(0, RELATED_REFERENCE_MAX).trimEnd()}…`
+    : description;
 }
 
 // Build the provider request (system blocks + user message). The stable framing
@@ -101,6 +137,9 @@ export function buildFleshEntityPrompt(ctx: FleshEntityContext): {
         "  when they fit rather than inventing near-duplicates.",
         "- Output only the requested fields. Do not invent stats, relationships,",
         "  or events — those are proposed by other tools.",
+        "- You may be shown related canon (other entities) for consistency. Treat it",
+        "  as read-only reference: make your additions fit it, but never restate it",
+        "  verbatim, modify it, or invent relationships to it (other tools do that).",
         "- Everything you produce is a *proposal* a human DM reviews before it",
         "  becomes canon, so be useful and specific, not hedged.",
       ].join("\n"),
@@ -125,6 +164,18 @@ export function buildFleshEntityPrompt(ctx: FleshEntityContext): {
     `- Description: ${ctx.entity.description?.trim() || "(empty)"}`,
     `- Tags: ${ctx.entity.tags.length ? ctx.entity.tags.join(", ") : "(none)"}`,
   ];
+
+  if (ctx.relatedCanon && ctx.relatedCanon.length) {
+    lines.push(
+      "",
+      "Related canon (reference — keep your additions consistent with this; do not restate or modify it):",
+      ...ctx.relatedCanon.map((related) => {
+        const reference = relatedReference(related);
+        const tags = related.tags.length ? ` [tags: ${related.tags.join(", ")}]` : "";
+        return `- ${formatEntityType(related.type)} · ${related.name}: ${reference}${tags}`;
+      }),
+    );
+  }
 
   if (ctx.campaignTags && ctx.campaignTags.length) {
     lines.push("", `Existing campaign tags to prefer: ${ctx.campaignTags.join(", ")}`);
