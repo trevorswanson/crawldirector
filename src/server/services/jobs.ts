@@ -24,6 +24,13 @@ type Db = Prisma.TransactionClient;
 type JobDisplay = Prisma.JobGetPayload<{ select: typeof jobDisplaySelect }>;
 type ActiveJobStatus = "QUEUED" | "RUNNING";
 
+// A worker that dies mid-job never reaches completeJob/failJob, so its row stays
+// RUNNING forever — claimNextJob only revisits QUEUED rows. Treat a RUNNING job
+// as "active" (and thus blocking) only while it was started recently; past this
+// window assume the worker is gone so a manual rebuild can re-queue instead of
+// being blocked until someone edits the database. QUEUED jobs always block.
+const STALE_RUNNING_JOB_MS = 15 * 60 * 1000; // 15 minutes
+
 async function assertCampaignDm(userId: string, campaignId: string) {
   const membership = await prisma.membership.findUnique({
     where: { userId_campaignId: { userId, campaignId } },
@@ -62,11 +69,17 @@ async function findActiveCampaignJob(
   campaignId: string,
   kind: JobKind,
 ): Promise<JobDisplay | null> {
+  const runningCutoff = new Date(Date.now() - STALE_RUNNING_JOB_MS);
   const active = await db.job.findMany({
     where: {
       campaignId,
       kind,
-      status: { in: [JobStatus.QUEUED, JobStatus.RUNNING] },
+      OR: [
+        { status: JobStatus.QUEUED },
+        // Stale RUNNING rows (worker died, or startedAt never set) are excluded
+        // so they no longer block a fresh rebuild.
+        { status: JobStatus.RUNNING, startedAt: { gte: runningCutoff } },
+      ],
     },
     orderBy: { createdAt: "asc" },
     take: 10,

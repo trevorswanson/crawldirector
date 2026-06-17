@@ -125,6 +125,27 @@ describe("enqueueBuildSemanticIndexJob", () => {
     ).resolves.toBe(1);
   });
 
+  it("queues a fresh rebuild when the RUNNING semantic job is stale (worker died)", async () => {
+    const { dmId, campaignId } = await seed();
+
+    const first = await enqueueBuildSemanticIndexJob(dmId, campaignId);
+    await claimNextJob(); // -> RUNNING
+    // Simulate a worker that died mid-job: claimed long ago, never finished.
+    await prisma.job.update({
+      where: { id: first.id },
+      data: { startedAt: new Date(Date.now() - 20 * 60 * 1000) },
+    });
+
+    const second = await enqueueBuildSemanticIndexJob(dmId, campaignId);
+
+    expect(second.created).toBe(true);
+    expect(second.status).toBe(JobStatus.QUEUED);
+    expect(second.id).not.toBe(first.id);
+    await expect(
+      prisma.job.count({ where: { campaignId, kind: JobKind.EMBED_SEARCH_DOCS } }),
+    ).resolves.toBe(2);
+  });
+
   it("allows a fresh semantic rebuild after the previous one finishes", async () => {
     const { dmId, campaignId } = await seed();
 
@@ -190,6 +211,20 @@ describe("getActiveCampaignJob", () => {
     const { id } = await enqueueBuildSemanticIndexJob(dmId, campaignId);
     await claimNextJob();
     await completeJob(id, { embedded: 0, model: "text-embedding-3-small" });
+
+    await expect(
+      getActiveCampaignJob(dmId, campaignId, JobKind.EMBED_SEARCH_DOCS),
+    ).resolves.toBeNull();
+  });
+
+  it("ignores a stale RUNNING job so the rebuild button re-enables", async () => {
+    const { dmId, campaignId } = await seed();
+    const { id } = await enqueueBuildSemanticIndexJob(dmId, campaignId);
+    await claimNextJob();
+    await prisma.job.update({
+      where: { id },
+      data: { startedAt: new Date(Date.now() - 20 * 60 * 1000) },
+    });
 
     await expect(
       getActiveCampaignJob(dmId, campaignId, JobKind.EMBED_SEARCH_DOCS),
