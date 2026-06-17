@@ -8,7 +8,7 @@ import {
   Visibility,
 } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
-import { readFloorData } from "@/lib/floor";
+import { effectiveFloorStartDay, readFloorData } from "@/lib/floor";
 import { resolveAbsoluteDay } from "@/lib/time-resolve";
 import { readTimeRef } from "@/lib/time-ref";
 import { createCampaignSchema, type CreateCampaignInput } from "@/lib/validation";
@@ -136,7 +136,7 @@ export async function getCampaignHeaderStatus(
     const data = readFloorData(floor.data);
     if (typeof data.floorNumber === "number") {
       floorAnchorsByNumber.set(data.floorNumber, {
-        startDay: data.startDay,
+        startDay: effectiveFloorStartDay(data.floorNumber, data.startDay),
         collapseDay: data.collapseDay,
       });
     }

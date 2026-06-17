@@ -162,6 +162,42 @@ describe("getCampaignHeaderStatus", () => {
     });
   });
 
+  it("defaults floor 1 to day 1 so FLOOR_START events resolve without an explicit startDay", async () => {
+    const owner = await makeUser("hud-floor1@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Tutorial run" });
+    const floor = await prisma.entity.create({
+      data: {
+        campaignId: campaign.id,
+        type: EntityType.FLOOR,
+        name: "Tutorial",
+        // No startDay set — the resolution layer should treat floor 1 as day 1.
+        data: { floorNumber: 1 },
+        visibility: Visibility.DM_ONLY,
+        source: ChangeSource.DM,
+        status: CanonStatus.CANON,
+      },
+    });
+    await prisma.campaign.update({
+      where: { id: campaign.id },
+      data: { currentFloorId: floor.id },
+    });
+    await prisma.event.create({
+      data: {
+        campaignId: campaign.id,
+        title: "Three days in",
+        inGameTime: { basis: "FLOOR_START", floor: 1, offset: 3, unit: "DAY" },
+        orderKey: 1,
+        rank: "a0",
+        status: CanonStatus.CANON,
+      },
+    });
+
+    await expect(getCampaignHeaderStatus(owner.id, campaign.id)).resolves.toEqual({
+      currentFloor: { id: floor.id, name: "Tutorial", floorNumber: 1 },
+      currentDay: 4,
+    });
+  });
+
   it("returns null for a non-member without leaking campaign status", async () => {
     const owner = await makeUser("hud-owner2@test.com");
     const outsider = await makeUser("hud-outsider@test.com");

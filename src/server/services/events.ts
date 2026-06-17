@@ -10,7 +10,7 @@ import {
 } from "@/generated/prisma/client";
 import { orderFromCausality } from "@/lib/causality-order";
 import { ServiceError } from "@/lib/errors";
-import { readFloorData } from "@/lib/floor";
+import { effectiveFloorStartDay, readFloorData } from "@/lib/floor";
 import { generateRankBetween } from "@/lib/rank";
 import {
   buildTimeRef,
@@ -29,6 +29,12 @@ import {
   type EventEffectStat,
   type UpdateEventInput,
 } from "@/lib/validation";
+import {
+  eventEffectKindValues,
+  eventEffectRequiresTarget,
+} from "@/lib/event-effect-kinds";
+import { resolveAbsoluteDay } from "@/lib/time-resolve";
+import { buildCampaignResolveContext } from "@/server/services/event-resolve-context";
 import { prisma } from "@/server/db";
 import {
   applyAutoApprovedEventChangeSet,
@@ -76,7 +82,8 @@ export type EventCausalitySummary = { id: string; title: string; linkId: string 
 export type EventEffectView = {
   id: string;
   kind: EventEffectKind;
-  targetId: string;
+  // Null for subject-derived kinds (COLLAPSE_FLOOR) that carry no crawler target.
+  targetId: string | null;
   stat: EventEffectStat | null;
   delta: number | null;
   valueNumber: number | null;
@@ -97,12 +104,20 @@ function projectEventEffects(value: unknown, isPlayer: boolean): EventEffectView
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
     const record = item as Record<string, unknown>;
     if (typeof record.id !== "string") continue;
-    if (typeof record.kind !== "string") continue;
-    if (typeof record.targetEntityId !== "string") continue;
+    if (
+      typeof record.kind !== "string" ||
+      !eventEffectKindValues.includes(record.kind as EventEffectKind)
+    ) {
+      continue;
+    }
+    const hasTarget = typeof record.targetEntityId === "string";
+    // Drop malformed target-requiring rows (e.g. an ADJUST_STAT with no target);
+    // subject-derived kinds (COLLAPSE_FLOOR) are kept without one.
+    if (eventEffectRequiresTarget(record.kind as EventEffectKind) && !hasTarget) continue;
     views.push({
       id: record.id,
       kind: record.kind as EventEffectKind,
-      targetId: record.targetEntityId,
+      targetId: hasTarget ? (record.targetEntityId as string) : null,
       stat: typeof record.stat === "string" ? (record.stat as EventEffectStat) : null,
       delta: typeof record.delta === "number" ? record.delta : null,
       valueNumber:
@@ -141,7 +156,20 @@ function reviewableEffectRecords(value: unknown): Record<string, unknown>[] {
     if (record.reviewStatus === "REJECTED" || record.reviewStatus === "SUPERSEDED") {
       continue;
     }
-    if (typeof record.id !== "string" || typeof record.targetEntityId !== "string") {
+    if (typeof record.id !== "string") continue;
+    const kind = record.kind;
+    if (
+      typeof kind !== "string" ||
+      !eventEffectKindValues.includes(kind as EventEffectKind)
+    ) {
+      continue;
+    }
+    // Entity-targeting kinds need a target to be applicable; subject-derived
+    // kinds (COLLAPSE_FLOOR) are reviewable/applicable without one.
+    if (
+      eventEffectRequiresTarget(kind as EventEffectKind) &&
+      typeof record.targetEntityId !== "string"
+    ) {
       continue;
     }
     effects.push({ ...record });
@@ -388,7 +416,7 @@ export async function createEvent(
       to: parsed.effects.map((effect) => ({
         ...(effect.id ? { id: effect.id } : {}),
         kind: effect.kind,
-        targetEntityId: effect.targetEntityId,
+        ...(effect.targetEntityId ? { targetEntityId: effect.targetEntityId } : {}),
         ...(effect.stat ? { stat: effect.stat } : {}),
         ...(typeof effect.delta === "number" ? { delta: effect.delta } : {}),
         ...(typeof effect.valueNumber === "number" ? { valueNumber: effect.valueNumber } : {}),
@@ -466,7 +494,7 @@ export async function updateEvent(
       to: parsed.effects.map((effect) => ({
         ...(effect.id ? { id: effect.id } : {}),
         kind: effect.kind,
-        targetEntityId: effect.targetEntityId,
+        ...(effect.targetEntityId ? { targetEntityId: effect.targetEntityId } : {}),
         ...(effect.stat ? { stat: effect.stat } : {}),
         ...(typeof effect.delta === "number" ? { delta: effect.delta } : {}),
         ...(typeof effect.valueNumber === "number" ? { valueNumber: effect.valueNumber } : {}),
@@ -494,7 +522,10 @@ export async function updateEvent(
   const newIds = parsed.participants
     ? parsed.participants.map((participant) => participant.entityId)
     : oldIds;
-  const effectTargetIds = parsed.effects?.map((effect) => effect.targetEntityId) ?? [];
+  const effectTargetIds =
+    parsed.effects
+      ?.map((effect) => effect.targetEntityId)
+      .filter((id): id is string => typeof id === "string") ?? [];
   return {
     id: eventId,
     participantIds: Array.from(new Set([...oldIds, ...newIds, ...effectTargetIds])),
@@ -1003,7 +1034,7 @@ export async function listCampaignFloors(
         name: row.name,
         theme,
         entityId: row.id,
-        startDay,
+        startDay: effectiveFloorStartDay(floorNumber, startDay),
         collapseDay,
       };
     }
@@ -1406,6 +1437,7 @@ export async function applyEventEffects(
     select: {
       id: true,
       effects: true,
+      inGameTime: true,
       participants: { select: { entityId: true } },
     },
   });
@@ -1414,6 +1446,26 @@ export async function applyEventEffects(
   const effects = reviewableEffectRecords(existing.effects);
   if (effects.length === 0) {
     throw new ServiceError("This event has no effects left to apply.");
+  }
+
+  // Pre-flight a floor collapse here — before queuing anything — so the DM gets an
+  // actionable message inline instead of an opaque failure deep in the approve
+  // transaction. Uses the same resolver the approve-time materialization does, so
+  // a collapse that passes here will resolve there.
+  if (effects.some((effect) => effect.kind === "COLLAPSE_FLOOR")) {
+    const time = readTimeRef(existing.inGameTime);
+    if (time.floor == null) {
+      throw new ServiceError(
+        "This event isn't on a floor, so it can't collapse one. Set the event's floor first.",
+      );
+    }
+    const ctx = await buildCampaignResolveContext(prisma, campaignId);
+    if (resolveAbsoluteDay(time, ctx) == null) {
+      throw new ServiceError(
+        "This event's in-game day can't be resolved yet, so the collapse has no date to anchor. " +
+          "Give it an absolute day (or anchor it to a floor/event whose day is known) before applying.",
+      );
+    }
   }
   const targetIds = Array.from(
     new Set(

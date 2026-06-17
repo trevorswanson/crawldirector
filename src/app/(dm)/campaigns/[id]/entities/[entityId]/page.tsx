@@ -58,12 +58,13 @@ export default async function EntityPage({
   searchParams,
 }: {
   params: Promise<{ id: string; entityId: string }>;
-  searchParams?: Promise<{ edit?: string; event?: string }>;
+  searchParams?: Promise<{ edit?: string; event?: string; rosterDay?: string }>;
 }) {
   const { id, entityId } = await params;
   const resolvedSearchParams = (await searchParams) ?? {};
   const editing = Boolean(resolvedSearchParams.edit);
   const openEventId = resolvedSearchParams.event;
+  const rosterDay = parseRosterDay(resolvedSearchParams.rosterDay);
   const user = await requireUser();
   const [campaign, entity] = await Promise.all([
     getCampaignForUser(user.id, id),
@@ -88,7 +89,14 @@ export default async function EntityPage({
     listConnectionsForEntity(user.id, id, entityId),
     listEventsForEntity(user.id, id, entityId),
     listEntitiesForUser(user.id, id),
-    isGroup ? getGroupRoster(user.id, id, entityId) : Promise.resolve(null),
+    isGroup
+      ? getGroupRoster(
+          user.id,
+          id,
+          entityId,
+          rosterDay === undefined ? {} : { asOfDay: rosterDay },
+        )
+      : Promise.resolve(null),
     // Only the edit form consumes the campaign tag list (autocomplete); the
     // read view's tag badges use entity.tags. Skip the scan in read mode.
     editing ? listCampaignTags(user.id, id) : Promise.resolve<string[]>([]),
@@ -348,7 +356,7 @@ export default async function EntityPage({
               {/* roster — rolled-up membership for group-type entities */}
               {isGroup && roster && (
                 <div className="mt-[26px]">
-                  <RosterPanel campaignId={id} roster={roster} />
+                  <RosterPanel campaignId={id} roster={roster} asOfDay={rosterDay} />
                 </div>
               )}
 
@@ -577,6 +585,13 @@ export default async function EntityPage({
 }
 
 type FieldRow = { key: string; label: string; value: string; href?: string };
+
+function parseRosterDay(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) return undefined;
+  return parsed;
+}
 
 // Structured fields for the Fields table. Keys match the review service's patch
 // field names so each row's lock toggle maps to the same `lockedFields` entry.

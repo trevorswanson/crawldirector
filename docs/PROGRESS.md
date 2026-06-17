@@ -39,15 +39,17 @@ non-milestone-blocking follow-ups and deferrals live in the subsections below.)
       field/relationship/event/FACT targets and MEMBERSHIP recipients; wire the
       M7 player "known world" projection and M11 agent fog-of-war context; add a
       reveal undo affordance and source-event linking for M8 session reveals.
-- [ ] **Event effects ergonomics.** Deep-link timeline pending-effect badges to
-      their Review Queue proposals, and design compensating change sets for
-      undo/revert of already-applied effects.
-- [ ] **Timeline roster snapshots.** Let the timeline pass an inferred/current day
-      into `getGroupRoster({ asOfDay })` when the DM wants a roster snapshot from
-      a selected event or floor-day band.
-- [ ] **Scale refinements for pickers and graph labels.** Revisit connection /
-      timeline target lists with M5 search/typeahead, and revisit relationship
-      graph label crowding with M12 graph analytics.
+- [ ] **Event effects ergonomics.** Design compensating change sets for
+      undo/revert of already-applied effects. Deep-linking pending timeline
+      effect badges to Review Queue proposals is complete.
+- [ ] **Timeline roster snapshots.** Add an explicit floor-day band affordance for
+      roster snapshots. Selected-event roster snapshots are complete: timeline
+      participant links pass an inferred `rosterDay` into
+      `getGroupRoster({ asOfDay })`.
+- [ ] **Scale refinements for pickers and graph labels.** Revisit relationship
+      graph label crowding with M12 graph analytics. Connection and timeline
+      entity pickers now use M5 search/typeahead for keyword-only lookup beyond
+      their initial candidate lists.
 - [ ] **M8/M12 broadcast HUD chrome.** Add a live broadcast ticker with session
       events/reveals in M8, and at-a-glance audience-rating tickers with M12
       broadcast/fan-economy modeling.
@@ -82,6 +84,23 @@ non-milestone-blocking follow-ups and deferrals live in the subsections below.)
 
 ### Done — non-M6 backlog follow-ups (2026-06-17)
 
+- [x] **Event effect Review Queue deep-links.** Pending effect badges/status
+      labels on both the entity timeline panel and campaign timeline now link to
+      `/campaigns/[id]/review?selected=<changeSetId>` when an effect carries a
+      `pendingChangeSetId`, preserving the existing non-link status rendering for
+      applied/failed effects.
+- [x] **Selected-event roster snapshots.** Campaign timeline participant links now
+      infer the event's absolute day using `resolveAbsoluteDay` and include
+      `rosterDay=<day>` when linking to a group roster. Entity detail validates
+      that query param and passes it to `getGroupRoster({ asOfDay })`; the roster
+      panel labels the snapshot day.
+- [x] **Keyword-only search-backed entity pickers.** Added a server-side
+      `searchEntityCandidates` helper plus `searchEntityCandidatesAction`, both
+      backed by `searchCanon(..., { semantic: false })` so connection and
+      timeline typeaheads can search scoped canon without query embeddings,
+      provider calls, or LLM spend. The client typeahead merges those remote hits
+      with its existing local candidates and keeps the current floor-exclusion
+      rules for event participants.
 - [x] **Global current floor & day HUD.** Added a route-aware topbar HUD
       (`GlobalCampaignStatus`) that fetches through `getCampaignHeaderStatusAction`
       / `getCampaignHeaderStatus` and renders the current floor from

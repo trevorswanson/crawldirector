@@ -55,6 +55,11 @@ import {
   type EventEffectStat,
 } from "@/lib/validation";
 import {
+  eventEffectKindValues,
+  eventEffectRequiresTarget,
+  type EventEffectKind,
+} from "@/lib/event-effect-kinds";
+import {
   formatInputValue,
   formatReviewValue,
   reviewInputKind,
@@ -90,6 +95,7 @@ export default async function ReviewQueuePage({
     done?: string;
     reopened?: string;
     show?: string;
+    error?: string;
   }>;
 }) {
   const { id } = await params;
@@ -244,6 +250,17 @@ export default async function ReviewQueuePage({
       </aside>
 
       <main className="flex min-h-0 min-w-0 flex-col">
+        {query.error && (
+          <div
+            role="alert"
+            className="border-b border-[var(--no)] bg-[color-mix(in_srgb,var(--no)_12%,var(--bg-1))] px-4 py-3"
+          >
+            <span className="font-mono text-[10px] uppercase tracking-[.12em] text-[var(--no)]">
+              Couldn&rsquo;t approve
+            </span>
+            <p className="mt-1 text-[13px] text-[var(--ink)]">{query.error}</p>
+          </div>
+        )}
         <div className="border-b border-[var(--line)] bg-[var(--bg-1)] px-4 py-3 lg:hidden">
           <Kicker noLead className="mb-[10px]">
             {showClosed
@@ -681,7 +698,7 @@ function OperationBlock({
           readOnly={readOnly}
         />
       )}
-      {operation.isStale && <ThreeWay operation={operation} />}
+      {operation.isStale && !isEffectOp && <ThreeWay operation={operation} />}
     </div>
   );
 }
@@ -916,17 +933,22 @@ function readEffectSeeds(
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
     const record = item as Record<string, unknown>;
     const kind = record.kind;
-    if (kind !== "ADJUST_STAT" && kind !== "SET_STAT" && kind !== "SET_ALIVE") {
+    if (
+      typeof kind !== "string" ||
+      !eventEffectKindValues.includes(kind as EventEffectKind)
+    ) {
       continue;
     }
-    if (typeof record.targetEntityId !== "string") continue;
+    const hasTarget = typeof record.targetEntityId === "string";
+    // Crawler kinds need a target; subject-derived kinds (COLLAPSE_FLOOR) don't.
+    if (eventEffectRequiresTarget(kind as EventEffectKind) && !hasTarget) continue;
 
     const id = typeof record.id === "string" ? record.id : "";
     const preview = previewById.get(id);
     seeds.push({
       id,
-      kind,
-      targetEntityId: record.targetEntityId,
+      kind: kind as EventEffectKind,
+      targetEntityId: hasTarget ? (record.targetEntityId as string) : null,
       stat:
         typeof record.stat === "string" && effectStatSet.has(record.stat)
           ? (record.stat as EventEffectStat)

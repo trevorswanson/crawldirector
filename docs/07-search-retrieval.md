@@ -109,6 +109,10 @@ against the full live canon set before filing review operations.
   an **OpenAI-compatible** provider (real OpenAI or a self-hosted/proxy endpoint)
   — the Anthropic Messages API has no embeddings endpoint — so an Anthropic-only
   campaign keeps full-text search until an OpenAI-compatible key is added.
+- **Keyword-only callers can opt out of semantic search.** Search-backed UI
+  pickers use `searchEntityCandidates`, which calls
+  `searchCanon(..., { semantic: false })`; these lookups run against scoped
+  Postgres full-text search and never embed the query or call an AI provider.
 
 ## Data model touchpoints
 

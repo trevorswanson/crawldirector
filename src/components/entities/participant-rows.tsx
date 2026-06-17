@@ -35,9 +35,11 @@ export function withoutFloorCandidates<T extends { type: string }>(
 export function ParticipantRows({
   candidates,
   initial,
+  searchCandidates,
 }: {
   candidates: EntityCandidate[];
   initial?: ParticipantRowValue[];
+  searchCandidates?: (query: string) => Promise<EntityCandidate[]>;
 }) {
   const seed: ParticipantRowValue[] =
     initial && initial.length > 0 ? initial : [{ entity: null, role: "ACTOR" }];
@@ -78,6 +80,11 @@ export function ParticipantRows({
           <EntityTypeahead
             name={`participantId_${index}`}
             candidates={pickable}
+            searchCandidates={
+              searchCandidates
+                ? async (query) => withoutFloorCandidates(await searchCandidates(query))
+                : undefined
+            }
             value={row.entity}
             onChange={(entity) =>
               setRows((current) =>

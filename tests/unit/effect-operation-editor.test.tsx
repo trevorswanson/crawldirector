@@ -246,4 +246,33 @@ describe("EffectOperationEditor", () => {
 
     expect(screen.getByText("HP Unset → 40")).toBeDefined();
   });
+
+  it("describes a target-less floor-collapse effect (no crawler name)", () => {
+    render(
+      <EffectOperationEditor
+        action={noop}
+        candidates={candidates}
+        effects={[
+          {
+            id: "fx-collapse",
+            kind: "COLLAPSE_FLOOR",
+            targetEntityId: null,
+            stat: null,
+            delta: null,
+            valueNumber: null,
+            value: null,
+            note: null,
+          },
+        ]}
+        rejected={false}
+      />,
+    );
+
+    expect(
+      screen.getByText(/Floor collapses — closes the current floor and opens the next/),
+    ).toBeDefined();
+    // No crawler name is shown for a subject-derived effect.
+    expect(screen.queryByText("Carl")).toBeNull();
+    expect(screen.queryByText("Princess Donut")).toBeNull();
+  });
 });

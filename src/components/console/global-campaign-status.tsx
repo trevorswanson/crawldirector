@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { MapPin } from "lucide-react";
+import { Clock } from "lucide-react";
 
 import { getCampaignHeaderStatusAction } from "@/app/(dm)/actions";
+import { HudTag } from "@/components/ui/hud-tag";
 
 type CampaignHeaderStatus = Awaited<ReturnType<typeof getCampaignHeaderStatusAction>>;
 type LoadedCampaignStatus = {
@@ -61,13 +62,13 @@ export function GlobalCampaignStatus() {
   if (!label) return null;
 
   return (
-    <div
+    <HudTag
       aria-label="Campaign status"
       title={status?.currentFloor?.name ?? label}
-      className="flex max-w-[42vw] shrink min-w-0 items-center gap-[7px] border border-[var(--line)] bg-[var(--bg)] px-[10px] py-[6px] text-[12.5px] font-semibold text-[var(--ink-dim)] sm:max-w-none"
+      className="max-w-[42vw] shrink min-w-0 sm:max-w-none"
     >
-      <MapPin aria-hidden size={14} className="shrink-0 text-[var(--accent)]" />
-      <span className="truncate">{label}</span>
-    </div>
+      <Clock aria-hidden size={12} className="shrink-0" />
+      <span className="min-w-0 truncate">{label}</span>
+    </HudTag>
   );
 }

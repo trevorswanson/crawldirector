@@ -2,6 +2,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
+vi.mock("next/link", () => ({
+  default: ({ href, children, className, title }: {
+    href: string;
+    children: React.ReactNode;
+    className?: string;
+    title?: string;
+  }) => (
+    <a href={href} className={className} title={title}>
+      {children}
+    </a>
+  ),
+}));
+
 import { EventEffectsSection } from "@/components/entities/event-effects-section";
 import { describeEffect } from "@/lib/event-effects";
 import type { EventEffectView } from "@/server/services/events";
@@ -80,6 +93,7 @@ describe("EventEffectsSection", () => {
   it("renders pending review state without another apply button", () => {
     render(
       <EventEffectsSection
+        campaignId="c1"
         effects={[
           {
             ...baseEffect,
@@ -95,6 +109,28 @@ describe("EventEffectsSection", () => {
 
     expect(screen.getByText("pending review")).toBeDefined();
     expect(screen.queryByRole("button", { name: /Send to review/ })).toBeNull();
+  });
+
+  it("links pending review state to the selected Review Queue proposal", () => {
+    render(
+      <EventEffectsSection
+        campaignId="c1"
+        effects={[
+          {
+            ...baseEffect,
+            pendingChangeSetId: "cs1",
+            pendingOperationId: "op1",
+            reviewStatus: "PENDING",
+          },
+        ]}
+        resolveName={() => "Carl"}
+        onApply={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole("link", { name: "pending review" }).getAttribute("href"),
+    ).toBe("/campaigns/c1/review?selected=cs1");
   });
 
   it("renders rejected effects as reviewed and not actionable", () => {

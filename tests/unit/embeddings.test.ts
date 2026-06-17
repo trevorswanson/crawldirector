@@ -386,6 +386,23 @@ describe("hybrid semantic ranking in searchCanon", () => {
     expect(hits.map((h) => h.targetId)).toContain(goblin.id);
   });
 
+  it("skips query embedding when semantic search is disabled for keyword-only callers", async () => {
+    const dm = await prisma.user.create({ data: { email: "dm@test.com" } });
+    const campaign = await createCampaign(dm.id, { name: "Dungeon" });
+    const goblin = await makeEntity(dm.id, campaign.id, {
+      name: "Snortwhistle the Goblin",
+      summary: "a grunt",
+    });
+    mockResolveEmbedder.mockResolvedValue(stubEmbedder(() => unit(5)));
+
+    const { hits } = await searchCanon(dm.id, campaign.id, "snortwhistle", {
+      semantic: false,
+    });
+
+    expect(hits.map((h) => h.targetId)).toEqual([goblin.id]);
+    expect(mockResolveEmbedder).not.toHaveBeenCalled();
+  });
+
   it("never lets a player's semantic query retrieve a DM-only doc (invariant #5)", async () => {
     const dm = await prisma.user.create({ data: { email: "dm@test.com" } });
     const campaign = await createCampaign(dm.id, { name: "Dungeon" });

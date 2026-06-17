@@ -18,10 +18,15 @@ import {
 } from "@/lib/entity-kinds";
 import { ServiceError } from "@/lib/errors";
 import { readFloorData } from "@/lib/floor";
+import {
+  eventEffectKindValues,
+  eventEffectRequiresTarget,
+  type EventEffectKind,
+} from "@/lib/event-effect-kinds";
+import { buildCampaignResolveContext } from "@/server/services/event-resolve-context";
 import { generateRankBetween } from "@/lib/rank";
 import {
   resolveAbsoluteDay,
-  type FloorAnchors,
   type ResolveContext,
 } from "@/lib/time-resolve";
 import { floorRelativeSortKey, readTimeRef } from "@/lib/time-ref";
@@ -998,7 +1003,7 @@ async function enrichReviewQueueItems(
       }
       if (operation.op === OpKind.APPLY_EVENT_EFFECTS) {
         for (const effect of parseEventEffects(readTo(patch, "effects"))) {
-          entityTargetIds.add(effect.targetEntityId);
+          if (effect.targetEntityId) entityTargetIds.add(effect.targetEntityId);
         }
       }
     }
@@ -1892,6 +1897,10 @@ async function evaluateApplyEventEffectsOperationFlags(
       isStale = true;
       continue;
     }
+    // Subject-derived kinds (COLLAPSE_FLOOR) touch no hand-picked crawler, so the
+    // crawler lock/staleness probe doesn't apply — their floor writes are
+    // lock-checked when the op is actually applied.
+    if (!reviewed.targetEntityId) continue;
     try {
       assertValidDeclaredEffect(reviewed);
       const crawler = await loadEffectTargetCrawler(
@@ -3149,8 +3158,9 @@ function jsonObject(value: JsonValue | undefined): Prisma.InputJsonValue {
 // entity-update path so the write is lock-aware + provenance-tracked.
 type StoredEventEffect = {
   id: string;
-  kind: "ADJUST_STAT" | "SET_STAT" | "SET_ALIVE";
-  targetEntityId: string;
+  kind: EventEffectKind;
+  // Absent for kinds that derive their subject from the event (COLLAPSE_FLOOR).
+  targetEntityId?: string;
   stat?: string;
   delta?: number;
   valueNumber?: number;
@@ -3163,7 +3173,7 @@ type StoredEventEffect = {
   reviewStatus: "PENDING" | "REJECTED" | "SUPERSEDED" | "APPLIED" | null;
 };
 
-const eventEffectKinds = new Set<string>(["ADJUST_STAT", "SET_STAT", "SET_ALIVE"]);
+const eventEffectKinds = new Set<string>(eventEffectKindValues);
 // Crawler numeric fields an event effect can update -> `crawler.*` patch field +
 // a floor the result is clamped to (DCC stats never go negative; level and floor
 // are 1-based).
@@ -3188,7 +3198,11 @@ function parseEventEffects(value: JsonValue | undefined): StoredEventEffect[] {
     const kind = record.kind;
     const targetEntityId = record.targetEntityId;
     if (typeof kind !== "string" || !eventEffectKinds.has(kind)) continue;
-    if (typeof targetEntityId !== "string" || targetEntityId.length === 0) continue;
+    const hasTarget = typeof targetEntityId === "string" && targetEntityId.length > 0;
+    // Entity-targeting kinds need a target; subject-derived kinds (COLLAPSE_FLOOR)
+    // never carry one.
+    if (eventEffectRequiresTarget(kind as EventEffectKind) && !hasTarget) continue;
+    const targetId = hasTarget ? (targetEntityId as string) : undefined;
     const stat = record.stat;
     effects.push({
       id:
@@ -3196,7 +3210,7 @@ function parseEventEffects(value: JsonValue | undefined): StoredEventEffect[] {
           ? record.id
           : crypto.randomUUID(),
       kind: kind as StoredEventEffect["kind"],
-      targetEntityId,
+      ...(targetId ? { targetEntityId: targetId } : {}),
       stat:
         typeof stat === "string" && stat in eventEffectStatFloors ? stat : undefined,
       delta: typeof record.delta === "number" ? record.delta : undefined,
@@ -3248,7 +3262,7 @@ function serializeEventEffects(
   return effects.map((effect) => ({
     id: effect.id,
     kind: effect.kind,
-    targetEntityId: effect.targetEntityId,
+    ...(effect.targetEntityId ? { targetEntityId: effect.targetEntityId } : {}),
     ...(effect.stat ? { stat: effect.stat } : {}),
     ...(typeof effect.delta === "number" ? { delta: effect.delta } : {}),
     ...(typeof effect.valueNumber === "number" ? { valueNumber: effect.valueNumber } : {}),
@@ -3349,14 +3363,24 @@ function effectEntityPatch(
 
   // ADJUST_STAT
   if (typeof effect.delta !== "number") return null;
-  if (typeof current !== "number") {
-    // hp/mp/currentFloor may be null (unset) — an event can't delta nothing.
+  const base = effectAdjustmentBase(stat, current);
+  if (base === null) {
+    // Some nullable stats, like currentFloor, have no sensible delta baseline.
     throw new ServiceError(`Cannot adjust ${stat}: the crawler has no value set.`);
   }
   const floor = eventEffectStatFloors[stat] ?? 0;
-  const next = Math.max(floor, current + effect.delta);
+  const next = Math.max(floor, base + effect.delta);
   if (next === current) return null;
   return { [`crawler.${stat}`]: { from: current, to: next } };
+}
+
+function effectAdjustmentBase(
+  stat: string,
+  current: number | null,
+): number | null {
+  if (typeof current === "number") return current;
+  if (stat === "hp" || stat === "mp") return 0;
+  return null;
 }
 
 function buildEffectPreviews(
@@ -3390,15 +3414,18 @@ function buildEffectPreviews(
     }
   >();
   for (const effect of parseEventEffects(readTo(patch, "effects"))) {
-    const crawler = targetById.get(effect.targetEntityId)?.crawler;
+    // Only crawler-targeting effects produce a stat before/after preview.
+    const targetEntityId = effect.targetEntityId;
+    if (!targetEntityId) continue;
+    const crawler = targetById.get(targetEntityId)?.crawler;
     if (!crawler) continue;
-    const state = stateByTarget.get(effect.targetEntityId) ?? { ...crawler };
-    stateByTarget.set(effect.targetEntityId, state);
+    const state = stateByTarget.get(targetEntityId) ?? { ...crawler };
+    stateByTarget.set(targetEntityId, state);
     if (effect.kind === "SET_ALIVE") {
       if (typeof effect.value !== "boolean") continue;
       previews.push({
         id: effect.id,
-        targetEntityId: effect.targetEntityId,
+        targetEntityId,
         before: state.isAlive,
         after: effect.value,
       });
@@ -3415,18 +3442,19 @@ function buildEffectPreviews(
       const after = Math.max(floor, effect.valueNumber);
       previews.push({
         id: effect.id,
-        targetEntityId: effect.targetEntityId,
+        targetEntityId,
         before,
         after,
       });
       values[effect.stat] = after;
       continue;
     }
-    if (typeof before !== "number" || typeof effect.delta !== "number") continue;
-    const after = Math.max(floor, before + effect.delta);
+    const base = effectAdjustmentBase(effect.stat, before);
+    if (base === null || typeof effect.delta !== "number") continue;
+    const after = Math.max(floor, base + effect.delta);
     previews.push({
       id: effect.id,
-      targetEntityId: effect.targetEntityId,
+      targetEntityId,
       before,
       after,
     });
@@ -3469,44 +3497,16 @@ async function nextRankForFloor(
   return generateRankBetween(last?.rank ?? null, null);
 }
 
-// A `ResolveContext` (src/lib/time-resolve.ts) over the whole campaign, so an
-// event's in-fiction time can be placed on the absolute days-since-collapse axis
-// (ADR 0008): EVENT-basis times walk to their anchor's day, and FLOOR_START /
-// FLOOR_COLLAPSE times resolve against the floor's open/collapse anchors. Built
-// from committed DB state inside the apply transaction; the event being applied
-// resolves against this even though it isn't in the map yet (it never anchors to
-// itself).
-async function buildResolveContext(
+// Campaign-wide `ResolveContext` (src/lib/time-resolve.ts), built from committed
+// DB state inside the apply transaction; the event being applied resolves against
+// this even though it isn't in the map yet (it never anchors to itself). Shares
+// one implementation with the apply-time validator (see `event-resolve-context`)
+// so "resolvable at apply" and "resolves at approve" can't diverge.
+function buildResolveContext(
   tx: Prisma.TransactionClient,
   campaignId: string,
 ): Promise<ResolveContext> {
-  const events = await tx.event.findMany({
-    where: { campaignId, status: { not: CanonStatus.ARCHIVED } },
-    select: { id: true, inGameTime: true },
-  });
-  const timeById = new Map<string, ReturnType<typeof readTimeRef>>();
-  for (const event of events) timeById.set(event.id, readTimeRef(event.inGameTime));
-
-  const floorRows = await tx.entity.findMany({
-    where: {
-      campaignId,
-      type: EntityType.FLOOR,
-      status: { not: CanonStatus.ARCHIVED },
-    },
-    select: { data: true },
-  });
-  const anchorsByFloor = new Map<number, FloorAnchors>();
-  for (const row of floorRows) {
-    const { floorNumber, startDay, collapseDay } = readFloorData(row.data);
-    if (floorNumber != null && !anchorsByFloor.has(floorNumber)) {
-      anchorsByFloor.set(floorNumber, { startDay, collapseDay });
-    }
-  }
-
-  return {
-    eventTimeById: (id) => timeById.get(id),
-    floorAnchors: (floor) => anchorsByFloor.get(floor),
-  };
+  return buildCampaignResolveContext(tx, campaignId);
 }
 
 // Mint a rank for an event at `position` among its comparable siblings, where a
@@ -3855,7 +3855,9 @@ async function applyCreateEvent(
     }));
     for (const effect of effects) {
       assertValidDeclaredEffect(effect);
-      await loadEffectTargetCrawler(tx, changeSet.campaignId, effect.targetEntityId);
+      if (eventEffectRequiresTarget(effect.kind) && effect.targetEntityId) {
+        await loadEffectTargetCrawler(tx, changeSet.campaignId, effect.targetEntityId);
+      }
     }
   }
 
@@ -4017,7 +4019,9 @@ async function applyUpdateEvent(
     }));
     for (const effect of declared) {
       assertValidDeclaredEffect(effect);
-      await loadEffectTargetCrawler(tx, changeSet.campaignId, effect.targetEntityId);
+      if (eventEffectRequiresTarget(effect.kind) && effect.targetEntityId) {
+        await loadEffectTargetCrawler(tx, changeSet.campaignId, effect.targetEntityId);
+      }
     }
     nextEffects = [...applied, ...declared];
     data.effects = serializeEventEffects(nextEffects);
@@ -4050,6 +4054,8 @@ async function applyUpdateEvent(
     const key = (entityId: string, role: EventParticipantRole) => `${entityId}:${role}`;
     const desiredKeys = new Set(desired.map((p) => key(p.entityId, p.role)));
     for (const effect of nextEffects.filter((candidate) => candidate.applied)) {
+      // Subject-derived effects (COLLAPSE_FLOOR) have no crawler participant.
+      if (!effect.targetEntityId) continue;
       const affectedKey = key(effect.targetEntityId, EventParticipantRole.AFFECTED);
       if (desiredKeys.has(affectedKey)) continue;
       desired.push({
@@ -4093,6 +4099,124 @@ async function applyUpdateEvent(
   return eventId;
 }
 
+// Materialize a COLLAPSE_FLOOR effect: the event's floor collapses on its
+// resolved in-fiction day D, and the next floor opens the same day (operator
+// decision: same-day, contiguous). Closes floor N (`data.collapseDay = D`),
+// ensures floor N+1 exists (auto-creating a stub so the close has a successor to
+// hand off to), opens it (`data.startDay = D`), and advances the campaign's
+// current floor to N+1. Floor writes route through the same lock-aware
+// create/update apply path as any other op, so they carry provenance and
+// re-derive floor anchoring (ADR 0008). Advancing the current floor is a direct
+// campaign write (ADR 0005), kept atomic inside this apply transaction.
+async function applyFloorCollapseEffect(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operationId: string,
+  eventInGameTime: JsonValue,
+) {
+  const time = readTimeRef(eventInGameTime);
+  const floorNumber = time.floor;
+  if (floorNumber == null) {
+    throw new ServiceError("A floor-collapse effect needs an event anchored to a floor.");
+  }
+  const ctx = await buildResolveContext(tx, changeSet.campaignId);
+  const day = resolveAbsoluteDay(time, ctx);
+  if (day == null) {
+    throw new ServiceError(
+      "Cannot collapse a floor from an event whose in-game day can't be resolved.",
+    );
+  }
+
+  // Live FLOOR entities for this floor and the next, keyed by their number.
+  const floorRows = await tx.entity.findMany({
+    where: {
+      campaignId: changeSet.campaignId,
+      type: EntityType.FLOOR,
+      status: { not: CanonStatus.ARCHIVED },
+    },
+    select: { id: true, data: true },
+  });
+  const floorByNumber = new Map<number, { id: string; data: unknown }>();
+  for (const row of floorRows) {
+    const { floorNumber: n } = readFloorData(row.data);
+    if (n != null && !floorByNumber.has(n)) floorByNumber.set(n, row);
+  }
+
+  const floorCreatePatch = (n: number, anchor: "startDay" | "collapseDay"): ReviewPatch => ({
+    type: { to: EntityType.FLOOR },
+    name: { to: `Floor ${n}` },
+    summary: { to: null },
+    description: { to: null },
+    visibility: { to: Visibility.DM_ONLY },
+    tags: { to: [] },
+    isStub: { to: true },
+    "data.floorNumber": { to: n },
+    [`data.${anchor}`]: { to: day },
+  });
+
+  // Close the current floor on day D (create it if it was never modelled).
+  const current = floorByNumber.get(floorNumber);
+  let nextFloorId: string;
+  if (current) {
+    await applyUpdateEntity(tx, changeSet, operationId, current.id, {
+      "data.collapseDay": {
+        from: readFloorData(current.data).collapseDay,
+        to: day,
+      },
+    });
+  } else {
+    await applyCreateEntity(
+      tx,
+      changeSet,
+      operationId,
+      floorCreatePatch(floorNumber, "collapseDay"),
+    );
+  }
+
+  // Open (or create) the next floor on the same day, and make it current.
+  const next = floorByNumber.get(floorNumber + 1);
+  if (next) {
+    await applyUpdateEntity(tx, changeSet, operationId, next.id, {
+      "data.startDay": {
+        from: readFloorData(next.data).startDay,
+        to: day,
+      },
+    });
+    nextFloorId = next.id;
+  } else {
+    nextFloorId = await applyCreateEntity(
+      tx,
+      changeSet,
+      operationId,
+      floorCreatePatch(floorNumber + 1, "startDay"),
+    );
+  }
+
+  const campaign = await tx.campaign.findUnique({
+    where: { id: changeSet.campaignId },
+    select: { currentFloorId: true },
+  });
+  if (campaign && campaign.currentFloorId !== nextFloorId) {
+    await tx.campaign.update({
+      where: { id: changeSet.campaignId },
+      data: { currentFloorId: nextFloorId },
+    });
+    await tx.auditLog.create({
+      data: {
+        campaignId: changeSet.campaignId,
+        actorUserId: changeSet.reviewedById ?? changeSet.actorUserId ?? "",
+        action: "SET_CURRENT_FLOOR",
+        targetType: "CAMPAIGN",
+        targetId: changeSet.campaignId,
+        detail: {
+          currentFloorId: nextFloorId,
+          previousCurrentFloorId: campaign.currentFloorId,
+        },
+      },
+    });
+  }
+}
+
 // Apply an event's unapplied effects to entity state. Each effect's entity write
 // goes through `applyUpdateEntity`, so it is lock-aware (a locked target / field
 // blocks the whole operation), version-bumped, and provenance-tracked. Marks the
@@ -4111,7 +4235,7 @@ async function applyApplyEventEffects(
       campaignId: changeSet.campaignId,
       status: { not: CanonStatus.ARCHIVED },
     },
-    select: { id: true, effects: true },
+    select: { id: true, effects: true, inGameTime: true },
   });
   if (!event) throw new ServiceError("Event not found.");
 
@@ -4169,24 +4293,25 @@ async function applyApplyEventEffects(
       effect.note = reviewed.note;
     }
     assertValidDeclaredEffect(effect);
-    const crawler = await loadEffectTargetCrawler(
-      tx,
-      changeSet.campaignId,
-      effect.targetEntityId,
-    );
-    const entityPatch = effectEntityPatch(effect, crawler);
-    if (entityPatch) {
-      // Routes through the lock-aware entity-update path (throws + flags the op
-      // blockedByLock if the target / field is locked, rolling back the apply).
-      await applyUpdateEntity(
-        tx,
-        changeSet,
-        operationId,
-        effect.targetEntityId,
-        entityPatch,
-      );
+    if (effect.kind === "COLLAPSE_FLOOR") {
+      // A campaign-scoped, subject-derived effect: it acts on the event's own
+      // floor, not a hand-picked crawler. Materializes as floor open/collapse
+      // anchors + a current-floor advance rather than a `crawler.*` patch.
+      await applyFloorCollapseEffect(tx, changeSet, operationId, event.inGameTime as JsonValue);
+    } else {
+      const targetEntityId = effect.targetEntityId;
+      if (!targetEntityId) {
+        throw new ServiceError("Effect target must be a crawler.");
+      }
+      const crawler = await loadEffectTargetCrawler(tx, changeSet.campaignId, targetEntityId);
+      const entityPatch = effectEntityPatch(effect, crawler);
+      if (entityPatch) {
+        // Routes through the lock-aware entity-update path (throws + flags the op
+        // blockedByLock if the target / field is locked, rolling back the apply).
+        await applyUpdateEntity(tx, changeSet, operationId, targetEntityId, entityPatch);
+      }
+      affectedParticipantIds.add(targetEntityId);
     }
-    affectedParticipantIds.add(effect.targetEntityId);
     effect.applied = true;
     effect.appliedChangeSetId = changeSet.id;
     effect.pendingChangeSetId = null;

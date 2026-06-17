@@ -23,6 +23,7 @@ const {
   linkCampaignEventCauseAction,
   archiveCampaignEventCausalityAction,
   restoreCampaignEventCausalityAction,
+  searchEntityCandidatesAction,
   routerRefresh,
 } = vi.hoisted(() => ({
   createCampaignEventAction: vi.fn(),
@@ -37,6 +38,7 @@ const {
   linkCampaignEventCauseAction: vi.fn(),
   archiveCampaignEventCausalityAction: vi.fn(),
   restoreCampaignEventCausalityAction: vi.fn(),
+  searchEntityCandidatesAction: vi.fn(),
   routerRefresh: vi.fn(),
 }));
 
@@ -53,6 +55,7 @@ vi.mock("@/app/(dm)/actions", () => ({
   linkCampaignEventCauseAction,
   archiveCampaignEventCausalityAction,
   restoreCampaignEventCausalityAction,
+  searchEntityCandidatesAction,
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: routerRefresh }),
@@ -181,6 +184,7 @@ function floor9Trio(): CampaignTimelineEvent[] {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  searchEntityCandidatesAction.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -382,7 +386,7 @@ describe("CampaignTimeline", () => {
     expect(screen.queryByRole("button", { name: /order from causality/i })).toBeNull();
   });
 
-  it("does not offer FLOOR entities as event participants (ADR 0008 §3)", () => {
+  it("does not offer FLOOR entities as event participants (ADR 0008 §3)", async () => {
     renderTimeline({
       events: [],
       candidates: [
@@ -398,7 +402,9 @@ describe("CampaignTimeline", () => {
     // The floor is filtered out of the participant pool — searching it surfaces
     // nothing (its floor is set via the time picker instead).
     expect(screen.queryByRole("button", { name: /Gloomdeep/ })).toBeNull();
-    expect(screen.getByText("No matching entities.")).toBeDefined();
+    await waitFor(() =>
+      expect(screen.getByText("No matching entities.")).toBeDefined(),
+    );
   });
 
   it("submits a multi-participant event", async () => {
@@ -620,6 +626,57 @@ describe("CampaignTimeline", () => {
     await waitFor(() =>
       expect(applyCampaignEventEffectsAction).toHaveBeenCalledWith("c1", "ev1"),
     );
+  });
+
+  it("links pending event-effect status to the selected Review Queue proposal", () => {
+    renderTimeline({
+      events: [
+        {
+          ...events[0],
+          effects: [
+            {
+              id: "fx1",
+              kind: "ADJUST_STAT",
+              targetId: "e1",
+              stat: "gold",
+              delta: 12000,
+              valueNumber: null,
+              value: null,
+              note: null,
+              applied: false,
+              appliedChangeSetId: null,
+              pendingChangeSetId: "cs1",
+              pendingOperationId: "op1",
+              reviewStatus: "PENDING",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(
+      screen.getByRole("link", { name: "pending review" }).getAttribute("href"),
+    ).toBe("/campaigns/c1/review?selected=cs1");
+    expect(screen.queryByRole("button", { name: /Apply/ })).toBeNull();
+  });
+
+  it("adds rosterDay to participant links when an event resolves to an absolute day", () => {
+    renderTimeline({
+      events: [
+        {
+          ...events[0],
+          id: "ev-day",
+          time: timeInfo({ basis: "ABSOLUTE_DAY", offset: 52, phrase: "Day 52" }),
+          participants: [
+            { id: "party1", name: "Desperado Club", type: "PARTY", role: "ACTOR" },
+          ],
+        },
+      ],
+    });
+
+    expect(
+      screen.getByRole("link", { name: /Desperado Club/ }).getAttribute("href"),
+    ).toBe("/campaigns/c1/entities/party1?event=ev-day&rosterDay=52");
   });
 
   it("prefills effect rows in the edit form and keeps it open on save errors", async () => {

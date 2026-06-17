@@ -14,12 +14,14 @@ const {
   archiveRelationshipAction,
   restoreRelationshipAction,
   toggleRelationshipLockAction,
+  searchEntityCandidatesAction,
 } = vi.hoisted(() => ({
   createRelationshipAction: vi.fn(),
   updateRelationshipAction: vi.fn(),
   archiveRelationshipAction: vi.fn(),
   restoreRelationshipAction: vi.fn(),
   toggleRelationshipLockAction: vi.fn(),
+  searchEntityCandidatesAction: vi.fn(),
 }));
 
 vi.mock("@/app/(dm)/actions", () => ({
@@ -28,6 +30,7 @@ vi.mock("@/app/(dm)/actions", () => ({
   archiveRelationshipAction,
   restoreRelationshipAction,
   toggleRelationshipLockAction,
+  searchEntityCandidatesAction,
 }));
 vi.mock("next/link", () => ({
   default: ({ href, children }: { href: string; children: React.ReactNode }) => (
@@ -65,6 +68,7 @@ function connection(overrides: Partial<EntityConnection> = {}): EntityConnection
 
 beforeEach(() => {
   vi.clearAllMocks();
+  searchEntityCandidatesAction.mockResolvedValue([]);
 });
 
 afterEach(cleanup);

@@ -45,6 +45,7 @@ const {
   inferRelationshipsForEntity,
   scaffoldStubEntities,
   askCampaign,
+  searchEntityCandidates,
   enqueueJob,
   enqueueBuildSemanticIndexJob,
   signOut,
@@ -95,6 +96,7 @@ const {
   inferRelationshipsForEntity: vi.fn(),
   scaffoldStubEntities: vi.fn(),
   askCampaign: vi.fn(),
+  searchEntityCandidates: vi.fn(),
   enqueueJob: vi.fn(),
   enqueueBuildSemanticIndexJob: vi.fn(),
   signOut: vi.fn(),
@@ -161,6 +163,7 @@ vi.mock("@/server/services/generation", () => ({
   scaffoldStubEntities,
 }));
 vi.mock("@/server/services/ask", () => ({ askCampaign }));
+vi.mock("@/server/services/search", () => ({ searchEntityCandidates }));
 vi.mock("@/server/services/jobs", () => ({ enqueueJob, enqueueBuildSemanticIndexJob }));
 vi.mock("@/server/services/seeding", () => ({ isLoreSeedDatasetAvailable }));
 vi.mock("@/server/auth", () => ({ signOut }));
@@ -224,6 +227,7 @@ import {
   enqueueBulkFleshAction,
   enqueueBuildSemanticIndexAction,
   askCampaignAction,
+  searchEntityCandidatesAction,
   inferRelationshipsForEntityAction,
   scaffoldStubsAction,
 } from "@/app/(dm)/actions";
@@ -2234,6 +2238,36 @@ describe("askCampaignAction", () => {
     expect((await askCampaignAction("c1", undefined, form({ question: "x" })))?.error).toBe(
       "The campaign couldn't answer that. Please try again.",
     );
+  });
+});
+
+describe("searchEntityCandidatesAction", () => {
+  it("uses the authenticated user and clamps search picker options", async () => {
+    searchEntityCandidates.mockResolvedValue([
+      { id: "e1", name: "Carl", type: "CRAWLER" },
+    ]);
+
+    const result = await searchEntityCandidatesAction("c1", "Carl", {
+      limit: 100,
+      types: ["CRAWLER"],
+      excludeIds: ["self"],
+    });
+
+    expect(searchEntityCandidates).toHaveBeenCalledWith("u1", "c1", "Carl", {
+      limit: 20,
+      types: ["CRAWLER"],
+      excludeIds: ["self"],
+    });
+    expect(result).toEqual([{ id: "e1", name: "Carl", type: "CRAWLER" }]);
+  });
+
+  it("returns an empty picker result for invalid options", async () => {
+    await expect(
+      searchEntityCandidatesAction("c1", "Carl", {
+        types: ["NOT_A_TYPE"],
+      } as never),
+    ).resolves.toEqual([]);
+    expect(searchEntityCandidates).not.toHaveBeenCalled();
   });
 });
 

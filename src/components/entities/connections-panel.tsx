@@ -9,6 +9,7 @@ import {
   archiveRelationshipAction,
   createRelationshipAction,
   restoreRelationshipAction,
+  searchEntityCandidatesAction,
   toggleRelationshipLockAction,
   updateRelationshipAction,
 } from "@/app/(dm)/actions";
@@ -67,12 +68,14 @@ function AddButton({ disabled }: { disabled?: boolean }) {
 function AddConnectionForm({
   sourceType,
   candidates,
+  searchCandidates,
   onSubmit,
   onCancel,
   error,
 }: {
   sourceType: EntityTypeValue;
   candidates: ConnectionCandidate[];
+  searchCandidates?: (query: string) => Promise<ConnectionCandidate[]>;
   onSubmit: (formData: FormData) => Promise<void>;
   onCancel: () => void;
   error: string | null;
@@ -115,6 +118,7 @@ function AddConnectionForm({
       <EntityTypeahead
         name="targetId"
         candidates={candidates}
+        searchCandidates={searchCandidates}
         value={target}
         onChange={selectTarget}
         placeholder="Search entity to connect…"
@@ -392,6 +396,11 @@ export function ConnectionsPanel({
     }
   };
 
+  const searchTargets = (query: string) =>
+    searchEntityCandidatesAction(campaignId, query, {
+      excludeIds: [entityId],
+    });
+
   const handleEdit = (relationshipId: string) => async (formData: FormData) => {
     setEditError(null);
     const res = await updateRelationshipAction(
@@ -560,6 +569,7 @@ export function ConnectionsPanel({
         <AddConnectionForm
           sourceType={sourceType as EntityTypeValue}
           candidates={candidates}
+          searchCandidates={searchTargets}
           onSubmit={handleSubmit}
           onCancel={() => {
             setError(null);

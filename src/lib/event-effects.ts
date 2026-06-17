@@ -14,6 +14,9 @@ export const effectStatLabels: Record<EventEffectStat, string> = {
 // Compact, target-agnostic description of an effect's update, e.g. "Gold +500",
 // "Floor = 1", or "Marked dead". The target name is rendered separately by the caller.
 export function describeEffect(effect: EventEffectView): string {
+  if (effect.kind === "COLLAPSE_FLOOR") {
+    return "Floor collapses → next floor opens";
+  }
   if (effect.kind === "SET_ALIVE") {
     return effect.value ? "Revived (alive)" : "Marked dead";
   }

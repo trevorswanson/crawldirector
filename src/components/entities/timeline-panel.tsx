@@ -13,6 +13,7 @@ import {
   linkEventCauseAction,
   restoreEventAction,
   restoreEventCausalityAction,
+  searchEntityCandidatesAction,
   toggleEventLockAction,
   updateEventAction,
   type EventCausalityActionState,
@@ -153,6 +154,8 @@ function EditEventForm({
   causeCandidates,
   entityEventIds,
   onRemoveCausality,
+  searchParticipants,
+  searchCrawlers,
 }: {
   event: EntityEvent;
   self: EntityCandidate;
@@ -168,6 +171,8 @@ function EditEventForm({
   causeCandidates: EntityEvent[];
   entityEventIds: Set<string>;
   onRemoveCausality: (linkId: string) => void;
+  searchParticipants?: (query: string) => Promise<EntityCandidate[]>;
+  searchCrawlers?: (query: string) => Promise<EntityCandidate[]>;
 }) {
   // Prefill the participant editor with the full current set: a row for every
   // role the viewed entity holds (it can have more than one) followed by the
@@ -186,12 +191,13 @@ function EditEventForm({
     .map((effect) => ({
       id: effect.id,
       kind: effect.kind,
-      target:
-        crawlerCandidates.find((candidate) => candidate.id === effect.targetId) ?? {
-          id: effect.targetId,
-          name: resolveName(effect.targetId),
-          type: "CRAWLER",
-        },
+      target: effect.targetId
+        ? crawlerCandidates.find((candidate) => candidate.id === effect.targetId) ?? {
+            id: effect.targetId,
+            name: resolveName(effect.targetId),
+            type: "CRAWLER",
+          }
+        : null,
       stat: effect.stat ?? "gold",
       delta: effect.delta != null ? String(effect.delta) : "",
       valueNumber: effect.valueNumber != null ? String(effect.valueNumber) : "",
@@ -232,8 +238,16 @@ function EditEventForm({
           anchorCandidates={anchorCandidates}
           excludeEventId={event.id}
         />
-        <ParticipantRows candidates={candidates} initial={initialParticipants} />
-        <EffectRows candidates={crawlerCandidates} initial={initialEffects} />
+        <ParticipantRows
+          candidates={candidates}
+          initial={initialParticipants}
+          searchCandidates={searchParticipants}
+        />
+        <EffectRows
+          candidates={crawlerCandidates}
+          initial={initialEffects}
+          searchCandidates={searchCrawlers}
+        />
         <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
           <input type="checkbox" name="secret" value="true" defaultChecked={event.secret} />
           DM-only (secret)
@@ -428,6 +442,15 @@ export function TimelinePanel({
     setParticipant(null);
     setOpen(false);
   };
+
+  const searchParticipants = (query: string) =>
+    searchEntityCandidatesAction(campaignId, query, {
+      excludeIds: [entityId],
+    });
+  const searchCrawlers = (query: string) =>
+    searchEntityCandidatesAction(campaignId, query, {
+      types: ["CRAWLER"],
+    });
 
   const handleSubmit = async (formData: FormData) => {
     setError(null);
@@ -647,6 +670,7 @@ export function TimelinePanel({
                         </div>
                       )}
                       <EventEffectsSection
+                        campaignId={campaignId}
                         effects={e.effects}
                         resolveName={resolveName}
                         onApply={() =>
@@ -672,6 +696,8 @@ export function TimelinePanel({
                           causeCandidates={causeCandidates}
                           entityEventIds={entityEventIds}
                           onRemoveCausality={setRemovedCausalityId}
+                          searchParticipants={searchParticipants}
+                          searchCrawlers={searchCrawlers}
                         />
                       ) : null}
                       <div className="flex flex-wrap gap-[6px]">
@@ -785,6 +811,7 @@ export function TimelinePanel({
                   <EntityTypeahead
                     name="otherId"
                     candidates={participantCandidates}
+                    searchCandidates={searchParticipants}
                     value={participant}
                     onChange={setParticipant}
                     placeholder="Search entity to add…"
@@ -805,7 +832,10 @@ export function TimelinePanel({
               </div>
             </div>
           )}
-          <EffectRows candidates={crawlerCandidates} />
+          <EffectRows
+            candidates={crawlerCandidates}
+            searchCandidates={searchCrawlers}
+          />
           <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
             <input type="checkbox" name="secret" value="true" />
             DM-only (secret)
