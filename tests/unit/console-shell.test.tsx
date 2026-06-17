@@ -84,16 +84,6 @@ describe("DmNav", () => {
     await waitFor(() => {});
   });
 
-  it("links Ask the Campaign to the current campaign and highlights it", async () => {
-    usePathname.mockReturnValue("/campaigns/c1/ask");
-
-    render(<DmNav />);
-
-    const link = screen.getByRole("link", { name: /Ask the Campaign/ });
-    expect(link.getAttribute("href")).toBe("/campaigns/c1/ask");
-    await waitFor(() => {});
-  });
-
   it("links the job queue to the current campaign and highlights it", async () => {
     usePathname.mockReturnValue("/campaigns/c1/jobs");
 

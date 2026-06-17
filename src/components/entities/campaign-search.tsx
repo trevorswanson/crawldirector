@@ -11,6 +11,7 @@ interface CampaignSearchProps {
   activeStatus?: string;
   activeSource?: string;
   lockedOnly?: boolean;
+  aiUntouched?: boolean;
 }
 
 export function CampaignSearch({
@@ -20,6 +21,7 @@ export function CampaignSearch({
   activeStatus,
   activeSource,
   lockedOnly,
+  aiUntouched,
 }: CampaignSearchProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -43,6 +45,7 @@ export function CampaignSearch({
       if (activeStatus && activeStatus !== "ALL") params.set("status", activeStatus);
       if (activeSource && activeSource !== "ALL") params.set("source", activeSource);
       if (lockedOnly) params.set("locked", "1");
+      if (aiUntouched) params.set("aiUntouched", "1");
 
       startTransition(() => {
         router.push(`${pathname}?${params.toString()}`);
@@ -50,7 +53,7 @@ export function CampaignSearch({
     }, 200); // 200ms debounce
 
     return () => clearTimeout(timeout);
-  }, [value, initialQuery, activeTag, activeType, activeStatus, activeSource, lockedOnly, pathname, router]);
+  }, [value, initialQuery, activeTag, activeType, activeStatus, activeSource, lockedOnly, aiUntouched, pathname, router]);
 
   return (
     <div className="field-shell relative flex items-center gap-[9px] bg-[var(--bg)] border border-[var(--line-strong)] px-3 py-[8px] flex-1 max-w-[420px] rounded-[2px] focus-within:border-[var(--accent)] focus-within:ring-1 focus-within:ring-[var(--ring)]">

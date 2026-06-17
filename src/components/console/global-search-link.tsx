@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Search } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
@@ -16,15 +16,28 @@ import {
  */
 export function GlobalSearchLink() {
   const pathname = usePathname();
+  const router = useRouter();
   const campaignId = pathname.match(/^\/campaigns\/([^/]+)/)?.[1] ?? null;
   const listId = useId();
   const [query, setQuery] = useState("");
+  // The dropdown only shows while the box has focus, so clicking away hides it.
+  const [open, setOpen] = useState(false);
   const [resultState, setResultState] = useState<{
     query: string;
     items: SearchPreviewItem[];
     error: boolean;
   } | null>(null);
   const trimmed = query.trim();
+  const searchHref = campaignId
+    ? `/campaigns/${campaignId}/search?q=${encodeURIComponent(trimmed)}`
+    : "#";
+
+  // Enter (or "See all results") jumps to the full search page for the query.
+  function goToResults() {
+    if (!campaignId || !trimmed) return;
+    setOpen(false);
+    router.push(searchHref);
+  }
   const activeResult = resultState?.query === trimmed ? resultState : null;
   const results = activeResult?.items ?? [];
   const loading = Boolean(campaignId && trimmed && !activeResult);
@@ -68,7 +81,16 @@ export function GlobalSearchLink() {
   }
 
   return (
-    <div className="relative hidden min-w-[280px] lg:block">
+    <div
+      className="relative hidden min-w-[280px] lg:block"
+      onBlur={(event) => {
+        // Hide the dropdown once focus leaves the box entirely (clicking a
+        // result/footer link keeps focus inside, so navigation still fires).
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setOpen(false);
+        }
+      }}
+    >
       <div className="flex items-center gap-[9px] border border-[var(--line)] bg-[var(--bg)] px-[11px] py-[6px] text-[var(--ink-dim)] focus-within:border-[var(--line-strong)] focus-within:text-[var(--ink)]">
         <Search aria-hidden size={14} />
         <input
@@ -76,14 +98,22 @@ export function GlobalSearchLink() {
           value={query}
           onChange={(event) => {
             setQuery(event.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              goToResults();
+            }
           }}
           aria-label="Search or ask the campaign"
-          aria-controls={trimmed ? listId : undefined}
+          aria-controls={trimmed && open ? listId : undefined}
           placeholder="Search · Ask the Campaign…"
           className="w-full bg-transparent text-[12.5px] text-[var(--ink)] outline-none placeholder:text-[var(--ink-dim)]"
         />
       </div>
-      {trimmed && (
+      {trimmed && open && (
         <div
           id={listId}
           className="absolute left-0 right-0 top-[calc(100%+6px)] z-50 max-h-[360px] overflow-y-auto border border-[var(--line-strong)] bg-[var(--bg)] shadow-[0_16px_35px_rgba(0,0,0,.35)]"
@@ -127,7 +157,15 @@ export function GlobalSearchLink() {
           </div>
           <div className="border-t border-[var(--line)] p-1">
             <Link
+              href={searchHref}
+              onClick={() => setOpen(false)}
+              className="block px-3 py-[8px] text-[12px] text-[var(--ink-dim)] transition-colors hover:bg-[var(--bg-3)] hover:text-[var(--ink)]"
+            >
+              See all results for &quot;{trimmed}&quot;
+            </Link>
+            <Link
               href={`/campaigns/${campaignId}/ask?q=${encodeURIComponent(trimmed)}`}
+              onClick={() => setOpen(false)}
               className="block px-3 py-[8px] text-[12px] text-[var(--ai)] transition-colors hover:bg-[var(--bg-3)]"
             >
               Ask the campaign &quot;{trimmed}&quot;
