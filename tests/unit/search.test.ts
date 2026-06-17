@@ -293,6 +293,27 @@ describe("buildSearchDocSearchSql", () => {
     expect(text).toContain("ORDER BY embedding <=>");
     expect(text).not.toContain("embedding::vector(1536)");
   });
+
+  it("constrains the candidate scan to the requested targetTypes", () => {
+    const filtered = buildSearchDocSearchSql({
+      campaignId: "campaign_1",
+      query: "lighthouse",
+      playerOnly: false,
+      limit: 10,
+      offset: 0,
+      targetTypes: ["ENTITY"],
+    }).strings.join("?");
+    expect(filtered).toContain('"targetType" IN (');
+
+    const unfiltered = buildSearchDocSearchSql({
+      campaignId: "campaign_1",
+      query: "lighthouse",
+      playerOnly: false,
+      limit: 10,
+      offset: 0,
+    }).strings.join("?");
+    expect(unfiltered).not.toContain('"targetType" IN');
+  });
 });
 
 describe("search indexing on canon writes", () => {
@@ -817,6 +838,35 @@ describe("searchCanon scoping & ranking", () => {
     });
     const { hits } = await searchCanon(dm.id, campaign.id, "bopca");
     expect(hits.map((h) => h.targetId)).toEqual([tagged.id]);
+  });
+
+  it("restricts hits to the requested targetTypes so non-entity matches don't crowd the page", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Dungeon" });
+    const a = await makeEntity(dm.id, campaign.id, {
+      name: "Stormcaller",
+      summary: "sharedterm hero",
+    });
+    const b = await makeEntity(dm.id, campaign.id, { name: "Tideturner" });
+    await createRelationship(dm.id, campaign.id, a.id, {
+      type: "ALLY_OF",
+      targetId: b.id,
+      notes: "sharedterm pact",
+      secret: false,
+    });
+
+    // Unfiltered, the term matches both the entity and the relationship doc.
+    const all = await searchCanon(dm.id, campaign.id, "sharedterm");
+    expect(all.hits.map((h) => h.targetType).sort()).toEqual(["ENTITY", "RELATIONSHIP"]);
+
+    // ENTITY-only: the relationship hit is filtered out at the SQL level, so it
+    // can't consume the limited candidate window ahead of the entity.
+    const entitiesOnly = await searchCanon(dm.id, campaign.id, "sharedterm", {
+      targetTypes: ["ENTITY"],
+    });
+    expect(entitiesOnly.hits).toHaveLength(1);
+    expect(entitiesOnly.hits[0].targetType).toBe("ENTITY");
+    expect(entitiesOnly.hits[0].targetId).toBe(a.id);
   });
 });
 

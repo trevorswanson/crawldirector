@@ -10,10 +10,14 @@ const { resolveCampaignProvider } = vi.hoisted(() => ({
   resolveCampaignProvider: vi.fn(),
 }));
 
-vi.mock("@/server/ai", () => ({
+// Partial mock: stub only the provider seam (no SDK, no network). Everything else
+// — including `describeProviderError` and the `resolveCampaignEmbedder` that
+// retrieval's `searchCanon` calls (M5 slice 6) — stays real. With no AI key
+// configured the real embedder resolves to null, so these tests exercise the
+// full-text retrieval path.
+vi.mock("@/server/ai", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/ai")>()),
   resolveCampaignProvider,
-  // Real-ish safe translator; generation only calls it for non-ProviderError throws.
-  describeProviderError: () => "Connection failed. Check the key, endpoint, and model.",
 }));
 
 import { prisma } from "@/server/db";
@@ -85,6 +89,7 @@ beforeEach(async () => {
   await prisma.changeOperation.deleteMany();
   await prisma.changeSet.deleteMany();
   await prisma.crawler.deleteMany();
+  await prisma.searchDoc.deleteMany();
   await prisma.entity.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.membership.deleteMany();
@@ -385,6 +390,52 @@ describe("inferRelationshipsForEntity", () => {
     expect(user).not.toContain(locked.id);
     expect(user).toContain("Open NPC");
     expect(user).toContain(open.id);
+  });
+
+  it("orders retrieval-relevant candidates ahead of the alphabetical baseline", async () => {
+    // Replaces the old alphabetical candidate dump: at scale the related entities
+    // rarely fall in the first N alphabetically (M5 slice 6 — retrieval context).
+    const { dmId, campaignId } = await seed();
+    const target = await createGenericEntity(dmId, campaignId, {
+      type: "NPC",
+      name: "Quasar",
+      summary: "A cosmic guide.",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: ["cosmic"],
+    });
+    // Alphabetically first, but shares nothing with the target.
+    await createGenericEntity(dmId, campaignId, {
+      type: "NPC",
+      name: "Aardvark",
+      summary: "Just a critter.",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    // Alphabetically last, but shares the target's distinctive term.
+    await createGenericEntity(dmId, campaignId, {
+      type: "NPC",
+      name: "Zenith",
+      summary: "A cosmic ally.",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: ["cosmic"],
+    });
+    const provider = fakeProvider({ summary: "unused", description: "unused", tags: [] });
+    provider.generateStructured.mockResolvedValue({ data: { relationships: [] } });
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    await expect(inferRelationshipsForEntity(dmId, campaignId, target.id)).rejects.toThrow(
+      /relationships/i,
+    );
+
+    const user = provider.generateStructured.mock.calls[0][0].messages[0].content;
+    // Both are offered (baseline keeps coverage), but the term-sharing "Zenith"
+    // is ranked ahead of the alphabetically-earlier, unrelated "Aardvark".
+    expect(user).toContain("Zenith");
+    expect(user).toContain("Aardvark");
+    expect(user.indexOf("Zenith")).toBeLessThan(user.indexOf("Aardvark"));
   });
 
   it("suppresses relationship proposals that duplicate pending relationship creates", async () => {
