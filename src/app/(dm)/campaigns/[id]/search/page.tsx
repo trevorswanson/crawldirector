@@ -2,15 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CalendarClock, Search, Share2 } from "lucide-react";
 
-import { JobKind, Role } from "@/generated/prisma/client";
 import { requireUser } from "@/server/auth/session";
-import { resolveCampaignEmbedder } from "@/server/ai";
 import { getCampaignForUser } from "@/server/services/campaigns";
-import { getActiveCampaignJob } from "@/server/services/jobs";
 import { searchCanon, type SearchHit } from "@/server/services/search";
 import { PageContainer } from "@/components/console/page-container";
 import { SearchBar } from "@/components/search/search-bar";
-import { BuildSemanticIndexButton } from "@/components/search/build-semantic-index-button";
 import { Kicker } from "@/components/ui/kicker";
 import { TypeDot } from "@/components/ui/type-dot";
 import { SourceBadge } from "@/components/ui/source-badge";
@@ -118,27 +114,6 @@ export default async function CampaignSearchPage({
   const rawQuery = q ?? "";
   const { query, hits } = await searchCanon(user.id, id, rawQuery);
 
-  // The "Build semantic index" control is DM-only and only meaningful when an
-  // embedding-capable provider is configured (semantic search degrades to
-  // full-text otherwise — doc 07). Resolve it only for DMs to avoid a needless
-  // key lookup on player requests.
-  const role = campaign.members[0]?.role;
-  const isDm = role === Role.OWNER || role === Role.CO_DM;
-  const canBuildSemanticIndex = isDm && (await resolveCampaignEmbedder(id)) !== null;
-  const activeSemanticJobRow = canBuildSemanticIndex
-    ? await getActiveCampaignJob(user.id, id, JobKind.EMBED_SEARCH_DOCS)
-    : null;
-  const activeSemanticJob =
-    activeSemanticJobRow &&
-    (activeSemanticJobRow.status === "QUEUED" || activeSemanticJobRow.status === "RUNNING")
-      ? {
-          id: activeSemanticJobRow.id,
-          status: activeSemanticJobRow.status,
-          createdAt: activeSemanticJobRow.createdAt,
-          startedAt: activeSemanticJobRow.startedAt,
-        }
-      : null;
-
   return (
     <PageContainer>
       <Kicker dim noLead className="mb-2">
@@ -150,15 +125,10 @@ export default async function CampaignSearchPage({
       <p className="mb-5 max-w-2xl text-[13px] leading-[1.6] text-[var(--ink-dim)]">
         Hybrid search across every entity, relationship, and event you can see —
         full-text over names, summaries, descriptions, tags, and connections,
-        blended with semantic meaning when a semantic index is built. With no
-        embedding provider configured it stays keyword-only.
+        blended with semantic meaning when a semantic index is built. Build the
+        semantic index from Settings; with no embedding provider configured it
+        stays keyword-only.
       </p>
-
-      {canBuildSemanticIndex && (
-        <div className="mb-5">
-          <BuildSemanticIndexButton campaignId={id} activeJob={activeSemanticJob} />
-        </div>
-      )}
 
       <SearchBar campaignId={id} initialQuery={rawQuery} autoFocus />
 

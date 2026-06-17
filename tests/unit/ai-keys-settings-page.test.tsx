@@ -2,22 +2,32 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
-const { requireUser, getCampaignForUser, listAiKeys, getCampaignAiUsage, notFound } = vi.hoisted(
-  () => ({
-    requireUser: vi.fn(),
-    getCampaignForUser: vi.fn(),
-    listAiKeys: vi.fn(),
-    getCampaignAiUsage: vi.fn(),
-    notFound: vi.fn(() => {
-      throw new Error("NEXT_NOT_FOUND");
-    }),
+const {
+  requireUser,
+  getCampaignForUser,
+  listAiKeys,
+  getCampaignAiUsage,
+  resolveCampaignEmbedder,
+  getActiveCampaignJob,
+  notFound,
+} = vi.hoisted(() => ({
+  requireUser: vi.fn(),
+  getCampaignForUser: vi.fn(),
+  listAiKeys: vi.fn(),
+  getCampaignAiUsage: vi.fn(),
+  resolveCampaignEmbedder: vi.fn(),
+  getActiveCampaignJob: vi.fn(),
+  notFound: vi.fn(() => {
+    throw new Error("NEXT_NOT_FOUND");
   }),
-);
+}));
 
 vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/campaigns", () => ({ getCampaignForUser }));
 vi.mock("@/server/services/ai-keys", () => ({ listAiKeys }));
 vi.mock("@/server/services/ai-usage", () => ({ getCampaignAiUsage }));
+vi.mock("@/server/ai", () => ({ resolveCampaignEmbedder }));
+vi.mock("@/server/services/jobs", () => ({ getActiveCampaignJob }));
 vi.mock("next/navigation", () => ({ notFound }));
 vi.mock("@/components/settings/ai-keys-panel", () => ({
   AiKeysPanel: ({ campaignId, configured }: { campaignId: string; configured: unknown[] }) => (
@@ -31,6 +41,13 @@ vi.mock("@/components/settings/usage-panel", () => ({
     <div data-testid="usage-panel">
       usage:{campaignId}:{usage.runCount}
     </div>
+  ),
+}));
+// The "Build semantic index" button is a client component (its own action test
+// covers it); here we only assert the page's embedder gating renders it.
+vi.mock("@/components/search/build-semantic-index-button", () => ({
+  BuildSemanticIndexButton: ({ activeJob }: { activeJob?: { status: string } | null }) => (
+    <div data-testid="build-semantic-index">{activeJob?.status ?? "idle"}</div>
   ),
 }));
 
@@ -49,6 +66,8 @@ beforeEach(() => {
     totalOutputTokens: 0,
     unpricedRunCount: 0,
   });
+  resolveCampaignEmbedder.mockResolvedValue(null);
+  getActiveCampaignJob.mockResolvedValue(null);
 });
 
 afterEach(() => cleanup());
@@ -61,6 +80,37 @@ describe("CampaignSettingsPage", () => {
     expect(screen.getByTestId("usage-panel").textContent).toBe("usage:c1:3");
     expect(listAiKeys).toHaveBeenCalledWith("u1", "c1");
     expect(getCampaignAiUsage).toHaveBeenCalledWith("u1", "c1");
+  });
+
+  it("shows Build semantic index when an embedder is configured", async () => {
+    resolveCampaignEmbedder.mockResolvedValue({ id: "openai" });
+    render(await CampaignSettingsPage({ params: Promise.resolve({ id: "c1" }) }));
+    expect(screen.getByTestId("build-semantic-index").textContent).toBe("idle");
+    expect(getActiveCampaignJob).toHaveBeenCalledWith("u1", "c1", "EMBED_SEARCH_DOCS");
+  });
+
+  it("passes the active semantic job to the build button", async () => {
+    resolveCampaignEmbedder.mockResolvedValue({ id: "openai" });
+    getActiveCampaignJob.mockResolvedValue({
+      id: "j1",
+      kind: "EMBED_SEARCH_DOCS",
+      status: "RUNNING",
+      error: null,
+      result: null,
+      createdAt: new Date(),
+      startedAt: new Date(),
+      finishedAt: null,
+    });
+    render(await CampaignSettingsPage({ params: Promise.resolve({ id: "c1" }) }));
+    expect(screen.getByTestId("build-semantic-index").textContent).toBe("RUNNING");
+  });
+
+  it("shows a hint instead of the button when no embedder is configured", async () => {
+    resolveCampaignEmbedder.mockResolvedValue(null);
+    render(await CampaignSettingsPage({ params: Promise.resolve({ id: "c1" }) }));
+    expect(screen.queryByTestId("build-semantic-index")).toBeNull();
+    expect(screen.getByText(/to enable semantic search/i)).toBeTruthy();
+    expect(getActiveCampaignJob).not.toHaveBeenCalled();
   });
 
   it("404s when the campaign is not visible to the user", async () => {

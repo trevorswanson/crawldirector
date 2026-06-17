@@ -56,6 +56,7 @@ export default async function CampaignPage({
     status?: string;
     source?: string;
     locked?: string;
+    aiUntouched?: string;
     archivedEntity?: string;
     page?: string;
   }>;
@@ -82,6 +83,7 @@ export default async function CampaignPage({
     ? filters.source!
     : "ALL";
   const lockedOnly = filters.locked === "1";
+  const aiUntouched = filters.aiUntouched === "1";
   const PAGE_SIZE = 60;
   // Clamp to ≥ 1; non-numeric or missing defaults to 1.
   const activePage = Math.max(1, parseInt(filters.page ?? "1", 10) || 1);
@@ -102,6 +104,7 @@ export default async function CampaignPage({
         status: activeStatus,
         source: sourceFilter === "ALL" ? undefined : sourceFilter,
         lockedOnly,
+        aiUntouched,
       }, { page: activePage, pageSize: PAGE_SIZE }),
       getEntityTypeCounts(user.id, id),
       listCampaignTags(user.id, id),
@@ -144,6 +147,7 @@ export default async function CampaignPage({
       status: activeStatus === "ALL" ? undefined : activeStatus,
       source: activeSource === "ALL" ? undefined : activeSource,
       locked: lockedOnly ? "1" : undefined,
+      aiUntouched: aiUntouched ? "1" : undefined,
       ...overrides,
     };
     for (const [k, v] of Object.entries(merged)) if (v) next.set(k, v);
@@ -161,6 +165,7 @@ export default async function CampaignPage({
       status: activeStatus === "ALL" ? undefined : activeStatus,
       source: activeSource === "ALL" ? undefined : activeSource,
       locked: lockedOnly ? "1" : undefined,
+      aiUntouched: aiUntouched ? "1" : undefined,
       page: p > 1 ? String(p) : undefined,
     };
     for (const [k, v] of Object.entries(merged)) if (v) next.set(k, v);
@@ -279,17 +284,26 @@ export default async function CampaignPage({
           <Lock aria-hidden size={13} />
           Locked only
         </Link>
-        <div
-          title="AI / import / player provenance arrives with AI generation (M4)."
-          aria-disabled
-          className="mt-[7px] flex w-full cursor-not-allowed items-center gap-2 border border-dashed border-[var(--line-strong)] px-[10px] py-[9px] font-mono text-[11px] text-[var(--ink-faint)]"
+        <Link
+          href={hrefWith({
+            aiUntouched: aiUntouched ? undefined : "1",
+            // Enabling implies source = AI, so reset the source facet to avoid a
+            // contradictory combination (e.g. source DM + AI-only).
+            source: undefined,
+          })}
+          title="AI-origin entities no one has edited since (source AI, never revised)."
+          className="mt-[7px] flex w-full items-center gap-2 border px-[10px] py-[9px] font-mono text-[11px]"
+          style={{
+            borderColor: aiUntouched ? "var(--ai)" : "var(--line-strong)",
+            color: aiUntouched ? "var(--ai)" : "var(--ink-dim)",
+            background: aiUntouched
+              ? "color-mix(in srgb, var(--ai) 12%, transparent)"
+              : "transparent",
+          }}
         >
           <Sparkles aria-hidden size={13} />
           AI-origin &amp; never edited
-          <span className="ml-auto text-[9px] uppercase tracking-[.08em]">
-            M4
-          </span>
-        </div>
+        </Link>
 
         {(campaignTags.length > 0 || activeTag) && (
           <>
@@ -341,6 +355,7 @@ export default async function CampaignPage({
             activeStatus={activeStatus}
             activeSource={activeSource}
             lockedOnly={lockedOnly}
+            aiUntouched={aiUntouched}
           />
           <span className="font-mono text-[11px] text-[var(--ink-faint)]">
             {filteredTotal} / {total}

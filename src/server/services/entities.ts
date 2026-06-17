@@ -310,6 +310,12 @@ export async function listEntitiesForUser(
     status?: EntityStatusFilter;
     lockedOnly?: boolean;
     source?: ChangeSource | "ALL";
+    /**
+     * "AI-origin & never edited": entities the AI created (source AI) that no one
+     * has touched since (version still 1 — every applied edit bumps version but
+     * leaves source). A quick provenance filter for un-reviewed AI canon.
+     */
+    aiUntouched?: boolean;
   } = {},
   paging?: { page: number; pageSize: number },
 ) {
@@ -321,6 +327,7 @@ export async function listEntitiesForUser(
   const type = filters.type && filters.type !== "ALL" ? filters.type : undefined;
   const status = filters.status && filters.status !== "ALL" ? filters.status : undefined;
   const lockedOnly = filters.lockedOnly || status === "LOCKED";
+  const aiUntouched = filters.aiUntouched ?? false;
   const source = filters.source && filters.source !== "ALL" ? filters.source : undefined;
 
   const where: Prisma.EntityWhereInput = {
@@ -340,7 +347,13 @@ export async function listEntitiesForUser(
           ],
         }
       : {}),
-    ...(source ? { source } : {}),
+    // The AI-untouched quick filter implies source = AI, so it takes precedence
+    // over an explicit source facet (the page clears that facet when toggling).
+    ...(aiUntouched
+      ? { source: ChangeSource.AI, version: 1 }
+      : source
+        ? { source }
+        : {}),
     ...playerVisibleWhere(membership.role),
     ...(type ? { type } : {}),
     ...(tag

@@ -959,6 +959,53 @@ describe("entity service", () => {
     });
     expect(list.entities.map((e) => e.name)).toEqual(["Pending NPC"]);
   });
+
+  it("filters to AI-origin entities that were never edited", async () => {
+    const owner = await makeUser("ai-untouched@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    // AI-created, never edited (version still 1) → matches.
+    await prisma.entity.create({
+      data: {
+        campaignId: campaign.id,
+        createdById: owner.id,
+        type: "NPC",
+        name: "Fresh AI NPC",
+        visibility: "DM_ONLY",
+        source: "AI",
+        version: 1,
+      },
+    });
+    // AI-created but edited since (version bumped) → excluded.
+    await prisma.entity.create({
+      data: {
+        campaignId: campaign.id,
+        createdById: owner.id,
+        type: "NPC",
+        name: "Edited AI NPC",
+        visibility: "DM_ONLY",
+        source: "AI",
+        version: 2,
+      },
+    });
+    // DM-authored → excluded (not AI-origin).
+    await prisma.entity.create({
+      data: {
+        campaignId: campaign.id,
+        createdById: owner.id,
+        type: "NPC",
+        name: "DM NPC",
+        visibility: "DM_ONLY",
+        source: "DM",
+        version: 1,
+      },
+    });
+
+    const list = await listEntitiesForUser(owner.id, campaign.id, {
+      aiUntouched: true,
+    });
+    expect(list.entities.map((e) => e.name)).toEqual(["Fresh AI NPC"]);
+  });
 });
 
 describe("entity locking", () => {

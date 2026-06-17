@@ -122,6 +122,7 @@ describe("CampaignPage", () => {
       status: "ALL",
       source: undefined,
       lockedOnly: false,
+      aiUntouched: false,
     }, { page: 1, pageSize: 60 });
     expect(getEntityTypeCounts).toHaveBeenCalledWith("u1", "c1");
   });
@@ -209,6 +210,34 @@ describe("CampaignPage", () => {
       status: "PENDING",
       source: "PLAYER_SUGGESTION",
       lockedOnly: true,
+      aiUntouched: false,
+    }, { page: 1, pageSize: 60 });
+  });
+
+  it("passes the AI-origin & never edited quick filter to the service", async () => {
+    getCampaignForUser.mockResolvedValue({
+      id: "c2",
+      name: "World Two",
+      summary: null,
+      createdAt: new Date(),
+      members: [{ role: "OWNER" }],
+      _count: { members: 1, entities: 1 },
+    });
+
+    render(
+      await CampaignPage({
+        params: Promise.resolve({ id: "c2" }),
+        searchParams: Promise.resolve({ aiUntouched: "1" }),
+      }),
+    );
+
+    expect(listEntitiesForUser).toHaveBeenCalledWith("u1", "c2", {
+      query: undefined,
+      type: "ALL",
+      status: "ALL",
+      source: undefined,
+      lockedOnly: false,
+      aiUntouched: true,
     }, { page: 1, pageSize: 60 });
   });
 
