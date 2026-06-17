@@ -92,6 +92,16 @@ export interface LLMProvider {
    * `resolveCampaignEmbedder` and degrade to full-text search when none exists.
    */
   embed(texts: string[]): Promise<EmbedResult>;
+  /**
+   * Scrub this adapter's decrypted secret (the BYO API key) out of arbitrary
+   * text before it reaches the logs. A misbehaving OpenAI-compatible
+   * endpoint/proxy can echo the request's `Authorization` header into an error
+   * message or a non-HTTP parse error; logging that raw error would leak the key
+   * (invariant #6). Call sites that log a *raw* provider error pass this to
+   * `logActionError` so the exact key is replaced with `[redacted]` while the
+   * rest of the error — errno, host, status — stays intact for troubleshooting.
+   */
+  redactSecrets(text: string): string;
 }
 
 export const DEFAULT_MAX_TOKENS = 4096;
@@ -114,4 +124,21 @@ export class ProviderError extends Error {
     super(message);
     this.name = "ProviderError";
   }
+}
+
+// Build the `redactSecrets` function an adapter exposes (see `LLMProvider`).
+// Replaces every occurrence of the adapter's decrypted secret(s) with
+// `[redacted]` so a raw provider error can be logged for diagnosis without
+// leaking the key (invariant #6). Blank/placeholder/short values are skipped: a
+// short secret would match unrelated substrings and corrupt the message, and the
+// `not-needed` placeholder (used when a local endpoint runs without auth) is not
+// a secret. Plain string replacement — no regex — so any key shape is handled.
+export function createSecretRedactor(
+  ...secrets: (string | null | undefined)[]
+): (text: string) => string {
+  const real = secrets.filter(
+    (s): s is string => typeof s === "string" && s.length >= 8 && s !== "not-needed",
+  );
+  if (real.length === 0) return (text) => text;
+  return (text) => real.reduce((acc, secret) => acc.split(secret).join("[redacted]"), text);
 }

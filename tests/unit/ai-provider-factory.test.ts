@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ServiceError } from "@/lib/errors";
+import { createSecretRedactor } from "@/server/ai/types";
 
 // Mock the key store (no DB) and both adapter factories (no SDK). The factory and
 // connection-test logic under test is real.
@@ -25,20 +26,25 @@ import {
   testAiConnection,
 } from "@/server/ai";
 
-function fakeProvider(over: Partial<{ model: string; generateStructured: ReturnType<typeof vi.fn> }> = {}) {
+function fakeProvider(
+  over: Partial<{ model: string; apiKey: string; generateStructured: ReturnType<typeof vi.fn> }> = {},
+) {
   return {
     id: "x",
     model: over.model ?? "some-model",
     generate: vi.fn(),
     generateStructured: over.generateStructured ?? vi.fn().mockResolvedValue({ data: { ok: true } }),
+    // Build the real redactor from the decrypted key so the connection-test error
+    // path is exercised exactly as production wires it (index.ts).
+    redactSecrets: createSecretRedactor(over.apiKey),
   };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   assertCampaignDm.mockResolvedValue({ role: "OWNER" });
-  createAnthropicProvider.mockImplementation((o) => fakeProvider({ model: o.model }));
-  createOpenAiProvider.mockImplementation((o) => fakeProvider({ model: o.model }));
+  createAnthropicProvider.mockImplementation((o) => fakeProvider({ model: o.model, apiKey: o.apiKey }));
+  createOpenAiProvider.mockImplementation((o) => fakeProvider({ model: o.model, apiKey: o.apiKey }));
 });
 
 describe("getCampaignProvider", () => {
@@ -237,6 +243,39 @@ describe("testAiConnection", () => {
       fakeProvider({ generateStructured: vi.fn().mockRejectedValue("just a string") }),
     );
     await expect(testAiConnection("dm1", "c1", "openai-compatible")).rejects.toThrow(/Check the key/);
+  });
+
+  it("redacts the configured key from the server log but still logs the failure", async () => {
+    const key = "sk-secret-ABCDEFGHIJK";
+    getAiKeyConfig.mockResolvedValue({ apiKey: key, baseUrl: "https://proxy.example/v1", model: "m" });
+    // Simulate a malformed OpenAI-compatible endpoint echoing the Authorization
+    // header into a non-HTTP parse error (no `status`) — the leak vector PR #139
+    // addresses. The raw error is logged for diagnosis, but with the key scrubbed.
+    createOpenAiProvider.mockReturnValueOnce(
+      fakeProvider({
+        apiKey: key,
+        generateStructured: vi
+          .fn()
+          .mockRejectedValue(new Error(`Unexpected token in JSON — Authorization: Bearer ${key}`)),
+      }),
+    );
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const err = await testAiConnection("dm1", "c1", "openai-compatible").catch((e) => e);
+
+    expect(err).toBeInstanceOf(ServiceError);
+    expect(errorSpy).toHaveBeenCalled();
+    // The raw key never reaches the log, in any argument...
+    for (const call of errorSpy.mock.calls) {
+      for (const arg of call) expect(String(arg)).not.toContain(key);
+    }
+    // ...but the failure is still recorded for troubleshooting (context + the
+    // redaction marker where the key was).
+    const logged = errorSpy.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
+    expect(logged).toContain("AI connection test failed");
+    expect(logged).toContain("[redacted]");
+
+    errorSpy.mockRestore();
   });
 
   it("propagates the DM-permission rejection", async () => {

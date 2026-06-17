@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import {
   DEFAULT_MAX_TOKENS,
   ProviderError,
+  createSecretRedactor,
   emptyUsage,
   type EmbedResult,
   type GenerateRequest,
@@ -89,12 +90,14 @@ export function createOpenAiProvider(opts: OpenAiAdapterOptions): LLMProvider {
     ...(opts.baseUrl ? { baseURL: opts.baseUrl } : {}),
   });
   const { model, providerId } = opts;
+  const redactSecrets = createSecretRedactor(opts.apiKey);
 
   return {
     id: providerId,
     model,
     embeddingModel: opts.embeddingModel ?? null,
     embeddingDimensions: opts.embeddingDimensions ?? null,
+    redactSecrets,
 
     async generate(req: GenerateRequest): Promise<GenerateResult> {
       const resp = await client.chat.completions.create({

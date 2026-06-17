@@ -197,9 +197,10 @@ async function fleshOutEntityLocked(
   } catch (error) {
     // Keep messages safe: never reflect a provider's raw free text, which (for an
     // OpenAI-compatible endpoint) could echo key-bearing config (invariant #6).
-    // Log the real error server-side first (key-safe; walks the `.cause` chain)
-    // so a failing BYO setup is diagnosable behind the vague user message.
-    logActionError(`Flesh-entity generation failed (provider=${provider.id})`, error);
+    // Log the real error server-side first so a failing BYO setup is diagnosable
+    // behind the vague user message — walking the `.cause` chain surfaces the
+    // network errno, and the provider's redactor scrubs the decrypted key.
+    logActionError(`Flesh-entity generation failed (provider=${provider.id})`, error, provider.redactSecrets);
     const message =
       error instanceof ProviderError ? error.message : describeProviderError(error);
     throw new ServiceError(message);
@@ -500,7 +501,7 @@ async function inferRelationshipsForEntityLocked(
     output = result.data;
     usage = result.usage ?? usage;
   } catch (error) {
-    logActionError(`Infer-relationships generation failed (provider=${provider.id})`, error);
+    logActionError(`Infer-relationships generation failed (provider=${provider.id})`, error, provider.redactSecrets);
     const message =
       error instanceof ProviderError ? error.message : describeProviderError(error);
     throw new ServiceError(message);
@@ -621,7 +622,7 @@ async function scaffoldStubEntitiesLocked(
     usage = result.usage ?? usage;
   } catch (error) {
     // Keep messages safe: never reflect a provider's raw free text (invariant #6).
-    logActionError(`Scaffold-stubs generation failed (provider=${provider.id})`, error);
+    logActionError(`Scaffold-stubs generation failed (provider=${provider.id})`, error, provider.redactSecrets);
     const message =
       error instanceof ProviderError ? error.message : describeProviderError(error);
     throw new ServiceError(message);

@@ -176,9 +176,11 @@ export async function testAiConnection(
     });
   } catch (error) {
     // The wrapped message below is deliberately vague (key-safe). Log the real
-    // error server-side so a failing BYO setup is diagnosable — logActionError is
-    // key-safe and walks the `.cause` chain to surface the network errno.
-    logActionError(`AI connection test failed (provider=${providerId})`, error);
+    // error server-side so a failing BYO setup is diagnosable — walking the
+    // `.cause` chain surfaces the network errno, and the provider's redactor
+    // scrubs the decrypted key (a malformed endpoint can echo the Authorization
+    // header) while leaving errno/host intact (invariant #6).
+    logActionError(`AI connection test failed (provider=${providerId})`, error, provider.redactSecrets);
     throw new ServiceError(describeProviderError(error));
   }
 

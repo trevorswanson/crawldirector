@@ -446,3 +446,43 @@ describe("OpenAI / OpenAI-compatible adapter", () => {
     await expect(provider.embed(["x"])).rejects.toBeInstanceOf(ProviderError);
   });
 });
+
+describe("redactSecrets", () => {
+  it("scrubs the configured key from text (OpenAI adapter)", () => {
+    const provider = createOpenAiProvider({
+      providerId: "openai",
+      apiKey: "sk-openai-supersecret",
+      baseUrl: "https://proxy.example",
+      model: "gpt-4o-mini",
+    });
+    const scrubbed = provider.redactSecrets(
+      "fetch failed — Authorization: Bearer sk-openai-supersecret",
+    );
+    expect(scrubbed).not.toContain("sk-openai-supersecret");
+    expect(scrubbed).toContain("[redacted]");
+    // Non-secret context is preserved so the error stays diagnosable.
+    expect(scrubbed).toContain("fetch failed");
+  });
+
+  it("scrubs the configured key from text (Anthropic adapter)", () => {
+    const provider = createAnthropicProvider({
+      providerId: "anthropic",
+      apiKey: "sk-ant-supersecret",
+      baseUrl: null,
+      model: "claude-opus-4-8",
+    });
+    expect(provider.redactSecrets("x-api-key: sk-ant-supersecret")).toBe("x-api-key: [redacted]");
+  });
+
+  it("is a no-op for the blank-key placeholder (local endpoint, no auth)", () => {
+    const provider = createOpenAiProvider({
+      providerId: "openai",
+      apiKey: "not-needed",
+      baseUrl: "http://localhost:11434/v1",
+      model: "llama3.1",
+    });
+    expect(provider.redactSecrets("connect ECONNREFUSED 127.0.0.1:11434")).toBe(
+      "connect ECONNREFUSED 127.0.0.1:11434",
+    );
+  });
+});

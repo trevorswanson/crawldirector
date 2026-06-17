@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import {
   DEFAULT_MAX_TOKENS,
   ProviderError,
+  createSecretRedactor,
   emptyUsage,
   type EmbedResult,
   type GenerateRequest,
@@ -73,10 +74,12 @@ export function createAnthropicProvider(opts: AnthropicAdapterOptions): LLMProvi
     ...(opts.baseUrl ? { baseURL: opts.baseUrl } : {}),
   });
   const { model, providerId } = opts;
+  const redactSecrets = createSecretRedactor(opts.apiKey);
 
   return {
     id: providerId,
     model,
+    redactSecrets,
 
     async generate(req: GenerateRequest): Promise<GenerateResult> {
       const resp = await client.messages.create({
