@@ -340,11 +340,87 @@ describe("OpenAI / OpenAI-compatible adapter", () => {
       cacheReadTokens: 0,
       cacheCreationTokens: 0,
     });
+    // The configured width is sent as `dimensions` so OpenAI returns vectors of
+    // the width embedSearchDocs validates against.
     expect(openaiEmbed.mock.calls[0][0]).toEqual({
       model: "text-embedding-3-small",
       input: ["first", "second"],
       encoding_format: "float",
+      dimensions: 1536,
     });
+  });
+
+  it("embed() sends a non-default dimension to the real OpenAI endpoint", async () => {
+    openaiEmbed.mockResolvedValue({
+      data: [{ index: 0, embedding: [0.1, 0.2] }],
+      usage: { prompt_tokens: 3, total_tokens: 3 },
+    });
+    const provider = createOpenAiProvider({
+      providerId: "openai",
+      apiKey: "sk-openai",
+      baseUrl: null,
+      model: "gpt-4o-mini",
+      embeddingModel: "text-embedding-3-large",
+      embeddingDimensions: 1024,
+    });
+
+    await provider.embed(["x"]);
+    expect(openaiEmbed.mock.calls[0][0].dimensions).toBe(1024);
+  });
+
+  it("embed() omits dimensions for a custom (OpenAI-compatible) endpoint", async () => {
+    openaiEmbed.mockResolvedValue({
+      data: [{ index: 0, embedding: [0.1, 0.2] }],
+      usage: { prompt_tokens: 3, total_tokens: 3 },
+    });
+    const provider = createOpenAiProvider({
+      providerId: "openai-compatible",
+      apiKey: "not-needed",
+      baseUrl: "http://localhost:11434/v1",
+      model: "llama3.1",
+      embeddingModel: "text-embedding-3-small",
+      embeddingDimensions: 768,
+    });
+
+    await provider.embed(["x"]);
+    // A self-hosted/proxy endpoint serves a fixed-width model and may reject the
+    // param, so we never send `dimensions` there.
+    expect(openaiEmbed.mock.calls[0][0]).not.toHaveProperty("dimensions");
+  });
+
+  it("embed() omits dimensions for a legacy model that does not accept the param", async () => {
+    openaiEmbed.mockResolvedValue({
+      data: [{ index: 0, embedding: [0.1, 0.2] }],
+      usage: { prompt_tokens: 3, total_tokens: 3 },
+    });
+    const provider = createOpenAiProvider({
+      providerId: "openai",
+      apiKey: "sk-openai",
+      baseUrl: null,
+      model: "gpt-4o-mini",
+      embeddingModel: "text-embedding-ada-002",
+      embeddingDimensions: 1536,
+    });
+
+    await provider.embed(["x"]);
+    expect(openaiEmbed.mock.calls[0][0]).not.toHaveProperty("dimensions");
+  });
+
+  it("embed() omits dimensions when none is configured", async () => {
+    openaiEmbed.mockResolvedValue({
+      data: [{ index: 0, embedding: [0.1, 0.2] }],
+      usage: { prompt_tokens: 3, total_tokens: 3 },
+    });
+    const provider = createOpenAiProvider({
+      providerId: "openai",
+      apiKey: "sk-openai",
+      baseUrl: null,
+      model: "gpt-4o-mini",
+      embeddingModel: "text-embedding-3-small",
+    });
+
+    await provider.embed(["x"]);
+    expect(openaiEmbed.mock.calls[0][0]).not.toHaveProperty("dimensions");
   });
 
   it("embed() short-circuits an empty input without calling the API", async () => {
