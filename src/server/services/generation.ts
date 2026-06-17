@@ -3,6 +3,7 @@ import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 import { describeProviderError, resolveCampaignProvider } from "@/server/ai";
 import { ProviderError, emptyUsage, type LLMUsage } from "@/server/ai/types";
+import { logActionError } from "@/server/log";
 import {
   assertWithinSpendCap,
   linkAiUsageChangeSet,
@@ -196,6 +197,9 @@ async function fleshOutEntityLocked(
   } catch (error) {
     // Keep messages safe: never reflect a provider's raw free text, which (for an
     // OpenAI-compatible endpoint) could echo key-bearing config (invariant #6).
+    // Log the real error server-side first (key-safe; walks the `.cause` chain)
+    // so a failing BYO setup is diagnosable behind the vague user message.
+    logActionError(`Flesh-entity generation failed (provider=${provider.id})`, error);
     const message =
       error instanceof ProviderError ? error.message : describeProviderError(error);
     throw new ServiceError(message);
@@ -496,6 +500,7 @@ async function inferRelationshipsForEntityLocked(
     output = result.data;
     usage = result.usage ?? usage;
   } catch (error) {
+    logActionError(`Infer-relationships generation failed (provider=${provider.id})`, error);
     const message =
       error instanceof ProviderError ? error.message : describeProviderError(error);
     throw new ServiceError(message);
@@ -616,6 +621,7 @@ async function scaffoldStubEntitiesLocked(
     usage = result.usage ?? usage;
   } catch (error) {
     // Keep messages safe: never reflect a provider's raw free text (invariant #6).
+    logActionError(`Scaffold-stubs generation failed (provider=${provider.id})`, error);
     const message =
       error instanceof ProviderError ? error.message : describeProviderError(error);
     throw new ServiceError(message);

@@ -1,3 +1,5 @@
+import dns from "node:dns";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ServiceError } from "@/lib/errors";
@@ -11,6 +13,7 @@ import {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 describe("isBlockedAddress", () => {
@@ -129,5 +132,92 @@ describe("createSafeFetch", () => {
     await expect(safeFetch("http://169.254.169.254/latest/meta-data")).rejects.toBeInstanceOf(
       ServiceError,
     );
+  });
+});
+
+// A dual-stack / DNS64 / split-horizon resolver hands the app a private (or ULA)
+// sibling next to the routable public address — e.g. a container behind NAT64
+// where api.mistral.ai resolves to both an `fd00::` address and a public IPv4.
+// The guard must allow such a host (and pin the socket to the public address)
+// rather than rejecting it as "private".
+describe("dual-stack / DNS64 resolution", () => {
+  it("assertPublicEndpoint allows a host with a public address despite a private sibling", async () => {
+    vi.stubEnv("AI_ALLOW_PRIVATE_ENDPOINTS", "");
+    vi.spyOn(dns.promises, "lookup").mockResolvedValue([
+      { address: "fd00::1", family: 6 }, // ULA sibling (DNS64/NAT64)
+      { address: "162.159.142.207", family: 4 }, // routable public
+    ] as never);
+    await expect(assertPublicEndpoint("https://api.example.test/v1")).resolves.toBeUndefined();
+  });
+
+  it("assertPublicEndpoint rejects a host that resolves only to private/ULA addresses", async () => {
+    vi.stubEnv("AI_ALLOW_PRIVATE_ENDPOINTS", "");
+    vi.spyOn(dns.promises, "lookup").mockResolvedValue([
+      { address: "fd00::1", family: 6 },
+      { address: "10.1.2.3", family: 4 },
+    ] as never);
+    await expect(assertPublicEndpoint("https://internal.example.test/v1")).rejects.toBeInstanceOf(
+      ServiceError,
+    );
+  });
+
+  it("guardedLookup drops blocked addresses and returns only the public ones (all: true)", async () => {
+    vi.spyOn(dns, "lookup").mockImplementation(((
+      _host: string,
+      _opts: unknown,
+      cb: (e: unknown, a: unknown) => void,
+    ) => {
+      cb(null, [
+        { address: "fd00::1", family: 6 },
+        { address: "162.159.142.207", family: 4 },
+      ]);
+    }) as never);
+    const { err, address } = await new Promise<{
+      err: NodeJS.ErrnoException | null;
+      address: unknown;
+    }>((resolve) => {
+      guardedLookup("api.example.test", { all: true }, (e, a) => resolve({ err: e, address: a }));
+    });
+    expect(err).toBeNull();
+    expect(address).toEqual([{ address: "162.159.142.207", family: 4 }]);
+  });
+
+  it("guardedLookup errors when every resolved address is blocked (all: true)", async () => {
+    vi.spyOn(dns, "lookup").mockImplementation(((
+      _host: string,
+      _opts: unknown,
+      cb: (e: unknown, a: unknown) => void,
+    ) => {
+      cb(null, [
+        { address: "fd00::1", family: 6 },
+        { address: "10.1.2.3", family: 4 },
+      ]);
+    }) as never);
+    const err = await new Promise<NodeJS.ErrnoException | null>((resolve) => {
+      guardedLookup("internal.example.test", { all: true }, (e) => resolve(e));
+    });
+    expect(err?.code).toBe("EAI_BLOCKED");
+  });
+
+  it("guardedLookup returns a single public address unchanged (all: false)", async () => {
+    vi.spyOn(dns, "lookup").mockImplementation(((
+      _host: string,
+      _opts: unknown,
+      cb: (e: unknown, a: unknown, f: unknown) => void,
+    ) => {
+      cb(null, "162.159.142.207", 4);
+    }) as never);
+    const { err, address, family } = await new Promise<{
+      err: NodeJS.ErrnoException | null;
+      address: unknown;
+      family: unknown;
+    }>((resolve) => {
+      guardedLookup("api.example.test", {}, (e, a, f) =>
+        resolve({ err: e, address: a, family: f }),
+      );
+    });
+    expect(err).toBeNull();
+    expect(address).toBe("162.159.142.207");
+    expect(family).toBe(4);
   });
 });

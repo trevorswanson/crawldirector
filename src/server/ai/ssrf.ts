@@ -130,9 +130,17 @@ export async function assertPublicEndpoint(rawUrl: string): Promise<void> {
       throw new ServiceError("Could not resolve the endpoint host.");
     }
   }
-  if (addresses.length === 0 || addresses.some(isBlockedAddress)) {
+  // Allow the endpoint as long as it has at least one public address to use. A
+  // dual-stack or DNS64/NAT64 host routinely resolves to a private/ULA sibling
+  // (e.g. an `fd00::` synthesized address) alongside the routable one; rejecting
+  // on *any* blocked address — the old `.some()` rule — broke legitimate public
+  // providers in those environments. The connect-time guard (`guardedLookup`) is
+  // authoritative and pins the socket to a public address, so a private sibling
+  // here is harmless. Reject only when *every* address is non-public (or none
+  // resolved — `[].every` is true) — there is then nothing safe to connect to.
+  if (addresses.every(isBlockedAddress)) {
     throw new ServiceError(
-      "That endpoint resolves to a private or loopback address. " +
+      "That endpoint resolves only to private or loopback addresses. " +
         "Set AI_ALLOW_PRIVATE_ENDPOINTS=1 to allow local or self-hosted endpoints.",
     );
   }
@@ -155,19 +163,32 @@ export function guardedLookup(
       callback(err, address as string, family);
       return;
     }
-    const entries: dns.LookupAddress[] = Array.isArray(address)
+    const wantsAll = Array.isArray(address);
+    const entries: dns.LookupAddress[] = wantsAll
       ? address
       : [{ address: address as string, family: family as number }];
-    const blocked = entries.find((entry) => isBlockedAddress(entry.address));
-    if (blocked) {
+    // Keep only public targets so the socket can never open to a private,
+    // loopback, link-local, or metadata address — even when the host *also*
+    // resolves to a public one. A dual-stack or DNS64/NAT64 resolver routinely
+    // returns a private/ULA sibling next to the routable address; dropping the
+    // blocked entries (rather than failing the whole lookup, the old behavior)
+    // lets the connection proceed to the surviving public address with SSRF
+    // still closed. Resolver order is preserved so Happy Eyeballs races them as
+    // intended.
+    const allowed = entries.filter((entry) => !isBlockedAddress(entry.address));
+    if (allowed.length === 0) {
       const error: NodeJS.ErrnoException = new Error(
-        `Blocked egress to non-public address ${blocked.address}`,
+        `Blocked egress to non-public address ${entries.map((e) => e.address).join(", ")}`,
       );
       error.code = "EAI_BLOCKED";
       callback(error, address, family);
       return;
     }
-    callback(null, address, family);
+    if (wantsAll) {
+      callback(null, allowed);
+      return;
+    }
+    callback(null, allowed[0].address, allowed[0].family);
   });
 }
 
