@@ -159,6 +159,12 @@ export async function askCampaign(
     };
   }
 
+  // Re-check the cap before the (more expensive) synthesis call. When semantic
+  // search is configured, `searchCanon` may have made and recorded a paid
+  // query-embedding call above — if that pushed total spend up to the cap, the
+  // chat answer must not proceed and spend past it.
+  await assertWithinSpendCap(campaignId);
+
   // Pull the denormalized content for each hit to use as synthesis context. The
   // hits already passed the live-canon visibility projection, so their stored
   // SearchDoc content is safe to hand the model.

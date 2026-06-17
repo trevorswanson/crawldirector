@@ -7,8 +7,11 @@ import { ServiceError } from "@/lib/errors";
 // test database — so the invariant-#5 test below proves a player's ask can never
 // retrieve DM-only canon, not just that a mock was filtered. `resolveCampaignEmbedder`
 // is forced to null so retrieval uses the deterministic full-text path.
-const { resolveCampaignProvider } = vi.hoisted(() => ({
+const { resolveCampaignProvider, searchCanonMock, searchRef } = vi.hoisted(() => ({
   resolveCampaignProvider: vi.fn(),
+  searchCanonMock: vi.fn(),
+  // Mutable holder for the real searchCanon, captured in the mock factory below.
+  searchRef: { current: null as null | typeof import("@/server/services/search").searchCanon },
 }));
 
 vi.mock("@/server/ai", async (importActual) => {
@@ -17,6 +20,18 @@ vi.mock("@/server/ai", async (importActual) => {
     ...actual,
     resolveCampaignProvider,
     resolveCampaignEmbedder: vi.fn().mockResolvedValue(null),
+  };
+});
+
+// `searchCanon` is wrapped so it runs for real by default (the DB-backed
+// visibility tests below depend on the real projection), but can be overridden
+// per test to simulate retrieval that spends — e.g. a paid query-embed.
+vi.mock("@/server/services/search", async (importActual) => {
+  const actual = await importActual<typeof import("@/server/services/search")>();
+  searchRef.current = actual.searchCanon;
+  return {
+    ...actual,
+    searchCanon: (...args: Parameters<typeof actual.searchCanon>) => searchCanonMock(...args),
   };
 });
 
@@ -83,6 +98,10 @@ function makeEntity(
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  // Default: delegate to the real, DB-backed searchCanon.
+  searchCanonMock.mockImplementation((...args: Parameters<NonNullable<typeof searchRef.current>>) =>
+    searchRef.current!(...args),
+  );
   await prisma.aiUsage.deleteMany();
   await prisma.searchDoc.deleteMany();
   await prisma.eventCausality.deleteMany();
@@ -253,6 +272,53 @@ describe("askCampaign", () => {
     resolveCampaignProvider.mockResolvedValue(provider);
 
     await expect(askCampaign(dm.id, campaign.id, "manager")).rejects.toThrow(ServiceError);
+    expect(provider.generate).not.toHaveBeenCalled();
+  });
+
+  it("re-checks the cap after retrieval spends (query-embed), before synthesis", async () => {
+    const dm = await makeUser("dm@example.com");
+    const campaign = await createCampaign(dm.id, { name: "Doomed Run" });
+    await setCampaignSpendCap(dm.id, campaign.id, 0.01);
+
+    // Below the cap when Ask starts, so the pre-retrieval check passes — but
+    // retrieval (simulating a paid query-embed) records spend that reaches the
+    // cap and returns a hit. The post-retrieval re-check must then block.
+    searchCanonMock.mockImplementation(async (userId: string, campaignId: string) => {
+      await recordAiUsage({
+        campaignId,
+        userId,
+        providerId: "openai",
+        model: "claude-opus-4-8",
+        generatorId: "search-query-embed",
+        usage: { inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      });
+      return {
+        role: Role.OWNER,
+        query: "throne",
+        hits: [
+          {
+            targetType: "ENTITY" as const,
+            targetId: "e1",
+            rank: 1,
+            entity: {
+              id: "e1",
+              type: "NPC" as const,
+              name: "X",
+              summary: null,
+              status: "CANON" as const,
+              source: "DM" as const,
+              tags: [],
+              isStub: false,
+            },
+          },
+        ],
+      };
+    });
+
+    const provider = fakeProvider("unused");
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    await expect(askCampaign(dm.id, campaign.id, "throne")).rejects.toThrow(ServiceError);
     expect(provider.generate).not.toHaveBeenCalled();
   });
 
