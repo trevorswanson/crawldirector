@@ -14,7 +14,7 @@ pitch and [`docs/`](./docs) for the full plan.
 
 ## Current status
 
-🚧 **M0–M4 complete; M5 (search & retrieval) underway.** The app is scaffolded
+🚧 **M0–M5 complete; M6 (System AI persona engine) next.** The app is scaffolded
 and runnable: Next.js 16 (App Router, TS, Tailwind) + Postgres/Prisma 7 +
 Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
 `npm audit`, migration-drift, coverage). Milestone-by-milestone:
@@ -48,7 +48,7 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
 - **Cross-cutting ✅.** Visibility collapsed to a binary `DM_ONLY`/`PLAYER_VISIBLE`
   (subset access via `KnowledgeGrant`, not a tier); entity-kind registry (ADR 0009)
   derives validation/data-keys/reviewable-set/form/display from per-type descriptors.
-- **M5 — Search & retrieval 🚧.** Slices 1–5 done. Slice 1 (full-text foundation):
+- **M5 — Search & retrieval ✅.** All slices done. Slice 1 (full-text foundation):
   a `SearchDoc` index kept in sync inside entity canon-write transactions + a DM
   backfill; `searchCanon` runs visibility-scoped Postgres full-text (players see
   only `PLAYER_VISIBLE` — invariant #5); a `/campaigns/[id]/search` page wired from
@@ -81,11 +81,14 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
   BYO-key chat model as numbered sources, and returns a grounded answer whose
   inline `[n]` citations link back to the source entity/relationship/event — never
   writing canon, scoped per requester (a player's ask can't reach DM-only canon).
-  Slice 6 began the retrieval-fed **generator** context: a `retrieval.ts` seam over
-  `searchCanon` now selects relationship-inference candidate edge endpoints by
-  relevance (scoped + lock-aware) instead of an alphabetical dump; wiring the
-  remaining generators (flesh-out enrichment, scaffold-stubs dedup) stays in the
-  backlog.
+  Slice 6 wired the retrieval-fed **generator** context: a `retrieval.ts` seam over
+  `searchCanon` feeds two generators — relationship inference picks candidate edge
+  endpoints by relevance (scoped + lock-aware) instead of an alphabetical dump, and
+  flesh-out enrichment hands the model the relevant slice of surrounding canon as
+  read-only reference (locked items included) instead of writing in isolation.
+  Scaffold-stubs is deliberately out of scope (its dedup needs an exhaustive name
+  set, not a relevance subset). With search + Ask + retrieval-fed generators, M5's
+  "done when" bar is met.
 
 For per-slice detail (files, tests, decisions) see
 [`docs/PROGRESS.md`](./docs/PROGRESS.md) — its "Open backlog" section is the

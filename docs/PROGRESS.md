@@ -68,15 +68,21 @@ keyword-scanning every doc.
             invariant #5 (a player's ask can't reach DM-only canon); provider
             errors stay safe (invariant #6). The scoped *player* variant is the
             same role-aware service, surfaced when the M7 player UI lands.
-      - [~] **Slice 6 — wire retrieval into generator context-building.** Replace
-            ad-hoc canon-dumping in the M4 generators; honor locks + scope.
-            **Relationship inference done** (2026-06-17 — see the section below): a
-            `retrieval.ts` seam over `searchCanon` now selects candidate edge
-            endpoints by relevance instead of an alphabetical dump, scoped to the
-            requester and lock-aware. Remaining (tracked, lower-value): flesh-out
-            related-canon *enrichment* (it loads only its target today — no dump to
-            replace) and scaffold-stubs (its exhaustive dedup name set is not a
-            relevance problem retrieval can safely replace).
+      - [x] **Slice 6 — wire retrieval into generator context-building.** ✅ Replace
+            ad-hoc canon-dumping in the M4 generators; honor locks + scope. Two
+            parts, both done: **relationship inference** (2026-06-17 — see the
+            section below) picks candidate edge endpoints by relevance instead of an
+            alphabetical dump (scoped + lock-aware), and **flesh-out enrichment**
+            (2026-06-17 — see the section below) now hands the generator the relevant
+            slice of surrounding canon as read-only reference (locked items
+            included, per doc 07) instead of writing in isolation. Both reuse the
+            `retrieval.ts` seam over `searchCanon`, so scope/fog-of-war and the
+            full-text graceful-degrade come for free. **Scaffold-stubs is
+            deliberately out of scope** — its dedup needs an *exhaustive* existing-
+            name set, which a relevance subset can't safely replace; its scaling fix
+            is a different technique (post-hoc dedup), not retrieval context. With
+            both retrieval-shaped generators wired, **M5's "done when" bar is met**
+            (search + Ask + generators draw context from retrieval).
 - [ ] **Entity-kind registry ([ADR 0009](./adr/0009-entity-kind-registry.md),
       accepted).** Consolidate per-type bespoke `data.*` fields into one
       `EntityKind` descriptor per type and derive validation, data-key lists, the
@@ -217,6 +223,67 @@ keyword-scanning every doc.
 - [x] `CreateCampaignForm` has an unchecked-by-default native checkbox (`name="seedLore"`, no `value` attribute); submits `"on"` when checked.
 - [x] `createCampaignAction`: after campaign creation, if `seedLore === "on"` enqueues a `LORE_SEED` job in its own try/catch — enqueue failure never blocks the redirect.
 - [x] Tests: seeding ServiceError assertions updated; non-empty campaign guard test added; LORE_SEED handler delegation test (mocked seeding module); dm-actions tests for seedLore=on/off/enqueue-throw; form checkbox test.
+
+## M5 — Retrieval-fed generator context: flesh-out enrichment (slice 6, part 2) ✅ (2026-06-17)
+
+**Goal:** the second consumer in [`07-search-retrieval.md`](./07-search-retrieval.md)
+§"Retrieval-augmented context" — give the entity flesh-out generator the *relevant*
+slice of surrounding canon as read-only reference so its proposed summary/
+description stay consistent with the world, instead of writing in isolation
+(today it sees only its own target + the campaign's tag vocabulary). This is
+additive enrichment, not a dump replacement, which is why it was tracked separately
+from part 1. With both retrieval-shaped generators wired, **M5's "done when" bar is
+met**. Branch: `feat/m5-search-slice6-flesh-enrichment`. No schema change.
+
+- [x] **Flesh-out rewired** ([`generation.ts`](../src/server/services/generation.ts)):
+      `fleshOutEntityLocked` now calls `retrieveRelatedEntityIds` (the existing
+      slice 6 seam) for the target, hydrates the top `FLESH_RELATED_LIMIT` (8)
+      relevant CANON entities preserving retrieval rank order, and passes them to
+      the prompt as `relatedCanon`. **Locked entities are intentionally kept** as
+      reference (doc 07: "locked items relevant to the task are retrieved and
+      included as read-only do-not-modify context") — unlike relationship inference,
+      which excludes locked endpoints from its *proposable* set; flesh-out only ever
+      proposes against its own target, so referencing locked canon can't violate
+      invariant #2. Because `bulk-flesh` calls `fleshOutEntity` per entity, the bulk
+      panel and the `BULK_FLESH` job inherit the enrichment with no extra wiring.
+- [x] **Prompt builder** ([`flesh-entity.ts`](../src/server/ai/generators/flesh-entity.ts)):
+      `FleshEntityContext` gains an optional `relatedCanon`; the volatile user
+      message lists each related entity (`type · name: summary [tags]`, honest
+      `(no summary yet)` fallback) under a "reference — keep your additions
+      consistent with this; do not restate or modify it" header, and the cacheable
+      system block gains a read-only-reference rule. `FLESH_ENTITY_GENERATOR.version`
+      bumped **1 → 2** (the prompt framing changed meaningfully — provenance now
+      distinguishes enriched runs).
+- [x] **Cost discipline.** The query-embed inside `searchCanon` is already metered
+      + cap-gated (slice 4a), and `fleshOutEntityLocked` now **re-checks the spend
+      cap after retrieval** and before the chat call (mirrors
+      `inferRelationshipsForEntityLocked`), so a campaign just under its cap can't
+      incur the extra paid generation call after a paid query-embed. With no
+      embedder, retrieval is free full-text and the prompt still gains relevant
+      reference context.
+- [x] **Tests:** pure
+      [`flesh-entity-generator.test.ts`](../tests/unit/flesh-entity-generator.test.ts)
+      gains related-canon rendering (present → reference block + system rule;
+      no-summary fallback; absent → no section) and the v2 provenance assertion.
+      DB-backed [`generation.test.ts`](../tests/unit/generation.test.ts) gains a
+      real-Postgres + real-`searchCanon` case that a term-sharing entity is surfaced
+      into the prompt while an unrelated one is excluded, and that a **fully locked**
+      related entity is still offered as read-only reference (the doc-07 contract
+      that distinguishes flesh-out from inference). The existing flesh-out cases
+      (style guide, campaign tags, locked-field exclusion, usage/cap) stay green.
+- [x] **Verification:** RED/GREEN, then `npm run test -- tests/unit/retrieval.test.ts
+      tests/unit/search.test.ts tests/unit/embeddings.test.ts
+      tests/unit/dm-actions.test.ts tests/unit/flesh-entity-generator.test.ts
+      tests/unit/generation.test.ts` (259 tests), `npm run lint` (0 errors;
+      pre-existing settings-action warnings only), `npm run typecheck`,
+      `npm run build`, and the full coverage gate green (100 files / 1356 tests;
+      statements 95.82%, branches 88.94%, functions 97.98%, lines 97.65%). The
+      retrieval → prompt assembly runs end-to-end against **real Postgres + the real
+      `searchCanon`**; the provider call stays the documented key-gated M4/M5
+      boundary (a synthesized run needs the DM's own valid BYO key + spend), covered
+      by the mocked-provider service tests. **No new UI surface** (flesh-out is
+      triggered from existing buttons and the enrichment changes only the prompt the
+      server builds), so — as with slice 6 part 1 — no browser smoke this slice.
 
 ## M5 — Retrieval-fed generator context: relationship inference (slice 6, part 1) ✅ (2026-06-17)
 

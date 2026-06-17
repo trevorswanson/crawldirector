@@ -121,7 +121,7 @@ describe("fleshOutEntity", () => {
     expect(changeSet?.providerId).toBe("anthropic");
     expect(changeSet?.model).toBe("claude-opus-4-8");
     expect(changeSet?.promptId).toBe("flesh-entity");
-    expect(changeSet?.promptVersion).toBe("1");
+    expect(changeSet?.promptVersion).toBe("2");
     expect(changeSet?.operations).toHaveLength(1);
     const op = changeSet!.operations[0];
     expect(op.op).toBe("UPDATE_ENTITY");
@@ -152,6 +152,60 @@ describe("fleshOutEntity", () => {
     const systemText = (req.system as Array<{ text: string }>).map((b) => b.text).join("\n");
     expect(systemText).toContain("Gritty and darkly funny.");
     expect(req.messages[0].content).toContain("Existing campaign tags to prefer: floor-9");
+  });
+
+  it("carries retrieval-surfaced related canon as reference, excluding unrelated entities", async () => {
+    const { dmId, campaignId, entityId } = await seed();
+    // The target (Mordecai) seeds tag "existing"; this entity shares it, so the
+    // OR-joined retrieval query ("Mordecai or existing") surfaces it as related.
+    await createGenericEntity(dmId, campaignId, {
+      type: "NPC",
+      name: "Grimaldi the Mapmaker",
+      summary: "A shifty guide working the same floor.",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: ["existing"],
+    });
+    // Shares no term with the query — must NOT crowd the reference context.
+    await createGenericEntity(dmId, campaignId, {
+      type: "NPC",
+      name: "Zarathustra",
+      summary: "A reclusive astronomer in a far-off tower.",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: ["cosmic"],
+    });
+    const provider = fakeProvider({ summary: "s", description: "d", tags: ["t"] });
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    await fleshOutEntity(dmId, campaignId, entityId);
+
+    const user = provider.generateStructured.mock.calls[0][0].messages[0].content as string;
+    expect(user).toContain("Related canon (reference");
+    expect(user).toContain("Grimaldi the Mapmaker: A shifty guide working the same floor.");
+    expect(user).not.toContain("Zarathustra");
+  });
+
+  it("includes a locked related entity as read-only reference (unlike relationship inference)", async () => {
+    const { dmId, campaignId, entityId } = await seed();
+    const related = await createGenericEntity(dmId, campaignId, {
+      type: "NPC",
+      name: "Grimaldi the Mapmaker",
+      summary: "A shifty guide working the same floor.",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: ["existing"],
+    });
+    // Fully locked canon is read-only, but flesh-out still uses it as reference —
+    // it only ever proposes against its own target, so this can't violate #2.
+    await setEntityLock(dmId, campaignId, related.id, { locked: true });
+    const provider = fakeProvider({ summary: "s", description: "d", tags: ["t"] });
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    await fleshOutEntity(dmId, campaignId, entityId);
+
+    const user = provider.generateStructured.mock.calls[0][0].messages[0].content as string;
+    expect(user).toContain("Grimaldi the Mapmaker");
   });
 
   it("never proposes a locked field", async () => {

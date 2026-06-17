@@ -64,6 +64,31 @@ describe("buildFleshEntityPrompt", () => {
     const { messages } = buildFleshEntityPrompt(ctx({ campaignTags: ["floor-9", "boss"] }));
     expect(messages[0].content).toContain("Existing campaign tags to prefer: floor-9, boss");
   });
+
+  it("lists related canon as read-only reference, and frames it as such in the system block", () => {
+    const { system, messages } = buildFleshEntityPrompt(
+      ctx({
+        relatedCanon: [
+          { type: "NPC", name: "Princess Donut", summary: "A vain talking cat.", tags: ["ally", "floor-9"] },
+          { type: "FACTION", name: "Borant Syndicate", summary: null, tags: [] },
+        ],
+      }),
+    );
+    const user = messages[0].content;
+    expect(user).toContain("Related canon (reference");
+    expect(user).toContain("Princess Donut: A vain talking cat. [tags: ally, floor-9]");
+    // A related entity with no summary still renders, honestly.
+    expect(user).toContain("Borant Syndicate: (no summary yet)");
+    // The read-only-reference rule lives in the cacheable framing.
+    const systemText = system.map((b) => b.text).join("\n");
+    expect(systemText).toMatch(/related canon/i);
+    expect(systemText).toContain("read-only reference");
+  });
+
+  it("omits the related-canon section when none is provided", () => {
+    const { messages } = buildFleshEntityPrompt(ctx());
+    expect(messages[0].content).not.toContain("Related canon (reference");
+  });
 });
 
 describe("fleshEntityToPatch", () => {
@@ -156,6 +181,6 @@ describe("fleshEntityOutputSchema", () => {
 describe("FLESH_ENTITY_GENERATOR", () => {
   it("has a stable id + version for provenance", () => {
     expect(FLESH_ENTITY_GENERATOR.id).toBe("flesh-entity");
-    expect(FLESH_ENTITY_GENERATOR.version).toBe("1");
+    expect(FLESH_ENTITY_GENERATOR.version).toBe("2");
   });
 });
