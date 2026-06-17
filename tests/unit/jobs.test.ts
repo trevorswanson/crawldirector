@@ -29,6 +29,7 @@ import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
 import {
   claimNextJob,
+  cancelJob,
   completeJob,
   enqueueBuildSemanticIndexJob,
   enqueueJob,
@@ -159,6 +160,23 @@ describe("enqueueBuildSemanticIndexJob", () => {
     await expect(
       prisma.job.count({ where: { campaignId, kind: JobKind.EMBED_SEARCH_DOCS } }),
     ).resolves.toBe(2);
+  });
+
+  it("queues a fresh rebuild after the DM cancels a stuck QUEUED semantic job", async () => {
+    const { dmId, campaignId } = await seed();
+
+    const first = await enqueueBuildSemanticIndexJob(dmId, campaignId);
+    const canceled = await cancelJob(dmId, campaignId, first.id);
+    const second = await enqueueBuildSemanticIndexJob(dmId, campaignId);
+
+    expect(canceled).toMatchObject({
+      id: first.id,
+      status: JobStatus.FAILED,
+      error: "Canceled by DM.",
+    });
+    expect(second.created).toBe(true);
+    expect(second.status).toBe(JobStatus.QUEUED);
+    expect(second.id).not.toBe(first.id);
   });
 });
 
@@ -317,6 +335,59 @@ describe("failJob", () => {
     const job = await prisma.job.findUniqueOrThrow({ where: { id } });
     expect(job.error).toBe(safeMessage);
     expect(job.error).not.toContain(rawText);
+  });
+});
+
+// ─── cancelJob ───────────────────────────────────────────────────────────────
+
+describe("cancelJob", () => {
+  it("marks a queued job failed with a safe cancellation message", async () => {
+    const { dmId, campaignId } = await seed();
+    const { id } = await enqueueJob(dmId, campaignId, JobKind.BULK_FLESH, {
+      entityIds: ["e1"],
+    });
+
+    const canceled = await cancelJob(dmId, campaignId, id);
+
+    expect(canceled).toMatchObject({
+      id,
+      status: JobStatus.FAILED,
+      error: "Canceled by DM.",
+    });
+    await expect(prisma.job.findUniqueOrThrow({ where: { id } })).resolves.toMatchObject({
+      status: JobStatus.FAILED,
+      error: "Canceled by DM.",
+      finishedAt: expect.any(Date),
+    });
+  });
+
+  it("rejects cancellation of a running job so side effects cannot continue under a failed row", async () => {
+    const { dmId, campaignId } = await seed();
+    const { id } = await enqueueJob(dmId, campaignId, JobKind.BULK_FLESH, {
+      entityIds: ["e1"],
+    });
+    await claimNextJob();
+
+    await expect(cancelJob(dmId, campaignId, id)).rejects.toThrow(/Only queued jobs/);
+
+    await completeJob(id, { proposedCount: 1 });
+
+    await expect(prisma.job.findUniqueOrThrow({ where: { id } })).resolves.toMatchObject({
+      status: JobStatus.SUCCEEDED,
+      error: null,
+      result: { proposedCount: 1 },
+    });
+  });
+
+  it("rejects cancellation of a completed job", async () => {
+    const { dmId, campaignId } = await seed();
+    const { id } = await enqueueJob(dmId, campaignId, JobKind.BULK_FLESH, {
+      entityIds: ["e1"],
+    });
+    await claimNextJob();
+    await completeJob(id, { proposedCount: 1 });
+
+    await expect(cancelJob(dmId, campaignId, id)).rejects.toThrow(/Only queued jobs/);
   });
 });
 

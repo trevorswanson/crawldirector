@@ -17,10 +17,13 @@ import { Kicker } from "@/components/ui/kicker";
 
 export default async function CampaignAskPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ q?: string }>;
 }) {
   const { id } = await params;
+  const query = (await searchParams)?.q ?? "";
   const user = await requireUser();
   const campaign = await getCampaignForUser(user.id, id);
 
@@ -46,7 +49,7 @@ export default async function CampaignAskPage({
       </p>
 
       {providerConfigured ? (
-        <AskPanel campaignId={id} />
+        <AskPanel campaignId={id} initialQuestion={query} />
       ) : (
         <div className="panel flex flex-col items-start gap-3 p-[18px]">
           <div className="flex items-center gap-[9px]">

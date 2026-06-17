@@ -70,9 +70,10 @@ import {
 import { askCampaign, type AskSource } from "@/server/services/ask";
 import {
   searchEntityCandidates,
+  searchCanon,
   type EntitySearchCandidate,
 } from "@/server/services/search";
-import { enqueueBuildSemanticIndexJob, enqueueJob } from "@/server/services/jobs";
+import { cancelJob, enqueueBuildSemanticIndexJob, enqueueJob } from "@/server/services/jobs";
 import { isLoreSeedDatasetAvailable } from "@/server/services/seeding";
 import {
   approveChangeSet,
@@ -599,6 +600,64 @@ export async function searchEntityCandidatesAction(
   });
 }
 
+export type SearchPreviewItem = {
+  id: string;
+  label: string;
+  meta: string;
+  excerpt: string | null;
+  href: string;
+};
+
+function typeLabel(value: string) {
+  if (value === value.toUpperCase() && !value.includes("_")) return value;
+  return value
+    .split("_")
+    .map((part) => part.charAt(0) + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+export async function searchCampaignPreviewAction(
+  campaignId: string,
+  query: string,
+): Promise<SearchPreviewItem[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  const user = await requireUser();
+  const result = await searchCanon(user.id, campaignId, trimmed, {
+    limit: 5,
+    semantic: false,
+  });
+
+  return result.hits.map((hit) => {
+    if (hit.targetType === "ENTITY") {
+      return {
+        id: `${hit.targetType}:${hit.entity.id}`,
+        label: hit.entity.name,
+        meta: typeLabel(hit.entity.type),
+        excerpt: hit.entity.summary,
+        href: `/campaigns/${campaignId}/entities/${hit.entity.id}`,
+      };
+    }
+    if (hit.targetType === "EVENT") {
+      return {
+        id: `${hit.targetType}:${hit.event.id}`,
+        label: hit.event.title,
+        meta: "Event",
+        excerpt: hit.event.summary,
+        href: `/campaigns/${campaignId}/timeline?event=${hit.event.id}`,
+      };
+    }
+    return {
+      id: `${hit.targetType}:${hit.relationship.id}`,
+      label: `${hit.relationship.sourceEntity.name} -> ${hit.relationship.targetEntity.name}`,
+      meta: "Relationship",
+      excerpt: hit.relationship.notes,
+      href: `/campaigns/${campaignId}/graph`,
+    };
+  });
+}
+
 export type BulkGenerateActionState =
   | {
       error?: string;
@@ -721,6 +780,23 @@ export async function enqueueBuildSemanticIndexAction(
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
     logActionError("Enqueue semantic index action failed", error);
     return { error: "Failed to queue job. Please try again.", timestamp: Date.now() };
+  }
+}
+
+export async function cancelJobAction(
+  campaignId: string,
+  jobId: string,
+): Promise<GenerateActionState> {
+  const user = await requireUser();
+  try {
+    await cancelJob(user.id, campaignId, jobId);
+    revalidatePath(`/campaigns/${campaignId}/jobs`);
+    revalidatePath(`/campaigns/${campaignId}/search`);
+    return { success: "Job canceled.", timestamp: Date.now() };
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    logActionError("Cancel job action failed", error);
+    return { error: "Could not cancel the job. Please try again.", timestamp: Date.now() };
   }
 }
 
@@ -1339,10 +1415,6 @@ export async function createCampaignEventAction(
     participants.push({ entityId, role });
   }
 
-  if (participants.length === 0) {
-    return { error: "Choose at least one participant." };
-  }
-
   const effects = parseEffectRows(formData);
   const parsed = createEventSchema.safeParse({
     title: formData.get("title"),
@@ -1480,9 +1552,9 @@ export async function toggleEventLockAction(
   revalidatePath(`/campaigns/${campaignId}/timeline`);
 }
 
-// Submit an event's effects from the entity Timeline panel: revalidates every
-// affected entity (participants + effect targets, plus the viewed entity), the
-// campaign timeline, and Review Queue.
+// Apply an event's effects from the entity Timeline panel. A DM action here is
+// direct canon intent, so the service records an auto-approved DM change set
+// instead of filing a pending Review Queue proposal.
 export async function applyEventEffectsAction(
   campaignId: string,
   entityId: string,
@@ -1491,22 +1563,22 @@ export async function applyEventEffectsAction(
   const user = await requireUser();
   let result: { affectedEntityIds: string[] };
   try {
-    result = await applyEventEffects(user.id, campaignId, eventId);
+    result = await applyEventEffects(user.id, campaignId, eventId, {
+      autoApprove: true,
+    });
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message };
-    return { error: "Could not submit the effects. Please try again." };
+    return { error: "Could not apply the effects. Please try again." };
   }
   for (const id of new Set([...result.affectedEntityIds, entityId])) {
     revalidatePath(`/campaigns/${campaignId}/entities/${id}`);
   }
   revalidatePath(`/campaigns/${campaignId}/timeline`);
-  revalidatePath(`/campaigns/${campaignId}/review`);
   return undefined;
 }
 
-// Submit an event's effects from the campaign timeline page (no single viewed
-// entity): revalidates every affected entity, the campaign timeline, and Review
-// Queue.
+// Apply an event's effects from the campaign timeline page (no single viewed
+// entity), using the same auto-approved DM path as the entity timeline panel.
 export async function applyCampaignEventEffectsAction(
   campaignId: string,
   eventId: string,
@@ -1514,16 +1586,17 @@ export async function applyCampaignEventEffectsAction(
   const user = await requireUser();
   let result: { affectedEntityIds: string[] };
   try {
-    result = await applyEventEffects(user.id, campaignId, eventId);
+    result = await applyEventEffects(user.id, campaignId, eventId, {
+      autoApprove: true,
+    });
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message };
-    return { error: "Could not submit the effects. Please try again." };
+    return { error: "Could not apply the effects. Please try again." };
   }
   for (const id of result.affectedEntityIds) {
     revalidatePath(`/campaigns/${campaignId}/entities/${id}`);
   }
   revalidatePath(`/campaigns/${campaignId}/timeline`);
-  revalidatePath(`/campaigns/${campaignId}/review`);
   return undefined;
 }
 

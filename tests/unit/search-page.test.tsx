@@ -152,7 +152,7 @@ describe("CampaignSearchPage", () => {
     expect(link?.getAttribute("href")).toBe("/campaigns/c1/entities/e1");
   });
 
-  it("renders relationship and event cards linking to graph and timeline", async () => {
+  it("renders relationship and event cards linking to graph and the selected timeline event", async () => {
     searchCanon.mockResolvedValue({
       role: "OWNER",
       query: "x",
@@ -174,7 +174,7 @@ describe("CampaignSearchPage", () => {
 
     expect(screen.getByText("Event")).toBeDefined();
     const evLink = screen.getByText("Big Event").closest("a");
-    expect(evLink?.getAttribute("href")).toBe("/campaigns/c1/timeline");
+    expect(evLink?.getAttribute("href")).toBe("/campaigns/c1/timeline?event=ev1");
   });
 
   it("shows fallback copy for a relationship with no notes and an event with no summary", async () => {

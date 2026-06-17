@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
-const { usePathnameMock } = vi.hoisted(() => ({
+const { usePathnameMock, searchCampaignPreviewAction } = vi.hoisted(() => ({
   usePathnameMock: vi.fn(() => "/dashboard"),
+  searchCampaignPreviewAction: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({ usePathname: usePathnameMock }));
+vi.mock("@/app/(dm)/actions", () => ({ searchCampaignPreviewAction }));
 vi.mock("next/link", () => ({
   default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => (
     <a href={href} {...rest}>
@@ -20,6 +22,7 @@ import { GlobalSearchLink } from "@/components/console/global-search-link";
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 describe("GlobalSearchLink", () => {
@@ -31,10 +34,59 @@ describe("GlobalSearchLink", () => {
     expect(document.querySelector("a")).toBeNull();
   });
 
-  it("links to the campaign search page when inside a campaign", () => {
+  it("opens an inline search box with results and an Ask handoff inside a campaign", async () => {
+    vi.useFakeTimers();
     usePathnameMock.mockReturnValue("/campaigns/c1/entities/e9");
+    searchCampaignPreviewAction.mockResolvedValue([
+      {
+        id: "ENTITY:e1",
+        label: "Mordecai",
+        meta: "NPC",
+        excerpt: "Tutorial guild advisor",
+        href: "/campaigns/c1/entities/e1",
+      },
+    ]);
+
     render(<GlobalSearchLink />);
-    const link = screen.getByText(/Ask the Campaign/i).closest("a");
-    expect(link?.getAttribute("href")).toBe("/campaigns/c1/search");
+
+    const input = screen.getByLabelText("Search or ask the campaign");
+    fireEvent.change(input, { target: { value: "mordecai" } });
+    await act(async () => {
+      vi.advanceTimersByTime(260);
+      await Promise.resolve();
+    });
+
+    expect(searchCampaignPreviewAction).toHaveBeenCalledWith("c1", "mordecai");
+    expect(screen.getByRole("link", { name: /Mordecai/ }).getAttribute("href")).toBe(
+      "/campaigns/c1/entities/e1",
+    );
+    expect(
+      screen
+        .getByRole("link", { name: 'Ask the campaign "mordecai"' })
+        .getAttribute("href"),
+    ).toBe("/campaigns/c1/ask?q=mordecai");
+  });
+
+  it("shows a safe unavailable state when preview search fails", async () => {
+    vi.useFakeTimers();
+    usePathnameMock.mockReturnValue("/campaigns/c1/search");
+    searchCampaignPreviewAction.mockRejectedValue(new Error("boom"));
+
+    render(<GlobalSearchLink />);
+
+    fireEvent.change(screen.getByLabelText("Search or ask the campaign"), {
+      target: { value: "mordecai" },
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(260);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("Search unavailable.")).toBeTruthy();
+    expect(
+      screen
+        .getByRole("link", { name: 'Ask the campaign "mordecai"' })
+        .getAttribute("href"),
+    ).toBe("/campaigns/c1/ask?q=mordecai");
   });
 });

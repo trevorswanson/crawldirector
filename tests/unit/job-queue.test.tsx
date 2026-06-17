@@ -2,6 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
+vi.mock("@/app/(dm)/actions", () => ({ cancelJobAction: vi.fn() }));
+
 import { JobQueueList } from "@/components/jobs/job-queue-list";
 
 beforeEach(() => {
@@ -47,12 +49,22 @@ describe("JobQueueList", () => {
           {
             id: "lore",
             kind: "LORE_SEED",
-            status: "FAILED",
-            error: "Dataset unavailable.",
-            result: null,
+            status: "SUCCEEDED",
+            error: null,
+            result: { count: 3 },
             createdAt: new Date("2026-06-15T12:00:00Z"),
             startedAt: new Date("2026-06-15T12:01:00Z"),
             finishedAt: new Date("2026-06-15T12:02:00Z"),
+          },
+          {
+            id: "failed",
+            kind: "LORE_SEED",
+            status: "FAILED",
+            error: "Dataset unavailable.",
+            result: null,
+            createdAt: new Date("2026-06-15T11:00:00Z"),
+            startedAt: new Date("2026-06-15T11:01:00Z"),
+            finishedAt: new Date("2026-06-15T11:02:00Z"),
           },
         ]}
       />,
@@ -60,11 +72,56 @@ describe("JobQueueList", () => {
 
     expect(screen.getByText("Semantic index")).toBeTruthy();
     expect(screen.getByText("Bulk flesh-out")).toBeTruthy();
-    expect(screen.getByText("Lore seed")).toBeTruthy();
+    expect(screen.getAllByText("Lore seed")).toHaveLength(2);
     expect(screen.getByText("RUNNING")).toBeTruthy();
-    expect(screen.getByText("SUCCEEDED")).toBeTruthy();
+    expect(screen.getAllByText("SUCCEEDED")).toHaveLength(2);
     expect(screen.getByText("FAILED")).toBeTruthy();
     expect(screen.getByText(/2 proposed, 1 skipped/i)).toBeTruthy();
+    expect(screen.getByText(/3 seeded/i)).toBeTruthy();
     expect(screen.getByText(/Dataset unavailable/i)).toBeTruthy();
+  });
+
+  it("renders cancel controls only for queued jobs when a campaign id is available", () => {
+    render(
+      <JobQueueList
+        campaignId="c1"
+        jobs={[
+          {
+            id: "semantic",
+            kind: "EMBED_SEARCH_DOCS",
+            status: "QUEUED",
+            error: null,
+            result: null,
+            createdAt: new Date("2026-06-16T11:55:00Z"),
+            startedAt: null,
+            finishedAt: null,
+          },
+          {
+            id: "running",
+            kind: "LORE_SEED",
+            status: "RUNNING",
+            error: null,
+            result: null,
+            createdAt: new Date("2026-06-16T11:45:00Z"),
+            startedAt: new Date("2026-06-16T11:46:00Z"),
+            finishedAt: null,
+          },
+          {
+            id: "done",
+            kind: "BULK_FLESH",
+            status: "SUCCEEDED",
+            error: null,
+            result: { proposedCount: 1 },
+            createdAt: new Date("2026-06-16T10:00:00Z"),
+            startedAt: new Date("2026-06-16T10:01:00Z"),
+            finishedAt: new Date("2026-06-16T10:05:00Z"),
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Cancel Semantic index job" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Cancel Lore seed job" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel Bulk flesh-out job" })).toBeNull();
   });
 });

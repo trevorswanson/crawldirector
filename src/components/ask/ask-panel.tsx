@@ -1,8 +1,14 @@
 "use client";
 
-import { Fragment } from "react";
+import {
+  Fragment,
+  useActionState,
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import Link from "next/link";
-import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 import { CalendarClock, Layers, Share2, Sparkles, type LucideIcon } from "lucide-react";
 
@@ -92,11 +98,36 @@ function SourceRow({ source }: { source: AskSource }) {
   );
 }
 
-export function AskPanel({ campaignId }: { campaignId: string }) {
+export function AskPanel({
+  campaignId,
+  initialQuestion = "",
+}: {
+  campaignId: string;
+  initialQuestion?: string;
+}) {
   const [state, action] = useActionState<AskActionState, FormData>(
     askCampaignAction.bind(null, campaignId),
     undefined,
   );
+  const [questionDraft, setQuestionDraft] = useState(() => ({
+    source: initialQuestion,
+    value: initialQuestion,
+  }));
+  const question =
+    questionDraft.source === initialQuestion ? questionDraft.value : initialQuestion;
+  const [, startTransition] = useTransition();
+  const lastSubmittedInitial = useRef<string | null>(null);
+
+  useEffect(() => {
+    const trimmed = initialQuestion.trim();
+    if (!trimmed || lastSubmittedInitial.current === trimmed) return;
+    lastSubmittedInitial.current = trimmed;
+    const formData = new FormData();
+    formData.set("question", trimmed);
+    startTransition(() => {
+      action(formData);
+    });
+  }, [action, initialQuestion, startTransition]);
 
   return (
     <div className="flex flex-col gap-5">
@@ -106,6 +137,10 @@ export function AskPanel({ campaignId }: { campaignId: string }) {
           rows={3}
           required
           autoFocus
+          value={question}
+          onChange={(event) =>
+            setQuestionDraft({ source: initialQuestion, value: event.target.value })
+          }
           placeholder="Ask anything about this campaign's canon — e.g. “Which NPCs has Carl wronged, and why?”"
           className="field-shell w-full resize-y rounded-[2px] border border-[var(--line-strong)] bg-[var(--bg)] px-[14px] py-[11px] text-[14px] text-[var(--ink)] outline-none placeholder:text-[var(--ink-faint)] focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--ring)]"
           aria-label="Ask the campaign a question"

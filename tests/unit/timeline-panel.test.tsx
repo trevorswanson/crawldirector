@@ -640,13 +640,20 @@ describe("TimelinePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /Log event/ }));
     const titleInput = screen.getByPlaceholderText("What happened?");
     fireEvent.change(titleInput, { target: { value: "A new event" } });
+    const summaryInput = screen.getByPlaceholderText("Summary (optional)");
+    fireEvent.change(summaryInput, { target: { value: "Important failed draft" } });
     fireEvent.submit(titleInput.closest("form")!);
 
     await waitFor(() =>
       expect(screen.getByText("Could not log the event.")).toBeDefined(),
     );
-    // the form stays open so the DM can correct and retry
-    expect(screen.getByPlaceholderText("What happened?")).toBeDefined();
+    // the form stays open with the user's draft intact so the DM can correct and retry
+    expect((screen.getByPlaceholderText("What happened?") as HTMLInputElement).value).toBe(
+      "A new event",
+    );
+    expect((screen.getByPlaceholderText("Summary (optional)") as HTMLTextAreaElement).value).toBe(
+      "Important failed draft",
+    );
   });
 
   it("opens the log form with role selects and a participant picker", () => {

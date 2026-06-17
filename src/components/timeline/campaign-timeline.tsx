@@ -195,6 +195,9 @@ function NewEventForm({
   onClose: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const [summary, setSummary] = useState("");
+  const [secret, setSecret] = useState(false);
   const [rows, setRows] = useState<ParticipantDraft[]>([
     { key: 0, entity: null, role: "ACTOR" },
   ]);
@@ -234,11 +237,19 @@ function NewEventForm({
           name="title"
           required
           maxLength={200}
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
           placeholder="What happened?"
           className="border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2 text-[13px] text-[var(--ink)]"
         />
         <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
-          <input type="checkbox" name="secret" value="true" />
+          <input
+            type="checkbox"
+            name="secret"
+            value="true"
+            checked={secret}
+            onChange={(event) => setSecret(event.target.checked)}
+          />
           DM-only
         </label>
       </div>
@@ -246,6 +257,8 @@ function NewEventForm({
         name="summary"
         rows={3}
         maxLength={2000}
+        value={summary}
+        onChange={(event) => setSummary(event.target.value)}
         placeholder="Summary (optional)"
         className="border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2 text-[12.5px] text-[var(--ink)]"
       />
@@ -315,22 +328,17 @@ function NewEventForm({
             </select>
             <button
               type="button"
-              title={
-                rows.length === 1
-                  ? "An event needs at least one participant"
-                  : "Remove participant row"
-              }
+              title="Remove participant row"
               onClick={() => removeRow(row.key)}
-              disabled={rows.length === 1}
-              className="inline-flex h-[34px] items-center justify-center border border-[var(--line)] px-[8px] text-[var(--ink-faint)] hover:text-[var(--no)] disabled:opacity-40"
+              className="inline-flex h-[34px] items-center justify-center border border-[var(--line)] px-[8px] text-[var(--ink-faint)] hover:text-[var(--no)]"
             >
               <Trash2 aria-hidden size={12} />
             </button>
           </div>
         ))}
-        {rows.length === 1 && (
+        {rows.length === 0 && (
           <p className="text-[10.5px] text-[var(--ink-faint)]">
-            An event needs at least one participant. Add another to remove this one.
+            Participants are optional. Add a row when an entity is involved.
           </p>
         )}
       </div>
@@ -550,9 +558,9 @@ function EditEventForm({
   );
 }
 
-// Effects as signed stat diffs + Apply. Same apply/review behaviour as
-// EventEffectsSection (applyCampaignEventEffectsAction routes through the review
-// pipeline) — restyled to the broadcast-HUD diff chips the timeline calls for.
+// Effects as signed stat diffs + Apply. Same direct DM apply path as
+// EventEffectsSection, restyled to the broadcast-HUD diff chips the timeline
+// calls for.
 function TimelineEffects({
   campaignId,
   effects,

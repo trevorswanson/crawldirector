@@ -415,6 +415,13 @@ export function TimelinePanel({
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [participant, setParticipant] = useState<TimelineCandidate | null>(null);
+  const [newTitle, setNewTitle] = useState("");
+  const [newSummary, setNewSummary] = useState("");
+  const [newSecret, setNewSecret] = useState(false);
+  const [sourceRole, setSourceRole] =
+    useState<(typeof eventParticipantRoleValues)[number]>("ACTOR");
+  const [otherRole, setOtherRole] =
+    useState<(typeof eventParticipantRoleValues)[number]>("TARGET");
   // Which event is being edited inline, with its own error slot.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
@@ -441,6 +448,11 @@ export function TimelinePanel({
   const closeForm = () => {
     setError(null);
     setParticipant(null);
+    setNewTitle("");
+    setNewSummary("");
+    setNewSecret(false);
+    setSourceRole("ACTOR");
+    setOtherRole("TARGET");
     setOpen(false);
   };
 
@@ -779,6 +791,8 @@ export function TimelinePanel({
             name="title"
             required
             maxLength={200}
+            value={newTitle}
+            onChange={(event) => setNewTitle(event.target.value)}
             placeholder="What happened?"
             className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12.5px] text-[var(--ink)]"
           />
@@ -786,6 +800,8 @@ export function TimelinePanel({
             name="summary"
             rows={2}
             maxLength={2000}
+            value={newSummary}
+            onChange={(event) => setNewSummary(event.target.value)}
             placeholder="Summary (optional)"
             className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
           />
@@ -794,7 +810,10 @@ export function TimelinePanel({
             This entity&rsquo;s role
             <select
               name="sourceRole"
-              defaultValue="ACTOR"
+              value={sourceRole}
+              onChange={(event) =>
+                setSourceRole(event.target.value as (typeof eventParticipantRoleValues)[number])
+              }
               className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[5px] font-mono text-[11px] text-[var(--ink)]"
             >
               {eventParticipantRoleValues.map((r) => (
@@ -822,7 +841,10 @@ export function TimelinePanel({
                 </div>
                 <select
                   name="otherRole"
-                  defaultValue="TARGET"
+                  value={otherRole}
+                  onChange={(event) =>
+                    setOtherRole(event.target.value as (typeof eventParticipantRoleValues)[number])
+                  }
                   disabled={!participant}
                   className="self-start border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] font-mono text-[11px] text-[var(--ink)] disabled:opacity-50"
                 >
@@ -840,7 +862,13 @@ export function TimelinePanel({
             searchCandidates={searchCrawlers}
           />
           <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
-            <input type="checkbox" name="secret" value="true" />
+            <input
+              type="checkbox"
+              name="secret"
+              value="true"
+              checked={newSecret}
+              onChange={(event) => setNewSecret(event.target.checked)}
+            />
             DM-only (secret)
           </label>
           {error && (

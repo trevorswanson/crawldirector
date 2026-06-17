@@ -47,6 +47,13 @@ export function EventTimeFields({
   const initialBasis: TimeBasisValue =
     initial?.basis ?? (initial?.floor != null ? "FLOOR_START" : "UNSCHEDULED");
   const [basis, setBasis] = useState<TimeBasisValue>(initialBasis);
+  const [floor, setFloor] = useState(initial?.floor != null ? String(initial.floor) : "");
+  const [offset, setOffset] = useState(
+    initial?.offset != null ? String(initial.offset) : "",
+  );
+  const [unit, setUnit] = useState<TimeUnitValue>(initial?.unit ?? "DAY");
+  const [anchorEventId, setAnchorEventId] = useState(initial?.anchorEventId ?? "");
+  const [label, setLabel] = useState(initial?.label ?? "");
   const usesOffset = basis !== "UNSCHEDULED";
   const isEvent = basis === "EVENT";
   const candidates = (anchorCandidates ?? []).filter(
@@ -61,7 +68,8 @@ export function EventTimeFields({
           type="number"
           min={1}
           max={18}
-          defaultValue={initial?.floor ?? ""}
+          value={floor}
+          onChange={(event) => setFloor(event.target.value)}
           aria-label="Floor"
           placeholder="Floor"
           className={`${inputClass} w-[80px]`}
@@ -70,7 +78,8 @@ export function EventTimeFields({
         <input
           name="offset"
           type="number"
-          defaultValue={initial?.offset ?? ""}
+          value={offset}
+          onChange={(event) => setOffset(event.target.value)}
           disabled={!usesOffset}
           aria-label="Time offset"
           placeholder="Offset"
@@ -79,7 +88,8 @@ export function EventTimeFields({
         <select
           name="unit"
           aria-label="Time unit"
-          defaultValue={initial?.unit ?? "DAY"}
+          value={unit}
+          onChange={(event) => setUnit(event.target.value as TimeUnitValue)}
           disabled={!usesOffset}
           className={`${inputClass} font-mono text-[11px]`}
         >
@@ -107,7 +117,8 @@ export function EventTimeFields({
         <select
           name="anchorEventId"
           aria-label="Anchor event"
-          defaultValue={initial?.anchorEventId ?? ""}
+          value={anchorEventId}
+          onChange={(event) => setAnchorEventId(event.target.value)}
           className={`${inputClass} font-mono text-[11px]`}
         >
           <option value="">Choose anchor event…</option>
@@ -121,7 +132,8 @@ export function EventTimeFields({
       <input
         name="timeLabel"
         maxLength={120}
-        defaultValue={initial?.label ?? ""}
+        value={label}
+        onChange={(event) => setLabel(event.target.value)}
         aria-label="Time label"
         placeholder="Label override (optional)"
         className={`${inputClass} min-w-0 flex-1`}

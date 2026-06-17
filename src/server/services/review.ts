@@ -3833,9 +3833,6 @@ async function applyCreateEvent(
     throw new ServiceError("Event title is required.");
   }
   const participants = parseEventParticipants(readTo(patch, "participants"));
-  if (participants.length === 0) {
-    throw new ServiceError("An event needs at least one participant.");
-  }
   // Participants must be live canon entities in this campaign.
   for (const participant of participants) {
     await assertCanonEntity(tx, changeSet.campaignId, participant.entityId);
@@ -4039,7 +4036,7 @@ async function applyUpdateEvent(
   // Participant editing: when the patch carries a participant list, reconcile it
   // against the live rows — add new (entity, role) pairs, drop removed ones, and
   // leave unchanged rows in place (preserving their order). Every desired
-  // participant must be live canon, and an event always keeps ≥1 participant.
+  // participant must be live canon; participant-less timeline entries are valid.
   if ("participants" in patch || "effects" in patch) {
     const existing = await tx.eventParticipant.findMany({
       where: { eventId },
@@ -4064,7 +4061,6 @@ async function applyUpdateEvent(
       });
       desiredKeys.add(affectedKey);
     }
-    if (desired.length === 0) throw new ServiceError("An event needs at least one participant.");
     for (const participant of desired) {
       await assertCanonEntity(tx, changeSet.campaignId, participant.entityId);
     }

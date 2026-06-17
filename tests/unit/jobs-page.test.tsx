@@ -14,6 +14,7 @@ const { requireUser, getCampaignForUser, listRecentJobs, notFound } = vi.hoisted
 vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/campaigns", () => ({ getCampaignForUser }));
 vi.mock("@/server/services/jobs", () => ({ listRecentJobs }));
+vi.mock("@/app/(dm)/actions", () => ({ cancelJobAction: vi.fn() }));
 vi.mock("next/navigation", () => ({ notFound }));
 
 import CampaignJobsPage from "@/app/(dm)/campaigns/[id]/jobs/page";
@@ -50,7 +51,7 @@ describe("CampaignJobsPage", () => {
     expect(screen.getByText(/World One/)).toBeTruthy();
     expect(screen.getByText("Semantic index")).toBeTruthy();
     expect(screen.getByText(/4 embedded/i)).toBeTruthy();
-    expect(listRecentJobs).toHaveBeenCalledWith("u1", "c1", 25);
+    expect(listRecentJobs).toHaveBeenCalledWith("u1", "c1", null);
   });
 
   it("404s when the campaign is not visible to the user", async () => {

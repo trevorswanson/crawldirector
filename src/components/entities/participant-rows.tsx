@@ -31,6 +31,7 @@ export function withoutFloorCandidates<T extends { type: string }>(
  * and editing). Emits indexed `participantId_N` / `participantRole_N` fields
  * counted by a hidden `participantCount`, which the event actions parse via
  * `parseParticipantRows`. Pass `initial` to prefill existing participants.
+ * Participants are optional for campaign-wide timeline entries.
  */
 export function ParticipantRows({
   candidates,
@@ -42,7 +43,7 @@ export function ParticipantRows({
   searchCandidates?: (query: string) => Promise<EntityCandidate[]>;
 }) {
   const seed: ParticipantRowValue[] =
-    initial && initial.length > 0 ? initial : [{ entity: null, role: "ACTOR" }];
+    initial != null ? initial : [{ entity: null, role: "ACTOR" }];
   const [rows, setRows] = useState(seed.map((row, index) => ({ key: index, ...row })));
   const [nextKey, setNextKey] = useState(seed.length);
   // Floors are set via the time picker, not as participants (ADR 0008 §3).
@@ -118,22 +119,17 @@ export function ParticipantRows({
           </select>
           <button
             type="button"
-            title={
-              rows.length === 1
-                ? "An event needs at least one participant"
-                : "Remove participant row"
-            }
+            title="Remove participant row"
             onClick={() => removeRow(row.key)}
-            disabled={rows.length === 1}
-            className="inline-flex h-[34px] items-center justify-center border border-[var(--line)] px-[8px] text-[var(--ink-faint)] hover:text-[var(--no)] disabled:opacity-40"
+            className="inline-flex h-[34px] items-center justify-center border border-[var(--line)] px-[8px] text-[var(--ink-faint)] hover:text-[var(--no)]"
           >
             <Trash2 aria-hidden size={12} />
           </button>
         </div>
       ))}
-      {rows.length === 1 && (
+      {rows.length === 0 && (
         <p className="text-[10.5px] text-[var(--ink-faint)]">
-          An event needs at least one participant. Add another to remove this one.
+          Participants are optional. Add a row when an entity is involved.
         </p>
       )}
     </div>

@@ -55,7 +55,7 @@ function ResultCard({ campaignId, hit }: { campaignId: string; hit: SearchHit })
   if (hit.targetType === "EVENT") {
     const { event } = hit;
     return (
-      <Link href={`/campaigns/${campaignId}/timeline`} className={cardClass}>
+      <Link href={`/campaigns/${campaignId}/timeline?event=${event.id}`} className={cardClass}>
         <div className="flex items-center gap-2">
           <CalendarClock aria-hidden size={12} className="text-[var(--ink-faint)]" />
           <span className={kickerClass}>Event</span>

@@ -30,10 +30,12 @@
 > provenance and audit rows. `CREATE_RELATIONSHIP` / `DELETE_RELATIONSHIP`,
 > `CREATE_EVENT` / `UPDATE_EVENT`, `CREATE_EVENT_CAUSALITY` /
 > `DELETE_EVENT_CAUSALITY`, and `APPLY_EVENT_EFFECTS` now flow through the
-> pipeline. Unapplied event effects now submit pending Review Queue proposals
-> before mutating target entities. Pending relationship proposals shipped in M3
-> slice 11, and event proposals use the same review dispatch path, so
-> relationships/events are reviewable rather than just auto-approved.
+> pipeline. DM-applied event effects use an auto-approved `DM` change set before
+> mutating target entities; AI/player/import effect proposals can still remain
+> pending in the Review Queue. Pending relationship proposals shipped in M3 slice
+> 11, and event proposals use the same review dispatch path, so
+> relationships/events remain reviewable when they are proposed rather than direct
+> DM edits.
 
 ## Sketch
 

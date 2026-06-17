@@ -22,7 +22,7 @@ export default async function CampaignJobsPage({
   const role = campaign.members[0]?.role;
   if (role !== Role.OWNER && role !== Role.CO_DM) notFound();
 
-  const jobs = await listRecentJobs(user.id, id, 25);
+  const jobs = await listRecentJobs(user.id, id, null);
 
   return (
     <PageContainer>
@@ -33,10 +33,11 @@ export default async function CampaignJobsPage({
         Job Queue
       </h1>
       <p className="mb-5 max-w-2xl text-[13px] leading-[1.6] text-[var(--ink-dim)]">
-        Recent background work kicked off by the DM console. The worker updates
-        these rows as jobs move from queued to running, succeeded, or failed.
+        Full background job history kicked off by the DM console. The worker
+        updates these rows as jobs move from queued to running, succeeded, or
+        failed; queued and running jobs can be canceled here.
       </p>
-      <JobQueueList jobs={jobs} />
+      <JobQueueList jobs={jobs} campaignId={id} />
     </PageContainer>
   );
 }

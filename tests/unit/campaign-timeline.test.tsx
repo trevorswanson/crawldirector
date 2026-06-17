@@ -438,14 +438,15 @@ describe("CampaignTimeline", () => {
     expect(submitted.get("participantRole_1")).toBe("TARGET");
   });
 
-  it("explains the participant minimum and offers effects in the log form", () => {
+  it("explains optional participants and offers effects in the log form", () => {
     renderTimeline({ events: [] });
 
     fireEvent.click(screen.getByRole("button", { name: "Log event" }));
 
-    // The single starting row can't be removed; the form says why (issue #1).
+    // Timeline entries can be campaign-wide notes with no actor or participant.
+    fireEvent.click(screen.getByTitle("Remove participant row"));
     expect(
-      screen.getByText(/an event needs at least one participant/i),
+      screen.getByText(/participants are optional/i),
     ).toBeDefined();
     // The new-event form exposes effects, matching the edit form (issue #5).
     expect(screen.getByRole("button", { name: /add effect/i })).toBeDefined();
@@ -486,21 +487,45 @@ describe("CampaignTimeline", () => {
   });
 
   it("surfaces action errors and lets the DM cancel", async () => {
-    createCampaignEventAction.mockResolvedValue({ error: "Choose at least one participant." });
+    createCampaignEventAction.mockResolvedValue({ error: "Could not log the event." });
     renderTimeline({ events: [] });
 
     fireEvent.click(screen.getByRole("button", { name: "Log event" }));
-    fireEvent.change(screen.getByPlaceholderText("What happened?"), {
+    const title = screen.getByPlaceholderText("What happened?") as HTMLInputElement;
+    fireEvent.change(title, {
       target: { value: "No witness" },
+    });
+    const summary = screen.getByPlaceholderText("Summary (optional)") as HTMLTextAreaElement;
+    fireEvent.change(summary, {
+      target: { value: "No actor is attached to this timeline note." },
     });
     fireEvent.click(screen.getByRole("button", { name: /Log event/ }));
 
     expect((await screen.findByRole("alert")).textContent).toBe(
-      "Choose at least one participant.",
+      "Could not log the event.",
     );
+    expect(title.value).toBe("No witness");
+    expect(summary.value).toBe("No actor is attached to this timeline note.");
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByPlaceholderText("What happened?")).toBeNull();
+  });
+
+  it("lets the DM log a campaign timeline event without participants", async () => {
+    createCampaignEventAction.mockResolvedValue(undefined);
+    renderTimeline({ events: [] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Log event" }));
+    fireEvent.click(screen.getByTitle("Remove participant row"));
+    fireEvent.change(screen.getByPlaceholderText("What happened?"), {
+      target: { value: "The floor announcement echoes everywhere" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Log event/ }));
+
+    await waitFor(() => expect(createCampaignEventAction).toHaveBeenCalledTimes(1));
+    const [, , submitted] = createCampaignEventAction.mock.calls[0];
+    expect(submitted.get("participantCount")).toBe("0");
+    expect(submitted.get("title")).toBe("The floor announcement echoes everywhere");
   });
 
   it("edits an event from the timeline: prefilled scalars + participants, submits", async () => {
