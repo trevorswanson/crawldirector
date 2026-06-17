@@ -58,6 +58,20 @@
 - **Scope honored:** agent runs in *in-character* mode retrieve only what the
   entity plausibly knows (fog of war — [`06-entity-agents.md`](./06-entity-agents.md)).
 
+*As built (M5 slice 6, part 1):* a `retrieval.ts` seam
+(`src/server/services/retrieval.ts`) wraps `searchCanon` for context-building.
+`retrieveRelatedEntityIds(userId, campaignId, seed)` builds an OR-joined seed
+query from an entity's name + tags (so the full-text arm matches *any* shared
+term — `websearch_to_tsquery` would otherwise AND the words) and returns the
+relevance-ranked ids of the canon entities most related to the seed, scoped to
+the requester's role (so scope/fog-of-war is enforced by reusing `searchCanon`)
+and degrading to full-text when no embedder is configured. The relationship-
+inference generator (`generation.ts`) now picks its candidate edge endpoints
+from this seam — relevance-ranked, with an alphabetical baseline as a coverage
+floor — instead of dumping the first N entities alphabetically; locked endpoints
+stay out of the proposable set. Wiring the remaining generators (flesh-out
+enrichment, scaffold-stubs dedup) is tracked in the backlog.
+
 ## Indexing pipeline
 
 - On canon change (a Change Set approved, an entity/event/edge created or

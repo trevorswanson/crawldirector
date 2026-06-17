@@ -68,8 +68,15 @@ keyword-scanning every doc.
             invariant #5 (a player's ask can't reach DM-only canon); provider
             errors stay safe (invariant #6). The scoped *player* variant is the
             same role-aware service, surfaced when the M7 player UI lands.
-      - [ ] **Slice 6 — wire retrieval into generator context-building.** Replace
+      - [~] **Slice 6 — wire retrieval into generator context-building.** Replace
             ad-hoc canon-dumping in the M4 generators; honor locks + scope.
+            **Relationship inference done** (2026-06-17 — see the section below): a
+            `retrieval.ts` seam over `searchCanon` now selects candidate edge
+            endpoints by relevance instead of an alphabetical dump, scoped to the
+            requester and lock-aware. Remaining (tracked, lower-value): flesh-out
+            related-canon *enrichment* (it loads only its target today — no dump to
+            replace) and scaffold-stubs (its exhaustive dedup name set is not a
+            relevance problem retrieval can safely replace).
 - [ ] **Entity-kind registry ([ADR 0009](./adr/0009-entity-kind-registry.md),
       accepted).** Consolidate per-type bespoke `data.*` fields into one
       `EntityKind` descriptor per type and derive validation, data-key lists, the
@@ -210,6 +217,72 @@ keyword-scanning every doc.
 - [x] `CreateCampaignForm` has an unchecked-by-default native checkbox (`name="seedLore"`, no `value` attribute); submits `"on"` when checked.
 - [x] `createCampaignAction`: after campaign creation, if `seedLore === "on"` enqueues a `LORE_SEED` job in its own try/catch — enqueue failure never blocks the redirect.
 - [x] Tests: seeding ServiceError assertions updated; non-empty campaign guard test added; LORE_SEED handler delegation test (mocked seeding module); dm-actions tests for seedLore=on/off/enqueue-throw; form checkbox test.
+
+## M5 — Retrieval-fed generator context: relationship inference (slice 6, part 1) ✅ (2026-06-17)
+
+**Goal:** the second consumer in [`07-search-retrieval.md`](./07-search-retrieval.md)
+§"Retrieval-augmented context" — replace ad-hoc canon-dumping in the M4 generators
+with principled retrieval over scoped canon. The one generator that *literally*
+dumped canon was relationship inference: it offered the model the first 40
+**alphabetical** entities as candidate edge endpoints, so at DCC's scale the
+genuinely related entities rarely fell inside that window. Branch:
+`feat/m5-search-slice6-retrieval-context`. No schema change.
+
+- [x] **Retrieval seam** ([`retrieval.ts`](../src/server/services/retrieval.ts)):
+      a thin wrapper over `searchCanon`. `buildEntityRetrievalQuery` (pure) OR-joins
+      a seed entity's salient identifiers (name + tags) so the full-text arm matches
+      *any* shared term — `websearch_to_tsquery` ANDs whitespace-separated words, so
+      a natural-language seed would over-constrain and match almost nothing in a
+      no-embedder campaign. `retrieveRelatedEntityIds(userId, campaignId, seed)` runs
+      `searchCanon`, returns the entity-hit ids in rank order, and excludes the seed
+      itself. Two guarantees fall out of reusing `searchCanon`: **scope** (it projects
+      by the requester's role — a DM generator sees full canon; a future in-character
+      agent path would see only player-visible canon, invariant #5) and **graceful
+      degradation** (semantic ranking is additive inside `searchCanon`; a campaign
+      with no embedding-capable key still gets full-text retrieval).
+- [x] **Relationship inference rewired** ([`generation.ts`](../src/server/services/generation.ts)):
+      `inferRelationshipsForEntityLocked` builds its candidate set from
+      `retrieveRelatedEntityIds` (relevance-ranked) instead of the alphabetical
+      `take: 40`, then hydrates details under the existing `locked: false` / `CANON`
+      filter so locked endpoints still stay out of the proposable set (invariant #2 —
+      a relationship create never modifies its endpoints, but we keep the prior
+      contract). An alphabetical baseline is kept as a **coverage floor** (deduped,
+      capped at 40): retrieval orders the relevant entities first and guarantees they
+      reach the model even in a large campaign, while a small campaign keeps full
+      coverage and the never-empty guard is unchanged. Retrieval is therefore purely
+      **additive** — it can only re-order and widen which related entities the model
+      sees, never narrow below the old behavior.
+- [x] **Deliberate deferrals (documented).** Flesh-out and scaffold-stubs are *not*
+      rewired this slice. Flesh-out loads only its own target — there is no
+      cross-canon dump to replace; adding related-canon *reference* context is
+      additive enrichment (and, with an embedder, a paid per-run query embed), so it
+      is tracked as a follow-up rather than bundled here. Scaffold-stubs needs an
+      *exhaustive* existing-name set for dedup, which a relevance subset can't safely
+      replace — its scaling fix is a different technique (post-hoc dedup), out of
+      scope for "retrieval context."
+- [x] **Tests:** new pure + DB-backed
+      [`retrieval.test.ts`](../tests/unit/retrieval.test.ts) (query builder OR-join /
+      trim / empty; term-sharing retrieval returns the related id and excludes the
+      seed; **a player never retrieves DM-only canon — invariant #5**; non-member and
+      empty-seed → `[]`). `generation.test.ts` gains a real-Postgres assertion that a
+      term-sharing, alphabetically-*last* candidate is offered to the model ahead of
+      an alphabetically-*first* unrelated one (proving retrieval re-ordering); its
+      `@/server/ai` mock became a **partial** mock (`importOriginal`) so retrieval's
+      real `searchCanon` runs (full-text, no key), and `searchDoc` is cleaned per
+      test. All existing infer-relationships cases (locked-endpoint exclusion,
+      candidate/edge prompt framing, pending-dupe suppression) stay green.
+- [x] **Verification:** RED/GREEN, then `npm run test -- tests/unit/retrieval.test.ts
+      tests/unit/generation.test.ts tests/unit/search.test.ts
+      tests/unit/embeddings.test.ts tests/unit/dm-actions.test.ts` (236 tests),
+      `npm run lint` (0 errors; pre-existing settings-action warnings only),
+      `npm run typecheck`, `npm run build`, and the full coverage gate green (100
+      files / 1349 tests; statements 95.79%, branches 88.85%, functions 97.97%,
+      lines 97.65%). The retrieval candidate-selection runs end-to-end against
+      **real Postgres + the real `searchCanon`** in the service tests; the provider
+      call stays the documented key-gated M4/M5 boundary (a fully synthesized
+      inference run needs the DM's own valid BYO key + spend), covered by the
+      mocked-provider service tests. No new UI surface, so no browser smoke this
+      slice.
 
 ## M5 — Ask the Campaign: retrieval-augmented Q&A with citations (slice 5) ✅ (2026-06-16)
 

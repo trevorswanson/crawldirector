@@ -1,4 +1,4 @@
-import { CanonStatus, ChangeSource, OpKind, Role } from "@/generated/prisma/client";
+import { CanonStatus, ChangeSource, OpKind, Prisma, Role } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 import { describeProviderError, resolveCampaignProvider } from "@/server/ai";
@@ -32,6 +32,7 @@ import {
   scaffoldStubsToSpecs,
 } from "@/server/ai/generators/scaffold-stubs";
 import { buildStubCreatePatch } from "@/server/services/entities";
+import { retrieveRelatedEntityIds } from "@/server/services/retrieval";
 import {
   createPendingEntityChangeSet,
   createPendingRelationshipChangeSet,
@@ -78,6 +79,22 @@ export type ScaffoldStubsResult = {
 
 const MAX_SCAFFOLD_INSTRUCTION = 2000;
 const MAX_BULK_FLESH = 20;
+
+// How many entities to offer the relationship-inference generator as candidate
+// edge endpoints. Retrieval picks the most relevant ones; the alphabetical
+// baseline fills any remaining budget (see `inferRelationshipsForEntityLocked`).
+const CANDIDATE_LIMIT = 40;
+
+const candidateSelect = {
+  id: true,
+  type: true,
+  name: true,
+  summary: true,
+  description: true,
+  tags: true,
+} satisfies Prisma.EntitySelect;
+
+type CandidateRow = Prisma.EntityGetPayload<{ select: typeof candidateSelect }>;
 
 export type BulkFleshOutcome = {
   entityId: string;
@@ -395,25 +412,22 @@ async function inferRelationshipsForEntityLocked(
 
   await assertWithinSpendCap(campaignId);
 
-  const [candidates, existing, pendingCreates] = await Promise.all([
-    prisma.entity.findMany({
-      where: {
-        campaignId,
-        status: CanonStatus.CANON,
-        locked: false,
-        id: { not: entityId },
-      },
-      orderBy: [{ name: "asc" }],
-      take: 40,
-      select: {
-        id: true,
-        type: true,
-        name: true,
-        summary: true,
-        description: true,
-        tags: true,
-      },
-    }),
+  // Build the candidate set via retrieval rather than an arbitrary alphabetical
+  // slice (M5 slice 6 — docs/07-search-retrieval.md §"Retrieval-augmented
+  // context"). At DCC's scale the entities actually related to the target rarely
+  // fall in the first N alphabetically; `retrieveRelatedEntityIds` surfaces them
+  // by keyword + semantic similarity, scoped to the DM's full canon (degrading to
+  // full-text when no embedder is configured). We still fetch an alphabetical
+  // baseline so the model always has candidates and a small campaign keeps full
+  // coverage — retrieval just orders the relevant entities first and guarantees
+  // they're inside the window even when the campaign is large.
+  const [relevantIds, existing, pendingCreates] = await Promise.all([
+    retrieveRelatedEntityIds(
+      userId,
+      campaignId,
+      { id: target.id, name: target.name, tags: target.tags },
+      { limit: CANDIDATE_LIMIT },
+    ),
     prisma.relationship.findMany({
       where: {
         campaignId,
@@ -445,6 +459,37 @@ async function inferRelationshipsForEntityLocked(
       },
     }),
   ]);
+
+  // Hydrate candidate details. Locked endpoints stay out of the proposable set
+  // (invariant #2 — AI never modifies locked targets); the baseline is the old
+  // alphabetical query, kept as a coverage floor so retrieval is purely additive.
+  const [relevantPool, baseline] = await Promise.all([
+    relevantIds.length === 0
+      ? Promise.resolve([] as CandidateRow[])
+      : prisma.entity.findMany({
+          where: { id: { in: relevantIds }, campaignId, status: CanonStatus.CANON, locked: false },
+          select: candidateSelect,
+        }),
+    prisma.entity.findMany({
+      where: { campaignId, status: CanonStatus.CANON, locked: false, id: { not: entityId } },
+      orderBy: [{ name: "asc" }],
+      take: CANDIDATE_LIMIT,
+      select: candidateSelect,
+    }),
+  ]);
+
+  // Relevant entities first (in rank order), then the alphabetical baseline fills
+  // the remaining budget; dedupe and cap so the window stays bounded.
+  const relevantById = new Map(relevantPool.map((entity) => [entity.id, entity] as const));
+  const seenCandidates = new Set<string>();
+  const candidates: CandidateRow[] = [];
+  const pushCandidate = (entity: CandidateRow | undefined) => {
+    if (!entity || seenCandidates.has(entity.id) || candidates.length >= CANDIDATE_LIMIT) return;
+    seenCandidates.add(entity.id);
+    candidates.push(entity);
+  };
+  for (const id of relevantIds) pushCandidate(relevantById.get(id));
+  for (const entity of baseline) pushCandidate(entity);
 
   if (candidates.length === 0) {
     throw new ServiceError("Add at least one other canon entity before inferring relationships.");

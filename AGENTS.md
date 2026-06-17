@@ -81,7 +81,11 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
   BYO-key chat model as numbered sources, and returns a grounded answer whose
   inline `[n]` citations link back to the source entity/relationship/event — never
   writing canon, scoped per requester (a player's ask can't reach DM-only canon).
-  The remaining slice (retrieval-fed generator context) is in the backlog.
+  Slice 6 began the retrieval-fed **generator** context: a `retrieval.ts` seam over
+  `searchCanon` now selects relationship-inference candidate edge endpoints by
+  relevance (scoped + lock-aware) instead of an alphabetical dump; wiring the
+  remaining generators (flesh-out enrichment, scaffold-stubs dedup) stays in the
+  backlog.
 
 For per-slice detail (files, tests, decisions) see
 [`docs/PROGRESS.md`](./docs/PROGRESS.md) — its "Open backlog" section is the
