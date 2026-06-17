@@ -26,7 +26,7 @@ describe("GlobalSearchLink", () => {
   it("is a disabled hint when not inside a campaign", () => {
     usePathnameMock.mockReturnValue("/dashboard");
     render(<GlobalSearchLink />);
-    const el = screen.getByText(/Query the System/i).closest("[aria-disabled]");
+    const el = screen.getByText(/Ask the Campaign/i).closest("[aria-disabled]");
     expect(el).not.toBeNull();
     expect(document.querySelector("a")).toBeNull();
   });
@@ -34,7 +34,7 @@ describe("GlobalSearchLink", () => {
   it("links to the campaign search page when inside a campaign", () => {
     usePathnameMock.mockReturnValue("/campaigns/c1/entities/e9");
     render(<GlobalSearchLink />);
-    const link = screen.getByText(/Query the System/i).closest("a");
+    const link = screen.getByText(/Ask the Campaign/i).closest("a");
     expect(link?.getAttribute("href")).toBe("/campaigns/c1/search");
   });
 });

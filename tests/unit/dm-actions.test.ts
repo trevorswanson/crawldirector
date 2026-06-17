@@ -43,6 +43,7 @@ const {
   fleshOutEntities,
   inferRelationshipsForEntity,
   scaffoldStubEntities,
+  askCampaign,
   enqueueJob,
   signOut,
   redirect,
@@ -90,6 +91,7 @@ const {
   fleshOutEntities: vi.fn(),
   inferRelationshipsForEntity: vi.fn(),
   scaffoldStubEntities: vi.fn(),
+  askCampaign: vi.fn(),
   enqueueJob: vi.fn(),
   signOut: vi.fn(),
   redirect: vi.fn(() => {
@@ -153,6 +155,7 @@ vi.mock("@/server/services/generation", () => ({
   inferRelationshipsForEntity,
   scaffoldStubEntities,
 }));
+vi.mock("@/server/services/ask", () => ({ askCampaign }));
 vi.mock("@/server/services/jobs", () => ({ enqueueJob }));
 vi.mock("@/server/services/seeding", () => ({ isLoreSeedDatasetAvailable }));
 vi.mock("@/server/auth", () => ({ signOut }));
@@ -214,6 +217,7 @@ import {
   fleshOutEntitiesAction,
   enqueueBulkFleshAction,
   enqueueBuildSemanticIndexAction,
+  askCampaignAction,
   inferRelationshipsForEntityAction,
   scaffoldStubsAction,
 } from "@/app/(dm)/actions";
@@ -2161,6 +2165,53 @@ describe("scaffoldStubsAction", () => {
     scaffoldStubEntities.mockRejectedValueOnce(new Error("boom"));
     expect((await scaffoldStubsAction("c1", undefined, form({ instruction: "x" })))?.error).toBe(
       "Generation failed. Please try again.",
+    );
+  });
+});
+
+describe("askCampaignAction", () => {
+  it("passes the question and returns the answer + sources (no revalidate — read-only)", async () => {
+    const sources = [
+      {
+        index: 1,
+        cited: true,
+        targetType: "ENTITY" as const,
+        targetId: "e1",
+        kind: "NPC",
+        label: "The Maestro",
+        href: "/campaigns/c1/entities/e1",
+      },
+    ];
+    askCampaign.mockResolvedValue({
+      role: "OWNER",
+      question: "Who is the Maestro?",
+      answer: "A manipulative manager [1].",
+      grounded: true,
+      sources,
+      model: "claude-opus-4-8",
+      providerId: "anthropic",
+    });
+
+    const result = await askCampaignAction("c1", undefined, form({ question: "Who is the Maestro?" }));
+
+    expect(askCampaign).toHaveBeenCalledWith("u1", "c1", "Who is the Maestro?");
+    expect(result?.answer).toBe("A manipulative manager [1].");
+    expect(result?.grounded).toBe(true);
+    expect(result?.sources).toEqual(sources);
+    expect(result?.model).toBe("claude-opus-4-8");
+    expect(result?.error).toBeUndefined();
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a ServiceError message and a generic fallback", async () => {
+    askCampaign.mockRejectedValueOnce(new ServiceError("Add an AI provider key in Settings."));
+    expect((await askCampaignAction("c1", undefined, form({ question: "x" })))?.error).toBe(
+      "Add an AI provider key in Settings.",
+    );
+
+    askCampaign.mockRejectedValueOnce(new Error("boom"));
+    expect((await askCampaignAction("c1", undefined, form({ question: "x" })))?.error).toBe(
+      "The campaign couldn't answer that. Please try again.",
     );
   });
 });

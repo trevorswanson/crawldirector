@@ -59,8 +59,15 @@ keyword-scanning every doc.
                   nearest semantic candidates with an indexable distance
                   expression before blending with full-text rank. DMs can set an
                   embedding dimension with their BYO embedding model.
-      - [ ] **Slice 5 — Ask the Campaign.** Retrieval-augmented Q&A with citations
-            (read-only), DM + scoped player variants.
+      - [x] **Slice 5 — Ask the Campaign.** ✅ (2026-06-16) — see the section
+            below. Retrieval-augmented Q&A with inline citations (read-only):
+            retrieve the top-k visibility-scoped canon via `searchCanon`, hand it
+            to the BYO-key chat model as numbered sources, and return a grounded
+            answer whose `[n]` markers link back to the source entity/edge/event.
+            Never writes canon (invariant #1); retrieval scoping enforces
+            invariant #5 (a player's ask can't reach DM-only canon); provider
+            errors stay safe (invariant #6). The scoped *player* variant is the
+            same role-aware service, surfaced when the M7 player UI lands.
       - [ ] **Slice 6 — wire retrieval into generator context-building.** Replace
             ad-hoc canon-dumping in the M4 generators; honor locks + scope.
 - [ ] **Entity-kind registry ([ADR 0009](./adr/0009-entity-kind-registry.md),
@@ -180,6 +187,84 @@ keyword-scanning every doc.
 - [x] `CreateCampaignForm` has an unchecked-by-default native checkbox (`name="seedLore"`, no `value` attribute); submits `"on"` when checked.
 - [x] `createCampaignAction`: after campaign creation, if `seedLore === "on"` enqueues a `LORE_SEED` job in its own try/catch — enqueue failure never blocks the redirect.
 - [x] Tests: seeding ServiceError assertions updated; non-empty campaign guard test added; LORE_SEED handler delegation test (mocked seeding module); dm-actions tests for seedLore=on/off/enqueue-throw; form checkbox test.
+
+## M5 — Ask the Campaign: retrieval-augmented Q&A with citations (slice 5) ✅ (2026-06-16)
+
+**Goal:** the user-facing half of [`07-search-retrieval.md`](./07-search-retrieval.md)
+§"Ask the Campaign" — a natural-language Q&A that retrieves the relevant slice of
+canon and has a BYO-key model synthesize a **cited** answer. Strictly read-only:
+answering never writes canon (invariant #1); it is a synthesized view with
+citations, not a proposal. Visibility is enforced **at retrieval** (invariant #5)
+— a player's ask can only ever see what `searchCanon` already projected for their
+role, so the model never receives DM-only or secret canon. Branch:
+`feat/m5-ask-the-campaign`. No schema change (answers aren't persisted).
+
+- [x] **Pure generator** ([`ask-campaign.ts`](../src/server/ai/generators/ask-campaign.ts)):
+      `ASK_CAMPAIGN_GENERATOR` identity, `buildAskPrompt` (a cacheable system
+      block that frames a grounded, read-only, `[n]`-cited answer + optional
+      cacheable style-guide block + a player fog-of-war reminder; numbered source
+      list + question in the volatile user message), and `parseCitedIndices`
+      (extracts sorted, de-duplicated, **in-range** `[n]` markers so a
+      hallucinated `[9]` against 3 sources can't produce a dangling link). No DB,
+      no SDK, no secrets — exhaustively unit-tested.
+- [x] **Service** ([`ask.ts`](../src/server/services/ask.ts)): `askCampaign(userId,
+      campaignId, question)` — checks membership, validates the question (non-empty,
+      ≤ `MAX_QUESTION_LENGTH`), requires a chat provider (`resolveCampaignProvider`;
+      none → safe `ServiceError` — Ask needs a model, unlike full-text search),
+      honors the spend cap **before** any paid work, then retrieves the top
+      `ASK_RETRIEVAL_LIMIT` (12) hits via `searchCanon` (role-scoped). No hits →
+      returns a "canon is silent" answer **without** a provider call (no cost, no
+      hallucination from an empty context). Otherwise it hands the model the
+      retrieved docs' denormalized `SearchDoc.content` as numbered sources, calls
+      `provider.generate`, records `AiUsage` (`generatorId: "ask-campaign"`,
+      best-effort — never loses a paid answer over a usage write), and maps the
+      `[n]` citations back to per-source `{ kind, label, href }` (entity detail /
+      graph / timeline) with a `cited` flag. Provider failures → safe
+      `describeProviderError` message (invariant #6).
+- [x] **Action + UI.** `askCampaignAction` ([`actions.ts`](<../src/app/(dm)/actions.ts>))
+      returns `{ answer, grounded, sources, model, error }` (read-only — no
+      revalidate). A new `/campaigns/[id]/ask` page (server component) gates on a
+      configured chat provider — renders the panel, or a "configure a key in
+      Settings" notice otherwise (full-text/semantic search keep working without
+      one). The client `AskPanel` ([`ask-panel.tsx`](../src/components/ask/ask-panel.tsx))
+      is a question textarea + a citation-aware answer renderer that linkifies each
+      `[n]` to its source, plus a "Sources · retrieved from canon" list (icon +
+      kind + label, "Cited" tag) for verification, and a "never saved as canon"
+      note. **Nav:** added an **Ask the Campaign** DM-nav item and retired the
+      topbar's "Ask · M5" planned badge (now `Search · Ask the Campaign…`, matching
+      the mockup).
+- [x] **Tests:** pure `ask-campaign.test.ts` (prompt framing/numbering/style-guide/
+      player-reminder; citation parse incl. out-of-range/dedup/empty). DB-backed
+      `ask.test.ts` — grounded cited answer surfaces the retrieved canon as numbered
+      source context; only model-cited sources flagged; **a player's ask never
+      retrieves DM-only canon and the DM-only doc never reaches the model's context
+      (invariant #5)**; relationship + event sources link to graph/timeline; no-hit
+      → "canon is silent" with no provider call; no-provider / blank / oversized /
+      non-member / spend-cap rejections; a provider failure becomes a safe
+      ServiceError that doesn't echo the key (invariant #6); usage row recorded.
+      `dm-actions.test.ts` (action passes the question, returns answer/sources, no
+      revalidate, ServiceError + generic fallback); `ask-panel.test.tsx` (form +
+      read-only note; cited `[n]` link + sources list; ungrounded no-list; error);
+      `ask-page.test.tsx` (404; provider-gated panel vs. configure-a-key notice);
+      `console-shell.test.tsx` + `global-search-link.test.tsx` updated for the new
+      nav/topbar.
+- [x] **Verification:** RED/GREEN, then `npm run test -- tests/unit/ask.test.ts
+      tests/unit/ask-campaign.test.ts tests/unit/ask-panel.test.tsx
+      tests/unit/ask-page.test.tsx`, `npm run lint` (0 errors; pre-existing
+      settings-action warnings only), `npm run typecheck`, `npm run build` (the
+      `/campaigns/[id]/ask` route compiles), and the full coverage gate
+      (`npm run test:coverage`) green — statements 95.77%, branches 88.91%,
+      functions 97.94%, lines 97.6%. **In-browser** (reseeded `dcc` + `scripts/seed-world.ts`,
+      authed as `dm@example.com`): the Ask page renders with the new nav item /
+      topbar / provider-gating notice and no console errors; with a placeholder
+      Anthropic key the panel renders, a long natural-language question over
+      full-text-only retrieval correctly returns the "canon is silent" answer with
+      **no** provider call, and a keyword question (`Princess Donut`) retrieves
+      canon → calls the provider → the placeholder key fails to a safe
+      "authentication failed" alert with **no key/raw text in the DOM**
+      (invariant #6). A fully synthesized answer needs the DM's own valid BYO key +
+      spend (the documented M4/M5 boundary), covered by the mocked-provider service
+      tests.
 
 ## M5 — Semantic layer: ANN index + embedding dimensions (slice 4c) ✅ (2026-06-16)
 
