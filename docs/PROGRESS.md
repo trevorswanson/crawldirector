@@ -283,6 +283,16 @@ genuinely related entities rarely fell inside that window. Branch:
       inference run needs the DM's own valid BYO key + spend), covered by the
       mocked-provider service tests. No new UI surface, so no browser smoke this
       slice.
+- [x] **Review fixes (Codex on PR #141).** (1) `searchCanon` gained an optional
+      `targetTypes` filter (threaded into `buildSearchDocSearchSql`'s candidate
+      scan) and `retrieveRelatedEntityIds` constrains retrieval to ENTITY docs, so
+      relationship/event matches can't consume the LIMIT window and push relevant
+      entities off the page. (2) `inferRelationshipsForEntityLocked` re-checks the
+      spend cap *after* retrieval (which may have spent a paid query-embed) and
+      before the chat generation call, so a campaign just under its cap can't incur
+      an extra paid inference call. Tests: `search.test.ts` (SQL `targetType IN`
+      shape + a behavioral ENTITY-only filter case) and `retrieval.test.ts` (a
+      relationship matching the seed term doesn't block entity retrieval).
 
 ## M5 — Ask the Campaign: retrieval-augmented Q&A with citations (slice 5) ✅ (2026-06-16)
 

@@ -154,6 +154,7 @@ export function buildSearchDocSearchSql({
   queryVector,
   embedModel,
   embedDimensions,
+  targetTypes,
 }: {
   campaignId: string;
   query: string;
@@ -165,10 +166,18 @@ export function buildSearchDocSearchSql({
   queryVector?: number[] | null;
   embedModel?: string;
   embedDimensions?: number;
+  // When set, restrict the candidate scan to these `targetType`s. Lets a caller
+  // (e.g. retrieval context-building) ask for one type without non-matching types
+  // consuming the LIMIT window. Absent → all target types (the default).
+  targetTypes?: string[];
 }) {
   const visibilityClause = playerOnly
     ? Prisma.sql`AND "visibility" = ${Visibility.PLAYER_VISIBLE}::"Visibility"`
     : Prisma.empty;
+  const targetTypeClause =
+    targetTypes && targetTypes.length
+      ? Prisma.sql`AND "targetType" IN (${Prisma.join(targetTypes)})`
+      : Prisma.empty;
 
   if (queryVector && queryVector.length > 0) {
     const literal = searchVectorLiteral(queryVector);
@@ -192,6 +201,7 @@ export function buildSearchDocSearchSql({
         FROM "SearchDoc"
         WHERE "campaignId" = ${campaignId}
           ${visibilityClause}
+          ${targetTypeClause}
           AND "searchVector" @@ websearch_to_tsquery('english', ${query})
         ORDER BY text_rank DESC, "targetId" ASC
         LIMIT ${semanticCandidateLimit}
@@ -205,6 +215,7 @@ export function buildSearchDocSearchSql({
           FROM "SearchDoc"
           WHERE "campaignId" = ${campaignId}
             ${visibilityClause}
+            ${targetTypeClause}
             AND embedding IS NOT NULL
             AND "embeddingModel" = ${model}
             AND "embeddingDimensions" = ${dimensions}
@@ -232,6 +243,7 @@ export function buildSearchDocSearchSql({
     FROM "SearchDoc"
     WHERE "campaignId" = ${campaignId}
       ${visibilityClause}
+      ${targetTypeClause}
       AND "searchVector" @@ websearch_to_tsquery('english', ${query})
     ORDER BY rank DESC, "targetId" ASC
     LIMIT ${limit} OFFSET ${offset}
@@ -248,7 +260,7 @@ export async function searchCanon(
   userId: string,
   campaignId: string,
   rawQuery: string,
-  options: { limit?: number } = {},
+  options: { limit?: number; targetTypes?: string[] } = {},
 ): Promise<SearchResult> {
   const membership = await prisma.membership.findUnique({
     where: { userId_campaignId: { userId, campaignId } },
@@ -328,6 +340,7 @@ export async function searchCanon(
         queryVector,
         embedModel: queryModel,
         embedDimensions: queryDimensions,
+        targetTypes: options.targetTypes,
       }),
     );
 

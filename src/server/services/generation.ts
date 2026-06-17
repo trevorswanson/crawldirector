@@ -533,6 +533,13 @@ async function inferRelationshipsForEntityLocked(
   };
   const { system, messages } = buildInferRelationshipsPrompt(context);
 
+  // Re-check the cap before the chat call: retrieval above may have spent (and
+  // recorded) a paid query-embedding when the campaign has an embedding-capable
+  // key, which can bring known spend to the cap. The early check happens before
+  // retrieval, so without this a campaign just under its cap could still incur an
+  // extra paid generation call.
+  await assertWithinSpendCap(campaignId);
+
   let output;
   let usage: LLMUsage = emptyUsage();
   try {

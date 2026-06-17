@@ -4,6 +4,7 @@ import { Role } from "@/generated/prisma/client";
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
 import { createGenericEntity } from "@/server/services/entities";
+import { createRelationship } from "@/server/services/relationships";
 import {
   buildEntityRetrievalQuery,
   retrieveRelatedEntityIds,
@@ -121,6 +122,31 @@ describe("retrieveRelatedEntityIds", () => {
     expect(dmIds).toEqual(expect.arrayContaining([visible.id, hidden.id]));
     expect(playerIds).toContain(visible.id);
     expect(playerIds).not.toContain(hidden.id);
+  });
+
+  it("still retrieves a relevant entity when relationship docs also match the seed term", async () => {
+    const dm = await makeUser("dm4@retrieval.test");
+    const campaign = await createCampaign(dm.id, { name: "Mixed" });
+    const target = await makeEntity(dm.id, campaign.id, { name: "Nimbus", tags: ["storm"] });
+    const related = await makeEntity(dm.id, campaign.id, {
+      name: "Tempest",
+      summary: "A storm bringer.",
+    });
+    // A relationship whose notes also match "storm" — it must not consume the
+    // candidate window ahead of the entity (the seam scans ENTITY docs only).
+    await createRelationship(dm.id, campaign.id, target.id, {
+      type: "ALLY_OF",
+      targetId: related.id,
+      notes: "a storm-forged pact",
+      secret: false,
+    });
+
+    const ids = await retrieveRelatedEntityIds(dm.id, campaign.id, {
+      id: target.id,
+      name: "Nimbus",
+      tags: ["storm"],
+    });
+    expect(ids).toContain(related.id);
   });
 
   it("returns nothing for a non-member or a seed with no terms", async () => {

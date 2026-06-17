@@ -58,12 +58,16 @@ export async function retrieveRelatedEntityIds(
   if (!query) return [];
 
   const limit = options.limit ?? DEFAULT_RELATED_LIMIT;
-  // Over-fetch by one so dropping the seed can't shrink us below the limit.
-  const result = await searchCanon(userId, campaignId, query, { limit: limit + 1 });
+  // Constrain the scan to ENTITY docs so relationship/event matches can't consume
+  // the LIMIT window and push relevant entities off the page. Over-fetch by one so
+  // dropping the seed itself can't shrink us below the requested limit.
+  const result = await searchCanon(userId, campaignId, query, {
+    limit: limit + 1,
+    targetTypes: [SEARCH_TARGET_ENTITY],
+  });
 
   const ids: string[] = [];
   for (const hit of result.hits) {
-    if (hit.targetType !== SEARCH_TARGET_ENTITY) continue;
     if (hit.targetId === seed.id) continue;
     ids.push(hit.targetId);
     if (ids.length >= limit) break;
