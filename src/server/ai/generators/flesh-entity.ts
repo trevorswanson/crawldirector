@@ -77,6 +77,7 @@ export type FleshEntityContext = {
     type: string;
     name: string;
     summary: string | null;
+    description: string | null;
     tags: string[];
   }>;
   /** Fields the DM has locked — excluded from the proposal. */
@@ -88,6 +89,26 @@ const FLESHABLE_FIELDS: FleshableField[] = ["summary", "description", "tags"];
 function writableFields(locked: FleshableField[] | undefined): FleshableField[] {
   const lockedSet = new Set(locked ?? []);
   return FLESHABLE_FIELDS.filter((f) => !lockedSet.has(f));
+}
+
+// Cap the related-canon reference excerpt. Summaries are already ≤ 280 chars
+// (schema), but retrieval matches against the doc's full content (incl.
+// description), so an entity can be surfaced for a description-only fact. When it
+// has no summary, fall back to a bounded slice of the description so that fact
+// still reaches the model instead of being withheld behind "(no summary yet)".
+const RELATED_REFERENCE_MAX = 300;
+
+function relatedReference(related: {
+  summary: string | null;
+  description: string | null;
+}): string {
+  const summary = related.summary?.trim();
+  if (summary) return summary;
+  const description = related.description?.trim();
+  if (!description) return "(no summary yet)";
+  return description.length > RELATED_REFERENCE_MAX
+    ? `${description.slice(0, RELATED_REFERENCE_MAX).trimEnd()}…`
+    : description;
 }
 
 // Build the provider request (system blocks + user message). The stable framing
@@ -149,9 +170,9 @@ export function buildFleshEntityPrompt(ctx: FleshEntityContext): {
       "",
       "Related canon (reference — keep your additions consistent with this; do not restate or modify it):",
       ...ctx.relatedCanon.map((related) => {
-        const summary = related.summary?.trim() || "(no summary yet)";
+        const reference = relatedReference(related);
         const tags = related.tags.length ? ` [tags: ${related.tags.join(", ")}]` : "";
-        return `- ${formatEntityType(related.type)} · ${related.name}: ${summary}${tags}`;
+        return `- ${formatEntityType(related.type)} · ${related.name}: ${reference}${tags}`;
       }),
     );
   }

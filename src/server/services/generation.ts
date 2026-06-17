@@ -211,14 +211,20 @@ async function fleshOutEntityLocked(
       ? []
       : await prisma.entity.findMany({
           where: { id: { in: relatedIds }, campaignId, status: CanonStatus.CANON },
-          select: { id: true, type: true, name: true, summary: true, tags: true },
+          select: { id: true, type: true, name: true, summary: true, description: true, tags: true },
         });
   // findMany doesn't guarantee order; restore retrieval's relevance ranking.
   const relatedById = new Map(relatedRows.map((r) => [r.id, r] as const));
   const relatedCanon = relatedIds
     .map((id) => relatedById.get(id))
     .filter((r): r is (typeof relatedRows)[number] => r !== undefined)
-    .map((r) => ({ type: r.type, name: r.name, summary: r.summary, tags: r.tags }));
+    .map((r) => ({
+      type: r.type,
+      name: r.name,
+      summary: r.summary,
+      description: r.description,
+      tags: r.tags,
+    }));
 
   // Re-check the cap after retrieval: with an embedding-capable key, searchCanon
   // spent (and recorded) a paid query-embedding above, which can bring known

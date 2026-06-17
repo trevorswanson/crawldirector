@@ -186,6 +186,30 @@ describe("fleshOutEntity", () => {
     expect(user).not.toContain("Zarathustra");
   });
 
+  it("surfaces a description-only related entity's canon (retrieved on a description match)", async () => {
+    const { dmId, campaignId, entityId } = await seed();
+    // Summary empty; its only tie to the target is a fact in the description, which
+    // SearchDoc indexes — so retrieval surfaces it and the fallback must carry that
+    // fact into the prompt rather than render "(no summary yet)" (Codex P2, PR #142).
+    await createGenericEntity(dmId, campaignId, {
+      type: "ITEM",
+      name: "Old Chronicle",
+      summary: "",
+      description: "A dusty ledger recording Mordecai's debts across the dungeon.",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const provider = fakeProvider({ summary: "s", description: "d", tags: ["t"] });
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    await fleshOutEntity(dmId, campaignId, entityId);
+
+    const user = provider.generateStructured.mock.calls[0][0].messages[0].content as string;
+    expect(user).toContain("Old Chronicle:");
+    expect(user).toContain("dusty ledger recording Mordecai's debts");
+    expect(user).not.toContain("Old Chronicle: (no summary yet)");
+  });
+
   it("includes a locked related entity as read-only reference (unlike relationship inference)", async () => {
     const { dmId, campaignId, entityId } = await seed();
     const related = await createGenericEntity(dmId, campaignId, {

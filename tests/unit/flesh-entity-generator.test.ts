@@ -69,20 +69,65 @@ describe("buildFleshEntityPrompt", () => {
     const { system, messages } = buildFleshEntityPrompt(
       ctx({
         relatedCanon: [
-          { type: "NPC", name: "Princess Donut", summary: "A vain talking cat.", tags: ["ally", "floor-9"] },
-          { type: "FACTION", name: "Borant Syndicate", summary: null, tags: [] },
+          { type: "NPC", name: "Princess Donut", summary: "A vain talking cat.", description: null, tags: ["ally", "floor-9"] },
+          { type: "FACTION", name: "Borant Syndicate", summary: null, description: null, tags: [] },
         ],
       }),
     );
     const user = messages[0].content;
     expect(user).toContain("Related canon (reference");
     expect(user).toContain("Princess Donut: A vain talking cat. [tags: ally, floor-9]");
-    // A related entity with no summary still renders, honestly.
+    // A related entity with neither summary nor description renders honestly.
     expect(user).toContain("Borant Syndicate: (no summary yet)");
     // The read-only-reference rule lives in the cacheable framing.
     const systemText = system.map((b) => b.text).join("\n");
     expect(systemText).toMatch(/related canon/i);
     expect(systemText).toContain("read-only reference");
+  });
+
+  it("falls back to a bounded description excerpt when a related entity has no summary", () => {
+    const { messages } = buildFleshEntityPrompt(
+      ctx({
+        relatedCanon: [
+          {
+            type: "ITEM",
+            name: "Old Chronicle",
+            summary: "   ",
+            description: "A dusty ledger recording Mordecai's first kill on Floor 9.",
+            tags: [],
+          },
+        ],
+      }),
+    );
+    const user = messages[0].content;
+    // Retrieval can surface an entity on a description-only fact (SearchDoc indexes
+    // descriptions); that fact must reach the model, not be hidden behind a stub.
+    expect(user).toContain("Old Chronicle: A dusty ledger recording Mordecai's first kill on Floor 9.");
+    expect(user).not.toContain("(no summary yet)");
+  });
+
+  it("truncates a long description fallback with an ellipsis", () => {
+    const { messages } = buildFleshEntityPrompt(
+      ctx({
+        relatedCanon: [
+          { type: "NPC", name: "Verbose", summary: null, description: "x".repeat(400), tags: [] },
+        ],
+      }),
+    );
+    expect(messages[0].content).toContain(`Verbose: ${"x".repeat(300)}…`);
+  });
+
+  it("prefers a present summary over the description fallback", () => {
+    const { messages } = buildFleshEntityPrompt(
+      ctx({
+        relatedCanon: [
+          { type: "NPC", name: "Donut", summary: "A vain talking cat.", description: "SHOULD NOT APPEAR", tags: [] },
+        ],
+      }),
+    );
+    const user = messages[0].content;
+    expect(user).toContain("Donut: A vain talking cat.");
+    expect(user).not.toContain("SHOULD NOT APPEAR");
   });
 
   it("omits the related-canon section when none is provided", () => {
