@@ -32,6 +32,7 @@ export async function setAiKeyAction(
     baseUrl: formData.get("baseUrl") ?? undefined,
     model: formData.get("model") ?? undefined,
     embeddingModel: formData.get("embeddingModel") ?? undefined,
+    embeddingDimensions: formData.get("embeddingDimensions") ?? undefined,
     inputPerMTokUsd: formData.get("inputPerMTokUsd") ?? undefined,
     outputPerMTokUsd: formData.get("outputPerMTokUsd") ?? undefined,
   });

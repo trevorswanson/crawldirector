@@ -17,6 +17,7 @@ vi.mock("@/server/ai/anthropic", () => ({ createAnthropicProvider }));
 vi.mock("@/server/ai/openai", () => ({ createOpenAiProvider }));
 
 import {
+  EMBED_DIMENSIONS_DEFAULT,
   EMBED_MODEL_DEFAULT,
   getCampaignProvider,
   resolveCampaignEmbedder,
@@ -114,6 +115,7 @@ describe("resolveCampaignEmbedder", () => {
       baseUrl: null,
       model: null,
       embeddingModel: null,
+      embeddingDimensions: null,
     });
     const embedder = await resolveCampaignEmbedder("c1");
     expect(embedder).not.toBeNull();
@@ -121,7 +123,11 @@ describe("resolveCampaignEmbedder", () => {
     expect(getAiKeyConfig).toHaveBeenCalledTimes(1);
     expect(getAiKeyConfig.mock.calls[0][1]).toBe("openai");
     expect(createOpenAiProvider).toHaveBeenCalledWith(
-      expect.objectContaining({ providerId: "openai", embeddingModel: EMBED_MODEL_DEFAULT }),
+      expect.objectContaining({
+        providerId: "openai",
+        embeddingModel: EMBED_MODEL_DEFAULT,
+        embeddingDimensions: EMBED_DIMENSIONS_DEFAULT,
+      }),
     );
     expect(createAnthropicProvider).not.toHaveBeenCalled();
   });
@@ -134,6 +140,7 @@ describe("resolveCampaignEmbedder", () => {
         baseUrl: "http://x/v1",
         model: "mistral-large-latest",
         embeddingModel: "codestral-embed",
+        embeddingDimensions: 1024,
       }); // openai-compatible
     await resolveCampaignEmbedder("c1");
     expect(createOpenAiProvider).toHaveBeenCalledWith(
@@ -142,6 +149,7 @@ describe("resolveCampaignEmbedder", () => {
         apiKey: "not-needed",
         baseUrl: "http://x/v1",
         embeddingModel: "codestral-embed",
+        embeddingDimensions: 1024,
       }),
     );
   });
@@ -154,6 +162,7 @@ describe("resolveCampaignEmbedder", () => {
         baseUrl: "http://x/v1",
         model: "mistral-large-latest",
         embeddingModel: null,
+        embeddingDimensions: null,
       }); // openai-compatible, chat configured but no embedding model
     expect(await resolveCampaignEmbedder("c1")).toBeNull();
     expect(createOpenAiProvider).not.toHaveBeenCalled();

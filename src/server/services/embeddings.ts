@@ -1,6 +1,7 @@
 import { Prisma } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import {
+  EMBED_DIMENSIONS_DEFAULT,
   EMBED_MODEL_DEFAULT,
   describeProviderError,
   resolveCampaignEmbedder,
@@ -26,10 +27,9 @@ import { assertWithinSpendCap, recordAiUsage } from "@/server/services/ai-usage"
 // 64 keeps each request modest while cutting round-trips on a big campaign.
 export const EMBED_BATCH_SIZE = 64;
 
-// Must match the `SearchDoc.embedding vector(1536)` column. A model that returns
-// a different dimension is a misconfiguration we surface safely (below) rather
-// than letting Postgres throw an opaque error.
-export const EMBED_DIMENSIONS = 1536;
+// Legacy/default dimension for OpenAI's text-embedding-3-small and for existing
+// custom endpoint configs that named a model before dimensions became explicit.
+export const EMBED_DIMENSIONS = EMBED_DIMENSIONS_DEFAULT;
 
 /** The text we embed for a SearchDoc — the denormalized `content`, trimmed. Pure. */
 export function embeddingInputForDoc(content: string): string {
@@ -73,12 +73,20 @@ export async function embedSearchDocs(
   // `embedding`, so "missing or stale" can be expressed without touching the
   // Unsupported vector column: model is null (never embedded) or differs from it.
   const targetModel = embedder.embeddingModel ?? EMBED_MODEL_DEFAULT;
+  const targetDimensions = embedder.embeddingDimensions ?? EMBED_DIMENSIONS;
   const docs = await prisma.searchDoc.findMany({
     where: {
       campaignId,
       ...(opts.force
         ? {}
-        : { OR: [{ embeddingModel: null }, { embeddingModel: { not: targetModel } }] }),
+        : {
+            OR: [
+              { embeddingModel: null },
+              { embeddingModel: { not: targetModel } },
+              { embeddingDimensions: null },
+              { embeddingDimensions: { not: targetDimensions } },
+            ],
+          }),
     },
     select: { id: true, content: true },
   });
@@ -93,15 +101,17 @@ export async function embedSearchDocs(
 
       for (let j = 0; j < batch.length; j += 1) {
         const vector = result.vectors[j];
-        if (!vector || vector.length !== EMBED_DIMENSIONS) {
+        if (!vector || vector.length !== targetDimensions) {
           throw new ServiceError(
             `The embedding model returned ${vector?.length ?? 0}-dimensional vectors; ` +
-              `semantic search expects ${EMBED_DIMENSIONS}. Configure a ${EMBED_DIMENSIONS}-dimensional model.`,
+              `semantic search expects ${targetDimensions}. Configure the model's vector dimension correctly.`,
           );
         }
         const updated = await prisma.$executeRaw(
           Prisma.sql`UPDATE "SearchDoc"
-            SET embedding = ${searchVectorLiteral(vector)}::vector, "embeddingModel" = ${result.model}
+            SET embedding = ${searchVectorLiteral(vector)}::vector,
+                "embeddingModel" = ${result.model},
+                "embeddingDimensions" = ${targetDimensions}
             WHERE id = ${batch[j].id} AND content = ${batch[j].content}`,
         );
         if (updated > 0) embedded += 1;

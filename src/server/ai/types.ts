@@ -73,6 +73,8 @@ export interface LLMProvider {
    * already embedded with it — rather than learning it only from the result.
    */
   readonly embeddingModel?: string | null;
+  /** Expected vector dimension for `embeddingModel`, when configured. */
+  readonly embeddingDimensions?: number | null;
   /** Free-text completion. */
   generate(req: GenerateRequest): Promise<GenerateResult>;
   /**

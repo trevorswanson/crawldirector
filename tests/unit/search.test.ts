@@ -186,6 +186,51 @@ describe("SearchDoc full-text storage", () => {
     expect(index.indexdef).toContain("USING gin");
     expect(index.indexdef).toContain('"searchVector"');
   });
+
+  it("stores semantic vector dimensions and adds a 1536-dim HNSW cosine index", async () => {
+    const [embeddingColumn] = await prisma.$queryRaw<
+      { columnName: string; udtName: string; dataType: string }[]
+    >`
+      SELECT column_name AS "columnName", udt_name AS "udtName", data_type AS "dataType"
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'SearchDoc'
+        AND column_name = 'embedding'
+    `;
+    expect(embeddingColumn).toMatchObject({
+      columnName: "embedding",
+      udtName: "vector",
+      dataType: "USER-DEFINED",
+    });
+
+    const [dimensionsColumn] = await prisma.$queryRaw<
+      { columnName: string; dataType: string; isNullable: string }[]
+    >`
+      SELECT column_name AS "columnName", data_type AS "dataType", is_nullable AS "isNullable"
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'SearchDoc'
+        AND column_name = 'embeddingDimensions'
+    `;
+    expect(dimensionsColumn).toMatchObject({
+      columnName: "embeddingDimensions",
+      dataType: "integer",
+      isNullable: "YES",
+    });
+
+    const [index] = await prisma.$queryRaw<{ indexdef: string }[]>`
+      SELECT indexdef
+      FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND tablename = 'SearchDoc'
+        AND indexname = 'SearchDoc_embedding_hnsw_1536_idx'
+    `;
+
+    expect(index.indexdef).toContain("USING hnsw");
+    expect(index.indexdef).toContain("vector_cosine_ops");
+    expect(index.indexdef).toContain("vector(1536)");
+    expect(index.indexdef).toContain('"embeddingDimensions" = 1536');
+  });
 });
 
 describe("buildSearchDocSearchSql", () => {
@@ -204,7 +249,7 @@ describe("buildSearchDocSearchSql", () => {
     expect(text).not.toContain("to_tsvector");
   });
 
-  it("adds a cosine-similarity term + semantic candidate arm when a query vector is given", () => {
+  it("adds an ANN-friendly semantic candidate CTE when a 1536-dim query vector is given", () => {
     const sql = buildSearchDocSearchSql({
       campaignId: "campaign_1",
       query: "lighthouse",
@@ -213,15 +258,40 @@ describe("buildSearchDocSearchSql", () => {
       offset: 0,
       queryVector: [0.1, 0.2, 0.3],
       embedModel: "text-embedding-3-small",
+      embedDimensions: 1536,
     });
     const text = sql.strings.join("?");
 
-    // Hybrid: keeps the full-text rank/match and adds the pgvector cosine term
-    // and a same-model embedded-row candidate arm.
+    // Hybrid: preselect nearest semantic candidates with raw cosine distance so
+    // pgvector can use the HNSW expression index, then blend with full-text rank.
+    expect(text).toContain("semantic_candidates AS MATERIALIZED");
+    expect(text).toContain("ORDER BY embedding::vector(1536) <=>");
     expect(text).toContain('ts_rank("searchVector", websearch_to_tsquery');
-    expect(text).toContain("embedding <=>");
-    expect(text).toContain('embedding IS NOT NULL AND "embeddingModel" =');
+    expect(text).toContain("1 - distance AS similarity");
+    expect(text).toContain("AND embedding IS NOT NULL");
+    expect(text).toContain('AND "embeddingModel" =');
+    expect(text).toContain('"embeddingDimensions" =');
     expect(text).toContain('"searchVector" @@ websearch_to_tsquery');
+  });
+
+  it("filters semantic candidates by custom embedding dimensions", () => {
+    const sql = buildSearchDocSearchSql({
+      campaignId: "campaign_1",
+      query: "lighthouse",
+      playerOnly: false,
+      limit: 10,
+      offset: 0,
+      queryVector: [0.1, 0.2],
+      embedModel: "tiny-embed",
+      embedDimensions: 2,
+    });
+    const text = sql.strings.join("?");
+
+    expect(text).toContain("AND embedding IS NOT NULL");
+    expect(text).toContain('AND "embeddingModel" =');
+    expect(text).toContain('"embeddingDimensions" =');
+    expect(text).toContain("ORDER BY embedding <=>");
+    expect(text).not.toContain("embedding::vector(1536)");
   });
 });
 

@@ -77,12 +77,16 @@
 
 A search/embedding store (pgvector) keyed to entity/event/relationship ids plus a
 full-text index; an indexing `Job` kind. See [`09-data-schema.md`](./09-data-schema.md).
-*As built (M5 slice 4a):* one `SearchDoc` row per target carries `content`, a
-generated `searchVector` (tsvector + GIN), and an `embedding vector(1536)` +
-`embeddingModel`; the `EMBED_SEARCH_DOCS` job populates embeddings. No ANN
-(HNSW/IVFFlat) index yet — cosine over a campaign-scoped sequential scan is fast
-at search result sizes, and a pgvector index type can't be represented in the
-Prisma schema without tripping the migration-drift gate (deferred to a perf slice).
+*As built (M5 slices 4a–4c):* one `SearchDoc` row per target carries `content`,
+a generated `searchVector` (tsvector + GIN), and a pgvector `embedding` plus
+`embeddingModel` and `embeddingDimensions`; the `EMBED_SEARCH_DOCS` job populates
+embeddings. The default 1536-dimensional path has a raw-SQL HNSW cosine
+expression index (`SearchDoc_embedding_hnsw_1536_idx`) because Prisma can't
+represent pgvector HNSW indexes in `@@index`. Hybrid search first preselects
+nearest semantic candidates with the indexable distance expression, then blends
+those candidates with full-text rank. Other configured dimensions are supported
+through exact vector search until a real campaign needs additional
+dimension-specific expression indexes.
 
 ## Build sequencing
 

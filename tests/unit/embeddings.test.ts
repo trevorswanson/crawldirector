@@ -39,7 +39,7 @@ function unit(index: number, dims = EMBED_DIMENSIONS): number[] {
  */
 function stubEmbedder(
   mapText: (text: string) => number[],
-  opts: { id?: string; embeddingModel?: string | null } = {},
+  opts: { id?: string; embeddingModel?: string | null; embeddingDimensions?: number | null } = {},
 ): LLMProvider {
   // `null` models an embedder that advertises no embedding model, exercising the
   // service's defensive `?? EMBED_MODEL_DEFAULT` fallback; the embed call still
@@ -50,6 +50,7 @@ function stubEmbedder(
     id: opts.id ?? "openai",
     model: "gpt-4o-mini",
     embeddingModel: advertised,
+    embeddingDimensions: opts.embeddingDimensions === undefined ? EMBED_DIMENSIONS : opts.embeddingDimensions,
     generate: vi.fn(),
     generateStructured: vi.fn(),
     embed: vi.fn(async (texts: string[]) => ({
@@ -92,6 +93,14 @@ async function embeddingDims(targetId: string): Promise<number | null> {
     SELECT vector_dims(embedding) AS dims FROM "SearchDoc" WHERE "targetId" = ${targetId}
   `;
   return rows[0]?.dims ?? null;
+}
+
+async function storedEmbeddingDimensions(targetId: string): Promise<number | null> {
+  const doc = await prisma.searchDoc.findUniqueOrThrow({
+    where: { targetType_targetId: { targetType: "ENTITY", targetId } },
+    select: { embeddingDimensions: true },
+  });
+  return doc.embeddingDimensions;
 }
 
 beforeEach(async () => {
@@ -141,6 +150,8 @@ describe("embedSearchDocs", () => {
     expect(docs.every((doc) => doc.embeddingModel === EMBED_MODEL_DEFAULT)).toBe(true);
     expect(await embeddingDims(a.id)).toBe(EMBED_DIMENSIONS);
     expect(await embeddingDims(b.id)).toBe(EMBED_DIMENSIONS);
+    expect(await storedEmbeddingDimensions(a.id)).toBe(EMBED_DIMENSIONS);
+    expect(await storedEmbeddingDimensions(b.id)).toBe(EMBED_DIMENSIONS);
 
     const usage = await prisma.aiUsage.findMany({ where: { campaignId: campaign.id } });
     expect(usage).toHaveLength(1);
@@ -170,6 +181,35 @@ describe("embedSearchDocs", () => {
 
     // A second default run sees the doc as already embedded with this model.
     expect((await embedSearchDocs(dm.id, campaign.id)).embedded).toBe(0);
+  });
+
+  it("stores a bring-your-own embedding dimension and treats it as the current shape", async () => {
+    const dm = await prisma.user.create({ data: { email: "dm@test.com" } });
+    const campaign = await createCampaign(dm.id, { name: "Dungeon" });
+    const alpha = await makeEntity(dm.id, campaign.id, { name: "Alpha", summary: "one" });
+    mockResolveEmbedder.mockResolvedValue(
+      stubEmbedder(() => unit(0, 3), {
+        id: "openai-compatible",
+        embeddingModel: "tiny-embed",
+        embeddingDimensions: 3,
+      }),
+    );
+
+    const result = await embedSearchDocs(dm.id, campaign.id);
+    expect(result).toEqual({ embedded: 1, model: "tiny-embed" });
+    expect(await embeddingDims(alpha.id)).toBe(3);
+    expect(await storedEmbeddingDimensions(alpha.id)).toBe(3);
+
+    // Same model but a different configured dimension marks the row stale.
+    mockResolveEmbedder.mockResolvedValue(
+      stubEmbedder(() => unit(0, 4), {
+        id: "openai-compatible",
+        embeddingModel: "tiny-embed",
+        embeddingDimensions: 4,
+      }),
+    );
+    expect((await embedSearchDocs(dm.id, campaign.id)).embedded).toBe(1);
+    expect(await storedEmbeddingDimensions(alpha.id)).toBe(4);
   });
 
   it("falls back to the default model when the embedder advertises none", async () => {
@@ -435,9 +475,12 @@ describe("content-change embedding invalidation", () => {
 
     const before = await prisma.searchDoc.findFirst({
       where: { targetType: "ENTITY", targetId: entity.id },
-      select: { embeddingModel: true },
+      select: { embeddingModel: true, embeddingDimensions: true },
     });
-    expect(before?.embeddingModel).toBe(EMBED_MODEL_DEFAULT);
+    expect(before).toMatchObject({
+      embeddingModel: EMBED_MODEL_DEFAULT,
+      embeddingDimensions: EMBED_DIMENSIONS,
+    });
 
     await updateEntity(dm.id, campaign.id, entity.id, {
       type: "NPC",
@@ -450,9 +493,9 @@ describe("content-change embedding invalidation", () => {
 
     const after = await prisma.searchDoc.findFirst({
       where: { targetType: "ENTITY", targetId: entity.id },
-      select: { embeddingModel: true },
+      select: { embeddingModel: true, embeddingDimensions: true },
     });
-    expect(after?.embeddingModel).toBeNull();
+    expect(after).toMatchObject({ embeddingModel: null, embeddingDimensions: null });
     // The DM's manual rebuild now re-embeds the stale row.
     expect((await embedSearchDocs(dm.id, campaign.id)).embedded).toBe(1);
   });
@@ -480,9 +523,12 @@ describe("content-change embedding invalidation", () => {
 
     const after = await prisma.searchDoc.findFirst({
       where: { targetType: "ENTITY", targetId: entity.id },
-      select: { embeddingModel: true },
+      select: { embeddingModel: true, embeddingDimensions: true },
     });
-    expect(after?.embeddingModel).toBe(EMBED_MODEL_DEFAULT);
+    expect(after).toMatchObject({
+      embeddingModel: EMBED_MODEL_DEFAULT,
+      embeddingDimensions: EMBED_DIMENSIONS,
+    });
     expect((await embedSearchDocs(dm.id, campaign.id)).embedded).toBe(0);
   });
 });

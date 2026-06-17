@@ -50,6 +50,7 @@ describe("setAiKeyAction", () => {
       baseUrl: "",
       model: "",
       embeddingModel: "",
+      embeddingDimensions: null,
       inputPerMTokUsd: null,
       outputPerMTokUsd: null,
     });
@@ -78,6 +79,7 @@ describe("setAiKeyAction", () => {
       baseUrl: "http://localhost:11434/v1",
       model: "llama3.1",
       embeddingModel: "",
+      embeddingDimensions: null,
       inputPerMTokUsd: 0.5,
       outputPerMTokUsd: 1.5,
     });
@@ -101,6 +103,7 @@ describe("setAiKeyAction", () => {
       baseUrl: "http://localhost:11434/v1",
       model: "llama3.1",
       embeddingModel: "",
+      embeddingDimensions: null,
       inputPerMTokUsd: null,
       outputPerMTokUsd: null,
     });
@@ -119,6 +122,7 @@ describe("setAiKeyAction", () => {
         baseUrl: "https://api.mistral.ai/v1",
         model: "mistral-large-latest",
         embeddingModel: "codestral-embed",
+        embeddingDimensions: "768",
       }),
     );
     expect(setAiKey).toHaveBeenCalledWith("dm1", "camp1", {
@@ -127,6 +131,7 @@ describe("setAiKeyAction", () => {
       baseUrl: "https://api.mistral.ai/v1",
       model: "mistral-large-latest",
       embeddingModel: "codestral-embed",
+      embeddingDimensions: 768,
       inputPerMTokUsd: null,
       outputPerMTokUsd: null,
     });

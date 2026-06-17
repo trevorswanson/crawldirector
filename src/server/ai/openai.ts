@@ -35,6 +35,7 @@ export type OpenAiAdapterOptions = {
   // this adapter is constructed as an embedder (resolveCampaignEmbedder). When
   // absent, `embed()` throws — chat callers never call it.
   embeddingModel?: string | null;
+  embeddingDimensions?: number | null;
 };
 
 function readEmbedUsage(usage: OpenAI.CreateEmbeddingResponse.Usage | undefined): LLMUsage {
@@ -93,6 +94,7 @@ export function createOpenAiProvider(opts: OpenAiAdapterOptions): LLMProvider {
     id: providerId,
     model,
     embeddingModel: opts.embeddingModel ?? null,
+    embeddingDimensions: opts.embeddingDimensions ?? null,
 
     async generate(req: GenerateRequest): Promise<GenerateResult> {
       const resp = await client.chat.completions.create({
@@ -140,11 +142,27 @@ export function createOpenAiProvider(opts: OpenAiAdapterOptions): LLMProvider {
       // Force `float`: the SDK otherwise defaults to base64, which an
       // OpenAI-*compatible* endpoint (Ollama, vLLM, llama.cpp) may not honor —
       // returning a plain float array the SDK then mis-decodes as bytes.
-      const resp = await client.embeddings.create({
+      const params: OpenAI.EmbeddingCreateParams = {
         model: embeddingModel,
         input: texts,
         encoding_format: "float",
-      });
+      };
+      // Ask OpenAI for a specific output width when the DM configured one. Without
+      // it, a non-default dimension (e.g. text-embedding-3-large at 1024d) comes
+      // back at the model's native width; embedSearchDocs then rejects it as
+      // wrong-dimension and query-time semantic search degrades to keyword-only.
+      // `dimensions` is a first-party OpenAI request param, supported only by
+      // `text-embedding-3` and later models, so scope it to the real OpenAI
+      // endpoint (no custom baseURL): a compatible endpoint serves a fixed-width
+      // model that may reject the param, and legacy models (ada-002) don't take it.
+      if (
+        opts.baseUrl == null &&
+        opts.embeddingDimensions != null &&
+        embeddingModel.startsWith("text-embedding-3")
+      ) {
+        params.dimensions = opts.embeddingDimensions;
+      }
+      const resp = await client.embeddings.create(params);
       // The API returns rows in input order, but sort on `index` to be safe.
       const vectors = [...resp.data]
         .sort((a, b) => a.index - b.index)

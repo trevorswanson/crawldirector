@@ -48,7 +48,7 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
 - **Cross-cutting ✅.** Visibility collapsed to a binary `DM_ONLY`/`PLAYER_VISIBLE`
   (subset access via `KnowledgeGrant`, not a tier); entity-kind registry (ADR 0009)
   derives validation/data-keys/reviewable-set/form/display from per-type descriptors.
-- **M5 — Search & retrieval 🚧.** Slices 1–4b done. Slice 1 (full-text foundation):
+- **M5 — Search & retrieval 🚧.** Slices 1–4c done. Slice 1 (full-text foundation):
   a `SearchDoc` index kept in sync inside entity canon-write transactions + a DM
   backfill; `searchCanon` runs visibility-scoped Postgres full-text (players see
   only `PLAYER_VISIBLE` — invariant #5); a `/campaigns/[id]/search` page wired from
@@ -68,9 +68,12 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
   still works with **no AI key**; semantic degrades off gracefully. Slice 4b added
   automatic, deduped `EMBED_SEARCH_DOCS` enqueueing when canon writes change
   searchable content in campaigns with an embedding-capable key, while full-text-only
-  campaigns and visibility-only mirror refreshes stay cheap. Remaining slices
-  (an ANN index, "Ask the Campaign", retrieval-fed generator context) are in the
-  backlog.
+  campaigns and visibility-only mirror refreshes stay cheap. Slice 4c widened
+  embeddings to configurable dimensions (`SearchDoc.embeddingDimensions` +
+  `AiKey.embeddingDimensions`), added a raw-SQL HNSW cosine expression index for
+  the default 1536-dim path, and reshaped hybrid search to preselect ANN-friendly
+  semantic candidates before blending with full-text rank. Remaining slices
+  ("Ask the Campaign", retrieval-fed generator context) are in the backlog.
 
 For per-slice detail (files, tests, decisions) see
 [`docs/PROGRESS.md`](./docs/PROGRESS.md) — its "Open backlog" section is the

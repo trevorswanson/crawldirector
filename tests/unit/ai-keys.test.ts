@@ -222,6 +222,7 @@ describe("OpenAI-compatible providers", () => {
       baseUrl: "http://localhost:11434/v1",
       model: "llama3.1",
       embeddingModel: null,
+      embeddingDimensions: null,
     });
 
     const audit = await prisma.auditLog.findFirstOrThrow({ where: { action: "SET_AI_KEY" } });
@@ -244,12 +245,14 @@ describe("OpenAI-compatible providers", () => {
       embeddingModel: "codestral-embed",
     });
     expect(view.embeddingModel).toBe("codestral-embed");
+    expect(view.embeddingDimensions).toBeNull();
 
     // Available to the embedder resolver (internal config) and the list view.
     const config = await getAiKeyConfig(campaign.id, "openai-compatible");
     expect(config?.embeddingModel).toBe("codestral-embed");
+    expect(config?.embeddingDimensions).toBeNull();
     const views = await listAiKeys(dm.id, campaign.id);
-    expect(views[0]).toMatchObject({ embeddingModel: "codestral-embed" });
+    expect(views[0]).toMatchObject({ embeddingModel: "codestral-embed", embeddingDimensions: null });
 
     // The non-secret audit detail records it; clearing it (blank) removes it.
     const audit = await prisma.auditLog.findFirstOrThrow({ where: { action: "SET_AI_KEY" } });
@@ -263,6 +266,42 @@ describe("OpenAI-compatible providers", () => {
       embeddingModel: "",
     });
     expect(cleared.embeddingModel).toBeNull();
+  });
+
+  it("stores a bring-your-own embedding dimension and surfaces it in safe views", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+
+    const view = await setAiKey(dm.id, campaign.id, {
+      providerId: "openai-compatible",
+      apiKey: "",
+      baseUrl: "https://api.example.com/v1",
+      model: "llama3.1",
+      embeddingModel: "tiny-embed",
+      embeddingDimensions: 768,
+    });
+    expect(view.embeddingDimensions).toBe(768);
+
+    const config = await getAiKeyConfig(campaign.id, "openai-compatible");
+    expect(config?.embeddingDimensions).toBe(768);
+    const views = await listAiKeys(dm.id, campaign.id);
+    expect(views[0]).toMatchObject({
+      embeddingModel: "tiny-embed",
+      embeddingDimensions: 768,
+    });
+
+    const audit = await prisma.auditLog.findFirstOrThrow({ where: { action: "SET_AI_KEY" } });
+    expect((audit.detail as { embeddingDimensions?: number | null }).embeddingDimensions).toBe(768);
+
+    const cleared = await setAiKey(dm.id, campaign.id, {
+      providerId: "openai-compatible",
+      apiKey: "",
+      baseUrl: "https://api.example.com/v1",
+      model: "llama3.1",
+      embeddingModel: "tiny-embed",
+      embeddingDimensions: null,
+    });
+    expect(cleared.embeddingDimensions).toBeNull();
   });
 
   it("stores DM-supplied per-token price overrides and projects them in the safe view", async () => {
@@ -351,6 +390,7 @@ describe("OpenAI-compatible providers", () => {
     const config = await getAiKeyConfig(campaign.id, "openai-compatible");
     expect(config?.apiKey).toBe("proxy-secret-7777");
     expect(config?.model).toBe("llama3.2");
+    expect(config?.embeddingDimensions).toBeNull();
   });
 
   it("getAiKeyConfig returns null when nothing is configured", async () => {

@@ -34,7 +34,7 @@ keyword-scanning every doc.
             column plus GIN index; Prisma represents it as optional
             `Unsupported("tsvector")` with the mapped GIN index so the drift gate
             stays clean.
-      - [ ] **Slice 4 — semantic layer (pgvector).** Enable the extension, embed
+      - [x] **Slice 4 — semantic layer (pgvector).** ✅ Enable the extension, embed
             SearchDocs via the BYO-key provider, async re-embed on canon change
             via the `Job` worker, hybrid ranking. Decomposed:
             - [x] **Slice 4a — pgvector foundation + hybrid search.** ✅
@@ -52,12 +52,13 @@ keyword-scanning every doc.
                   self-heal through the worker without a manual rebuild.
                   Full-text-only campaigns and visibility-only mirror refreshes
                   do not enqueue.
-            - [ ] **Slice 4c — ANN index perf + configurable model.** Add an
-                  HNSW/IVFFlat index on `SearchDoc.embedding` once campaigns grow
-                  past sequential-scan sizes (needs an `Unsupported`/out-of-schema
-                  decision vs. the drift gate — Prisma's `@@index` can't represent
-                  pgvector index types); plus a configurable embedding
-                  model/dimension.
+            - [x] **Slice 4c — ANN index perf + configurable model/dimension.**
+                  ✅ (2026-06-16) — see the section below. SearchDoc embeddings
+                  now record dimensions and default 1536-dimensional rows have a
+                  raw-SQL HNSW cosine expression index; hybrid search preselects
+                  nearest semantic candidates with an indexable distance
+                  expression before blending with full-text rank. DMs can set an
+                  embedding dimension with their BYO embedding model.
       - [ ] **Slice 5 — Ask the Campaign.** Retrieval-augmented Q&A with citations
             (read-only), DM + scoped player variants.
       - [ ] **Slice 6 — wire retrieval into generator context-building.** Replace
@@ -179,6 +180,55 @@ keyword-scanning every doc.
 - [x] `CreateCampaignForm` has an unchecked-by-default native checkbox (`name="seedLore"`, no `value` attribute); submits `"on"` when checked.
 - [x] `createCampaignAction`: after campaign creation, if `seedLore === "on"` enqueues a `LORE_SEED` job in its own try/catch — enqueue failure never blocks the redirect.
 - [x] Tests: seeding ServiceError assertions updated; non-empty campaign guard test added; LORE_SEED handler delegation test (mocked seeding module); dm-actions tests for seedLore=on/off/enqueue-throw; form checkbox test.
+
+## M5 — Semantic layer: ANN index + embedding dimensions (slice 4c) ✅ (2026-06-16)
+
+**Goal:** finish the deferred semantic-search performance/config slice from
+[`07-search-retrieval.md`](./07-search-retrieval.md): keep the default
+OpenAI-compatible path fast with a pgvector ANN index, while letting DMs name
+the vector dimension for compatible custom embedding models.
+
+- [x] **Schema + migration** (`20260616193000_m5_embedding_ann_dimension`):
+      `AiKey.embeddingDimensions` stores the DM's optional non-secret vector-width
+      config, and `SearchDoc.embeddingDimensions` records the actual dimension
+      written beside each derived embedding. `SearchDoc.embedding` is widened from
+      `vector(1536)` to unconstrained `vector`; existing rows backfill their
+      dimension via `vector_dims(embedding)`.
+- [x] **ANN index decision:** added raw SQL
+      `SearchDoc_embedding_hnsw_1536_idx` on
+      `(embedding::vector(1536)) vector_cosine_ops` for rows with
+      `embeddingDimensions = 1536`. Prisma still cannot represent pgvector HNSW
+      indexes in `@@index`, so the index intentionally lives in the migration
+      and the query shape is kept aligned with that expression.
+- [x] **Hybrid query shape** ([`search.ts`](../src/server/services/search.ts)):
+      semantic search now preselects nearest candidates in a
+      `semantic_candidates AS MATERIALIZED` CTE ordered by raw cosine distance
+      (`embedding::vector(1536) <=> query::vector(1536)` for the indexed default
+      path), then blends those candidates with full-text `ts_rank`. Non-1536
+      dimensions remain supported through exact vector search, filtered by both
+      `embeddingModel` and `embeddingDimensions`.
+- [x] **Config plumbing:** provider metadata exposes default embedding dimensions,
+      `setAiKey` / Settings UI accept an optional dimension, and
+      `resolveCampaignEmbedder` passes it to the OpenAI-compatible adapter. Legacy
+      configs still default to 1536 unless a DM sets a dimension.
+- [x] **Embedding freshness:** `embedSearchDocs` treats model or dimension changes
+      as stale, writes `embeddingDimensions` with the vector, and content changes
+      clear both the model and dimension markers so stale vectors are excluded
+      until the worker refreshes them.
+- [x] **Tests / verification:** RED/GREEN focused suite covers the HNSW index DB
+      contract, ANN-friendly SQL shape, custom-dimension config path, custom
+      vector storage/re-embed, adapter/factory plumbing, Settings UI/action
+      propagation, and existing search visibility invariants:
+      `npm run test -- tests/unit/search.test.ts tests/unit/embeddings.test.ts tests/unit/ai-keys.test.ts tests/unit/ai-keys-actions.test.ts tests/unit/ai-provider-factory.test.ts tests/unit/ai-keys-panel.test.tsx tests/unit/ai-provider-adapters.test.ts`
+      (127 tests). Also verified `npm run db:deploy`, Prisma migration drift
+      (`npx prisma migrate diff --from-config-datasource --to-schema=./prisma/schema.prisma --exit-code`),
+      `npm run lint` (0 errors; existing settings-action / `.claude/worktrees`
+      warnings), `npm run typecheck`, `npm run build` (existing Turbopack NFT
+      seeding trace warning), `npm run test:coverage` (93 files / 1275 tests;
+      statements 95.76%, branches 88.91%, functions 97.91%, lines 97.62%), and a
+      local browser smoke of `/campaigns/[id]/settings` as seeded
+      `dm@example.com` confirming the embedding-dimensions controls render with
+      no console errors.
 
 ## M5 — Semantic layer: auto re-embed on canon change (slice 4b) ✅ (2026-06-16)
 
