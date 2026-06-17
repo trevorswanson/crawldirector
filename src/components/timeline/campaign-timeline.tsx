@@ -36,6 +36,7 @@ import {
   type EventActionState,
   type EventCausalityActionState,
 } from "@/app/(dm)/actions";
+import { invalidateCampaignStatus } from "@/lib/campaign-events";
 import {
   EntityTypeahead,
   type EntityCandidate,
@@ -222,6 +223,7 @@ function NewEventForm({
       setError(result.error);
       return;
     }
+    invalidateCampaignStatus();
     onClose();
   };
 
@@ -436,6 +438,7 @@ function EditEventForm({
         setError(result.error);
         return;
       }
+      invalidateCampaignStatus();
       onClose();
     });
   };
@@ -576,7 +579,11 @@ function TimelineEffects({
     setPending(true);
     const result = await onApply();
     setPending(false);
-    if (result?.error) setError(result.error);
+    if (result?.error) {
+      setError(result.error);
+    } else {
+      invalidateCampaignStatus();
+    }
   };
 
   return (
@@ -988,6 +995,7 @@ export function CampaignTimeline({
   const handleFloorChange = (floorEntityId: string) => {
     startFloorChange(async () => {
       await setCampaignCurrentFloorAction(campaignId, floorEntityId || null);
+      invalidateCampaignStatus();
       router.refresh();
     });
   };
@@ -998,6 +1006,7 @@ export function CampaignTimeline({
     startFloorCreate(async () => {
       const result = await createCampaignFloorEntityAction(campaignId, floorNumber);
       if ("entityId" in result) {
+        invalidateCampaignStatus();
         router.push(`/campaigns/${campaignId}/entities/${result.entityId}`);
       }
     });

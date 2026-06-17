@@ -7,6 +7,7 @@ import { Zap } from "lucide-react";
 import type { EventActionState } from "@/app/(dm)/actions";
 import { describeEffect } from "@/lib/event-effects";
 import type { EventEffectView } from "@/server/services/events";
+import { invalidateCampaignStatus } from "@/lib/campaign-events";
 
 /**
  * Read-side display of an event's declared effects plus an Apply control. Shared
@@ -39,7 +40,11 @@ export function EventEffectsSection({
     setPending(true);
     const result = await onApply();
     setPending(false);
-    if (result?.error) setError(result.error);
+    if (result?.error) {
+      setError(result.error);
+    } else {
+      invalidateCampaignStatus();
+    }
   };
 
   return (

@@ -18,6 +18,7 @@ import {
   updateEventAction,
   type EventCausalityActionState,
 } from "@/app/(dm)/actions";
+import { invalidateCampaignStatus } from "@/lib/campaign-events";
 import {
   EntityTypeahead,
   type EntityCandidate,
@@ -459,6 +460,7 @@ export function TimelinePanel({
       setError(res.error);
     } else {
       closeForm();
+      invalidateCampaignStatus();
     }
   };
 
@@ -475,6 +477,7 @@ export function TimelinePanel({
       setEditError(res.error);
     } else {
       setEditingId(null);
+      invalidateCampaignStatus();
     }
   };
 

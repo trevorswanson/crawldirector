@@ -45,4 +45,42 @@ describe("GlobalCampaignStatus", () => {
     });
     expect(getCampaignHeaderStatusAction).toHaveBeenCalledWith("c1");
   });
+
+  it("re-fetches when campaign status is invalidated", async () => {
+    usePathnameMock.mockReturnValue("/campaigns/c1/entities/e1");
+    getCampaignHeaderStatusAction.mockResolvedValue({
+      currentFloor: { id: "f9", name: "Larracos", floorNumber: 9 },
+      currentDay: 52,
+    });
+
+    render(<GlobalCampaignStatus />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Campaign status").textContent).toContain(
+        "Floor 9 · Day 52",
+      );
+    });
+    expect(getCampaignHeaderStatusAction).toHaveBeenCalledTimes(1);
+
+    // Mock new status values
+    getCampaignHeaderStatusAction.mockResolvedValue({
+      currentFloor: { id: "f10", name: "Sheol", floorNumber: 10 },
+      currentDay: 53,
+    });
+
+    // Invalidate
+    const { invalidateCampaignStatus } = await import("@/lib/campaign-events");
+    const { act } = await import("@testing-library/react");
+    act(() => {
+      invalidateCampaignStatus();
+    });
+
+    // Assert that it fetched again and updated the UI
+    await waitFor(() => {
+      expect(screen.getByLabelText("Campaign status").textContent).toContain(
+        "Floor 10 · Day 53",
+      );
+    });
+    expect(getCampaignHeaderStatusAction).toHaveBeenCalledTimes(2);
+  });
 });

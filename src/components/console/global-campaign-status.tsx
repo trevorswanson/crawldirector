@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Clock } from "lucide-react";
 
 import { getCampaignHeaderStatusAction } from "@/app/(dm)/actions";
+import { onCampaignStatusInvalidated } from "@/lib/campaign-events";
 import { HudTag } from "@/components/ui/hud-tag";
 
 type CampaignHeaderStatus = Awaited<ReturnType<typeof getCampaignHeaderStatusAction>>;
@@ -22,7 +23,10 @@ export function GlobalCampaignStatus() {
   const pathname = usePathname();
   const campaignId = campaignIdFromPathname(pathname);
   const [loadedStatus, setLoadedStatus] = useState<LoadedCampaignStatus | null>(null);
+  // Bumped by the custom event listener to trigger a re-fetch after mutations.
+  const [refreshKey, setRefreshKey] = useState(0);
 
+  // Re-fetch when the campaign changes or a mutation invalidates the status.
   useEffect(() => {
     let cancelled = false;
 
@@ -47,7 +51,12 @@ export function GlobalCampaignStatus() {
     return () => {
       cancelled = true;
     };
-  }, [campaignId]);
+  }, [campaignId, refreshKey]);
+
+  // Listen for targeted invalidation from mutation sites (floor change, event
+  // create/apply, etc.) so the HUD updates without a full-page navigation.
+  const invalidate = useCallback(() => setRefreshKey((k) => k + 1), []);
+  useEffect(() => onCampaignStatusInvalidated(invalidate), [invalidate]);
 
   if (!campaignId || loadedStatus?.campaignId !== campaignId) return null;
   const status = loadedStatus.status;

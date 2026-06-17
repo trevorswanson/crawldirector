@@ -18,6 +18,7 @@ import {
   updateEntityAction,
   type EntityActionState,
 } from "@/app/(dm)/actions";
+import { invalidateCampaignStatus } from "@/lib/campaign-events";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -481,7 +482,15 @@ export function EditEntityForm({
   }, [entity.locked, state?.error, campaignId, entity.id, router]);
 
   return (
-    <form id="edit-entity-form" key={state?.timestamp} action={action} className="grid gap-4">
+    <form
+      id="edit-entity-form"
+      key={state?.timestamp}
+      action={action}
+      onSubmit={() => {
+        invalidateCampaignStatus();
+      }}
+      className="grid gap-4"
+    >
       <input type="hidden" name="type" value={entity.type} />
       <CoreFields
         entity={entity}

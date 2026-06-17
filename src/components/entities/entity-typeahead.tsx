@@ -42,28 +42,33 @@ export function EntityTypeahead({
   } | null>(null);
   const listId = useId();
 
+  // Debounce remote search so rapid keystrokes don't fire a server action per
+  // character. Local candidate filtering (below) is instant and unaffected.
   useEffect(() => {
     if (!searchCandidates) return;
     const q = query.trim();
     if (!q) return;
 
     let cancelled = false;
-    searchCandidates(q)
-      .then((results) => {
-        if (cancelled) return;
-        setRemoteResult({
-          query: q,
-          matches: results.slice(0, 8),
-          error: false,
+    const timer = setTimeout(() => {
+      searchCandidates(q)
+        .then((results) => {
+          if (cancelled) return;
+          setRemoteResult({
+            query: q,
+            matches: results.slice(0, 8),
+            error: false,
+          });
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setRemoteResult({ query: q, matches: [], error: true });
         });
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setRemoteResult({ query: q, matches: [], error: true });
-      });
+    }, 250);
 
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   }, [query, searchCandidates]);
 
