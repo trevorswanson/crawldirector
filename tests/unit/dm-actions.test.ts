@@ -38,6 +38,7 @@ const {
   archiveEventCausality,
   restoreEventCausality,
   applyEventEffects,
+  cancelJob,
   grantEntityKnowledge,
   revokeKnowledge,
   fleshOutEntity,
@@ -45,6 +46,7 @@ const {
   inferRelationshipsForEntity,
   scaffoldStubEntities,
   askCampaign,
+  searchCanon,
   searchEntityCandidates,
   enqueueJob,
   enqueueBuildSemanticIndexJob,
@@ -89,6 +91,7 @@ const {
   archiveEventCausality: vi.fn(),
   restoreEventCausality: vi.fn(),
   applyEventEffects: vi.fn(),
+  cancelJob: vi.fn(),
   grantEntityKnowledge: vi.fn(),
   revokeKnowledge: vi.fn(),
   fleshOutEntity: vi.fn(),
@@ -96,6 +99,7 @@ const {
   inferRelationshipsForEntity: vi.fn(),
   scaffoldStubEntities: vi.fn(),
   askCampaign: vi.fn(),
+  searchCanon: vi.fn(),
   searchEntityCandidates: vi.fn(),
   enqueueJob: vi.fn(),
   enqueueBuildSemanticIndexJob: vi.fn(),
@@ -163,8 +167,12 @@ vi.mock("@/server/services/generation", () => ({
   scaffoldStubEntities,
 }));
 vi.mock("@/server/services/ask", () => ({ askCampaign }));
-vi.mock("@/server/services/search", () => ({ searchEntityCandidates }));
-vi.mock("@/server/services/jobs", () => ({ enqueueJob, enqueueBuildSemanticIndexJob }));
+vi.mock("@/server/services/search", () => ({ searchCanon, searchEntityCandidates }));
+vi.mock("@/server/services/jobs", () => ({
+  cancelJob,
+  enqueueJob,
+  enqueueBuildSemanticIndexJob,
+}));
 vi.mock("@/server/services/seeding", () => ({ isLoreSeedDatasetAvailable }));
 vi.mock("@/server/auth", () => ({ signOut }));
 vi.mock("next/navigation", () => ({ redirect }));
@@ -226,7 +234,9 @@ import {
   fleshOutEntitiesAction,
   enqueueBulkFleshAction,
   enqueueBuildSemanticIndexAction,
+  cancelJobAction,
   askCampaignAction,
+  searchCampaignPreviewAction,
   searchEntityCandidatesAction,
   inferRelationshipsForEntityAction,
   scaffoldStubsAction,
@@ -1287,15 +1297,25 @@ describe("createCampaignEventAction", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e3");
   });
 
-  it("requires at least one selected participant", async () => {
+  it("logs a campaign timeline event with no participants", async () => {
+    createEvent.mockResolvedValue({ id: "ev1" });
+
     const result = await createCampaignEventAction(
       "c1",
       undefined,
       form({ title: "No witnesses", participantCount: "2" }),
     );
 
-    expect(result?.error).toBe("Choose at least one participant.");
-    expect(createEvent).not.toHaveBeenCalled();
+    expect(result).toBeUndefined();
+    expect(createEvent).toHaveBeenCalledWith("u1", "c1", {
+      title: "No witnesses",
+      summary: undefined,
+      floor: undefined,
+      timeLabel: undefined,
+      secret: false,
+      participants: [],
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
   });
 });
 
@@ -1585,22 +1605,23 @@ describe("event effect rows", () => {
 });
 
 describe("applyEventEffectsAction", () => {
-  it("submits effects for review and revalidates affected entities + review queue", async () => {
+  it("auto-applies effects and revalidates affected entities without the review queue", async () => {
     applyEventEffects.mockResolvedValue({
       id: "ev1",
       changeSetId: "cs1",
-      operationId: "op1",
       affectedEntityIds: ["e1", "e2"],
     });
 
     const result = await applyEventEffectsAction("c1", "e1", "ev1");
 
     expect(result).toBeUndefined();
-    expect(applyEventEffects).toHaveBeenCalledWith("u1", "c1", "ev1");
+    expect(applyEventEffects).toHaveBeenCalledWith("u1", "c1", "ev1", {
+      autoApprove: true,
+    });
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
-    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+    expect(revalidatePath).not.toHaveBeenCalledWith("/campaigns/c1/review");
   });
 
   it("surfaces a ServiceError (e.g. a locked target) without throwing", async () => {
@@ -1614,33 +1635,40 @@ describe("applyEventEffectsAction", () => {
   it("hides unexpected errors behind a generic message", async () => {
     applyEventEffects.mockRejectedValueOnce(new Error("boom"));
     const result = await applyEventEffectsAction("c1", "e1", "ev1");
-    expect(result?.error).toMatch(/Could not submit the effects/);
+    expect(result?.error).toMatch(/Could not apply the effects/);
   });
 });
 
 describe("applyCampaignEventEffectsAction", () => {
-  it("submits campaign timeline effects for review and revalidates affected entities", async () => {
+  it("auto-applies campaign timeline effects and revalidates affected entities", async () => {
     applyEventEffects.mockResolvedValue({
       id: "ev1",
       changeSetId: "cs1",
-      operationId: "op1",
       affectedEntityIds: ["e1", "e3"],
     });
 
     const result = await applyCampaignEventEffectsAction("c1", "ev1");
 
     expect(result).toBeUndefined();
-    expect(applyEventEffects).toHaveBeenCalledWith("u1", "c1", "ev1");
+    expect(applyEventEffects).toHaveBeenCalledWith("u1", "c1", "ev1", {
+      autoApprove: true,
+    });
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e3");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
-    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+    expect(revalidatePath).not.toHaveBeenCalledWith("/campaigns/c1/review");
   });
 
   it("surfaces a ServiceError from the campaign apply", async () => {
     applyEventEffects.mockRejectedValueOnce(new ServiceError("This event has no effects left to apply."));
     const result = await applyCampaignEventEffectsAction("c1", "ev1");
     expect(result?.error).toMatch(/no effects left/);
+  });
+
+  it("hides unexpected campaign apply failures behind a generic message", async () => {
+    applyEventEffects.mockRejectedValueOnce(new Error("boom"));
+    const result = await applyCampaignEventEffectsAction("c1", "ev1");
+    expect(result?.error).toMatch(/Could not apply the effects/);
   });
 });
 
@@ -1809,6 +1837,33 @@ describe("linkEventCauseAction", () => {
     );
 
     expect(result?.error).toMatch(/cycle/);
+  });
+
+  it("requires a selected cause event", async () => {
+    const result = await linkEventCauseAction(
+      "c1",
+      "entity1",
+      "effect1",
+      undefined,
+      form({ causeId: "" }),
+    );
+
+    expect(result?.error).toBe("Choose a cause event.");
+    expect(linkEventCause).not.toHaveBeenCalled();
+  });
+
+  it("hides unexpected causality failures behind a generic message", async () => {
+    linkEventCause.mockRejectedValue(new Error("db down"));
+
+    const result = await linkEventCauseAction(
+      "c1",
+      "entity1",
+      "effect1",
+      undefined,
+      form({ causeId: "cause1" }),
+    );
+
+    expect(result?.error).toBe("Could not link the events. Please try again.");
   });
 });
 
@@ -2271,6 +2326,73 @@ describe("searchEntityCandidatesAction", () => {
   });
 });
 
+describe("searchCampaignPreviewAction", () => {
+  it("returns direct-link preview rows for the global search typeahead", async () => {
+    searchCanon.mockResolvedValue({
+      role: "OWNER",
+      query: "mordecai",
+      hits: [
+        {
+          targetType: "ENTITY",
+          targetId: "e1",
+          rank: 1,
+          entity: {
+            id: "e1",
+            type: "NPC",
+            name: "Mordecai",
+            summary: "Tutorial guild advisor",
+            status: "CANON",
+            source: "DM",
+            tags: [],
+            isStub: false,
+          },
+        },
+        {
+          targetType: "EVENT",
+          targetId: "ev1",
+          rank: 0.5,
+          event: {
+            id: "ev1",
+            title: "The announcement",
+            summary: null,
+            status: "CANON",
+            source: "DM",
+            secret: false,
+          },
+        },
+      ],
+    });
+
+    const result = await searchCampaignPreviewAction("c1", "mordecai");
+
+    expect(searchCanon).toHaveBeenCalledWith("u1", "c1", "mordecai", {
+      limit: 5,
+      semantic: false,
+    });
+    expect(result).toEqual([
+      {
+        id: "ENTITY:e1",
+        label: "Mordecai",
+        meta: "NPC",
+        excerpt: "Tutorial guild advisor",
+        href: "/campaigns/c1/entities/e1",
+      },
+      {
+        id: "EVENT:ev1",
+        label: "The announcement",
+        meta: "Event",
+        excerpt: null,
+        href: "/campaigns/c1/timeline?event=ev1",
+      },
+    ]);
+  });
+
+  it("returns no preview rows for blank queries", async () => {
+    await expect(searchCampaignPreviewAction("c1", " ")).resolves.toEqual([]);
+    expect(searchCanon).not.toHaveBeenCalled();
+  });
+});
+
 describe("fleshOutEntitiesAction", () => {
   function idsForm(ids: string[]): FormData {
     const fd = new FormData();
@@ -2430,6 +2552,42 @@ describe("enqueueBuildSemanticIndexAction", () => {
     enqueueBuildSemanticIndexJob.mockRejectedValueOnce(new Error("db down"));
     expect((await enqueueBuildSemanticIndexAction("c1", undefined, new FormData()))?.error).toBe(
       "Failed to queue job. Please try again.",
+    );
+  });
+});
+
+describe("cancelJobAction", () => {
+  it("cancels a queued/running job and revalidates job/search surfaces", async () => {
+    cancelJob.mockResolvedValue({
+      id: "j1",
+      kind: "EMBED_SEARCH_DOCS",
+      status: "FAILED",
+      error: "Canceled by DM.",
+      result: null,
+      createdAt: new Date(),
+      startedAt: null,
+      finishedAt: new Date(),
+    });
+
+    const result = await cancelJobAction("c1", "j1");
+
+    expect(cancelJob).toHaveBeenCalledWith("u1", "c1", "j1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/jobs");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/search");
+    expect(result?.success).toBe("Job canceled.");
+  });
+
+  it("surfaces ServiceError messages and hides unexpected failures", async () => {
+    cancelJob.mockRejectedValueOnce(
+      new ServiceError("Only queued or running jobs can be canceled."),
+    );
+    expect((await cancelJobAction("c1", "j1"))?.error).toBe(
+      "Only queued or running jobs can be canceled.",
+    );
+
+    cancelJob.mockRejectedValueOnce(new Error("db down"));
+    expect((await cancelJobAction("c1", "j1"))?.error).toBe(
+      "Could not cancel the job. Please try again.",
     );
   });
 });

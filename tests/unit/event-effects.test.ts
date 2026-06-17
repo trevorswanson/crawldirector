@@ -206,6 +206,30 @@ describe("event effects", () => {
     ]);
   });
 
+  it("auto-applies effects immediately for direct DM timeline apply", async () => {
+    const { owner, campaign, carl, event } = await setup("auto-apply-stat@test.com");
+    await declareEffect(owner.id, campaign.id, event.id, [
+      { kind: "ADJUST_STAT", targetEntityId: carl.id, stat: "gold", delta: 25 },
+    ]);
+
+    const result = await applyEventEffects(owner.id, campaign.id, event.id, {
+      autoApprove: true,
+    });
+
+    expect(result.operationId).toBeNull();
+    expect(result.affectedEntityIds).toContain(carl.id);
+    await expect(
+      prisma.crawler.findUniqueOrThrow({ where: { id: carl.id } }),
+    ).resolves.toMatchObject({ gold: 125 });
+    await expect(listPendingChangeSetsForUser(owner.id, campaign.id)).resolves.toHaveLength(0);
+    const timeline = await listEventsForEntity(owner.id, campaign.id, carl.id);
+    expect(timeline[0].effects[0]).toMatchObject({
+      applied: true,
+      reviewStatus: "APPLIED",
+      appliedChangeSetId: result.changeSetId,
+    });
+  });
+
   it("does not mark a freshly applied HP effect proposal stale after queue refresh", async () => {
     const { owner, campaign, carl, event } = await setup("fresh-hp-effect@test.com");
     await prisma.crawler.update({
@@ -380,7 +404,7 @@ describe("event effects", () => {
       owner.id,
       campaign.id,
       result.changeSetId,
-      result.operationId,
+      result.operationId!,
       {
         decision: "EDITED",
         editedPatch: {
@@ -423,7 +447,7 @@ describe("event effects", () => {
       owner.id,
       campaign.id,
       result.changeSetId,
-      result.operationId,
+      result.operationId!,
       {
         decision: "EDITED",
         editedPatch: { effects: { to: [retainedEffect] } },
@@ -456,7 +480,7 @@ describe("event effects", () => {
         owner.id,
         campaign.id,
         result.changeSetId,
-        result.operationId,
+        result.operationId!,
         {
           decision: "EDITED",
           editedPatch: {
@@ -508,7 +532,7 @@ describe("event effects", () => {
       owner.id,
       campaign.id,
       result.changeSetId,
-      result.operationId,
+      result.operationId!,
       {
         decision: "EDITED",
         editedPatch: {

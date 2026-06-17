@@ -306,12 +306,12 @@ describe("createEventSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("requires at least one participant", () => {
+  it("allows an event with no participants", () => {
     const result = createEventSchema.safeParse({
       title: "Lonely event",
       participants: [],
     });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 
   it("rejects an out-of-range floor", () => {

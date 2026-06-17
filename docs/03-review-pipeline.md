@@ -132,33 +132,38 @@ is complete. The UI makes this invisible/instant for the DM.
 
 Event effects are structured consequences of an event: examples include
 `Crawler.gold +50`, `Crawler.currentFloor = 1`, or `Crawler.isAlive = false`.
-The event itself can store the declared effect rows, but applying those rows to
-the target entity is a canon mutation and should enter the Review Queue as an
-`APPLY_EVENT_EFFECTS` operation.
+The event itself can store the declared effect rows. Applying those rows to the
+target entity is a canon mutation and always uses an `APPLY_EVENT_EFFECTS`
+operation so provenance/audit stay uniform.
 
-Default flow:
+DM timeline apply flow:
 
-1. A DM, AI run, player suggestion, or import declares one or more unapplied
-   effects on an event.
-2. The service creates or updates a `PENDING` Change Set with an
-   `APPLY_EVENT_EFFECTS` operation that targets the event and shows the resolved
-   entity patch in the queue (for example, `Crawler.gold: 20 -> 70`).
-3. The Review Queue owns approve/edit/reject/supersede. Editing the queued
+1. A DM declares one or more unapplied effects on an event.
+2. When the DM clicks **Apply**, the service creates an explicit auto-approved
+   `DM` Change Set with an `APPLY_EVENT_EFFECTS` operation. This applies
+   immediately; it does not land in the Review Queue as a pending proposal.
+3. The operation applies the resolved patch atomically, marks the event effect
+   rows as applied, records the applying Change Set id on applied rows, and
+   attaches every target as an `AFFECTED` participant so affected entities show
+   the event in their timelines.
+
+Proposal flow:
+
+1. AI runs, player suggestions, and imports may declare unapplied effects or file
+   a `PENDING` Change Set with an `APPLY_EVENT_EFFECTS` operation that targets
+   the event and shows the resolved entity patch in the queue (for example,
+   `Crawler.gold: 20 -> 70`).
+2. The Review Queue owns approve/edit/reject/supersede. Editing the queued
    operation should let the DM fix or remove a declared effect before approval.
    Adding brand-new effects belongs to the event edit/declaration flow, not an
    existing apply-effects proposal.
-4. Approval applies the resolved patch atomically, marks the event effect rows as
-   applied, marks effect rows omitted by an edited proposal as rejected, records
-   the applying Change Set id on applied rows, and attaches every target as an
-   `AFFECTED` participant so affected entities show the event in their timelines.
-5. Rejection or supersede must not mutate the target entity. The UI must also
-   avoid leaving a rejected effect looking like a still-actionable unapplied
-   effect; either remove it from the active effect list or mark it with an
-   explicit rejected/superseded review state.
+3. Approval applies the same operation path used by the DM direct flow. Rejection
+   or supersede must not mutate the target entity. The UI must also avoid leaving
+   a rejected effect looking like a still-actionable unapplied effect; either
+   remove it from the active effect list or mark it with an explicit
+   rejected/superseded review state.
 
-A later "apply now" button can exist for DM speed, but it should still be an
-explicit auto-approved `DM` Change Set using the same `APPLY_EVENT_EFFECTS`
-application path. The distinction is:
+The distinction is:
 
 - Review Queue `PENDING` means the entity mutation has not been approved.
 - Event effect `unapplied` means the declared consequence has not changed entity

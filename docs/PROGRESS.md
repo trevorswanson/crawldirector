@@ -42,6 +42,10 @@ non-milestone-blocking follow-ups and deferrals live in the subsections below.)
 - [ ] **Event effects ergonomics.** Design compensating change sets for
       undo/revert of already-applied effects. Deep-linking pending timeline
       effect badges to Review Queue proposals is complete.
+- [ ] **Form failure value-preservation audit.** Timeline event create forms now
+      retain typed values when a server action returns an error; audit remaining
+      uncontrolled forms that render inline action errors and convert any
+      value-losing paths to controlled/state-preserving inputs.
 - [ ] **Timeline roster snapshots.** Add an explicit floor-day band affordance for
       roster snapshots. Selected-event roster snapshots are complete: timeline
       participant links pass an inferred `rosterDay` into
@@ -84,6 +88,16 @@ non-milestone-blocking follow-ups and deferrals live in the subsections below.)
 
 ### Done — non-M6 backlog follow-ups (2026-06-17)
 
+- [x] **User-reported maintenance fixes.** Timeline event logging no longer wipes
+      title/summary/time/participant/effect inputs after a failed submit, campaign
+      timeline events may be logged without participants, DM timeline effect
+      application records an auto-approved `DM` `APPLY_EVENT_EFFECTS` change set
+      instead of filing a pending Review Queue item, Floor entity detail pages show
+      floor number/theme/open/collapse metadata, unhandled entity `data.*` fields
+      render in an Additional data panel, queued/running jobs can be canceled from
+      the full job-history page, event search hits deep-link to their timeline
+      event, and the topbar search box now performs debounced inline preview with
+      an `Ask the campaign "<query>"` handoff to `/ask?q=...`.
 - [x] **Event effect Review Queue deep-links.** Pending effect badges/status
       labels on both the entity timeline panel and campaign timeline now link to
       `/campaigns/[id]/review?selected=<changeSetId>` when an effect carries a

@@ -682,4 +682,59 @@ describe("EntityPage", () => {
     // Verify lock button is present
     expect(screen.getByTitle("Locked field — click to unlock")).toBeDefined();
   });
+
+  it("renders FLOOR-specific data fields on the read view", async () => {
+    getEntityForUser.mockResolvedValue(
+      crawler({
+        type: "FLOOR",
+        name: "Floor Nine",
+        summary: "Faction Wars",
+        crawler: null,
+        tags: [],
+        data: {
+          floorNumber: 9,
+          theme: "Castle siege",
+          startDay: 35,
+          collapseDay: 65,
+        },
+      }),
+    );
+
+    await renderPage();
+
+    expect(screen.getByText("Floor number")).toBeDefined();
+    expect(screen.getByText("9")).toBeDefined();
+    expect(screen.getByText("Theme")).toBeDefined();
+    expect(screen.getByText("Castle siege")).toBeDefined();
+    expect(screen.getByText("Opens")).toBeDefined();
+    expect(screen.getByText("Day 35")).toBeDefined();
+    expect(screen.getByText("Collapses")).toBeDefined();
+    expect(screen.getByText("Day 65")).toBeDefined();
+  });
+
+  it("renders unaccounted entity data fields in a generic fallback panel", async () => {
+    getEntityForUser.mockResolvedValue(
+      crawler({
+        type: "NPC",
+        name: "Mordecai",
+        crawler: null,
+        tags: [],
+        data: {
+          favoriteSnack: "goblin jerky",
+          dangerRating: 7,
+          nestedSignal: { floor: 3 },
+        },
+      }),
+    );
+
+    await renderPage();
+
+    expect(screen.getByText("Additional data")).toBeDefined();
+    expect(screen.getByText("Favorite snack")).toBeDefined();
+    expect(screen.getByText("goblin jerky")).toBeDefined();
+    expect(screen.getByText("Danger rating")).toBeDefined();
+    expect(screen.getByText("7")).toBeDefined();
+    expect(screen.getByText("Nested signal")).toBeDefined();
+    expect(screen.getByText('{"floor":3}')).toBeDefined();
+  });
 });

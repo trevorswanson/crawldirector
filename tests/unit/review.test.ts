@@ -1279,25 +1279,26 @@ describe("review service — event apply edge cases", () => {
     ).rejects.toThrow(/title is required/);
   });
 
-  it("rejects a create with no resolvable participants", async () => {
+  it("allows a create with no resolvable participants", async () => {
     const { dmId, campaignId } = await seed();
-    await expect(
-      applyAutoApprovedEventChangeSet(dmId, campaignId, {
-        title: "wrapper",
-        operations: [
-          {
-            op: "CREATE_EVENT",
-            // Mixed junk: not-an-array entries, bad entityId, all dropped.
-            patch: {
-              title: { to: "Lonely event" },
-              participants: {
-                to: [42, ["nested"], { role: "ACTOR" }, { entityId: "" }],
-              },
+    const created = await applyAutoApprovedEventChangeSet(dmId, campaignId, {
+      title: "wrapper",
+      operations: [
+        {
+          op: "CREATE_EVENT",
+          // Mixed junk: not-an-array entries, bad entityId, all dropped.
+          patch: {
+            title: { to: "Lonely event" },
+            participants: {
+              to: [42, ["nested"], { role: "ACTOR" }, { entityId: "" }],
             },
           },
-        ],
-      }),
-    ).rejects.toThrow(/at least one participant/);
+        },
+      ],
+    });
+    await expect(
+      prisma.eventParticipant.count({ where: { eventId: created.targetIds[0] } }),
+    ).resolves.toBe(0);
   });
 
   it("defaults an unknown participant role to ACTOR and tolerates missing time", async () => {

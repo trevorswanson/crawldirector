@@ -132,13 +132,55 @@ export async function enqueueBuildSemanticIndexJob(
 export async function listRecentJobs(
   userId: string,
   campaignId: string,
-  take = 5,
+  take: number | null = 5,
 ) {
   await assertCampaignDm(userId, campaignId);
   return prisma.job.findMany({
     where: { campaignId },
     orderBy: { createdAt: "desc" },
-    take,
+    ...(take == null ? {} : { take }),
+    select: jobDisplaySelect,
+  });
+}
+
+// Cancel a queued/running job from the DM console. Cancellation is represented
+// as a safe FAILED terminal state so the existing worker lifecycle and history
+// display do not need a new schema enum value.
+export async function cancelJob(
+  userId: string,
+  campaignId: string,
+  jobId: string,
+): Promise<JobDisplay> {
+  await assertCampaignDm(userId, campaignId);
+  const job = await prisma.job.findFirst({
+    where: { id: jobId, campaignId },
+    select: jobDisplaySelect,
+  });
+  if (!job) {
+    throw new ServiceError("Job not found.");
+  }
+  if (job.status !== JobStatus.QUEUED && job.status !== JobStatus.RUNNING) {
+    throw new ServiceError("Only queued or running jobs can be canceled.");
+  }
+
+  const { count } = await prisma.job.updateMany({
+    where: {
+      id: jobId,
+      campaignId,
+      status: { in: [JobStatus.QUEUED, JobStatus.RUNNING] },
+    },
+    data: {
+      status: JobStatus.FAILED,
+      finishedAt: new Date(),
+      error: "Canceled by DM.",
+    },
+  });
+  if (count !== 1) {
+    throw new ServiceError("Only queued or running jobs can be canceled.");
+  }
+
+  return prisma.job.findUniqueOrThrow({
+    where: { id: jobId },
     select: jobDisplaySelect,
   });
 }
@@ -194,8 +236,8 @@ export async function claimNextJob() {
 
 // Mark a job SUCCEEDED and persist its result.
 export async function completeJob(id: string, result: unknown): Promise<void> {
-  await prisma.job.update({
-    where: { id },
+  await prisma.job.updateMany({
+    where: { id, status: JobStatus.RUNNING },
     data: {
       status: JobStatus.SUCCEEDED,
       finishedAt: new Date(),
@@ -206,8 +248,8 @@ export async function completeJob(id: string, result: unknown): Promise<void> {
 
 // Mark a job FAILED with a safe message (never raw provider text — invariant #6).
 export async function failJob(id: string, safeMessage: string): Promise<void> {
-  await prisma.job.update({
-    where: { id },
+  await prisma.job.updateMany({
+    where: { id, status: JobStatus.RUNNING },
     data: {
       status: JobStatus.FAILED,
       finishedAt: new Date(),

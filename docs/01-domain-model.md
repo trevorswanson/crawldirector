@@ -279,12 +279,11 @@ Event fields:
   [`05-system-ai-persona.md`](./05-system-ai-persona.md)) that can be applied to
   entity state through the review pipeline. Effect declarations are distinct
   from applied state changes: an event can carry **unapplied** effect rows, but
-  mutating the target entity should be represented as a Review Queue
-  `PENDING` `APPLY_EVENT_EFFECTS` proposal until the DM approves, edits, rejects,
-  or supersedes it. A future "apply now" shortcut may create an auto-approved
-  `DM` change set for ergonomics, but the default path for unapplied effects is
-  the Review Queue because it is already the product's place for inspecting
-  pending canon mutations.
+  mutating the target entity is represented as an `APPLY_EVENT_EFFECTS`
+  operation. DM timeline **Apply** creates an auto-approved `DM` change set and
+  applies immediately; AI/player/import suggestions can still land as Review
+  Queue `PENDING` proposals until the DM approves, edits, rejects, or supersedes
+  them.
 - provenance + review state.
 
 When an effect is approved and applied, the event should link the target entity

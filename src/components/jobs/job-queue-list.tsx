@@ -1,4 +1,5 @@
 import type { JobKind, JobStatus } from "@/generated/prisma/client";
+import { cancelJobAction } from "@/app/(dm)/actions";
 
 export type JobQueueItem = {
   id: string;
@@ -75,7 +76,13 @@ function timingText(job: JobQueueItem): string {
   return `Queued ${relativeTime(job.createdAt)}`;
 }
 
-export function JobQueueList({ jobs }: { jobs: JobQueueItem[] }) {
+export function JobQueueList({
+  jobs,
+  campaignId,
+}: {
+  jobs: JobQueueItem[];
+  campaignId?: string;
+}) {
   if (jobs.length === 0) {
     return (
       <div className="grid min-h-48 place-items-center border border-dashed border-[var(--line)] bg-[var(--bg)] p-8 text-center">
@@ -103,12 +110,30 @@ export function JobQueueList({ jobs }: { jobs: JobQueueItem[] }) {
                   {kindDescriptions[job.kind]}
                 </p>
               </div>
-              <span
-                className="font-mono text-[10px] uppercase tracking-[.08em]"
-                style={{ color: statusColor(job.status) }}
-              >
-                {job.status}
-              </span>
+              <div className="flex items-center gap-2">
+                <span
+                  className="font-mono text-[10px] uppercase tracking-[.08em]"
+                  style={{ color: statusColor(job.status) }}
+                >
+                  {job.status}
+                </span>
+                {campaignId && (job.status === "QUEUED" || job.status === "RUNNING") && (
+                  <form
+                    action={async () => {
+                      "use server";
+                      await cancelJobAction(campaignId, job.id);
+                    }}
+                  >
+                    <button
+                      type="submit"
+                      aria-label={`Cancel ${kindLabels[job.kind]} job`}
+                      className="border border-[var(--line)] px-[8px] py-[5px] font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)] transition-colors hover:border-[var(--no)] hover:text-[var(--no)]"
+                    >
+                      Cancel
+                    </button>
+                  </form>
+                )}
+              </div>
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--ink-faint)]">
               <time dateTime={job.createdAt.toISOString()}>{timingText(job)}</time>

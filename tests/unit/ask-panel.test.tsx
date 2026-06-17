@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 
 const { askCampaignAction, mockUseActionState } = vi.hoisted(() => ({
   askCampaignAction: vi.fn(),
@@ -54,6 +54,19 @@ describe("AskPanel", () => {
     expect(screen.getByLabelText(/ask the campaign a question/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: /^ask$/i })).toBeTruthy();
     expect(screen.getByText(/never saved as canon/i)).toBeTruthy();
+  });
+
+  it("prefills and submits an initial question from search handoff", async () => {
+    const action = vi.fn();
+    mockUseActionState.mockImplementation(() => [undefined, action, false]);
+
+    render(<AskPanel campaignId="c1" initialQuestion="Who knows Mordecai?" />);
+
+    expect(
+      (screen.getByLabelText(/ask the campaign a question/i) as HTMLTextAreaElement).value,
+    ).toBe("Who knows Mordecai?");
+    await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
+    expect(action.mock.calls[0][0].get("question")).toBe("Who knows Mordecai?");
   });
 
   it("renders a grounded answer with the cited marker linked and a sources list", () => {

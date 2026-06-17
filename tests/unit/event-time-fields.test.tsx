@@ -60,4 +60,39 @@ describe("EventTimeFields", () => {
       "UNSCHEDULED",
     );
   });
+
+  it("keeps edited time fields controlled", () => {
+    render(
+      <EventTimeFields
+        anchorCandidates={[{ id: "ev1", title: "Boss fight" }]}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Floor"), { target: { value: "9" } });
+    fireEvent.change(screen.getByLabelText("Time basis"), {
+      target: { value: "FLOOR_START" },
+    });
+    fireEvent.change(screen.getByLabelText("Time offset"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Time unit"), { target: { value: "HOUR" } });
+    fireEvent.change(screen.getByLabelText("Time label"), {
+      target: { value: "Two hours after opening" },
+    });
+
+    expect((screen.getByLabelText("Floor") as HTMLInputElement).value).toBe("9");
+    expect((screen.getByLabelText("Time offset") as HTMLInputElement).value).toBe("2");
+    expect((screen.getByLabelText("Time unit") as HTMLSelectElement).value).toBe("HOUR");
+    expect((screen.getByLabelText("Time label") as HTMLInputElement).value).toBe(
+      "Two hours after opening",
+    );
+
+    fireEvent.change(screen.getByLabelText("Time basis"), {
+      target: { value: "EVENT" },
+    });
+    fireEvent.change(screen.getByLabelText("Anchor event"), {
+      target: { value: "ev1" },
+    });
+    expect((screen.getByLabelText("Anchor event") as HTMLSelectElement).value).toBe(
+      "ev1",
+    );
+  });
 });

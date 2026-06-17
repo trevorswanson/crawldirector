@@ -196,6 +196,26 @@ describe("event service", () => {
     expect(timeline[0].effects[0].applied).toBe(false);
   });
 
+  it("creates a campaign event with no participants", async () => {
+    const owner = await makeUser("owner-no-participants@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const event = await createEvent(owner.id, campaign.id, {
+      title: "The crawl feed cuts to static",
+      summary: "",
+      floor: 1,
+      secret: false,
+      participants: [],
+    });
+
+    const row = await prisma.event.findUnique({
+      where: { id: event.id },
+      include: { participants: true },
+    });
+    expect(row?.title).toBe("The crawl feed cuts to static");
+    expect(row?.participants).toHaveLength(0);
+  });
+
   it("rejects a logged effect whose target is not a crawler", async () => {
     const owner = await makeUser("owner-fx-bad@test.com");
     const campaign = await createCampaign(owner.id, { name: "Dungeon" });
@@ -1410,7 +1430,7 @@ describe("updateEvent", () => {
     );
   });
 
-  it("rejects an edit that drops all participants or names a non-canon one", async () => {
+  it("allows participant-free edits but rejects a non-canon participant", async () => {
     const owner = await makeUser("owner-edit-badparts@test.com");
     const campaign = await createCampaign(owner.id, { name: "Dungeon" });
     const carl = await makeEntity(owner.id, campaign.id, "Carl");
@@ -1424,10 +1444,12 @@ describe("updateEvent", () => {
       updateEvent(owner.id, campaign.id, event.id, {
         title: "Boss fight",
         secret: false,
-        // Zod rejects an empty participant list before the service runs.
         participants: [],
       }),
-    ).rejects.toThrow(/at least one participant/i);
+    ).resolves.toMatchObject({ participantIds: [carl.id] });
+    await expect(
+      prisma.eventParticipant.count({ where: { eventId: event.id } }),
+    ).resolves.toBe(0);
 
     await expect(
       updateEvent(owner.id, campaign.id, event.id, {

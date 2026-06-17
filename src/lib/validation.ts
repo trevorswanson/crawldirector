@@ -565,13 +565,13 @@ export const createEventSchema = z.object({
   secret: z
     .preprocess((value) => value === true || value === "true" || value === "on", z.boolean())
     .default(false),
-  // At least one participant; the source entity is always included by the action.
+  // Participants are optional: campaign-wide timeline notes can be real canon
+  // even when no entity directly acted in or witnessed them.
   participants: z
     .array(eventParticipantSchema)
-    .min(1, "An event needs at least one participant.")
     .max(20, "Too many participants."),
-  // Effects declared while logging the event. Stored unapplied (the DM applies
-  // them to entity state later via the Review Queue), mirroring the edit path.
+  // Effects declared while logging the event. Stored unapplied; the DM can apply
+  // them to entity state later through an audited APPLY_EVENT_EFFECTS operation.
   effects: z.array(eventEffectSchema).max(20, "Too many effects.").optional(),
 });
 export type CreateEventInput = z.infer<typeof createEventSchema>;
@@ -588,7 +588,6 @@ export const updateEventSchema = z.object({
     .default(false),
   participants: z
     .array(eventParticipantSchema)
-    .min(1, "An event needs at least one participant.")
     .max(20, "Too many participants.")
     .optional(),
   // The desired set of *unapplied* effects. When present it replaces the event's

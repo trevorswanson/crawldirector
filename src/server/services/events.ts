@@ -1420,15 +1420,15 @@ function markEffectsPendingReview(
 }
 
 /**
- * Submit an event's declared effects to the Review Queue. The entity mutations
- * are not applied here; approving the resulting APPLY_EVENT_EFFECTS operation
- * applies them atomically through the lock-aware review pipeline. Returns the
- * entity ids whose pages may need to show pending review state. DM-only.
+ * Apply or submit an event's declared effects through APPLY_EVENT_EFFECTS. The
+ * default path files a pending Review Queue proposal; `autoApprove` is the DM
+ * direct-apply path and records an approved DM change set immediately.
  */
 export async function applyEventEffects(
   userId: string,
   campaignId: string,
   eventId: string,
+  options: { autoApprove?: boolean } = {},
 ) {
   await assertCampaignDm(userId, campaignId);
 
@@ -1474,6 +1474,26 @@ export async function applyEventEffects(
         .filter((id): id is string => typeof id === "string"),
     ),
   );
+  const participantIds = existing.participants.map((p) => p.entityId);
+
+  if (options.autoApprove) {
+    const result = await applyAutoApprovedEventChangeSet(userId, campaignId, {
+      title: "Apply event effects",
+      operations: [
+        {
+          op: OpKind.APPLY_EVENT_EFFECTS,
+          targetId: eventId,
+          patch: {},
+        },
+      ],
+    });
+    return {
+      id: eventId,
+      changeSetId: result.changeSetId,
+      operationId: null,
+      affectedEntityIds: Array.from(new Set([...participantIds, ...targetIds])),
+    };
+  }
 
   const changeSet = await createPendingEventChangeSet(userId, campaignId, {
     title: "Apply event effects",
@@ -1505,7 +1525,6 @@ export async function applyEventEffects(
     select: { id: true },
   });
 
-  const participantIds = existing.participants.map((p) => p.entityId);
   return {
     id: eventId,
     changeSetId: changeSet.id,

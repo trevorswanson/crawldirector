@@ -23,13 +23,18 @@ vi.mock("next/link", () => ({
 // The Ask form is a client component with its own test; here we only assert the
 // page's provider gating decides whether to render it.
 vi.mock("@/components/ask/ask-panel", () => ({
-  AskPanel: () => <div data-testid="ask-panel" />,
+  AskPanel: ({ initialQuestion }: { initialQuestion?: string }) => (
+    <div data-testid="ask-panel">{initialQuestion}</div>
+  ),
 }));
 
 import CampaignAskPage from "@/app/(dm)/campaigns/[id]/ask/page";
 
-function renderPage() {
-  return CampaignAskPage({ params: Promise.resolve({ id: "c1" }) });
+function renderPage(searchParams?: { q?: string }) {
+  return CampaignAskPage({
+    params: Promise.resolve({ id: "c1" }),
+    searchParams: Promise.resolve(searchParams ?? {}),
+  });
 }
 
 beforeEach(() => {
@@ -52,6 +57,11 @@ describe("CampaignAskPage", () => {
     render(await renderPage());
     expect(screen.getByTestId("ask-panel")).toBeTruthy();
     expect(screen.getByRole("heading", { name: /Ask the Campaign/i })).toBeTruthy();
+  });
+
+  it("passes the search handoff question to the Ask panel", async () => {
+    render(await renderPage({ q: "Who knows Mordecai?" }));
+    expect(screen.getByTestId("ask-panel").textContent).toBe("Who knows Mordecai?");
   });
 
   it("shows a configure-a-key notice when no provider is configured", async () => {
