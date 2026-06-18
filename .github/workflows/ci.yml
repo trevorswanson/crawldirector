@@ -108,23 +108,57 @@ jobs:
       - name: Unit tests & coverage floors
         run: npm run test:coverage
 
-      - name: Get Playwright version
-        id: playwright-version
-        run: echo "version=$(npx playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+  # E2E runs in its own job, in parallel with build-and-test. The official
+  # Playwright image ships Chromium + all OS deps preinstalled, which removes the
+  # ~9-minute `playwright install-deps` apt step (and the browser download) that
+  # otherwise re-runs on every build. The suite drives `npm run dev`, so it needs
+  # no production build — only deps + a migrated database.
+  e2e:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+    name: E2E tests
+    runs-on: ubuntu-latest
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v5
-        id: playwright-cache
+    # Pin to the @playwright/test version in package-lock.json; the browser build
+    # bundled in the image must match the test runner. Bump both together.
+    container:
+      image: mcr.microsoft.com/playwright:v1.61.0-noble
+
+    services:
+      postgres:
+        # pgvector image (Postgres 18 + the `vector` extension) — the M5
+        # semantic-search migration runs `CREATE EXTENSION vector`.
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: dcc
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # This job runs inside a container, so the Postgres service is reachable by
+      # its label hostname on the shared network — not localhost. (The other env
+      # vars are inherited from the workflow level.)
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/dcc?schema=public
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # Restore the project's pinned Node over the container's bundled runtime;
+      # the Playwright browsers live in /ms-playwright and are left untouched.
+      - uses: actions/setup-node@v6
         with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ steps.playwright-version.outputs.version }}
+          node-version: 26
+          cache: npm
 
-      - name: Install Playwright browsers
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install chromium
+      # postinstall runs `prisma generate`
+      - run: npm ci
 
-      - name: Install Playwright OS dependencies
-        run: npx playwright install-deps chromium
+      - name: Apply migrations
+        run: npx prisma migrate deploy
 
       - name: E2E tests
         run: npm run test:e2e
