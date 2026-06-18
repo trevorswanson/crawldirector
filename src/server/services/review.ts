@@ -21,7 +21,7 @@ import {
   schemaVersionFor,
 } from "@/lib/entity-kinds";
 import { ServiceError } from "@/lib/errors";
-import { readFloorData } from "@/lib/floor";
+import { readFloorData, type FloorData } from "@/lib/floor";
 import {
   eventEffectKindValues,
   eventEffectRequiresTarget,
@@ -169,6 +169,19 @@ function optionalNumber(value: JsonValue | undefined) {
   return typeof value === "number" ? value : null;
 }
 
+function readPersistedFloorDataWithoutMigrations(value: unknown): FloorData {
+  const data =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  return {
+    floorNumber: typeof data.floorNumber === "number" ? data.floorNumber : null,
+    theme: typeof data.theme === "string" && data.theme.length > 0 ? data.theme : null,
+    startDay: typeof data.startDay === "number" ? data.startDay : null,
+    collapseDay: typeof data.collapseDay === "number" ? data.collapseDay : null,
+  };
+}
+
 /**
  * Floor number is the campaign-unique canonical key for a floor (ADR 0008 §1).
  * It lives in `Entity.data` (JSON), so it can't be a DB unique constraint — the
@@ -190,15 +203,9 @@ async function assertFloorNumberAvailable(
     },
     select: { id: true, name: true, data: true },
   });
-  const clash = floors.find((floor) => {
-    const data = floor.data;
-    return (
-      !!data &&
-      typeof data === "object" &&
-      !Array.isArray(data) &&
-      (data as { floorNumber?: unknown }).floorNumber === floorNumber
-    );
-  });
+  const clash = floors.find(
+    (floor) => readFloorData(floor.data).floorNumber === floorNumber,
+  );
   if (clash) {
     throw new ServiceError(
       `Floor number ${floorNumber} is already used by “${clash.name}”. Floor numbers must be unique within a campaign.`,
@@ -2592,6 +2599,10 @@ async function applyUpdateEntity(
       "data.collapseDay" in patch ||
       "data.floorNumber" in patch)
   ) {
+    // Migration can persist a raw `"61"` anchor as `61` without changing the
+    // semantic read shape; existing ranks still need rebuilding because they may
+    // have been computed before that anchor was resolvable.
+    const persistedBefore = readPersistedFloorDataWithoutMigrations(entity.data);
     const before = readFloorData(entity.data);
     const afterFloorNumber =
       "data.floorNumber" in patch
@@ -2608,8 +2619,15 @@ async function applyUpdateEntity(
     const numberMoved = afterFloorNumber !== before.floorNumber;
     const anchorsMoved =
       afterStartDay !== before.startDay || afterCollapseDay !== before.collapseDay;
-    if (numberMoved || anchorsMoved) {
+    const storageResolved =
+      persistedBefore.floorNumber !== before.floorNumber ||
+      persistedBefore.startDay !== before.startDay ||
+      persistedBefore.collapseDay !== before.collapseDay;
+    if (numberMoved || anchorsMoved || storageResolved) {
       const affectedFloors = new Set<number>();
+      if (persistedBefore.floorNumber != null) {
+        affectedFloors.add(persistedBefore.floorNumber);
+      }
       if (before.floorNumber != null) affectedFloors.add(before.floorNumber);
       if (afterFloorNumber != null) affectedFloors.add(afterFloorNumber);
       for (const floorNumber of affectedFloors) {

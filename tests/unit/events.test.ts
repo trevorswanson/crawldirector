@@ -1,6 +1,12 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
-import { CanonStatus, ChangeSetStatus, Prisma, Role } from "@/generated/prisma/client";
+import {
+  CanonStatus,
+  ChangeSetStatus,
+  EntityType,
+  Prisma,
+  Role,
+} from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 import {
@@ -2404,6 +2410,82 @@ describe("typed timeRef (ADR 0004 slice 2)", () => {
           op: "UPDATE_ENTITY",
           targetId: floor.id,
           patch: { "data.floorNumber": { from: 8, to: 9 } },
+        },
+      ],
+    });
+
+    ({ events: timeline } = await listCampaignTimeline(owner.id, campaign.id));
+    expect(timeline.map((event) => event.title)).toEqual([
+      "Late start",
+      "Early collapse",
+    ]);
+  });
+
+  it("re-ranks floor events when migration resolves legacy string anchors", async () => {
+    const owner = await makeUser("timeref-floor-anchor-migration@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const carl = await makeEntity(owner.id, campaign.id, "Carl");
+
+    // These events were logged before the FLOOR descriptor migrated string
+    // anchors, so floor 9 had no resolvable day anchors and the mixed
+    // FLOOR_START / FLOOR_COLLAPSE bases kept newest-first log order.
+    await createEvent(owner.id, campaign.id, {
+      title: "Late start",
+      basis: "FLOOR_START",
+      floor: 9,
+      offset: 30,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+    await createEvent(owner.id, campaign.id, {
+      title: "Early collapse",
+      basis: "FLOOR_COLLAPSE",
+      floor: 9,
+      offset: 30,
+      unit: "DAY",
+      secret: false,
+      participants: [{ entityId: carl.id, role: "ACTOR" }],
+    });
+
+    let { events: timeline } = await listCampaignTimeline(owner.id, campaign.id);
+    expect(timeline.map((event) => event.title)).toEqual([
+      "Early collapse",
+      "Late start",
+    ]);
+
+    const floor = await prisma.entity.create({
+      data: {
+        campaignId: campaign.id,
+        createdById: owner.id,
+        type: EntityType.FLOOR,
+        name: "Legacy Floor Nine",
+        data: {
+          floorNumber: "9",
+          theme: "Castle siege",
+          startDay: "61",
+          collapseDay: "82",
+          _v: 1,
+        },
+      },
+      select: { id: true, version: true },
+    });
+
+    await applyAutoApprovedEntityChangeSet(owner.id, campaign.id, {
+      source: "MIGRATION",
+      auditAction: "MIGRATE",
+      title: "Migrate legacy floor anchors",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: floor.id,
+          patch: {
+            _baseVersion: { to: floor.version },
+            "data.floorNumber": { from: "9", to: 9 },
+            "data.theme": { from: "Castle siege", to: "Castle siege" },
+            "data.startDay": { from: "61", to: 61 },
+            "data.collapseDay": { from: "82", to: 82 },
+          },
         },
       ],
     });

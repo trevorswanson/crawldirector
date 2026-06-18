@@ -1140,6 +1140,74 @@ describe("review service — entity apply edge cases", () => {
     ).rejects.toThrow(/Unknown data field "data\.stratDay"/);
   });
 
+  it("rejects duplicate floor numbers still stored as legacy strings", async () => {
+    const { dmId, campaignId } = await seed();
+    await prisma.entity.create({
+      data: {
+        campaignId,
+        createdById: dmId,
+        type: EntityType.FLOOR,
+        name: "Legacy Floor Nine",
+        data: {
+          floorNumber: "9",
+          theme: "Castle siege",
+          startDay: "0",
+          collapseDay: "12",
+          _v: 1,
+        },
+      },
+    });
+
+    await expect(
+      applyAutoApprovedEntityChangeSet(dmId, campaignId, {
+        title: "Create duplicate floor",
+        operations: [
+          {
+            op: "CREATE_ENTITY",
+            patch: {
+              type: { to: EntityType.FLOOR },
+              name: { to: "Another Floor Nine" },
+              "data.floorNumber": { to: 9 },
+            },
+          },
+        ],
+      }),
+    ).rejects.toThrow(/Floor number 9 is already used by “Legacy Floor Nine”/);
+
+    const other = await prisma.entity.create({
+      data: {
+        campaignId,
+        createdById: dmId,
+        type: EntityType.FLOOR,
+        name: "Floor Eight",
+        data: {
+          floorNumber: 8,
+          theme: "Bone market",
+          startDay: 61,
+          collapseDay: 82,
+          _v: 2,
+        },
+      },
+      select: { id: true, version: true },
+    });
+
+    await expect(
+      applyAutoApprovedEntityChangeSet(dmId, campaignId, {
+        title: "Update duplicate floor",
+        operations: [
+          {
+            op: "UPDATE_ENTITY",
+            targetId: other.id,
+            patch: {
+              _baseVersion: { to: other.version },
+              "data.floorNumber": { from: 8, to: 9 },
+            },
+          },
+        ],
+      }),
+    ).rejects.toThrow(/Floor number 9 is already used by “Legacy Floor Nine”/);
+  });
+
   it("rejects an update targeting a missing entity", async () => {
     const { dmId, campaignId } = await seed();
     await expect(

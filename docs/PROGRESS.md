@@ -192,24 +192,34 @@ add more moving parts. Branch: `feat/m5.5-data-versioning-foundation`.
       ignoring them. Review current-value enrichment now reads both individual
       `data.*` fields and the whole `data` blob through `readKindData`, so stale
       comparisons use the upgraded shape.
+- [x] **Review follow-up:** floor-number uniqueness now compares the semantic
+      `readFloorData` shape so legacy string-backed floors still block duplicate
+      numeric floors before migration persistence finishes. Migration-shaped FLOOR
+      anchor updates also detect raw-vs-upgraded anchor changes and re-rank
+      affected floor events instead of skipping because `"61"` and `61` compare
+      equal after descriptor migration.
 - [x] **Tests:** `entity-kinds.test.ts` covers FLOOR v2 stamping and v1 numeric
       string upgrades; `entity-data-migration.test.ts` covers approved
       `MIGRATION` change sets, canonical storage, `MIGRATE` audit, owner fallback,
       idempotence, and player rejection; `jobs.test.ts` covers enqueue dedupe and
       handler delegation; `review.test.ts` covers upgraded current-values and
-      strict unknown `data.*` rejection; `job-queue.test.tsx` stays green for the
-      expanded label map.
+      strict unknown `data.*` rejection plus semantic duplicate-floor detection
+      for legacy string rows; `events.test.ts` covers migration-shaped FLOOR
+      anchor updates re-ranking stale timeline order; `job-queue.test.tsx` stays
+      green for the expanded label map.
 - [x] **Verification:** RED/GREEN, then
       `npm run test -- tests/unit/entity-kinds.test.ts tests/unit/review.test.ts
       tests/unit/entity-data-migration.test.ts tests/unit/jobs.test.ts
       tests/unit/job-queue.test.tsx` (125 tests) after `npm run db:generate` and
-      `npm run db:deploy`; `git diff --check`; `npm run typecheck`;
+      `npm run db:deploy`; review-follow-up RED/GREEN with
+      `npm run test -- tests/unit/review.test.ts tests/unit/events.test.ts`
+      (144 tests); `git diff --check`; `npm run typecheck`;
       `npx prisma migrate diff --from-config-datasource --to-schema=./prisma/schema.prisma
       --exit-code` (**No difference detected**); `npm run lint` (0 errors;
       pre-existing settings-action warnings only); `npm run build` (passes with
       the existing Turbopack NFT seeding trace warning); and `npm run test:coverage`
-      green (107 files / 1467 tests; statements 95.07%, branches 88.45%,
-      functions 96.85%, lines 96.87%).
+      green (107 files / 1469 tests; statements 95.07%, branches 88.44%,
+      functions 96.86%, lines 96.87%).
 
 ### Done — connection disposition/direction flip & settings nav layout (2026-06-18)
 
