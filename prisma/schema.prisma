@@ -66,6 +66,7 @@ enum ChangeSource {
   AI
   PLAYER_SUGGESTION
   IMPORT
+  MIGRATION
 }
 
 enum ChangeSetStatus {
@@ -624,6 +625,7 @@ enum JobKind {
   BULK_FLESH
   LORE_SEED
   EMBED_SEARCH_DOCS
+  MIGRATE_ENTITY_DATA
 }
 
 // Async work queue (M4 — docs/04-ai-integration.md §"Async / batching"): long

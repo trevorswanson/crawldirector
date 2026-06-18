@@ -66,6 +66,11 @@ export function kindFor(type: string): EntityKind | undefined {
   return KINDS[type];
 }
 
+/** Every EntityType that has a versioned bespoke-data descriptor. */
+export function kindTypes(): string[] {
+  return Object.keys(KINDS);
+}
+
 /** A type's current bespoke-`data` schema version (1 for a type with no kind). */
 export function schemaVersionFor(type: string): number {
   const kind = kindFor(type);
@@ -230,6 +235,19 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function storedSchemaVersion(raw: unknown): number {
+  const record = asRecord(raw);
+  return typeof record[RESERVED_DATA_KEY] === "number"
+    ? (record[RESERVED_DATA_KEY] as number)
+    : 1;
+}
+
+/** Whether a stored row's stamped data version is behind its descriptor. */
+export function isKindDataStale(type: string, raw: unknown): boolean {
+  const kind = kindFor(type);
+  return !!kind && storedSchemaVersion(raw) < schemaVersionOf(kind);
+}
+
 /**
  * Chain a descriptor's pure migrations to upgrade a `data` record from one schema
  * version up to another (ADR 0011). `migrations[i]` upgrades version `i + 1` to
@@ -274,10 +292,7 @@ export function readKindData(
   if (!kind) return {};
 
   const record = asRecord(raw);
-  const storedVersion =
-    typeof record[RESERVED_DATA_KEY] === "number"
-      ? (record[RESERVED_DATA_KEY] as number)
-      : 1;
+  const storedVersion = storedSchemaVersion(record);
   const migrated = applyDataMigrations(
     record,
     kind.migrations ?? [],
@@ -305,10 +320,7 @@ export function migrateKindData(
   if (!kind) return { ...asRecord(raw) };
 
   const record = { ...asRecord(raw) };
-  const storedVersion =
-    typeof record[RESERVED_DATA_KEY] === "number"
-      ? (record[RESERVED_DATA_KEY] as number)
-      : 1;
+  const storedVersion = storedSchemaVersion(record);
 
   return applyDataMigrations(
     record,
@@ -317,4 +329,3 @@ export function migrateKindData(
     schemaVersionOf(kind),
   );
 }
-

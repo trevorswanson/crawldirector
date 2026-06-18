@@ -127,6 +127,41 @@ export async function enqueueBuildSemanticIndexJob(
   });
 }
 
+// Enqueue a campaign data-schema migration once per active campaign run. This
+// mirrors the manual semantic rebuild guard: repeated triggers should point at
+// the in-flight mechanical migration instead of queuing overlapping passes.
+export async function enqueueMigrateEntityDataJob(
+  userId: string,
+  campaignId: string,
+): Promise<{ id: string; status: ActiveJobStatus; created: boolean }> {
+  await assertCampaignDm(userId, campaignId);
+
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Campaign" WHERE id = ${campaignId} FOR UPDATE`;
+
+    const active = await findActiveCampaignJob(tx, campaignId, JobKind.MIGRATE_ENTITY_DATA);
+    if (active) {
+      return {
+        id: active.id,
+        status: active.status as ActiveJobStatus,
+        created: false,
+      };
+    }
+
+    const job = await tx.job.create({
+      data: {
+        campaignId,
+        createdById: userId,
+        kind: JobKind.MIGRATE_ENTITY_DATA,
+        status: JobStatus.QUEUED,
+        payload: {},
+      },
+      select: { id: true },
+    });
+    return { id: job.id, status: JobStatus.QUEUED, created: true };
+  });
+}
+
 // List the most recent jobs for a campaign (DM/co-DM only). Returns display
 // fields only — no payload or internals.
 export async function listRecentJobs(

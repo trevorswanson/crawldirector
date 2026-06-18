@@ -2,10 +2,16 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the generation module's provider seam — handler tests should not make
 // real network calls. Uses the same vi.hoisted + vi.mock pattern as generation.test.ts.
-const { resolveCampaignProvider, seedCampaignFromLore, embedSearchDocs } = vi.hoisted(() => ({
+const {
+  resolveCampaignProvider,
+  seedCampaignFromLore,
+  embedSearchDocs,
+  migrateEntityData,
+} = vi.hoisted(() => ({
   resolveCampaignProvider: vi.fn(),
   seedCampaignFromLore: vi.fn().mockResolvedValue({ count: 3 }),
   embedSearchDocs: vi.fn().mockResolvedValue({ embedded: 5, model: "text-embedding-3-small" }),
+  migrateEntityData: vi.fn().mockResolvedValue({ checked: 1, migrated: 1, skipped: 0 }),
 }));
 
 vi.mock("@/server/ai", () => ({
@@ -23,6 +29,10 @@ vi.mock("@/server/services/embeddings", () => ({
   embedSearchDocs,
 }));
 
+vi.mock("@/server/services/entity-data-migration", () => ({
+  migrateEntityData,
+}));
+
 import { JobKind, JobStatus } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
@@ -32,6 +42,7 @@ import {
   cancelJob,
   completeJob,
   enqueueBuildSemanticIndexJob,
+  enqueueMigrateEntityDataJob,
   enqueueJob,
   failJob,
   getActiveCampaignJob,
@@ -177,6 +188,43 @@ describe("enqueueBuildSemanticIndexJob", () => {
     expect(second.created).toBe(true);
     expect(second.status).toBe(JobStatus.QUEUED);
     expect(second.id).not.toBe(first.id);
+  });
+});
+
+// ─── enqueueMigrateEntityDataJob ────────────────────────────────────────────
+
+describe("enqueueMigrateEntityDataJob", () => {
+  it("returns the existing QUEUED migration job instead of creating a duplicate", async () => {
+    const { dmId, campaignId } = await seed();
+
+    const first = await enqueueMigrateEntityDataJob(dmId, campaignId);
+    const second = await enqueueMigrateEntityDataJob(dmId, campaignId);
+
+    expect(second).toEqual({
+      id: first.id,
+      status: JobStatus.QUEUED,
+      created: false,
+    });
+    await expect(
+      prisma.job.count({ where: { campaignId, kind: JobKind.MIGRATE_ENTITY_DATA } }),
+    ).resolves.toBe(1);
+  });
+
+  it("returns the existing RUNNING migration job while a pass is active", async () => {
+    const { dmId, campaignId } = await seed();
+
+    const first = await enqueueMigrateEntityDataJob(dmId, campaignId);
+    await claimNextJob();
+    const second = await enqueueMigrateEntityDataJob(dmId, campaignId);
+
+    expect(second).toEqual({
+      id: first.id,
+      status: JobStatus.RUNNING,
+      created: false,
+    });
+    await expect(
+      prisma.job.count({ where: { campaignId, kind: JobKind.MIGRATE_ENTITY_DATA } }),
+    ).resolves.toBe(1);
   });
 });
 
@@ -543,5 +591,33 @@ describe("jobHandlers.EMBED_SEARCH_DOCS", () => {
     const result = await jobHandlers[JobKind.EMBED_SEARCH_DOCS](fakeJob);
     expect(embedSearchDocs).toHaveBeenCalledWith("u1", "c1");
     expect(result).toEqual({ embedded: 5, model: "text-embedding-3-small" });
+  });
+});
+
+// ─── MIGRATE_ENTITY_DATA handler ────────────────────────────────────────────
+
+describe("jobHandlers.MIGRATE_ENTITY_DATA", () => {
+  it("delegates to migrateEntityData with the job's createdById and campaignId", async () => {
+    const fakeJob = {
+      id: "j4",
+      campaignId: "c1",
+      createdById: "u1",
+      kind: JobKind.MIGRATE_ENTITY_DATA,
+      status: JobStatus.RUNNING,
+      payload: {},
+      result: null,
+      error: null,
+      attempts: 1,
+      maxAttempts: 1,
+      runAfter: new Date(),
+      startedAt: new Date(),
+      finishedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const result = await jobHandlers[JobKind.MIGRATE_ENTITY_DATA](fakeJob);
+    expect(migrateEntityData).toHaveBeenCalledWith("u1", "c1");
+    expect(result).toEqual({ checked: 1, migrated: 1, skipped: 0 });
   });
 });

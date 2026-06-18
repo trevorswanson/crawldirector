@@ -169,7 +169,7 @@ describe("entity-kind registry (ADR 0009)", () => {
         theme: "Siege",
         startDay: null,
         collapseDay: null,
-        [RESERVED_DATA_KEY]: 1,
+        [RESERVED_DATA_KEY]: 2,
       });
       expect(data).not.toHaveProperty("divine");
     });
@@ -181,7 +181,7 @@ describe("entity-kind registry (ADR 0009)", () => {
 
   describe("schema versioning + read seam (ADR 0011)", () => {
     it("reports each kind's schema version (1 for a type with no kind)", () => {
-      expect(schemaVersionFor("FLOOR")).toBe(1);
+      expect(schemaVersionFor("FLOOR")).toBe(2);
       expect(schemaVersionFor("ITEM")).toBe(1);
       expect(schemaVersionFor("LOCATION")).toBe(1);
     });
@@ -204,6 +204,22 @@ describe("entity-kind registry (ADR 0009)", () => {
       expect(readKindData("FLOOR", stored)).toEqual({
         floorNumber: 9,
         theme: "Siege",
+        startDay: 0,
+        collapseDay: 12,
+      });
+    });
+
+    it("upgrades legacy FLOOR v1 numeric strings before normalization", () => {
+      const stored = {
+        floorNumber: "9",
+        theme: "Castle siege",
+        startDay: "0",
+        collapseDay: "12",
+        [RESERVED_DATA_KEY]: 1,
+      };
+      expect(readKindData("FLOOR", stored)).toEqual({
+        floorNumber: 9,
+        theme: "Castle siege",
         startDay: 0,
         collapseDay: 12,
       });

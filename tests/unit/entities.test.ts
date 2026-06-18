@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { Role } from "@/generated/prisma/client";
 import { RESERVED_DATA_KEY } from "@/lib/entity-kinds";
@@ -1256,35 +1256,54 @@ describe("entity locking", () => {
     expect(finalData["unique"]).toBe(false);
   });
 
-  it("migrates existing data first when editing data fields during an update", async () => {
+  it("upgrades stale existing data before editing data fields during an update", async () => {
     const owner = await makeUser("migrate-test@test.com");
     const campaign = await createCampaign(owner.id, { name: "Dungeon" });
 
-    const item = await createGenericEntity(owner.id, campaign.id, {
-      type: "ITEM",
-      name: "Dagger",
+    const floor = await prisma.entity.create({
+      data: {
+        campaignId: campaign.id,
+        createdById: owner.id,
+        type: "FLOOR",
+        name: "Floor Nine",
+        data: {
+          floorNumber: "9",
+          theme: "Castle siege",
+          startDay: "0",
+          collapseDay: "12",
+          retiredKey: "drop me",
+          [RESERVED_DATA_KEY]: 1,
+        },
+      },
+      select: { id: true },
+    });
+
+    await updateEntity(owner.id, campaign.id, floor.id, {
+      type: "FLOOR",
+      name: "Floor Nine",
       summary: "",
       description: "",
       visibility: "DM_ONLY",
       tags: [],
-      divine: false,
+      floorNumber: 9,
+      theme: "Castle siege revised",
+      startDay: 0,
+      collapseDay: 12,
     });
 
-    const entityKindsMod = await import("@/lib/entity-kinds");
-    const spy = vi.spyOn(entityKindsMod, "migrateKindData");
-
-    await updateEntity(owner.id, campaign.id, item.id, {
-      type: "ITEM",
-      name: "Dagger",
-      summary: "",
-      description: "",
-      visibility: "DM_ONLY",
-      tags: [],
-      divine: true,
+    const stored = await prisma.entity.findUniqueOrThrow({
+      where: { id: floor.id },
+      select: { data: true },
     });
-
-    expect(spy).toHaveBeenCalled();
-    spy.mockRestore();
+    const data = stored.data as Record<string, unknown>;
+    expect(data).toMatchObject({
+      floorNumber: 9,
+      theme: "Castle siege revised",
+      startDay: 0,
+      collapseDay: 12,
+      [RESERVED_DATA_KEY]: 2,
+    });
+    expect(data).not.toHaveProperty("retiredKey");
   });
 
   it("scopes bespoke data.* provenance to the type's entity-kind (ADR 0009)", async () => {

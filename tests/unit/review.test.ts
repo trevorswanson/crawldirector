@@ -967,6 +967,53 @@ describe("review service — review queue enrichment", () => {
     expect(crawlerOp?.currentValues["crawler.level"]).toBe(1);
     expect(crawlerOp?.currentValues["crawler.viewCount"]).toBe("0");
   });
+
+  it("attaches upgraded current values for stale bespoke data", async () => {
+    const { dmId, campaignId } = await seed();
+    const floor = await prisma.entity.create({
+      data: {
+        campaignId,
+        createdById: dmId,
+        type: EntityType.FLOOR,
+        name: "Floor Nine",
+        data: {
+          floorNumber: "9",
+          theme: "Castle siege",
+          startDay: "0",
+          collapseDay: "12",
+          _v: 1,
+        },
+      },
+      select: { id: true, version: true },
+    });
+
+    await createPendingEntityChangeSet(dmId, campaignId, {
+      source: "AI",
+      title: "Shift floor",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: floor.id,
+          patch: {
+            _baseVersion: { to: floor.version },
+            "data.floorNumber": { to: 10 },
+            data: { to: { floorNumber: 10 } },
+          },
+        },
+      ],
+    });
+
+    const queue = await listPendingChangeSetsForUser(dmId, campaignId);
+    const operation = queue.flatMap((cs) => cs.operations)[0];
+
+    expect(operation?.currentValues["data.floorNumber"]).toBe(9);
+    expect(operation?.currentValues.data).toEqual({
+      floorNumber: 9,
+      theme: "Castle siege",
+      startDay: 0,
+      collapseDay: 12,
+    });
+  });
 });
 
 describe("review service — entity apply edge cases", () => {
@@ -1045,6 +1092,52 @@ describe("review service — entity apply edge cases", () => {
         operations: [{ op: "CREATE_ENTITY", patch: { name: { to: "Nameless" } } }],
       }),
     ).rejects.toThrow(/type is required/);
+  });
+
+  it("rejects unknown bespoke data fields on create and update", async () => {
+    const { dmId, campaignId } = await seed();
+
+    await expect(
+      applyAutoApprovedEntityChangeSet(dmId, campaignId, {
+        title: "Create with typo data",
+        operations: [
+          {
+            op: "CREATE_ENTITY",
+            patch: {
+              type: { to: EntityType.FLOOR },
+              name: { to: "Floor Typo" },
+              "data.floorNumber": { to: 9 },
+              "data.floorNambr": { to: 9 },
+            },
+          },
+        ],
+      }),
+    ).rejects.toThrow(/Unknown data field "data\.floorNambr"/);
+
+    const entityId = await createEntity(
+      dmId,
+      campaignId,
+      "Floor Without Typos",
+      EntityType.FLOOR,
+    );
+    const baseVersion = await versionOf(entityId);
+
+    await expect(
+      applyAutoApprovedEntityChangeSet(dmId, campaignId, {
+        title: "Update with typo data",
+        operations: [
+          {
+            op: "UPDATE_ENTITY",
+            targetId: entityId,
+            patch: {
+              _baseVersion: { to: baseVersion },
+              "data.startDay": { to: 1 },
+              "data.stratDay": { to: 1 },
+            },
+          },
+        ],
+      }),
+    ).rejects.toThrow(/Unknown data field "data\.stratDay"/);
   });
 
   it("rejects an update targeting a missing entity", async () => {

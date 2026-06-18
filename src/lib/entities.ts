@@ -72,6 +72,8 @@ export function provenanceMeta(source: string): ProvenanceMeta {
       return { short: "PLR", label: "Player suggestion", color: "var(--player)" };
     case "IMPORT":
       return { short: "IMP", label: "Imported", color: "var(--import)" };
+    case "MIGRATION":
+      return { short: "MIG", label: "Data migration", color: "var(--sys)" };
     case "DM":
     default:
       return { short: "DM", label: "DM-authored", color: "var(--ink-dim)" };

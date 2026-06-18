@@ -14,8 +14,9 @@ import {
 import {
   allKindDataKeys,
   buildKindData,
-  migrateKindData,
+  dataKeysFor,
   normalizeKindFieldValue,
+  readKindData,
   RESERVED_DATA_KEY,
   schemaVersionFor,
 } from "@/lib/entity-kinds";
@@ -132,6 +133,10 @@ const crawlerFields = new Set([
 const dataFields = new Set(
   allKindDataKeys().map((key) => `data.${key}`),
 );
+
+function typeDataFields(type: string): Set<string> {
+  return new Set(dataKeysFor(type).map((key) => `data.${key}`));
+}
 
 async function getMembership(userId: string, campaignId: string) {
   return prisma.membership.findUnique({
@@ -449,6 +454,16 @@ function operationBaseVersions(
   return baseVersions;
 }
 
+function assertKnownEntityDataPatchFields(type: string, patch: ReviewPatch) {
+  const allowed = typeDataFields(type);
+  const unknown = patchFields(patch).find(
+    (field) => field.startsWith("data.") && !allowed.has(field),
+  );
+  if (unknown) {
+    throw new ServiceError(`Unknown data field "${unknown}" for entity type ${type}.`);
+  }
+}
+
 function isEntityReviewOp(op: OpKind): op is EntityReviewOperationInput["op"] {
   return (
     op === OpKind.CREATE_ENTITY ||
@@ -604,6 +619,8 @@ export async function applyAutoApprovedEntityChangeSet(
   userId: string,
   campaignId: string,
   input: {
+    source?: ChangeSource;
+    auditAction?: string;
     title: string;
     summary?: string;
     operations: EntityReviewOperationInput[];
@@ -616,7 +633,7 @@ export async function applyAutoApprovedEntityChangeSet(
     const changeSet = await tx.changeSet.create({
       data: {
         campaignId,
-        source: ChangeSource.DM,
+        source: input.source ?? ChangeSource.DM,
         title: input.title,
         summary: input.summary,
         actorUserId: userId,
@@ -659,7 +676,7 @@ export async function applyAutoApprovedEntityChangeSet(
       data: {
         campaignId,
         actorUserId: userId,
-        action: "AUTO_APPROVE",
+        action: input.auditAction ?? "AUTO_APPROVE",
         targetType: "CHANGE_SET",
         targetId: changeSet.id,
         detail: { appliedIds },
@@ -1241,7 +1258,7 @@ function currentEntityValue(
     case "isStub":
       return entity.isStub;
     case "data":
-      return entity.data;
+      return readKindData(entity.type, entity.data);
     case "customFields":
       return entity.customFields;
   }
@@ -1251,9 +1268,9 @@ function currentEntityValue(
   // field no kind declares is unknown → undefined (as the prior switch returned).
   if (field.startsWith("data.")) {
     const key = field.slice("data.".length);
-    if (dataFields.has(field)) {
-      const metadata = entity.data as Record<string, unknown> | null;
-      return normalizeKindFieldValue(key, metadata?.[key]);
+    if (typeDataFields(entity.type).has(field)) {
+      const metadata = readKindData(entity.type, entity.data);
+      return metadata[key];
     }
     return undefined;
   }
@@ -2437,6 +2454,7 @@ async function applyCreateEntity(
 ) {
   const type = readTo(patch, "type");
   if (typeof type !== "string") throw new ServiceError("Entity type is required.");
+  assertKnownEntityDataPatchFields(type, patch);
 
   if (type === EntityType.FLOOR) {
     const floorNumber = optionalNumber(readTo(patch, "data.floorNumber"));
@@ -2516,6 +2534,7 @@ async function applyUpdateEntity(
     },
   });
   if (!entity) throw new ServiceError("Entity not found.");
+  assertKnownEntityDataPatchFields(entity.type, patch);
 
   const expectedVersion = baseVersionsObject(changeSet.baseVersions)[entityId];
   if (typeof expectedVersion === "number" && expectedVersion !== entity.version) {
@@ -2529,7 +2548,7 @@ async function applyUpdateEntity(
   }
 
   const lockedFields = lockedPatchFields(patch, entity.locked, entity.lockedFields);
-  if (lockedFields.length > 0) {
+  if (changeSet.source !== ChangeSource.MIGRATION && lockedFields.length > 0) {
     await tx.changeOperation.update({
       where: { id: operationId },
       data: { blockedByLock: true },
@@ -2772,10 +2791,10 @@ function entityUpdateData(patch: ReviewPatch, type: EntityType, existingData?: u
 
   const dataPatch = Object.keys(patch).some((field) => dataFields.has(field));
   if (dataPatch) {
-    // Migrate the existing data first (if it is stale) before merging the patch
-    // so that untouched renamed/retyped fields are correctly migrated before
-    // we advance the version stamp (ADR 0011).
-    const currentData = migrateKindData(type, existingData);
+    // Read the existing data through the current descriptor seam before merging
+    // the patch, so untouched renamed/retyped fields migrate and off-schema keys
+    // do not survive a strict data write (ADR 0011 slice 2).
+    const currentData = readKindData(type, existingData);
     for (const key of allKindDataKeys()) {
       const field = `data.${key}`;
       if (field in patch) {
