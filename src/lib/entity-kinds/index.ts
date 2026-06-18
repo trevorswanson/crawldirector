@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { FACTION_KIND, factionDataSchema } from "./faction";
 import { FLOOR_KIND, floorDataSchema } from "./floor";
 import { ITEM_KIND, itemDataSchema } from "./item";
 import type { DataMigration, EntityKind } from "./types";
@@ -30,6 +31,7 @@ export const RESERVED_DATA_KEY = "_v";
 const KINDS: Record<string, EntityKind> = {
   ITEM: ITEM_KIND,
   FLOOR: FLOOR_KIND,
+  FACTION: FACTION_KIND,
 };
 
 /** The descriptor's current schema version (ADR 0011); defaults to 1. */
@@ -56,6 +58,16 @@ export function assertKindInvariants(kind: EntityKind): void {
     throw new Error(
       `EntityKind ${kind.type}: "${RESERVED_DATA_KEY}" is a reserved data key.`,
     );
+  }
+  // A satellite-backed field must be one the descriptor actually declares (ADR
+  // 0011 Part C) — otherwise the write path would route a phantom key to the
+  // satellite and the read merge would never produce it.
+  for (const field of kind.satellite?.fields ?? []) {
+    if (!(field in kind.dataSchema.shape)) {
+      throw new Error(
+        `EntityKind ${kind.type}: satellite field "${field}" is not in dataSchema.`,
+      );
+    }
   }
 }
 
@@ -103,7 +115,28 @@ export function allKindDataKeys(): string[] {
  * precise type. A new kind adds its `...<kind>DataSchema.shape` here.
  */
 export function allKindDataShape() {
-  return { ...itemDataSchema.shape, ...floorDataSchema.shape };
+  return {
+    ...itemDataSchema.shape,
+    ...floorDataSchema.shape,
+    ...factionDataSchema.shape,
+  };
+}
+
+/**
+ * The bespoke `data.*` field keys a type stores in a 1:1 satellite table rather
+ * than the `Entity.data` JSON blob (ADR 0011 Part C). Empty for a type with no
+ * satellite. The write path keeps these out of `Entity.data` and routes them to
+ * the satellite; `readKindData` merges the satellite row back over the blob.
+ */
+export function satelliteFieldsFor(type: string): string[] {
+  return [...(kindFor(type)?.satellite?.fields ?? [])];
+}
+
+/** Every satellite-backed `data.*` field key across all registered kinds. */
+export function allSatelliteDataKeys(): string[] {
+  return Object.values(KINDS).flatMap((kind) => [
+    ...(kind.satellite?.fields ?? []),
+  ]);
 }
 
 /**
@@ -220,7 +253,11 @@ export function buildKindData(
   const out: Record<string, unknown> = {};
   const kind = kindFor(type);
   if (!kind) return out;
+  // Satellite-backed fields (ADR 0011 Part C) live in a 1:1 table, not this JSON
+  // blob — the apply path writes them there. Everything else composes into data.
+  const satellite = new Set(kind.satellite?.fields ?? []);
   for (const key of Object.keys(kind.dataSchema.shape)) {
+    if (satellite.has(key)) continue;
     out[key] = normalizeKindFieldValue(key, read(key));
   }
   // Stamp the schema version (ADR 0011) so a later bump can find + migrate this
@@ -283,15 +320,26 @@ export function applyDataMigrations(
  * coercion for genuinely-corrupt data, never the silent data-dropping read it
  * replaced. A type with no kind has no versioned fields → `{}` (its free-form
  * `data` is surfaced by the generic "additional data" path, not this seam).
+ *
+ * `satellite` is the optional 1:1 satellite row for types with satellite-backed
+ * fields (ADR 0011 Part C). Its columns are the canonical home for those fields,
+ * so they are merged over the JSON blob before migration/normalize — a caller
+ * that doesn't pass it (FLOOR/ITEM, or a FACTION loaded without the relation)
+ * simply reads those fields as their empty defaults.
  */
 export function readKindData(
   type: string,
   raw: unknown,
+  satellite?: unknown,
 ): Record<string, unknown> {
   const kind = kindFor(type);
   if (!kind) return {};
 
-  const record = asRecord(raw);
+  const record = { ...asRecord(raw) };
+  if (satellite && kind.satellite) {
+    const satelliteRow = asRecord(satellite);
+    for (const key of kind.satellite.fields) record[key] = satelliteRow[key];
+  }
   const storedVersion = storedSchemaVersion(record);
   const migrated = applyDataMigrations(
     record,

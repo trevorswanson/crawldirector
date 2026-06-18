@@ -36,6 +36,7 @@ beforeEach(async () => {
   await prisma.changeOperation.deleteMany();
   await prisma.changeSet.deleteMany();
   await prisma.crawler.deleteMany();
+  await prisma.faction.deleteMany();
   await prisma.entity.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.membership.deleteMany();
@@ -1013,6 +1014,42 @@ describe("review service — review queue enrichment", () => {
       startDay: 0,
       collapseDay: 12,
     });
+  });
+
+  it("reads a FACTION's current values from the satellite (ADR 0011 Part C)", async () => {
+    const { dmId, campaignId } = await seed();
+    const faction = await prisma.entity.create({
+      data: {
+        campaignId,
+        createdById: dmId,
+        type: EntityType.FACTION,
+        name: "The Vanguard",
+        data: { _v: 1 },
+        faction: { create: { standing: 42, strength: 7 } },
+      },
+      select: { id: true, version: true },
+    });
+
+    await createPendingEntityChangeSet(dmId, campaignId, {
+      source: "AI",
+      title: "Shift standing",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: faction.id,
+          patch: {
+            _baseVersion: { to: faction.version },
+            "data.standing": { to: 99 },
+          },
+        },
+      ],
+    });
+
+    const queue = await listPendingChangeSetsForUser(dmId, campaignId);
+    const operation = queue.flatMap((cs) => cs.operations)[0];
+
+    // The current value comes from the satellite row, not a stale JSON null.
+    expect(operation?.currentValues["data.standing"]).toBe(42);
   });
 });
 

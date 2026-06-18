@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { Role } from "@/generated/prisma/client";
-import { RESERVED_DATA_KEY } from "@/lib/entity-kinds";
+import { readKindData, RESERVED_DATA_KEY } from "@/lib/entity-kinds";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 import { createCrawlerSchema } from "@/lib/validation";
@@ -46,6 +46,7 @@ async function approveAcceptedChangeSet(
 
 beforeEach(async () => {
   await prisma.crawler.deleteMany();
+  await prisma.faction.deleteMany();
   await prisma.entity.deleteMany();
   await prisma.membership.deleteMany();
   await prisma.campaign.deleteMany();
@@ -1404,6 +1405,238 @@ describe("entity locking", () => {
     expect(floorData).not.toHaveProperty("divine");
     expect(floorData).not.toHaveProperty("itemTypeId");
     expect(floorData).not.toHaveProperty("aiDescription");
+  });
+
+  describe("FACTION satellite (ADR 0011 Part C)", () => {
+    it("stores bespoke fields in the satellite, not the data blob, with data.* provenance", async () => {
+      const owner = await makeUser("faction-create@test.com");
+      const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+      const faction = await createGenericEntity(owner.id, campaign.id, {
+        type: "FACTION",
+        name: "The Vanguard",
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: [],
+        standing: 42,
+        strength: 7,
+        allegiance: "The System",
+        resources: "Three legions and a vault.",
+      });
+
+      // The satellite row carries the values…
+      const row = await prisma.faction.findUnique({ where: { id: faction.id } });
+      expect(row).toMatchObject({
+        standing: 42,
+        strength: 7,
+        allegiance: "The System",
+        resources: "Three legions and a vault.",
+      });
+
+      // …and the JSON blob holds only the version stamp — no satellite keys.
+      const stored = await prisma.entity.findUniqueOrThrow({
+        where: { id: faction.id },
+        select: { data: true },
+      });
+      expect(stored.data).toEqual({ [RESERVED_DATA_KEY]: 1 });
+
+      // The read seam surfaces them as ordinary bespoke fields (merged in).
+      const detail = await getEntityForUser(owner.id, campaign.id, faction.id);
+      expect(detail?.faction).toMatchObject({ standing: 42, strength: 7 });
+      const merged = readKindData("FACTION", detail?.data, detail?.faction);
+      expect(merged).toEqual({
+        standing: 42,
+        strength: 7,
+        allegiance: "The System",
+        resources: "Three legions and a vault.",
+      });
+
+      // They are canonical fields: each records data.* provenance like any other.
+      const provFields = (
+        await prisma.provenance.findMany({
+          where: { entityId: faction.id },
+          select: { field: true },
+        })
+      ).map((p) => p.field);
+      expect(provFields).toEqual(
+        expect.arrayContaining([
+          "data.standing",
+          "data.strength",
+          "data.allegiance",
+          "data.resources",
+        ]),
+      );
+    });
+
+    it("updates satellite fields through the review pipeline and re-reads them", async () => {
+      const owner = await makeUser("faction-update@test.com");
+      const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+      const faction = await createGenericEntity(owner.id, campaign.id, {
+        type: "FACTION",
+        name: "The Vanguard",
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: [],
+        standing: 10,
+        strength: 5,
+      });
+
+      await updateEntity(owner.id, campaign.id, faction.id, {
+        type: "FACTION",
+        name: "The Vanguard",
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: [],
+        standing: 99,
+        strength: 5,
+        allegiance: "Crawler-aligned",
+      });
+
+      const row = await prisma.faction.findUniqueOrThrow({
+        where: { id: faction.id },
+      });
+      expect(row.standing).toBe(99);
+      expect(row.strength).toBe(5);
+      expect(row.allegiance).toBe("Crawler-aligned");
+
+      // The blob is still just the stamp — satellite fields never leak into it.
+      const stored = await prisma.entity.findUniqueOrThrow({
+        where: { id: faction.id },
+        select: { data: true },
+      });
+      expect(stored.data).toEqual({ [RESERVED_DATA_KEY]: 1 });
+    });
+
+    it("diffs against the satellite, so a no-op resubmit creates no change set", async () => {
+      const owner = await makeUser("faction-noop@test.com");
+      const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+      const faction = await createGenericEntity(owner.id, campaign.id, {
+        type: "FACTION",
+        name: "The Vanguard",
+        summary: "Steadfast",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: [],
+        standing: 10,
+        strength: 5,
+        allegiance: "The System",
+      });
+
+      const before = await prisma.changeSet.count({
+        where: { campaignId: campaign.id },
+      });
+
+      // Resubmit identical values — the diff reads the satellite, so nothing moves.
+      await updateEntity(owner.id, campaign.id, faction.id, {
+        type: "FACTION",
+        name: "The Vanguard",
+        summary: "Steadfast",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: [],
+        standing: 10,
+        strength: 5,
+        allegiance: "The System",
+      });
+
+      const after = await prisma.changeSet.count({
+        where: { campaignId: campaign.id },
+      });
+      expect(after).toBe(before);
+    });
+
+    it("keeps lock/review uniform: a locked satellite field blocks its edit", async () => {
+      const owner = await makeUser("faction-lock@test.com");
+      const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+      const faction = await createGenericEntity(owner.id, campaign.id, {
+        type: "FACTION",
+        name: "The Vanguard",
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: [],
+        standing: 10,
+        strength: 5,
+      });
+
+      await setEntityLock(owner.id, campaign.id, faction.id, {
+        lockedFields: ["data.standing"],
+      });
+
+      // Editing the locked satellite field is rejected…
+      await expect(
+        updateEntity(owner.id, campaign.id, faction.id, {
+          type: "FACTION",
+          name: "The Vanguard",
+          summary: "",
+          description: "",
+          visibility: "DM_ONLY",
+          tags: [],
+          standing: 50,
+          strength: 5,
+        }),
+      ).rejects.toThrow("locked entity fields");
+
+      // …while editing an unlocked one succeeds.
+      await updateEntity(owner.id, campaign.id, faction.id, {
+        type: "FACTION",
+        name: "The Vanguard",
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: [],
+        standing: 10,
+        strength: 80,
+      });
+      const row = await prisma.faction.findUniqueOrThrow({
+        where: { id: faction.id },
+      });
+      expect(row.standing).toBe(10);
+      expect(row.strength).toBe(80);
+    });
+
+    it("upserts a satellite row when a pre-satellite FACTION is first edited", async () => {
+      const owner = await makeUser("faction-legacy@test.com");
+      const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+      // A FACTION row that predates the satellite (no Faction relation row).
+      const legacy = await prisma.entity.create({
+        data: {
+          campaignId: campaign.id,
+          createdById: owner.id,
+          type: "FACTION",
+          name: "Old Guard",
+          data: {},
+        },
+        select: { id: true },
+      });
+      expect(
+        await prisma.faction.findUnique({ where: { id: legacy.id } }),
+      ).toBeNull();
+
+      await updateEntity(owner.id, campaign.id, legacy.id, {
+        type: "FACTION",
+        name: "Old Guard",
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: [],
+        standing: 3,
+        strength: 9,
+      });
+
+      const row = await prisma.faction.findUniqueOrThrow({
+        where: { id: legacy.id },
+      });
+      expect(row.standing).toBe(3);
+      expect(row.strength).toBe(9);
+    });
   });
 });
 

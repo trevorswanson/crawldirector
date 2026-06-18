@@ -148,6 +148,48 @@ describe("entity-kind display panel (ADR 0009)", () => {
     expect(screen.getByText("Item Type")).toBeDefined();
   });
 
+  it("renders FACTION rows from the satellite, not the data blob (ADR 0011 Part C)", () => {
+    render(
+      <KindDisplay
+        campaignId="c1"
+        entityId="e1"
+        entity={entity(
+          "FACTION",
+          { _v: 1 },
+          {
+            faction: {
+              standing: 42,
+              strength: 7,
+              allegiance: "The System",
+              resources: "Three legions.",
+            },
+          } as unknown as Partial<EntityDetail>,
+        )}
+      />,
+    );
+    expect(screen.getByText("Standing")).toBeDefined();
+    expect(screen.getByText("42")).toBeDefined();
+    expect(screen.getByText("Strength")).toBeDefined();
+    expect(screen.getByText("7")).toBeDefined();
+    expect(screen.getByText("The System")).toBeDefined();
+    expect(screen.getByText("Three legions.")).toBeDefined();
+    // No satellite values masquerading in the additional-data fallback.
+    expect(screen.queryByText("Additional data")).toBeNull();
+  });
+
+  it("tolerates a FACTION with no satellite row (empty rows)", () => {
+    render(
+      <KindDisplay
+        campaignId="c1"
+        entityId="e1"
+        entity={entity("FACTION", { _v: 1 })}
+      />,
+    );
+    expect(screen.getByText("Standing")).toBeDefined();
+    // Every value falls back to the em-dash placeholder.
+    expect(screen.getAllByText("—").length).toBe(4);
+  });
+
   it("hides the reserved _v stamp + handled keys from the additional-data panel", () => {
     render(
       <KindDisplay

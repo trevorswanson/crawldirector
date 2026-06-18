@@ -213,9 +213,84 @@ function ItemFields({ entity, itemTypes = [], getVal, isLocked }: KindFieldsProp
   );
 }
 
+function FactionFields({ entity, getVal, isLocked }: KindFieldsProps) {
+  // FACTION bespoke fields (ADR 0011 Part C) live in the 1:1 Faction satellite,
+  // merged back in by readKindData(type, data, faction). standing/strength are
+  // indexed power metrics (M9/M12); allegiance/resources are descriptive text.
+  const existingData = readKindData("FACTION", entity.data, entity.faction) as {
+    standing?: number | null;
+    strength?: number | null;
+    allegiance?: string | null;
+    resources?: string | null;
+  };
+  return (
+    <>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-2">
+          <Label htmlFor="standing">Standing</Label>
+          <Input
+            id="standing"
+            name="standing"
+            type="number"
+            min={0}
+            defaultValue={getVal("standing", existingData.standing ?? "") as string}
+            readOnly={isLocked("data.standing")}
+            placeholder="reputation / influence"
+          />
+          {isLocked("data.standing") && (
+            <input type="hidden" name="standing" value={existingData.standing ?? ""} />
+          )}
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="strength">Strength</Label>
+          <Input
+            id="strength"
+            name="strength"
+            type="number"
+            min={0}
+            defaultValue={getVal("strength", existingData.strength ?? "") as string}
+            readOnly={isLocked("data.strength")}
+            placeholder="raw power rating"
+          />
+          {isLocked("data.strength") && (
+            <input type="hidden" name="strength" value={existingData.strength ?? ""} />
+          )}
+        </div>
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="allegiance">Allegiance</Label>
+        <Input
+          id="allegiance"
+          name="allegiance"
+          defaultValue={getVal("allegiance", existingData.allegiance ?? "") as string}
+          readOnly={isLocked("data.allegiance")}
+          placeholder="e.g. The System · Crawler-aligned"
+        />
+        {isLocked("data.allegiance") && (
+          <input type="hidden" name="allegiance" value={existingData.allegiance ?? ""} />
+        )}
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="resources">Resources</Label>
+        <Textarea
+          id="resources"
+          name="resources"
+          defaultValue={getVal("resources", existingData.resources ?? undefined) as string}
+          readOnly={isLocked("data.resources")}
+          placeholder="Assets, holdings, and forces this faction commands."
+        />
+        {isLocked("data.resources") && (
+          <input type="hidden" name="resources" value={existingData.resources ?? ""} />
+        )}
+      </div>
+    </>
+  );
+}
+
 const KIND_FIELDS: Record<string, (props: KindFieldsProps) => ReactNode> = {
   FLOOR: FloorFields,
   ITEM: ItemFields,
+  FACTION: FactionFields,
 };
 
 /** The bespoke form-fields component for a type, or undefined if it has none. */

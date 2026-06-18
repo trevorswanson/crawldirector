@@ -107,6 +107,7 @@ const crawlerEntity: EntityDetail = {
     isAlive: true,
     currentFloor: 1,
   },
+  faction: null,
 };
 
 const genericEntity: EntityDetail = {
@@ -385,6 +386,7 @@ describe("entity forms", () => {
     createdAt: new Date(),
     updatedAt: new Date(),
     crawler: null,
+    faction: null,
     data: {
       itemTypeId: "it1",
       divine: true,
@@ -443,6 +445,54 @@ describe("entity forms", () => {
     expect(screen.getByLabelText("Unique").getAttribute("disabled")).not.toBeNull();
     expect(screen.getByLabelText("Fleeting").getAttribute("disabled")).not.toBeNull();
     expect(screen.getByLabelText("AI Description").getAttribute("readonly")).not.toBeNull();
+  });
+
+  const factionEntity: EntityDetail = {
+    ...itemEntity,
+    id: "e4",
+    type: "FACTION",
+    name: "The Vanguard",
+    data: { _v: 1 },
+    crawler: null,
+    faction: {
+      standing: 42,
+      strength: 7,
+      allegiance: "The System",
+      resources: "Three legions.",
+    },
+  };
+
+  it("renders FACTION fields prefilled from the satellite (ADR 0011 Part C)", () => {
+    render(
+      <EditFormProvider>
+        <EditEntityForm campaignId="c1" entity={factionEntity} />
+      </EditFormProvider>,
+    );
+
+    expect((screen.getByLabelText("Standing") as HTMLInputElement).value).toBe("42");
+    expect((screen.getByLabelText("Strength") as HTMLInputElement).value).toBe("7");
+    expect(
+      (screen.getByLabelText("Allegiance") as HTMLInputElement).value,
+    ).toBe("The System");
+    expect(
+      (screen.getByLabelText("Resources") as HTMLTextAreaElement).value,
+    ).toBe("Three legions.");
+  });
+
+  it("makes locked FACTION satellite fields read-only", () => {
+    const lockedFaction: EntityDetail = {
+      ...factionEntity,
+      lockedFields: ["data.standing", "data.resources"],
+    };
+    render(
+      <EditFormProvider>
+        <EditEntityForm campaignId="c1" entity={lockedFaction} />
+      </EditFormProvider>,
+    );
+
+    expect(screen.getByLabelText("Standing").getAttribute("readonly")).not.toBeNull();
+    expect(screen.getByLabelText("Resources").getAttribute("readonly")).not.toBeNull();
+    expect(screen.getByLabelText("Strength").getAttribute("readonly")).toBeNull();
   });
 
   it("renders EditRailControls properly inside provider", () => {

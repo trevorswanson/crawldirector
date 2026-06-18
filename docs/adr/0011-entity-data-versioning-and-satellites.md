@@ -4,8 +4,11 @@
   `readKindData` read seam shipped as slice 1 (2026-06-18); the
   `MIGRATE_ENTITY_DATA` job + first real FLOOR v2 data bump shipped as slice 2
   (2026-06-18); Part B's reference-integrity badge + impact-aware archive shipped as
-  slice 3a (2026-06-18). The Part B orphan report (slice 3b — deferred until M10
-  consumes it) and the satellites (Part C) remain.
+  slice 3a (2026-06-18); Part C's greenfield Faction satellite shipped as slice 4
+  (2026-06-18) — a 1:1 `Faction` table proving the satellite read/write plumbing
+  (an `EntityKind.satellite` marker redirects storage while review/lock/provenance
+  stay uniform on `Entity`). The Part B orphan report (slice 3b — deferred until M10
+  consumes it) and the Floor satellite / generated column (slice 5) remain.
   Decomposes into the slices tracked in [`11-roadmap.md`](../11-roadmap.md) (M5.5)
   and [`PROGRESS.md`](../PROGRESS.md). This ADR **extends [ADR 0009](./0009-entity-kind-registry.md)**:
   0009 consolidated each type's bespoke fields into a per-type descriptor but

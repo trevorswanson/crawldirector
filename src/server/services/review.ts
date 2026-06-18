@@ -13,6 +13,7 @@ import {
 } from "@/generated/prisma/client";
 import {
   allKindDataKeys,
+  allSatelliteDataKeys,
   buildKindData,
   dataKeysFor,
   normalizeKindFieldValue,
@@ -132,6 +133,14 @@ const crawlerFields = new Set([
 // the schemas and a new field is never silently un-reviewable.
 const dataFields = new Set(
   allKindDataKeys().map((key) => `data.${key}`),
+);
+
+// The subset of `data.*` fields physically stored in a 1:1 satellite table
+// (ADR 0011 Part C), not the `Entity.data` JSON blob. They are still reviewable/
+// lockable `data.*` canon — the apply path routes them to the satellite and keeps
+// them out of the blob; reads merge the satellite back in via `readKindData`.
+const satelliteDataFields = new Set(
+  allSatelliteDataKeys().map((key) => `data.${key}`),
 );
 
 function typeDataFields(type: string): Set<string> {
@@ -1058,7 +1067,7 @@ async function enrichReviewQueueItems(
   const targets = entityTargetIds.size
     ? await prisma.entity.findMany({
         where: { campaignId, id: { in: [...entityTargetIds] } },
-        include: { crawler: true },
+        include: { crawler: true, faction: true },
       })
     : [];
   const targetById = new Map(targets.map((target) => [target.id, target]));
@@ -1246,7 +1255,7 @@ function stringFromReviewValue(value: JsonValue | undefined) {
 }
 
 function currentEntityValue(
-  entity: Prisma.EntityGetPayload<{ include: { crawler: true } }>,
+  entity: Prisma.EntityGetPayload<{ include: { crawler: true; faction: true } }>,
   field: string,
 ): unknown {
   switch (field) {
@@ -1265,7 +1274,9 @@ function currentEntityValue(
     case "isStub":
       return entity.isStub;
     case "data":
-      return readKindData(entity.type, entity.data);
+      // Merge the satellite row so a FACTION's `data.*` blob reflects its
+      // satellite-backed fields, not stale JSON nulls (ADR 0011 Part C).
+      return readKindData(entity.type, entity.data, entity.faction);
     case "customFields":
       return entity.customFields;
   }
@@ -1276,7 +1287,7 @@ function currentEntityValue(
   if (field.startsWith("data.")) {
     const key = field.slice("data.".length);
     if (typeDataFields(entity.type).has(field)) {
-      const metadata = readKindData(entity.type, entity.data);
+      const metadata = readKindData(entity.type, entity.data, entity.faction);
       return metadata[key];
     }
     return undefined;
@@ -2496,6 +2507,15 @@ async function applyCreateEntity(
             },
           }
         : {}),
+      // FACTION's bespoke fields live in the 1:1 satellite (ADR 0011 Part C);
+      // buildKindData already kept them out of the JSON blob above.
+      ...(type === EntityType.FACTION
+        ? {
+            faction: {
+              create: factionSatelliteData(patch),
+            },
+          }
+        : {}),
     },
     select: { id: true },
   });
@@ -2711,6 +2731,18 @@ async function applyDeleteEntity(
   return entityId;
 }
 
+// Build the FACTION satellite row from a change-set patch (ADR 0011 Part C). The
+// fields are addressed by their reviewable `data.*` patch keys (FACTION's
+// entity-kind descriptor), but persist to the 1:1 Faction table, not Entity.data.
+function factionSatelliteData(patch: ReviewPatch): Prisma.FactionCreateWithoutEntityInput {
+  return {
+    standing: optionalNumber(readTo(patch, "data.standing")),
+    strength: optionalNumber(readTo(patch, "data.strength")),
+    allegiance: nullableString(readTo(patch, "data.allegiance")),
+    resources: nullableString(readTo(patch, "data.resources")),
+  };
+}
+
 function crawlerCreateData(patch: ReviewPatch) {
   return {
     realName: nullableString(readTo(patch, "crawler.realName")),
@@ -2807,13 +2839,48 @@ function entityUpdateData(patch: ReviewPatch, type: EntityType, existingData?: u
     data.crawler = { update: crawlerData };
   }
 
-  const dataPatch = Object.keys(patch).some((field) => dataFields.has(field));
+  // FACTION's bespoke fields are reviewable `data.*` canon stored in the 1:1
+  // satellite (ADR 0011 Part C). Route the patched ones there and upsert so a
+  // FACTION created before the satellite existed gains its row on first edit;
+  // unpatched fields stay untouched. They are excluded from the JSON merge below.
+  if (type === EntityType.FACTION) {
+    const factionData: Prisma.FactionUpdateInput = {};
+    if ("data.standing" in patch) {
+      factionData.standing = optionalNumber(readTo(patch, "data.standing"));
+    }
+    if ("data.strength" in patch) {
+      factionData.strength = optionalNumber(readTo(patch, "data.strength"));
+    }
+    if ("data.allegiance" in patch) {
+      factionData.allegiance = nullableString(readTo(patch, "data.allegiance"));
+    }
+    if ("data.resources" in patch) {
+      factionData.resources = nullableString(readTo(patch, "data.resources"));
+    }
+    if (Object.keys(factionData).length > 0) {
+      data.faction = {
+        upsert: { create: factionSatelliteData(patch), update: factionData },
+      };
+    }
+  }
+
+  // Only non-satellite `data.*` fields are merged into the JSON blob; satellite
+  // fields (handled above) never live there (ADR 0011 Part C).
+  const dataPatch = Object.keys(patch).some(
+    (field) => dataFields.has(field) && !satelliteDataFields.has(field),
+  );
   if (dataPatch) {
     // Read the existing data through the current descriptor seam before merging
     // the patch, so untouched renamed/retyped fields migrate and off-schema keys
     // do not survive a strict data write (ADR 0011 slice 2).
     const currentData = readKindData(type, existingData);
     for (const key of allKindDataKeys()) {
+      // Satellite-backed keys are persisted to their table, not the JSON blob —
+      // drop any the seam normalized in (it has no satellite row to read here).
+      if (satelliteDataFields.has(`data.${key}`)) {
+        delete currentData[key];
+        continue;
+      }
       const field = `data.${key}`;
       if (field in patch) {
         currentData[key] = normalizeKindFieldValue(key, readTo(patch, field));

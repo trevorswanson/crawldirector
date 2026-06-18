@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { z } from "zod";
 
+import { FACTION_KIND, factionDataSchema } from "@/lib/entity-kinds/faction";
 import { FLOOR_KIND, floorDataSchema } from "@/lib/entity-kinds/floor";
 import { ITEM_KIND, itemDataSchema } from "@/lib/entity-kinds/item";
 import {
   allKindDataKeys,
   allKindDataShape,
+  allSatelliteDataKeys,
   applyDataMigrations,
   assertKindInvariants,
   buildKindData,
@@ -17,6 +19,7 @@ import {
   normalizeKindFieldValue,
   readKindData,
   RESERVED_DATA_KEY,
+  satelliteFieldsFor,
   schemaVersionFor,
 } from "@/lib/entity-kinds";
 import type { EntityKind } from "@/lib/entity-kinds";
@@ -54,7 +57,7 @@ describe("entity-kind registry (ADR 0009)", () => {
     expect(dataKeysFor("LOCATION")).toEqual([]);
   });
 
-  it("unions every registered kind's data keys (ITEM then FLOOR)", () => {
+  it("unions every registered kind's data keys (ITEM, FLOOR, FACTION)", () => {
     expect(allKindDataKeys()).toEqual([
       "itemTypeId",
       "divine",
@@ -65,12 +68,20 @@ describe("entity-kind registry (ADR 0009)", () => {
       "theme",
       "startDay",
       "collapseDay",
+      "standing",
+      "strength",
+      "allegiance",
+      "resources",
     ]);
   });
 
   it("merges every kind's data shape for the write schemas", () => {
     expect(Object.keys(allKindDataShape()).sort()).toEqual(
-      [...dataKeysFor("ITEM"), ...dataKeysFor("FLOOR")].sort(),
+      [
+        ...dataKeysFor("ITEM"),
+        ...dataKeysFor("FLOOR"),
+        ...dataKeysFor("FACTION"),
+      ].sort(),
     );
   });
 
@@ -309,6 +320,96 @@ describe("entity-kind registry (ADR 0009)", () => {
         dataSchema: z.object({ [RESERVED_DATA_KEY]: z.string().optional() }),
       };
       expect(() => assertKindInvariants(bad)).toThrow(/reserved data key/);
+    });
+
+    it("rejects a satellite field the descriptor does not declare", () => {
+      const bad: EntityKind = {
+        type: "BAD",
+        dataSchema: z.object({ a: z.string().optional() }),
+        satellite: { relation: "bad", fields: ["a", "ghost"] },
+      };
+      expect(() => assertKindInvariants(bad)).toThrow(/satellite field "ghost"/);
+    });
+
+    it("accepts the FACTION satellite descriptor", () => {
+      expect(() => assertKindInvariants(FACTION_KIND)).not.toThrow();
+    });
+  });
+
+  describe("satellite-table promotion (ADR 0011 Part C)", () => {
+    it("lists FACTION's satellite-backed fields and none for other kinds", () => {
+      expect(satelliteFieldsFor("FACTION")).toEqual([
+        "standing",
+        "strength",
+        "allegiance",
+        "resources",
+      ]);
+      expect(satelliteFieldsFor("FLOOR")).toEqual([]);
+      expect(satelliteFieldsFor("ITEM")).toEqual([]);
+      expect(satelliteFieldsFor("NPC")).toEqual([]);
+      expect(allSatelliteDataKeys()).toEqual([
+        "standing",
+        "strength",
+        "allegiance",
+        "resources",
+      ]);
+    });
+
+    it("keeps satellite fields out of the create-path data blob (only _v)", () => {
+      const data = buildKindData("FACTION", (key) =>
+        ({ standing: 7, strength: 3, allegiance: "System", resources: "vast" }[key]),
+      );
+      expect(data).toEqual({ [RESERVED_DATA_KEY]: 1 });
+    });
+
+    it("merges a satellite row over the blob on read", () => {
+      const out = readKindData(
+        "FACTION",
+        { [RESERVED_DATA_KEY]: 1 },
+        { standing: 7, strength: 3, allegiance: "System", resources: "vast" },
+      );
+      expect(out).toEqual({
+        standing: 7,
+        strength: 3,
+        allegiance: "System",
+        resources: "vast",
+      });
+    });
+
+    it("reads satellite fields as empty defaults when no row is passed", () => {
+      expect(readKindData("FACTION", { [RESERVED_DATA_KEY]: 1 })).toEqual({
+        standing: null,
+        strength: null,
+        allegiance: null,
+        resources: null,
+      });
+    });
+
+    it("normalizes a null/partial satellite row to empty defaults", () => {
+      expect(
+        readKindData("FACTION", {}, { standing: 5, strength: null }),
+      ).toEqual({
+        standing: 5,
+        strength: null,
+        allegiance: null,
+        resources: null,
+      });
+    });
+
+    it("validates FACTION fields through the descriptor schema", () => {
+      expect(
+        factionDataSchema.parse({
+          standing: "7",
+          strength: "3",
+          allegiance: "  The System  ",
+          resources: "  legions  ",
+        }),
+      ).toEqual({
+        standing: 7,
+        strength: 3,
+        allegiance: "The System",
+        resources: "legions",
+      });
     });
   });
 
