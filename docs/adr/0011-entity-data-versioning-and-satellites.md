@@ -171,17 +171,37 @@ versioning layer (Part A/D) makes a clean promotion possible.
   [`jobs.ts`](../../src/server/services/jobs.ts)). It walks a campaign's entities
   whose `data._v` is below the current `schemaVersion`, runs `readKindData` (and
   writes any satellite columns), and persists the upgraded shape through an
-  **auto-approved system change set** so provenance is recorded (invariant #3) with
-  an `AuditLog` `MIGRATE` row — kept **out of the DM's review queue** (a mechanical
+  **auto-approved change set** so provenance is recorded (invariant #3) with an
+  `AuditLog` `MIGRATE` row — kept **out of the DM's review queue** (a mechanical
   upgrade is not a content proposal, the same way DM direct edits are auto-approved
   change sets).
+- **Actor & source — a concrete account, never an actorless write.** The current
+  pipeline cannot represent an actorless system write: `AuditLog.actorUserId` is a
+  required FK to `User`, and the apply path falls back to `actorUserId: … ?? ""`
+  ([`review.ts`](../../src/server/services/review.ts), e.g. the entity/relationship/
+  event apply sites), which would break the audit insert. So the migration must
+  carry a **real `userId`**, exactly like the existing `applyAutoApproved*ChangeSet`
+  helpers (which set both `actorUserId` and `reviewedById` to that user):
+  - **Manual run** → the DM who triggered it, already carried as the required
+    `Job.createdById`.
+  - **Automatic run** (a `schemaVersion` bump deployed) → the **campaign owner**
+    (`Campaign.ownerId`, always present). The job is never enqueued without a
+    resolvable user; there is no "system with no account" path.
+  - **Honest origin via a new `ChangeSource.MIGRATION` value** (additive
+    `ALTER TYPE ... ADD VALUE`, the pattern the `LORE_SEED` `JobKind` used). The
+    change set / provenance record `source: MIGRATION` so history reads as a
+    *mechanical data-schema migration attributed to <that account>*, **not** a hand
+    edit that account made — which resolves the misattribution risk while keeping
+    the required actor satisfied. (`IMPORT` is deliberately **not** reused: a
+    migration is internal data evolution, not external content coming in.) The
+    `09-data-schema.md` `ChangeSource` enum is updated to list `MIGRATION`.
 - **Idempotent and safe to re-run.** A row already at the current `_v` is skipped;
   a content change underneath a running pass is handled like the embed job's
   snapshot guard.
 - **Triggering.** Enqueued automatically when a descriptor's `schemaVersion` bump
-  is deployed (detected by the presence of stale `_v` rows) and exposable as a
-  DM-visible action in `/campaigns/[id]/jobs`, where embed/lore/bulk jobs already
-  surface.
+  is deployed (detected by the presence of stale `_v` rows, attributed to the
+  campaign owner) and exposable as a DM-visible action in `/campaigns/[id]/jobs`
+  (attributed to that DM), where embed/lore/bulk jobs already surface.
 
 ## Consequences
 

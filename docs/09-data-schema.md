@@ -310,7 +310,11 @@ model EventCausality {     // DAG edge between events; cycles blocked in service
 }
 
 // ───────────── Review pipeline ─────────────
-enum ChangeSource { DM AI PLAYER_SUGGESTION IMPORT }
+// MIGRATION (M5.5, ADR 0011) marks an auto-approved data-schema migration write —
+// attributed to a real account (the triggering DM, or Campaign.ownerId for an
+// automatic schemaVersion bump) so the required AuditLog.actorUserId FK is satisfied,
+// while provenance reads as a mechanical migration, not that account's hand edit.
+enum ChangeSource { DM AI PLAYER_SUGGESTION IMPORT MIGRATION }
 enum ChangeSetStatus { PENDING APPROVED REJECTED PARTIALLY_APPLIED SUPERSEDED }
 enum OpKind {
   CREATE_ENTITY UPDATE_ENTITY DELETE_ENTITY

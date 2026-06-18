@@ -114,9 +114,13 @@ reference integrity, and the first satellite promotions. Full design in
   one-time stamp migration marks existing rows v1.
 - **Migration execution:** a `MIGRATE_ENTITY_DATA` `Job` (reusing the
   `EMBED_SEARCH_DOCS` worker/dedupe pattern) eagerly upgrades stale `_v` rows
-  through an auto-approved system change set (provenance + `MIGRATE` audit, out of
-  the review queue); idempotent. Strict unknown-`data`-key policy; derive
-  `HANDLED_DATA_KEYS` from the descriptor.
+  through an auto-approved change set — a new additive `ChangeSource.MIGRATION`
+  attributed to a real account (the triggering DM via `Job.createdById`, or
+  `Campaign.ownerId` for an automatic `schemaVersion` bump) so the required
+  `AuditLog.actorUserId` is satisfied and history reads as a migration, not a hand
+  edit — recording provenance + a `MIGRATE` audit, out of the review queue;
+  idempotent. Strict unknown-`data`-key policy; derive `HANDLED_DATA_KEYS` from the
+  descriptor.
 - **Reference integrity:** `validateReferences` for `referenceFields` (broken-ref
   badge), an impact-aware "N entities reference this" reverse-lookup before
   archive, and an optional orphan report (feeds M10's consistency-check generator).
