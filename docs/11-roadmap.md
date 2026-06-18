@@ -124,12 +124,16 @@ reference integrity, and the first satellite promotions. Full design in
 - **Reference integrity:** `validateReferences` for `referenceFields` (broken-ref
   badge), an impact-aware "N entities reference this" reverse-lookup before
   archive, and an optional orphan report (feeds M10's consistency-check generator).
-- **Satellites:** promote **Faction** (`standing`/`strength`/`allegiance`/
-  `resources`, indexed for M9 queries + M12 faction-power rollups) to a 1:1
-  satellite via the migration job — the first real `data → satellite` move. Then
-  **Floor** (heavier — many readers of `data.floorNumber`): land a full satellite
-  or the lighter indexed-generated-column alternative, whichever the query shapes
-  warrant.
+- **Satellites:** **Faction** (`standing`/`strength`/`allegiance`/`resources`,
+  indexed for M9 queries + M12 faction-power rollups) is a **greenfield** 1:1
+  satellite — Faction has no bespoke `data` today, so these are new fields written
+  straight to the satellite (proves the satellite *plumbing*, low-risk). The
+  genuine `data → satellite` **migration** is **Floor** (real existing
+  `data.floorNumber`/`startDay`/`collapseDay`, many hot readers incl.
+  `campaigns.ts`): the migration job moves them to the satellite — or land the
+  lighter indexed-generated-column alternative, whichever the query shapes warrant.
+  (The migration *machinery* itself is proved earlier by a within-`data`
+  `schemaVersion` bump on FLOOR/ITEM, no satellite risk.)
 - **Done when:** every `data` write is `_v`-stamped; a kind can bump its version
   and migrate existing rows (lazy + batch, provenance-tracked) with no silent data
   loss; reference fields are integrity-checked; Faction is satellite-backed with

@@ -95,12 +95,23 @@ as one or more shippable slices (see M5.5 in the roadmap).
    reads `raw._v` (an absent/legacy stamp is treated as `1`, since all existing
    rows already match the v1 shapes), applies each `migrations[k]` from the stored
    version up to `schemaVersion`, then validates the result against `dataSchema`.
-   This becomes the **single read seam** consumed by the detail display, the entity
-   form, the search-index content builder ([`search-index.ts`](../../src/server/services/search-index.ts)),
-   and the generators — replacing today's scattered direct `entity.data` reads and
-   the lossy `normalizeKindFieldValue` fallback (which stays only as the
-   field-level coercion *inside* a migration step, never as a silent
+   This becomes the **single read seam** that replaces today's scattered direct
+   `entity.data` reads and the lossy `normalizeKindFieldValue` fallback (which stays
+   only as the field-level coercion *inside* a migration step, never as a silent
    data-dropping read).
+   **Every `entity.data` read site must route through it** — the enumeration as of
+   this writing is **both UI and service layer**, not just the UI:
+   - UI: [`kind-display.tsx`](../../src/components/entities/kind-display.tsx),
+     [`kind-fields.tsx`](../../src/components/entities/kind-fields.tsx), the
+     detail page's additional-data panel ([`entities/[entityId]/page.tsx`](<../../src/app/(dm)/campaigns/[id]/entities/[entityId]/page.tsx>)).
+   - Service: [`search-index.ts`](../../src/server/services/search-index.ts) content
+     builder; the [`review.ts`](../../src/server/services/review.ts) apply path and
+     [`entities.ts`](../../src/server/services/entities.ts) patch builders; and —
+     easy to miss — **[`campaigns.ts`](../../src/server/services/campaigns.ts)**,
+     which reads `data.floorNumber` / `data.startDay` / `data.collapseDay` directly
+     for the floor-anchor / absolute-day resolver. A missed site reads
+     **un-upgraded** data; an implementation slice should grep `\.data` to re-confirm
+     the full set before claiming the seam complete.
 
 4. **Backfill = lazy + batch.** Lazy: `readKindData` upgrades in memory on every
    read, so the app is correct immediately with no migration run required. Batch:
@@ -149,20 +160,38 @@ versioning layer (Part A/D) makes a clean promotion possible.
    `data.<field>` review-patch key it has today (the apply path writes the
    satellite; the patch contract is unchanged).
 
-2. **Faction satellite (first real migration).** Indexed `standing` / `strength`,
-   `allegiance`, and `resources` — the fields M9 queries and M12's faction-power
-   rollups / Faction-Wars tracker need to sort and aggregate. A `vN → vN+1`
-   migration moves those `data.*` fields into the satellite and drops them from
-   `data`, executed by the Part D job. This is the deliberately chosen *small,
-   real* proof of the machinery (Faction has few `data` readers today).
+> **Greenfield vs. migration — an honest distinction (corrected after auditing the
+> current data).** **Faction has no bespoke `data.*` fields today** — it has no
+> `EntityKind` descriptor at all (only FLOOR and ITEM do), so there is *nothing in
+> `data` to migrate from*. **FLOOR, by contrast, has real `data.floorNumber` /
+> `startDay` / `collapseDay` in live rows**, read across hot paths. So the two
+> satellites play different roles, and the "versioning *is* the promotion mechanism"
+> insight is proved by FLOOR (and by a within-`data` version bump), **not** by
+> Faction. The migration *machinery* (Parts A/D) is therefore proved first by a
+> pure **within-`data` `schemaVersion` bump** on an existing descriptor (e.g.
+> renaming/retyping a FLOOR or ITEM field) — that exercises `readKindData` +
+> `MIGRATE_ENTITY_DATA` on real data without the satellite risk.
 
-3. **Floor satellite (heavier; sequenced last in M5.5).** `floorNumber`,
-   `startDay`, `collapseDay`, `theme` are read in many hot paths — the absolute-day
-   resolver, timeline floor-banding, `currentFloor` resolution (ADRs 0005, 0008).
-   Promotion must update every reader, so the slice first evaluates the **lighter
-   alternative**: an indexed *generated column* for `floorNumber` (and any other
-   purely-lookup field) while the values stay in `data`. The slice lands whichever
-   is warranted by the actual query shapes; a full satellite is not assumed.
+2. **Faction satellite (greenfield — proves satellite *plumbing*).** Introduce a
+   Faction descriptor + a 1:1 satellite carrying indexed `standing` / `strength`,
+   `allegiance`, `resources` — the fields M9 queries and M12's faction-power
+   rollups / Faction-Wars tracker need to sort and aggregate. Because Faction has no
+   existing `data`, these are **new fields written straight to the satellite** (no
+   `data → satellite` migration). This is the deliberately chosen *low-risk* intro:
+   it validates the satellite read/write path and that review / lock / provenance
+   stay uniform on `Entity`, with few existing readers to disturb.
+
+3. **Floor satellite (the genuine `data → satellite` migration; heavier; sequenced
+   last in M5.5).** `floorNumber`, `startDay`, `collapseDay`, `theme` are real
+   existing `data` fields read in many hot paths — the absolute-day resolver,
+   `campaigns.ts` floor anchors, timeline floor-banding, `currentFloor` resolution
+   (ADRs 0005, 0008). Here a `vN → vN+1` migration genuinely **moves `data.*` fields
+   into the satellite and drops them from `data`** via the Part D job — the real
+   proof that the machinery promotes existing data. Because promotion must update
+   every reader, the slice first evaluates the **lighter alternative**: an indexed
+   *generated column* for `floorNumber` (and any other purely-lookup field) while
+   the values stay in `data`. The slice lands whichever the actual query shapes
+   warrant; a full satellite is not assumed.
 
 ### Part D — Migration execution (`MIGRATE_ENTITY_DATA` job)
 
