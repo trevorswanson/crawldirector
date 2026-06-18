@@ -133,7 +133,8 @@ reference integrity, and the first satellite promotions. Full design in
   `campaigns.ts`): the migration job moves them to the satellite — or land the
   lighter indexed-generated-column alternative, whichever the query shapes warrant.
   (The migration *machinery* itself is proved earlier by a within-`data`
-  `schemaVersion` bump on FLOOR/ITEM, no satellite risk.)
+  `schemaVersion` bump on FLOOR — v1 legacy numeric strings to v2 stored numbers —
+  no satellite risk.)
 - **Done when:** every `data` write is `_v`-stamped; a kind can bump its version
   and migrate existing rows (lazy + batch, provenance-tracked) with no silent data
   loss; reference fields are integrity-checked; Faction is satellite-backed with

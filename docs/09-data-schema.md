@@ -540,7 +540,9 @@ model SessionLogEntry {             // real-time capture; NOT canon until promot
   carries a `schemaVersion`, every write stamps a reserved `data._v`, and pure
   per-kind migrations upgrade older rows on read (and via the
   `MIGRATE_ENTITY_DATA` job), so a type can evolve its fields without silent data
-  loss ([ADR 0011](./adr/0011-entity-data-versioning-and-satellites.md)).
+  loss ([ADR 0011](./adr/0011-entity-data-versioning-and-satellites.md)). FLOOR is
+  the first non-lossless bump: v2 converts legacy v1 numeric floor fields stored
+  as strings into stored numbers before final validation.
   Examples of bespoke `data` to add as those types gain descriptors:
   `NPC.data.roles: NpcRole[]` (GUIDE/MANAGER/ADMIN/HOST/PRODUCTION_CREW/ELITE/
   FACTION_LEADER/SHOPKEEPER/DEITY/QUEST_GIVER — non-exclusive, queryable);

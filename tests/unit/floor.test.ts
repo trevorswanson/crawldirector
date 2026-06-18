@@ -9,7 +9,7 @@ describe("readFloorData", () => {
     ).toEqual({ floorNumber: 3, theme: "Neon bazaar", startDay: 12, collapseDay: 20 });
   });
 
-  it("normalizes missing / wrong-typed fields to null", () => {
+  it("normalizes missing / non-migratable wrong-typed fields to null", () => {
     expect(readFloorData(null)).toEqual({
       floorNumber: null,
       theme: null,
@@ -17,7 +17,7 @@ describe("readFloorData", () => {
       collapseDay: null,
     });
     expect(readFloorData({ floorNumber: "1", theme: "", startDay: "x" })).toEqual({
-      floorNumber: null,
+      floorNumber: 1,
       theme: null,
       startDay: null,
       collapseDay: null,

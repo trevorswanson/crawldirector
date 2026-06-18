@@ -28,27 +28,28 @@ flesh-out, async `Job` worker).
 — a `.5` cross-cutting insertion (like M3.5) added in the 2026-06-18 roadmap
 review, scheduled **before M6** because the catalog types (M7), import (M10), and
 export (M9) are about to put real weight on `Entity.data`. Decomposed into five
-vertical slices (ADR 0011 Parts A–D); **slice 1 is done** (dated entry below):
+vertical slices (ADR 0011 Parts A–D); **slices 1–2 are done** (dated entries
+below):
 
 - [x] **Slice 1 — versioning foundation + `readKindData` read seam** (Part A core).
       `schemaVersion` + pure `migrations` on `EntityKind` (load-time assertion),
       `_v` stamped on every write, the `readKindData` validate-and-upgrade seam,
       `HANDLED_DATA_KEYS` derived from the descriptor, all bespoke-data read sites
       routed through the seam (service via `readFloorData` delegation; UI panels/
-      forms/detail directly), and a one-time `_v`-stamp migration. All kinds stay
-      v1 (no migration yet) — proves the seam is lossless. ✅ 2026-06-18.
-- [ ] **Slice 2 — `MIGRATE_ENTITY_DATA` job + first real version bump** (Part D).
+      forms/detail directly), and a one-time `_v`-stamp migration. At delivery,
+      all kinds stayed v1 (no migration yet) — proved the seam was lossless.
+      ✅ 2026-06-18.
+- [x] **Slice 2 — `MIGRATE_ENTITY_DATA` job + first real version bump** (Part D).
       The async job (reusing the `EMBED_SEARCH_DOCS` worker/dedupe pattern) eagerly
       upgrades stale `_v` rows through an auto-approved change set; new additive
       `ChangeSource.MIGRATION` attributed to a real account (triggering DM via
       `Job.createdById`, else `Campaign.ownerId`); a `MIGRATE` audit row; out of the
       review queue; idempotent. Proven by a within-`data` `schemaVersion` bump on
-      FLOOR/ITEM (rename/retype with a real `migrations[0]`). Adds the strict
-      unknown-`data`-key write policy. **Also route the two reads slice 1 left on raw
-      data — now that an upgrade actually changes values:** the review three-way-merge
-      current-value read (`currentValueForField`, `review.ts` ~L1251) and its `case
-      "data"` whole-blob read should read through `readKindData` so a stale check
-      compares the upgraded shape.
+      FLOOR (v1 legacy numeric strings → v2 stored numbers with a real
+      `migrations[0]`). Adds the strict unknown-`data`-key write policy. The two
+      reads slice 1 left on raw data now route through `readKindData`: the review
+      three-way-merge current-value read and its `case "data"` whole-blob read
+      compare the upgraded shape. ✅ 2026-06-18.
 - [ ] **Slice 3 — reference integrity** (Part B). `validateReferences` for
       `referenceFields` (broken-ref badge), impact-aware "N entities reference this"
       reverse-lookup before archive, optional orphan report (feeds M10's
@@ -158,6 +159,67 @@ below.)
       - **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
+
+## M5.5 — `MIGRATE_ENTITY_DATA` job + first real data bump (slice 2) ✅ (2026-06-18)
+
+**Goal:** deliver ADR 0011 Part D's eager migration execution path and prove it
+with the first non-lossless descriptor bump before reference integrity/satellites
+add more moving parts. Branch: `feat/m5.5-data-versioning-foundation`.
+
+- [x] **First real version bump:** `FLOOR_KIND` is now `schemaVersion: 2` with a
+      pure `migrations[0]` that upgrades legacy v1 numeric floor fields
+      (`floorNumber`, `startDay`, `collapseDay`) stored as strings into numbers
+      before final descriptor normalization. Normal current rows are unchanged;
+      stale rows now demonstrate that `readKindData` preserves data that the old
+      wrong-type fallback would have coerced to `null`.
+- [x] **Migration source + job kind:** added `ChangeSource.MIGRATION` and
+      `JobKind.MIGRATE_ENTITY_DATA` via additive enum migration
+      (`20260618143000_m5_5_migrate_entity_data_job`). Migration provenance now
+      renders as **Data migration** instead of DM-authored.
+- [x] **`migrateEntityData` service:** finds stale versioned `Entity.data` rows,
+      builds a canonical per-row `UPDATE_ENTITY` patch from `readKindData`, and
+      applies it through `applyAutoApprovedEntityChangeSet` with
+      `source: MIGRATION` + `MIGRATE` audit. It attributes manual/worker runs to
+      `Job.createdById`, falls back to `Campaign.ownerId` when called without an
+      actor, skips base-version races idempotently, stays out of the Review Queue,
+      and drops off-schema keys when a data row is rewritten.
+- [x] **Queue wiring:** added `enqueueMigrateEntityDataJob()` with the same
+      active `QUEUED`/fresh-`RUNNING` duplicate guard used by manual semantic
+      rebuilds, registered the worker handler, and taught the Job Queue display to
+      label/summarize migration jobs.
+- [x] **Review strictness + read seam:** `applyCreateEntity` / `applyUpdateEntity`
+      now reject unknown or off-type `data.*` patch fields instead of silently
+      ignoring them. Review current-value enrichment now reads both individual
+      `data.*` fields and the whole `data` blob through `readKindData`, so stale
+      comparisons use the upgraded shape.
+- [x] **Review follow-up:** floor-number uniqueness now compares the semantic
+      `readFloorData` shape so legacy string-backed floors still block duplicate
+      numeric floors before migration persistence finishes. Migration-shaped FLOOR
+      anchor updates also detect raw-vs-upgraded anchor changes and re-rank
+      affected floor events instead of skipping because `"61"` and `61` compare
+      equal after descriptor migration.
+- [x] **Tests:** `entity-kinds.test.ts` covers FLOOR v2 stamping and v1 numeric
+      string upgrades; `entity-data-migration.test.ts` covers approved
+      `MIGRATION` change sets, canonical storage, `MIGRATE` audit, owner fallback,
+      idempotence, and player rejection; `jobs.test.ts` covers enqueue dedupe and
+      handler delegation; `review.test.ts` covers upgraded current-values and
+      strict unknown `data.*` rejection plus semantic duplicate-floor detection
+      for legacy string rows; `events.test.ts` covers migration-shaped FLOOR
+      anchor updates re-ranking stale timeline order; `job-queue.test.tsx` stays
+      green for the expanded label map.
+- [x] **Verification:** RED/GREEN, then
+      `npm run test -- tests/unit/entity-kinds.test.ts tests/unit/review.test.ts
+      tests/unit/entity-data-migration.test.ts tests/unit/jobs.test.ts
+      tests/unit/job-queue.test.tsx` (125 tests) after `npm run db:generate` and
+      `npm run db:deploy`; review-follow-up RED/GREEN with
+      `npm run test -- tests/unit/review.test.ts tests/unit/events.test.ts`
+      (144 tests); `git diff --check`; `npm run typecheck`;
+      `npx prisma migrate diff --from-config-datasource --to-schema=./prisma/schema.prisma
+      --exit-code` (**No difference detected**); `npm run lint` (0 errors;
+      pre-existing settings-action warnings only); `npm run build` (passes with
+      the existing Turbopack NFT seeding trace warning); and `npm run test:coverage`
+      green (107 files / 1469 tests; statements 95.07%, branches 88.44%,
+      functions 96.86%, lines 96.87%).
 
 ### Done — connection disposition/direction flip & settings nav layout (2026-06-18)
 

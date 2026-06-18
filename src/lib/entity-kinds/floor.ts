@@ -4,6 +4,13 @@ import { optionalInt, optionalText } from "@/lib/zod-field-helpers";
 
 import type { EntityKind } from "./types";
 
+function numericStringToNumber(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!/^-?\d+$/.test(trimmed)) return value;
+  return Number(trimmed);
+}
+
 /**
  * FLOOR-entity bespoke fields, stored in Entity.data (docs/adr/0005, 0008).
  *
@@ -23,6 +30,16 @@ export const floorDataSchema = z.object({
 export const FLOOR_KIND: EntityKind = {
   type: "FLOOR",
   dataSchema: floorDataSchema,
-  // v1: original shape. Bumping this requires a `migrations[0]` (ADR 0011).
-  schemaVersion: 1,
+  // v1 stored the numeric floor anchors as the same semantic fields, but legacy
+  // imports/direct JSON could leave them as strings. v2 makes the stored shape
+  // converge to numbers before the descriptor's final normalization step.
+  schemaVersion: 2,
+  migrations: [
+    (data) => ({
+      ...data,
+      floorNumber: numericStringToNumber(data.floorNumber),
+      startDay: numericStringToNumber(data.startDay),
+      collapseDay: numericStringToNumber(data.collapseDay),
+    }),
+  ],
 };
