@@ -39,8 +39,14 @@ services:
     #   - ./dungeon-crawler-carl.jsonl:/app/dungeon-crawler-carl.jsonl:ro
 
   worker:
-    build: .
-    command: npm run worker
+    # Dedicated lean worker image (Dockerfile `worker` stage). The default
+    # `runner` image only ships the Next standalone server, so the worker needs
+    # its own stage with the source + tsx to run scripts/worker.ts. Its CMD is
+    # `npm run worker`, so no `command:` override is needed here.
+    build:
+      context: .
+      target: worker
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
