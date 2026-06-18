@@ -17,6 +17,8 @@ const {
   listKnowledgeHeldByEntity,
   getEntityProvenance,
   listAiKeys,
+  validateEntityReferences,
+  countReferrers,
   notFound,
 } = vi.hoisted(() => ({
   requireUser: vi.fn(),
@@ -33,6 +35,8 @@ const {
   listKnowledgeHeldByEntity: vi.fn(),
   getEntityProvenance: vi.fn(),
   listAiKeys: vi.fn(),
+  validateEntityReferences: vi.fn(),
+  countReferrers: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
@@ -50,6 +54,10 @@ vi.mock("@/server/services/events", () => ({ listEventsForEntity, resolveFloorEn
 vi.mock("@/server/services/groups", () => ({ getGroupRoster, isGroupEntityType }));
 vi.mock("@/server/services/review", () => ({ getEntityProvenance }));
 vi.mock("@/server/services/ai-keys", () => ({ listAiKeys }));
+vi.mock("@/server/services/references", () => ({
+  validateEntityReferences,
+  countReferrers,
+}));
 vi.mock("@/server/services/knowledge", () => ({
   listKnowledgeOfEntity,
   listKnowledgeHeldByEntity,
@@ -123,8 +131,16 @@ vi.mock("next/link", () => ({
   ),
 }));
 vi.mock("@/components/entities/entity-forms", () => ({
-  ArchiveEntityForm: ({ entityId }: { entityId: string }) => (
-    <div>Archive {entityId}</div>
+  ArchiveEntityForm: ({
+    entityId,
+    referrerCount,
+  }: {
+    entityId: string;
+    referrerCount?: number;
+  }) => (
+    <div>
+      Archive {entityId} (refs: {referrerCount ?? 0})
+    </div>
   ),
   EditEntityForm: ({ entity }: { entity: { id: string; name: string } }) => (
     <div>Edit form {entity.name}</div>
@@ -181,6 +197,8 @@ beforeEach(() => {
   listKnowledgeOfEntity.mockResolvedValue([]);
   listKnowledgeHeldByEntity.mockResolvedValue([]);
   listAiKeys.mockResolvedValue([]);
+  validateEntityReferences.mockResolvedValue([]);
+  countReferrers.mockResolvedValue(0);
 });
 
 afterEach(cleanup);
@@ -239,6 +257,64 @@ async function renderPage(
 }
 
 describe("EntityPage", () => {
+  it("surfaces a broken-reference badge and the archive impact for an ITEM (ADR 0011 Part B)", async () => {
+    getEntityForUser.mockResolvedValue(
+      crawler({ id: "i1", type: "ITEM", name: "Orphan Blade", crawler: null, data: { itemTypeId: "missing", _v: 1 } }),
+    );
+    validateEntityReferences.mockResolvedValue([
+      {
+        field: "itemTypeId",
+        patchKey: "data.itemTypeId",
+        targetType: "ITEM_TYPE",
+        targetId: "missing",
+        resolvedName: null,
+        broken: true,
+      },
+    ]);
+    countReferrers.mockResolvedValue(0);
+
+    await renderPage("i1");
+
+    // The reference services were called for the entity, and the badge renders.
+    expect(validateEntityReferences).toHaveBeenCalledWith("u1", "c1", "i1");
+    expect(countReferrers).toHaveBeenCalledWith("u1", "c1", "i1");
+    expect(screen.getByText("Broken reference")).toBeDefined();
+  });
+
+  it("passes the referrer count into the archive form (impact-aware archive)", async () => {
+    getEntityForUser.mockResolvedValue(
+      crawler({ id: "t1", type: "ITEM_TYPE", name: "Magic Sword", crawler: null, data: {} }),
+    );
+    countReferrers.mockResolvedValue(4);
+
+    await renderPage("t1");
+
+    expect(screen.getByText("Archive t1 (refs: 4)")).toBeDefined();
+  });
+
+  it("does not flag broken references for a player viewer (invariant #5)", async () => {
+    getEntityForUser.mockResolvedValue(
+      crawler({ id: "i2", type: "ITEM", name: "Public Item", crawler: null, data: { itemTypeId: "hidden", _v: 1 } }),
+    );
+    listEntitiesForUser.mockResolvedValue({ entities: [], role: "PLAYER" });
+    // A player's scoped validation reads the hidden target as broken...
+    validateEntityReferences.mockResolvedValue([
+      {
+        field: "itemTypeId",
+        patchKey: "data.itemTypeId",
+        targetType: "ITEM_TYPE",
+        targetId: "hidden",
+        resolvedName: null,
+        broken: true,
+      },
+    ]);
+
+    await renderPage("i2");
+
+    // ...but the page never renders the badge to a player (hidden ≠ broken).
+    expect(screen.queryByText("Broken reference")).toBeNull();
+  });
+
   it("renders the two-column detail with fields table and provenance", async () => {
     getEntityForUser.mockResolvedValue(crawler());
     // Candidate list includes the current entity (filtered out) and one other,
@@ -620,6 +696,16 @@ describe("EntityPage", () => {
       ],
       role: "OWNER",
     });
+    validateEntityReferences.mockResolvedValue([
+      {
+        field: "itemTypeId",
+        patchKey: "data.itemTypeId",
+        targetType: "ITEM_TYPE",
+        targetId: "it1",
+        resolvedName: "Gourd Type",
+        broken: false,
+      },
+    ]);
 
     await renderPage();
 

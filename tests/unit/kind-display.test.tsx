@@ -57,6 +57,33 @@ describe("entity-kind display panel (ADR 0009)", () => {
     expect(screen.getByText("No")).toBeDefined();
   });
 
+  it("renders a broken-reference badge instead of the name for a broken ref", () => {
+    render(
+      <KindDisplay
+        campaignId="c1"
+        entityId="e1"
+        entity={itemEntity({ itemTypeId: "missing" })}
+        resolvedNames={{ "data.itemTypeId": null }}
+        brokenReferences={["data.itemTypeId"]}
+      />,
+    );
+    expect(screen.getByText("Broken reference")).toBeDefined();
+  });
+
+  it("does not show a broken badge when the reference resolves", () => {
+    render(
+      <KindDisplay
+        campaignId="c1"
+        entityId="e1"
+        entity={itemEntity({ itemTypeId: "it1" })}
+        resolvedNames={{ "data.itemTypeId": "Gourd Type" }}
+        brokenReferences={[]}
+      />,
+    );
+    expect(screen.getByText("Gourd Type")).toBeDefined();
+    expect(screen.queryByText("Broken reference")).toBeNull();
+  });
+
   it("composes the AI-description blockquote from the flags + flavor text", () => {
     render(
       <KindDisplay

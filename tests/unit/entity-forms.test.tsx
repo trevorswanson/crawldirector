@@ -215,6 +215,41 @@ describe("entity forms", () => {
     expect(screen.getByRole("button", { name: /Archive/ })).toBeDefined();
   });
 
+  it("archives in one click with no referrers (no warning)", () => {
+    render(<ArchiveEntityForm campaignId="c1" entityId="e1" referrerCount={0} />);
+
+    const button = screen.getByRole("button", { name: /Archive/ });
+    expect(button.getAttribute("type")).toBe("submit");
+    expect(screen.queryByText(/reference/i)).toBeNull();
+  });
+
+  it("warns and confirms before archiving when entities reference it", () => {
+    render(<ArchiveEntityForm campaignId="c1" entityId="e1" referrerCount={3} />);
+
+    // The impact is shown up front; the first Archive click only opens the confirm.
+    expect(screen.getByText(/3 entities reference this/)).toBeDefined();
+    const archive = screen.getByRole("button", { name: /Archive/ });
+    expect(archive.getAttribute("type")).toBe("button");
+
+    fireEvent.click(archive);
+
+    // Confirmation step: a real submit + a warning + cancel.
+    expect(screen.getByText(/Archive anyway\?/)).toBeDefined();
+    const confirm = screen.getByRole("button", { name: /Archive anyway/ });
+    expect(confirm.getAttribute("type")).toBe("submit");
+    expect(screen.getByRole("alert")).toBeDefined();
+
+    // Cancel returns to the warning-only state.
+    fireEvent.click(screen.getByRole("button", { name: /Cancel/ }));
+    expect(screen.queryByRole("button", { name: /Archive anyway/ })).toBeNull();
+    expect(screen.getByText(/3 entities reference this/)).toBeDefined();
+  });
+
+  it("uses singular phrasing for a single referrer", () => {
+    render(<ArchiveEntityForm campaignId="c1" entityId="e1" referrerCount={1} />);
+    expect(screen.getByText(/1 entity references this/)).toBeDefined();
+  });
+
   it("toggles the quick-create stub form open", () => {
     render(<QuickCreateStub campaignId="c1" />);
 
