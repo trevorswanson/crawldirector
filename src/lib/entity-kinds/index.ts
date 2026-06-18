@@ -291,3 +291,30 @@ export function readKindData(
   }
   return out;
 }
+
+/**
+ * Run migrations on a raw bespoke data object if its kind is versioned (ADR 0011).
+ * Returns the migrated object (retaining reserved fields and off-schema keys), or
+ * the original object if the type has no kind.
+ */
+export function migrateKindData(
+  type: string,
+  raw: unknown,
+): Record<string, unknown> {
+  const kind = kindFor(type);
+  if (!kind) return { ...asRecord(raw) };
+
+  const record = { ...asRecord(raw) };
+  const storedVersion =
+    typeof record[RESERVED_DATA_KEY] === "number"
+      ? (record[RESERVED_DATA_KEY] as number)
+      : 1;
+
+  return applyDataMigrations(
+    record,
+    kind.migrations ?? [],
+    storedVersion,
+    schemaVersionOf(kind),
+  );
+}
+

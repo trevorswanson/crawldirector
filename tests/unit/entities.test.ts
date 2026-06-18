@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Role } from "@/generated/prisma/client";
 import { RESERVED_DATA_KEY } from "@/lib/entity-kinds";
@@ -1254,6 +1254,37 @@ describe("entity locking", () => {
     expect(finalItem?.name).toBe("Excalibur (Modified)");
     const finalData = (finalItem?.data as Record<string, unknown>) || {};
     expect(finalData["unique"]).toBe(false);
+  });
+
+  it("migrates existing data first when editing data fields during an update", async () => {
+    const owner = await makeUser("migrate-test@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const item = await createGenericEntity(owner.id, campaign.id, {
+      type: "ITEM",
+      name: "Dagger",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+      divine: false,
+    });
+
+    const entityKindsMod = await import("@/lib/entity-kinds");
+    const spy = vi.spyOn(entityKindsMod, "migrateKindData");
+
+    await updateEntity(owner.id, campaign.id, item.id, {
+      type: "ITEM",
+      name: "Dagger",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+      divine: true,
+    });
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
   });
 
   it("scopes bespoke data.* provenance to the type's entity-kind (ADR 0009)", async () => {

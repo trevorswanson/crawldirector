@@ -14,6 +14,7 @@ import {
 import {
   allKindDataKeys,
   buildKindData,
+  migrateKindData,
   normalizeKindFieldValue,
   RESERVED_DATA_KEY,
   schemaVersionFor,
@@ -2771,13 +2772,10 @@ function entityUpdateData(patch: ReviewPatch, type: EntityType, existingData?: u
 
   const dataPatch = Object.keys(patch).some((field) => dataFields.has(field));
   if (dataPatch) {
-    // Merge each touched bespoke `data.*` field onto the existing data, each
-    // value normalized by its entity-kind descriptor (ADR 0009) — replacing the
-    // per-field `if ("data.X" in patch)` ladder. Keyed by field name (not type)
-    // so it stays faithful to the prior type-agnostic update behavior.
-    const currentData = (
-      existingData && typeof existingData === "object" ? { ...existingData } : {}
-    ) as Record<string, unknown>;
+    // Migrate the existing data first (if it is stale) before merging the patch
+    // so that untouched renamed/retyped fields are correctly migrated before
+    // we advance the version stamp (ADR 0011).
+    const currentData = migrateKindData(type, existingData);
     for (const key of allKindDataKeys()) {
       const field = `data.${key}`;
       if (field in patch) {

@@ -13,6 +13,7 @@ import {
   dataKeysFor,
   kindDataDefaults,
   kindFor,
+  migrateKindData,
   normalizeKindFieldValue,
   readKindData,
   RESERVED_DATA_KEY,
@@ -292,6 +293,22 @@ describe("entity-kind registry (ADR 0009)", () => {
         dataSchema: z.object({ [RESERVED_DATA_KEY]: z.string().optional() }),
       };
       expect(() => assertKindInvariants(bad)).toThrow(/reserved data key/);
+    });
+  });
+
+  describe("migrateKindData", () => {
+    it("returns a cloned object and leaves input unchanged", () => {
+      const input = { floorNumber: 5, [RESERVED_DATA_KEY]: 1 };
+      const out = migrateKindData("FLOOR", input);
+      expect(out).toEqual(input);
+      expect(out).not.toBe(input);
+    });
+
+    it("returns a copy even for NPC/unknown type with no kind", () => {
+      const input = { anything: 1 };
+      const out = migrateKindData("NPC", input);
+      expect(out).toEqual(input);
+      expect(out).not.toBe(input);
     });
   });
 });
