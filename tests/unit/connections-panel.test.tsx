@@ -123,6 +123,29 @@ describe("ConnectionsPanel", () => {
     );
   });
 
+  it("shows a signed disposition readout, and omits it when unset", () => {
+    render(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="e1"
+        sourceType="CRAWLER"
+        connections={[
+          connection({ disposition: 50 }),
+          connection({
+            id: "r2",
+            disposition: null,
+            other: { id: "e3", name: "Mordecai", type: "NPC" },
+          }),
+        ]}
+        candidates={candidates}
+      />,
+    );
+
+    // The edge with a disposition reads it out, signed; the null one shows nothing.
+    expect(screen.getByText("disposition +50")).toBeDefined();
+    expect(screen.getAllByText(/disposition/)).toHaveLength(1);
+  });
+
   it("shows day bounds on bounded membership edges", () => {
     render(
       <ConnectionsPanel
@@ -482,6 +505,71 @@ describe("ConnectionsPanel", () => {
 
     await waitFor(() => expect(createRelationshipAction).toHaveBeenCalledTimes(1));
     expect(screen.queryByText("DM-only (secret)")).toBeNull();
+  });
+
+  it("exposes a disposition field and a direction toggle once a target is picked", () => {
+    render(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="e1"
+        sourceType="CRAWLER"
+        sourceName="Carl"
+        connections={[]}
+        candidates={candidates}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Add connection/ }));
+    // Direction + disposition only surface after both ends are known.
+    expect(screen.queryByLabelText("Disposition")).toBeNull();
+
+    fireEvent.change(screen.getByPlaceholderText("Search entity to connect…"), {
+      target: { value: "Don" },
+    });
+    fireEvent.click(screen.getByText("Donut"));
+
+    // Disposition input and both direction options are now present, default out.
+    expect(screen.getByLabelText("Disposition")).toBeDefined();
+    const outBtn = screen.getByRole("button", { name: "Carl → Donut" });
+    const inBtn = screen.getByRole("button", { name: "Donut → Carl" });
+    expect(outBtn.getAttribute("aria-pressed")).toBe("true");
+    expect(inBtn.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("submits an incoming edge with the chosen direction and disposition", async () => {
+    let captured: FormData | undefined;
+    createRelationshipAction.mockImplementation(
+      (_c: string, _e: string, _p: unknown, fd: FormData) => {
+        captured = fd;
+        return Promise.resolve(undefined);
+      },
+    );
+    render(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="e1"
+        sourceType="CRAWLER"
+        sourceName="Carl"
+        connections={[]}
+        candidates={candidates}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Add connection/ }));
+    fireEvent.change(screen.getByPlaceholderText("Search entity to connect…"), {
+      target: { value: "Mor" },
+    });
+    fireEvent.click(screen.getByText("Mordecai"));
+
+    // Flip to an incoming edge (Mordecai → Carl) and set a disposition.
+    fireEvent.click(screen.getByRole("button", { name: "Mordecai → Carl" }));
+    fireEvent.change(screen.getByLabelText("Disposition"), { target: { value: "40" } });
+    fireEvent.submit(screen.getByRole("combobox").closest("form")!);
+
+    await waitFor(() => expect(createRelationshipAction).toHaveBeenCalledTimes(1));
+    expect(captured?.get("direction")).toBe("in");
+    expect(captured?.get("targetId")).toBe("e3");
+    expect(captured?.get("disposition")).toBe("40");
   });
 
   it("keeps the add form open when connection creation fails", async () => {

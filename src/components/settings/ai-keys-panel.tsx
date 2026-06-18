@@ -1,8 +1,8 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { KeyRound, ShieldCheck, Trash2, Zap } from "lucide-react";
+import { Check, KeyRound, ShieldCheck, Trash2, Zap } from "lucide-react";
 
 import {
   deleteAiKeyAction,
@@ -261,13 +261,21 @@ export function AiKeysPanel({
   configured: AiKeyView[];
 }) {
   const byProvider = new Map(configured.map((k) => [k.providerId, k] as const));
+  // One provider configured at a time: pick a type, then add its key. Land on a
+  // configured provider if there is one, else the first in the registry — so the
+  // page opens on whatever the DM already set up.
+  const [selectedId, setSelectedId] = useState<string>(
+    () => configured[0]?.providerId ?? AI_PROVIDERS[0].id,
+  );
+  const selected =
+    AI_PROVIDERS.find((provider) => provider.id === selectedId) ?? AI_PROVIDERS[0];
 
   return (
     <Panel>
       <PanelHeader
-        kicker="AI providers"
+        kicker="AI provider"
         title="Bring your own key"
-        sub="Your API keys are encrypted at rest and never shared with players or shown again. Anthropic, OpenAI, or any OpenAI-compatible endpoint (a self-hosted model or proxy). The app works fully without a key — AI generation (M4) is additive."
+        sub="Pick a provider, then add its key. Keys are encrypted at rest and never shared with players or shown again — Anthropic, OpenAI, or any OpenAI-compatible endpoint (a self-hosted model or proxy). The app works fully without a key — AI generation (M4) is additive."
       />
       <div className="flex items-center gap-2 border-b border-[var(--line)] bg-[var(--bg-2)] px-[18px] py-[10px]">
         <ShieldCheck aria-hidden size={14} className="text-[var(--ok)]" />
@@ -275,14 +283,45 @@ export function AiKeysPanel({
           Keys are decrypted only at the moment of a provider call
         </Kicker>
       </div>
-      {AI_PROVIDERS.map((provider) => (
-        <ProviderRow
-          key={provider.id}
-          campaignId={campaignId}
-          provider={provider}
-          configured={byProvider.get(provider.id)}
-        />
-      ))}
+      {/* Provider picker — only the chosen provider's form renders, so the panel
+          stays short. A check marks providers that already have a key. */}
+      <div
+        role="tablist"
+        aria-label="AI provider"
+        className="flex flex-wrap gap-[6px] border-b border-[var(--line)] px-[18px] py-3"
+      >
+        {AI_PROVIDERS.map((provider) => {
+          const active = provider.id === selected.id;
+          const isConfigured = byProvider.has(provider.id);
+          return (
+            <button
+              key={provider.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => setSelectedId(provider.id)}
+              className="inline-flex items-center gap-[6px] border px-[11px] py-[6px] text-[12px] font-medium transition-colors"
+              style={{
+                background: active ? "var(--bg-3)" : "transparent",
+                color: active ? "var(--ink)" : "var(--ink-dim)",
+                borderColor: active ? "var(--accent)" : "var(--line-strong)",
+              }}
+            >
+              {provider.label}
+              {isConfigured && (
+                <Check aria-label="configured" size={13} style={{ color: "var(--ok)" }} />
+              )}
+            </button>
+          );
+        })}
+      </div>
+      {/* Remount per provider so the bound action/form state resets on switch. */}
+      <ProviderRow
+        key={selected.id}
+        campaignId={campaignId}
+        provider={selected}
+        configured={byProvider.get(selected.id)}
+      />
     </Panel>
   );
 }

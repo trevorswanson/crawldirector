@@ -4,6 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Eye, EyeOff, Lock } from "lucide-react";
 
+import {
+  DispositionBar,
+  dispositionColor,
+} from "@/components/ui/disposition-bar";
 import { entityTypeColor, formatEntityType } from "@/lib/entities";
 import {
   relationshipEdgeLabel,
@@ -15,13 +19,6 @@ import type { GraphEdge, GraphNode } from "@/server/services/relationships";
 const W = 1200;
 const H = 820;
 const MIN_SIMULATION_ALPHA = 0.02;
-
-// Disposition → edge color: warm allies, hot rivals, faint neutral/unknown.
-function edgeColor(disp: number | null): string {
-  if (disp != null && disp > 20) return "var(--ok)";
-  if (disp != null && disp < -20) return "var(--hot)";
-  return "var(--ink-faint)";
-}
 
 type SimNode = GraphNode & {
   px: number;
@@ -406,7 +403,7 @@ function RelationshipGraphInner({ campaignId, nodes, edges }: RelationshipGraphP
                     y1={a.py}
                     x2={b.px}
                     y2={b.py}
-                    stroke={edge.secret ? "var(--hot)" : edgeColor(disp)}
+                    stroke={edge.secret ? "var(--hot)" : dispositionColor(disp)}
                     strokeWidth={Math.max(1, Math.abs(disp ?? 0) / 45 + 0.7)}
                     strokeDasharray={edge.secret ? "5 4" : undefined}
                     markerEnd="url(#rg-arrow)"
@@ -622,25 +619,7 @@ function RelationshipGraphInner({ campaignId, nodes, edges }: RelationshipGraphP
                       />
                       <span className="text-[13px] font-semibold">{other.name}</span>
                     </div>
-                    {e.disposition != null && (
-                      <>
-                        <div className="relative mt-2 h-1 bg-[var(--bg-3)]">
-                          <div className="absolute inset-y-0 left-1/2 w-px bg-[var(--ink-faint)]" />
-                          <div
-                            className="absolute inset-y-0"
-                            style={{
-                              background: edgeColor(disp),
-                              left: disp < 0 ? `${50 + disp / 2}%` : "50%",
-                              width: `${Math.abs(disp) / 2}%`,
-                            }}
-                          />
-                        </div>
-                        <div className="mt-1 font-mono text-[9.5px] text-[var(--ink-faint)]">
-                          disposition {disp > 0 ? "+" : ""}
-                          {disp}
-                        </div>
-                      </>
-                    )}
+                    {e.disposition != null && <DispositionBar disposition={disp} />}
                   </button>
                 );
               })}

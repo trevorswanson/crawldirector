@@ -86,6 +86,14 @@ non-milestone-blocking follow-ups and deferrals live in the subsections below.)
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
 
+### Done — connection disposition/direction flip & settings nav layout (2026-06-18)
+
+- [x] **Disposition in the create-connection form.** The add-connection form now has the same Disposition (−100…100) input the edit form has, so you can set affinity when first creating an edge.
+- [x] **Flip direction when adding a connection.** Added a direction toggle to connection creation, supporting incoming edges. Flipping to incoming swaps target and source endpoints in the action handler before calling the service.
+- [x] **AI Provider tab layout.** Refactored the BYO API Keys panel on the Campaign settings page to use a compact, tabbed provider row selector instead of rendering all form rows at once.
+- [x] **Settings middle-pane navigation.** Introduced `SettingsNav` with roadmapped planned (disabled) sections on the settings page to establish the campaign settings navigation architecture.
+- [x] **Tests & Coverage.** Added `disposition-bar.test.tsx` and `settings-nav.test.tsx` covering all new components to 100%, keeping project unit coverage safely above the required floors.
+
 ### Done — non-M6 backlog follow-ups (2026-06-17)
 
 - [x] **User-reported maintenance fixes.** Timeline event logging no longer wipes
