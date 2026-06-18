@@ -48,7 +48,11 @@
   search still works with none); with no matching canon it answers "the canon is
   silent" without spending a provider call. The page lives at
   `/campaigns/[id]/ask`. The role-aware service is the single seam the future M7
-  player "Ask" reuses.
+  player "Ask" reuses. (Both DM and player "Ask" depend on a configured **chat**
+  provider; the semantic ranking underneath additionally needs an
+  **OpenAI-compatible** key — the Anthropic Messages API has no embeddings
+  endpoint — so an Anthropic-only campaign answers from full-text retrieval. See
+  Trust & safety below.)
 
 ### 2. Retrieval-augmented context (generators & agents)
 - The AI orchestrator's context-building step uses retrieval to assemble the

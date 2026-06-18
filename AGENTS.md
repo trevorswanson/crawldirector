@@ -14,7 +14,8 @@ pitch and [`docs/`](./docs) for the full plan.
 
 ## Current status
 
-🚧 **M0–M5 complete; M6 (System AI persona engine) next.** The app is scaffolded
+🚧 **M0–M5 complete; M5.5 (data model hardening — ADR 0011) next, then M6
+(System AI persona engine).** The app is scaffolded
 and runnable: Next.js 16 (App Router, TS, Tailwind) + Postgres/Prisma 7 +
 Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
 `npm audit`, migration-drift, coverage). Milestone-by-milestone:

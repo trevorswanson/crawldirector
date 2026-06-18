@@ -37,7 +37,12 @@ Two distinct surfaces share one app and one data layer but feel different:
   **connections panel** (in/out relationships), a **timeline** of events the
   entity participated in, provenance ("authored by you" vs "AI-generated, model
   X, approved by you on …"), lock controls, and an **entity history / audit trail panel**
-  (to view previous versions, edit history, and change attribution).
+  (to view previous versions, edit history, and change attribution). A type's
+  bespoke fields render through **registry-driven per-type slots** — the form and
+  the detail display dispatch to the entity-kind descriptor's `FormFields` /
+  `DisplayPanel` ([`adr/0009-entity-kind-registry.md`](./adr/0009-entity-kind-registry.md)),
+  not per-type conditionals, so a new type's UI is one descriptor, and any
+  unhandled `data` keys fall back to a generic "additional data" panel.
 - **Relationship graph** — interactive node-link view of the campaign (filter by
   type/faction/floor). Central to feeling the "web."
   _Mockup: `design/mockup/screen-graph.jsx` (M3)._
