@@ -75,7 +75,10 @@ afterEach(() => cleanup());
 describe("CampaignSettingsPage", () => {
   it("renders the AI keys and usage panels for a DM", async () => {
     render(await CampaignSettingsPage({ params: Promise.resolve({ id: "c1" }) }));
-    expect(screen.getByRole("heading", { name: /Campaign settings/i })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /AI provider/i })).toBeTruthy();
+    // The settings sub-nav lists the planned (disabled) sections alongside AI.
+    expect(screen.getByText("General")).toBeTruthy();
+    expect(screen.getByText("Crawlers")).toBeTruthy();
     expect(screen.getByTestId("ai-keys-panel").textContent).toBe("panel:c1:1");
     expect(screen.getByTestId("usage-panel").textContent).toBe("usage:c1:3");
     expect(listAiKeys).toHaveBeenCalledWith("u1", "c1");

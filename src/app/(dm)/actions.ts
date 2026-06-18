@@ -1003,7 +1003,7 @@ export type RelationshipActionState = { error?: string } | undefined;
 
 export async function createRelationshipAction(
   campaignId: string,
-  sourceId: string,
+  entityId: string,
   _prev: RelationshipActionState,
   formData: FormData,
 ): Promise<RelationshipActionState> {
@@ -1021,15 +1021,24 @@ export async function createRelationshipAction(
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
 
+  // Direction lets the DM add an *incoming* edge from the entity they're viewing
+  // (e.g. on Carl's page, "Mordecai MENTORS Carl"): "in" makes the picked entity
+  // the source and the viewed entity the target. Default "out" keeps the viewed
+  // entity as the source. The picked entity is always `targetId` in the form.
+  const incoming = formData.get("direction") === "in";
+  const otherId = parsed.data.targetId;
+  const edgeSourceId = incoming ? otherId : entityId;
+  const input = incoming ? { ...parsed.data, targetId: entityId } : parsed.data;
+
   try {
-    await createRelationship(user.id, campaignId, sourceId, parsed.data);
+    await createRelationship(user.id, campaignId, edgeSourceId, input);
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message };
     return { error: "Could not add the connection. Please try again." };
   }
 
-  revalidatePath(`/campaigns/${campaignId}/entities/${sourceId}`);
-  revalidatePath(`/campaigns/${campaignId}/entities/${parsed.data.targetId}`);
+  revalidatePath(`/campaigns/${campaignId}/entities/${entityId}`);
+  revalidatePath(`/campaigns/${campaignId}/entities/${otherId}`);
   return undefined;
 }
 

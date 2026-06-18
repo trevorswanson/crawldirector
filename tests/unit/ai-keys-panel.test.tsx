@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 const { setAiKeyAction, deleteAiKeyAction, testAiConnectionAction, mockUseActionState } =
   vi.hoisted(() => ({
@@ -59,34 +59,56 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("AiKeysPanel", () => {
-  it("renders every provider, masking a configured key and prompting for the rest", () => {
+  it("offers a tab per provider and shows only the selected provider's form", () => {
     render(<AiKeysPanel campaignId="camp1" configured={[anthropicKey]} />);
 
-    // All three registry providers are listed (incl. OpenAI-compatible).
-    expect(screen.getByText("Anthropic (Claude)")).toBeTruthy();
-    expect(screen.getByText("OpenAI")).toBeTruthy();
-    expect(screen.getByText("OpenAI-compatible (self-hosted / proxy)")).toBeTruthy();
+    // All three registry providers are pickable (incl. OpenAI-compatible).
+    expect(screen.getByRole("tab", { name: /Anthropic/ })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: /^OpenAI$/ })).toBeTruthy();
+    expect(
+      screen.getByRole("tab", { name: /OpenAI-compatible/ }),
+    ).toBeTruthy();
 
-    // Configured provider shows the last-four hint (never the key) + Remove + Test.
+    // The configured provider is selected by default and marked configured.
+    const anthropicTab = screen.getByRole("tab", { name: /Anthropic/ });
+    expect(anthropicTab.getAttribute("aria-selected")).toBe("true");
+    expect(anthropicTab.querySelector('[aria-label="configured"]')).toBeTruthy();
+
+    // Its form is the only one rendered: last-four hint (never the key), Remove,
+    // Replace, Test, and exactly one password key field.
     expect(screen.getByText(/ends ••9999/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /remove/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /replace/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /test/i })).toBeTruthy();
+    expect(screen.queryByText(/No key configured/)).toBeNull();
 
-    // Unconfigured providers prompt for a key (openai + openai-compatible).
-    expect(screen.getAllByText(/No key configured/)).toHaveLength(2);
-    expect(screen.getAllByRole("button", { name: /^save$/i }).length).toBeGreaterThan(0);
-
-    // Key inputs are password fields so the secret is never shown (one per provider).
     const inputs = screen.getAllByLabelText(/API key/);
-    expect(inputs).toHaveLength(3);
-    inputs.forEach((el) => expect(el.getAttribute("type")).toBe("password"));
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0].getAttribute("type")).toBe("password");
+  });
+
+  it("swaps the visible form when another provider tab is picked", () => {
+    render(<AiKeysPanel campaignId="camp1" configured={[anthropicKey]} />);
+
+    // Anthropic (configured) is shown first; OpenAI's form is not.
+    expect(screen.getByText(/ends ••9999/)).toBeTruthy();
+    expect(screen.queryByText(/No key configured/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: /^OpenAI$/ }));
+
+    // OpenAI has no key here, so its form prompts for one — and Anthropic's
+    // configured summary is gone (one form at a time).
+    expect(screen.getByText(/No key configured/)).toBeTruthy();
+    expect(screen.queryByText(/ends ••9999/)).toBeNull();
+    expect(screen.getByRole("button", { name: /^save$/i })).toBeTruthy();
+    expect(screen.getAllByLabelText(/API key/)).toHaveLength(1);
   });
 
   it("shows endpoint + model inputs for the OpenAI-compatible provider and renders its config", () => {
     render(<AiKeysPanel campaignId="camp1" configured={[compatibleKey]} />);
 
-    // Only the compatible provider exposes endpoint/model fields, prefilled.
+    // The configured compatible provider is selected by default, so its
+    // endpoint/model fields render prefilled.
     const endpoint = screen.getByLabelText(/endpoint URL/i) as HTMLInputElement;
     expect(endpoint.value).toBe("http://localhost:11434/v1");
     const model = screen.getByLabelText(/OpenAI-compatible.*chat model/i) as HTMLInputElement;
@@ -98,7 +120,7 @@ describe("AiKeysPanel", () => {
     const dimensions = screen.getByLabelText(/OpenAI-compatible.*embedding dimensions/i) as HTMLInputElement;
     expect(dimensions.value).toBe("768");
 
-    // First-party providers don't show endpoint fields.
+    // Only the selected provider's form renders, so there's a single endpoint field.
     expect(screen.getAllByLabelText(/endpoint URL/i)).toHaveLength(1);
 
     // The configured (keyless) compatible row reads "Configured" + shows the model/endpoint.
@@ -107,12 +129,12 @@ describe("AiKeysPanel", () => {
     ).toBeTruthy();
   });
 
-  it("exposes per-token price inputs for every provider, prefilled when configured", () => {
+  it("exposes per-token price inputs for the selected provider, prefilled when configured", () => {
     render(<AiKeysPanel campaignId="camp1" configured={[compatibleKey]} />);
 
-    // Every provider row offers input + output price fields (3 of each).
-    expect(screen.getAllByLabelText(/input price per million tokens/i)).toHaveLength(3);
-    expect(screen.getAllByLabelText(/output price per million tokens/i)).toHaveLength(3);
+    // The selected provider's form offers one input + one output price field.
+    expect(screen.getAllByLabelText(/input price per million tokens/i)).toHaveLength(1);
+    expect(screen.getAllByLabelText(/output price per million tokens/i)).toHaveLength(1);
 
     // The configured compatible key prefills its rates and shows them in the summary.
     const input = screen.getByLabelText(/OpenAI-compatible.*input price/i) as HTMLInputElement;

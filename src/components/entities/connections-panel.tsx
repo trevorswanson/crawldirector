@@ -17,6 +17,7 @@ import {
   EntityTypeahead,
   type EntityCandidate,
 } from "@/components/entities/entity-typeahead";
+import { DispositionBar } from "@/components/ui/disposition-bar";
 import { Kicker } from "@/components/ui/kicker";
 import { TypeDot } from "@/components/ui/type-dot";
 import {
@@ -67,6 +68,7 @@ function AddButton({ disabled }: { disabled?: boolean }) {
 
 function AddConnectionForm({
   sourceType,
+  sourceName,
   candidates,
   searchCandidates,
   onSubmit,
@@ -74,6 +76,7 @@ function AddConnectionForm({
   error,
 }: {
   sourceType: EntityTypeValue;
+  sourceName: string;
   candidates: ConnectionCandidate[];
   searchCandidates?: (query: string) => Promise<ConnectionCandidate[]>;
   onSubmit: (formData: FormData) => Promise<void>;
@@ -82,39 +85,63 @@ function AddConnectionForm({
 }) {
   const [target, setTarget] = useState<ConnectionCandidate | null>(null);
   const [type, setType] = useState<RelationshipTypeValue>("ALLY_OF");
+  // Edge direction relative to the viewed entity. "out": viewed → other (default).
+  // "in": other → viewed, so the DM can add an incoming edge (e.g. on Carl's
+  // page, "Mordecai MENTORS Carl") without leaving the page.
+  const [direction, setDirection] = useState<"out" | "in">("out");
   // Collapsed by default: show only the applicable types until the DM opts into
   // the full list, so the picker stays short and strongly steers toward sense.
   const [showAll, setShowAll] = useState(false);
 
-  // Target-first: the type picker is only meaningful once we know both ends.
+  // Target-first: the type picker is only meaningful once we know both ends. The
+  // edge's real endpoints follow `direction`, so suggestions rank from the right
+  // source/target (mirrors EditConnectionForm).
   const targetType = target?.type as EntityTypeValue | undefined;
+  const edgeSourceType = direction === "out" ? sourceType : targetType;
+  const edgeTargetType = direction === "out" ? targetType : sourceType;
   const options = useMemo(
     () =>
-      targetType
-        ? relationshipPickerOptions(sourceType, targetType)
+      edgeSourceType && edgeTargetType
+        ? relationshipPickerOptions(edgeSourceType, edgeTargetType)
         : null,
-    [sourceType, targetType],
+    [edgeSourceType, edgeTargetType],
   );
+
+  const defaultTypeFor = (dir: "out" | "in", candidate: ConnectionCandidate) => {
+    const otherType = candidate.type as EntityTypeValue;
+    return dir === "out"
+      ? defaultRelationshipType(sourceType, otherType)
+      : defaultRelationshipType(otherType, sourceType);
+  };
 
   const selectTarget = (candidate: ConnectionCandidate | null) => {
     setTarget(candidate);
     setShowAll(false);
-    if (candidate) {
-      setType(
-        defaultRelationshipType(sourceType, candidate.type as EntityTypeValue),
-      );
-    }
+    if (candidate) setType(defaultTypeFor(direction, candidate));
+  };
+
+  const flipTo = (dir: "out" | "in") => {
+    setDirection(dir);
+    setShowAll(false);
+    if (target) setType(defaultTypeFor(dir, target));
   };
 
   const unusual =
-    targetType !== undefined &&
+    edgeSourceType !== undefined &&
+    edgeTargetType !== undefined &&
     options !== null &&
     options.suggested.length > 0 &&
-    !isSuggestedRelationship(type, sourceType, targetType);
+    !isSuggestedRelationship(type, edgeSourceType, edgeTargetType);
+
+  const otherName = target?.name ?? "the other entity";
+  const previewSource = direction === "out" ? sourceName : otherName;
+  const previewTarget = direction === "out" ? otherName : sourceName;
 
   return (
     <form action={onSubmit} className="mt-3 flex flex-col gap-2">
-      {/* Step 1 — pick the target entity */}
+      {/* The viewed entity is the anchor; the action swaps endpoints when "in". */}
+      <input type="hidden" name="direction" value={direction} />
+      {/* Step 1 — pick the other entity */}
       <EntityTypeahead
         name="targetId"
         candidates={candidates}
@@ -125,10 +152,40 @@ function AddConnectionForm({
         autoFocus
       />
 
-      {/* Step 2 — pick the relationship type, ranked by the chosen pairing.
+      {/* Step 2 — direction + relationship type, ranked by the chosen pairing.
           Collapsed to suggested-only until the DM picks "Show all…". */}
       {target && options && (
         <>
+          <div
+            role="group"
+            aria-label="Relationship direction"
+            className="flex items-stretch gap-1"
+          >
+            {(["out", "in"] as const).map((dir) => {
+              const active = direction === dir;
+              const label =
+                dir === "out"
+                  ? `${sourceName} → ${otherName}`
+                  : `${otherName} → ${sourceName}`;
+              return (
+                <button
+                  key={dir}
+                  type="button"
+                  aria-pressed={active}
+                  title={dir === "out" ? "Outgoing edge" : "Incoming edge"}
+                  onClick={() => flipTo(dir)}
+                  className="min-w-0 flex-1 truncate border px-[8px] py-[6px] text-[11px] transition-colors"
+                  style={{
+                    background: active ? "var(--bg-3)" : "transparent",
+                    color: active ? "var(--ink)" : "var(--ink-dim)",
+                    borderColor: active ? "var(--accent)" : "var(--line-strong)",
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
           <select
             name="type"
             value={type}
@@ -175,6 +232,14 @@ function AddConnectionForm({
               Show suggested only
             </button>
           )}
+          {/* Live reading of the edge being built, so the direction is unambiguous. */}
+          <p className="font-mono text-[9.5px] leading-[1.5] text-[var(--ink-faint)]">
+            {previewSource}{" "}
+            <span className="text-[var(--accent)]">
+              {relationshipEdgeLabel(type, "out")}
+            </span>{" "}
+            {previewTarget}
+          </p>
           {unusual && (
             <p className="font-mono text-[9.5px] leading-[1.5] text-[var(--hot)]">
               Unusual pairing — allowed, just uncommon.
@@ -200,6 +265,15 @@ function AddConnectionForm({
               />
             </div>
           )}
+          <input
+            name="disposition"
+            type="number"
+            min={-100}
+            max={100}
+            placeholder="Disposition (−100…100)"
+            aria-label="Disposition"
+            className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[6px] text-[12px] text-[var(--ink)]"
+          />
         </>
       )}
 
@@ -367,12 +441,15 @@ export function ConnectionsPanel({
   campaignId,
   entityId,
   sourceType,
+  sourceName = "This entity",
   connections,
   candidates,
 }: {
   campaignId: string;
   entityId: string;
   sourceType: string;
+  /** Display name of the viewed entity, shown in the add-form direction toggle. */
+  sourceName?: string;
   connections: EntityConnection[];
   candidates: ConnectionCandidate[];
 }) {
@@ -484,6 +561,7 @@ export function ConnectionsPanel({
                   {dayBounds}
                 </div>
               )}
+              {c.disposition != null && <DispositionBar disposition={c.disposition} />}
             </Link>
             {!c.locked && (
               <button
@@ -568,6 +646,7 @@ export function ConnectionsPanel({
       ) : open ? (
         <AddConnectionForm
           sourceType={sourceType as EntityTypeValue}
+          sourceName={sourceName}
           candidates={candidates}
           searchCandidates={searchTargets}
           onSubmit={handleSubmit}

@@ -497,6 +497,7 @@ export default async function EntityPage({
             campaignId={id}
             entityId={entityId}
             sourceType={entity.type}
+            sourceName={entity.name}
             connections={connections}
             candidates={candidates}
           />

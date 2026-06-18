@@ -1060,6 +1060,30 @@ describe("createRelationshipAction", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
   });
 
+  it("flips endpoints for an incoming edge (other → viewed entity)", async () => {
+    createRelationship.mockResolvedValue({ id: "r1" });
+
+    const result = await createRelationshipAction(
+      "c1",
+      "e1",
+      undefined,
+      form({ type: "MENTOR_OF", targetId: "e2", direction: "in" }),
+    );
+
+    expect(result).toBeUndefined();
+    // The picked entity (e2) becomes the source; the viewed entity (e1) the target.
+    expect(createRelationship).toHaveBeenCalledWith("u1", "c1", "e2", {
+      type: "MENTOR_OF",
+      targetId: "e1",
+      disposition: undefined,
+      notes: undefined,
+      secret: false,
+    });
+    // Both endpoint pages are revalidated regardless of direction.
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/e2");
+  });
+
   it("surfaces a ServiceError message", async () => {
     createRelationship.mockRejectedValue(new ServiceError("This relationship is locked."));
 
