@@ -33,7 +33,7 @@ import { SourceBadge } from "@/components/ui/source-badge";
 import { StatusPill } from "@/components/ui/status-pill";
 import { TypeDot } from "@/components/ui/type-dot";
 import { formatEntityType } from "@/lib/entities";
-import { kindFor } from "@/lib/entity-kinds";
+import { kindFor, readKindData } from "@/lib/entity-kinds";
 import { cn } from "@/lib/utils";
 import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
@@ -143,7 +143,7 @@ export default async function EntityPage({
   const kind = kindFor(entity.type);
   const resolvedNames: Record<string, string | null> = {};
   if (kind?.referenceFields) {
-    const entityData = (entity.data as Record<string, unknown>) || {};
+    const entityData = readKindData(entity.type, entity.data);
     for (const [field, targetType] of Object.entries(kind.referenceFields)) {
       const refId = entityData[field];
       resolvedNames[`data.${field}`] =

@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { readKindData } from "@/lib/entity-kinds";
 import type { EntityDetail } from "@/server/services/entities";
 
 // Client companion to the entity-kind registry (ADR 0009): per-type bespoke
@@ -34,13 +35,12 @@ function FloorFields({ entity, getVal, isLocked }: KindFieldsProps) {
   // the one-line flavour under the header. startDay/collapseDay are the absolute
   // days-since-collapse the floor opened / collapses — anchors that let
   // FLOOR_START / FLOOR_COLLAPSE event times resolve to absolute days (ADR 0008).
-  const existingData =
-    (entity.data as {
-      floorNumber?: number | null;
-      theme?: string | null;
-      startDay?: number | null;
-      collapseDay?: number | null;
-    }) || {};
+  const existingData = readKindData("FLOOR", entity.data) as {
+    floorNumber?: number | null;
+    theme?: string | null;
+    startDay?: number | null;
+    collapseDay?: number | null;
+  };
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-[160px_minmax(0,1fr)]">
@@ -114,14 +114,13 @@ function ItemFields({ entity, itemTypes = [], getVal, isLocked }: KindFieldsProp
   // commentary / flavour text; itemTypeId links to an ITEM_TYPE entity; divine/
   // unique/fleeting are DCC item flags. The detail page composes the flags +
   // aiDescription into the read-view blockquote (see kind-display.tsx).
-  const existingData =
-    (entity.data as {
-      itemTypeId?: string | null;
-      divine?: boolean;
-      unique?: boolean;
-      fleeting?: boolean;
-      aiDescription?: string | null;
-    }) || {};
+  const existingData = readKindData("ITEM", entity.data) as {
+    itemTypeId?: string | null;
+    divine?: boolean;
+    unique?: boolean;
+    fleeting?: boolean;
+    aiDescription?: string | null;
+  };
 
   return (
     <>

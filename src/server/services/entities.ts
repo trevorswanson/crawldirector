@@ -7,7 +7,7 @@ import {
   Role,
   Visibility,
 } from "@/generated/prisma/client";
-import { dataKeysFor, kindDataDefaults } from "@/lib/entity-kinds";
+import { dataKeysFor, kindDataDefaults, readKindData } from "@/lib/entity-kinds";
 import { ServiceError } from "@/lib/errors";
 import {
   createCrawlerSchema,
@@ -586,7 +586,9 @@ export async function updateEntity(
   // blocks. Empty string / absent normalizes to the field default (booleans →
   // false, everything else → null), matching the prior `?? false` / `?? null`.
   const parsedData = parsed as Record<string, unknown>;
-  const existingDataRecord = (existing.data as Record<string, unknown>) || {};
+  // Read the existing blob through the versioned seam (ADR 0011) so the diff
+  // `from` value is the upgraded shape, not a stale stored one.
+  const existingDataRecord = readKindData(existing.type, existing.data);
   const dataDefaults = kindDataDefaults(existing.type);
   for (const key of dataKeysFor(existing.type)) {
     const raw = parsedData[key];

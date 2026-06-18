@@ -22,19 +22,45 @@ under *Deferred design options*). So is the **visibility-model simplification** 
 the full **M4 generator expansion** (scaffolding, usage/cost + spend caps, bulk
 flesh-out, async `Job` worker).
 
-**Next milestone: M5.5 — Data model hardening**
+**In progress: M5.5 — Data model hardening**
 ([11-roadmap.md](./11-roadmap.md),
 [adr/0011-entity-data-versioning-and-satellites.md](./adr/0011-entity-data-versioning-and-satellites.md))
 — a `.5` cross-cutting insertion (like M3.5) added in the 2026-06-18 roadmap
 review, scheduled **before M6** because the catalog types (M7), import (M10), and
-export (M9) are about to put real weight on `Entity.data`. It adds `data`
-schema-versioning (`schemaVersion` + reserved `data._v` + pure per-kind
-migrations + a `readKindData` validate-and-upgrade read seam replacing the lossy
-coercion), a `MIGRATE_ENTITY_DATA` job, reference-integrity checks, and the first
-satellite promotions (Faction, then Floor). Not yet decomposed into slices —
-decompose per [`12-working-sessions.md`](./12-working-sessions.md) when picking it
-up; the suggested slice breakdown is in the roadmap's M5.5 entry. **Then M6 —
-System AI persona engine** ([05-system-ai-persona.md](./05-system-ai-persona.md)).
+export (M9) are about to put real weight on `Entity.data`. Decomposed into five
+vertical slices (ADR 0011 Parts A–D); **slice 1 is done** (dated entry below):
+
+- [x] **Slice 1 — versioning foundation + `readKindData` read seam** (Part A core).
+      `schemaVersion` + pure `migrations` on `EntityKind` (load-time assertion),
+      `_v` stamped on every write, the `readKindData` validate-and-upgrade seam,
+      `HANDLED_DATA_KEYS` derived from the descriptor, all bespoke-data read sites
+      routed through the seam (service via `readFloorData` delegation; UI panels/
+      forms/detail directly), and a one-time `_v`-stamp migration. All kinds stay
+      v1 (no migration yet) — proves the seam is lossless. ✅ 2026-06-18.
+- [ ] **Slice 2 — `MIGRATE_ENTITY_DATA` job + first real version bump** (Part D).
+      The async job (reusing the `EMBED_SEARCH_DOCS` worker/dedupe pattern) eagerly
+      upgrades stale `_v` rows through an auto-approved change set; new additive
+      `ChangeSource.MIGRATION` attributed to a real account (triggering DM via
+      `Job.createdById`, else `Campaign.ownerId`); a `MIGRATE` audit row; out of the
+      review queue; idempotent. Proven by a within-`data` `schemaVersion` bump on
+      FLOOR/ITEM (rename/retype with a real `migrations[0]`). Adds the strict
+      unknown-`data`-key write policy. **Also route the two reads slice 1 left on raw
+      data — now that an upgrade actually changes values:** the review three-way-merge
+      current-value read (`currentValueForField`, `review.ts` ~L1251) and its `case
+      "data"` whole-blob read should read through `readKindData` so a stale check
+      compares the upgraded shape.
+- [ ] **Slice 3 — reference integrity** (Part B). `validateReferences` for
+      `referenceFields` (broken-ref badge), impact-aware "N entities reference this"
+      reverse-lookup before archive, optional orphan report (feeds M10's
+      consistency-check generator).
+- [ ] **Slice 4 — Faction satellite** (Part C, greenfield). A 1:1 satellite for
+      indexed `standing`/`strength`/`allegiance`/`resources`; proves the satellite
+      read/write plumbing with review/lock/provenance still uniform on `Entity`.
+- [ ] **Slice 5 — Floor satellite or indexed generated column** (Part C, the genuine
+      `data → satellite` migration). Land whichever the hot-path query shapes warrant.
+
+**Then M6 — System AI persona engine**
+([05-system-ai-persona.md](./05-system-ai-persona.md)).
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
 
@@ -226,6 +252,86 @@ below.)
 - [x] `CreateCampaignForm` has an unchecked-by-default native checkbox (`name="seedLore"`, no `value` attribute); submits `"on"` when checked.
 - [x] `createCampaignAction`: after campaign creation, if `seedLore === "on"` enqueues a `LORE_SEED` job in its own try/catch — enqueue failure never blocks the redirect.
 - [x] Tests: seeding ServiceError assertions updated; non-empty campaign guard test added; LORE_SEED handler delegation test (mocked seeding module); dm-actions tests for seedLore=on/off/enqueue-throw; form checkbox test.
+
+## M5.5 — `Entity.data` schema-versioning foundation (slice 1) ✅ (2026-06-18)
+
+**Goal:** the foundation of [`adr/0011`](./adr/0011-entity-data-versioning-and-satellites.md)
+Part A — make `Entity.data` safe to evolve before M7 multiplies the catalog types'
+bespoke fields. Establish a versioned `EntityKind` descriptor, stamp a reserved
+`data._v` on every write, and stand up the single `readKindData` validate-and-upgrade
+read seam that all bespoke-`data` reads now route through. All kinds stay
+`schemaVersion: 1` with no migrations this slice — the seam is proven **lossless**
+first; the first real version bump + the `MIGRATE_ENTITY_DATA` job land in slice 2.
+Branch: `feat/m5.5-data-versioning-foundation`.
+
+- [x] **Versioned descriptor** ([`types.ts`](../src/lib/entity-kinds/types.ts),
+      [`index.ts`](../src/lib/entity-kinds/index.ts)): `EntityKind` gains
+      `schemaVersion` (default 1) + an optional ordered `migrations: DataMigration[]`
+      (pure `data → data` upgrades, `migrations[i]`: v`i+1`→v`i+2`).
+      `assertKindInvariants` runs over the registry at module load — a bump that
+      forgot its migration (`migrations.length + 1 !== schemaVersion`) or a descriptor
+      that shadows the reserved `_v` key throws at import. FLOOR + ITEM declare
+      `schemaVersion: 1`.
+- [x] **Stamp `_v` on every write.** `buildKindData` (create path) writes
+      `_v: schemaVersion` alongside the bespoke fields; `entityUpdateData`
+      ([`review.ts`](../src/server/services/review.ts)) re-stamps it on every
+      bespoke-data update so an edited row converges to the current version. A type
+      with no kind has no versioned fields → no stamp. `_v` is reserved
+      (`RESERVED_DATA_KEY`): no descriptor may declare it, the write schema strips it
+      (it's never a declared field), and the read-view hides it.
+- [x] **`readKindData(type, raw)` seam** ([`index.ts`](../src/lib/entity-kinds/index.ts)):
+      reads the stamped `_v` (absent/legacy → 1, since all pre-versioning rows already
+      match v1), chains `applyDataMigrations` from that version to the descriptor's
+      `schemaVersion`, then returns every declared field normalized to its canonical
+      empty default with `_v`/off-schema keys dropped. Migrations run *before* the
+      per-field normalize, so a future retype/rename carries the old value across
+      explicitly — the normalize is last-resort coercion, **not** the silent
+      data-dropping read it replaces (ADR 0011's closed gap).
+- [x] **All bespoke-`data` read sites routed through the seam.** Service: the typed
+      `readFloorData` ([`floor.ts`](../src/lib/floor.ts)) now delegates to
+      `readKindData("FLOOR", …)`, so every floor consumer (campaigns/events/review/
+      event-resolve-context) upgrades through one path with byte-stable output; the
+      entities patch builder ([`entities.ts`](../src/server/services/entities.ts))
+      reads the diff `from` value through it. UI: the ITEM/FLOOR display panels +
+      additional-data fallback ([`kind-display.tsx`](../src/components/entities/kind-display.tsx)),
+      the edit-form prefill ([`kind-fields.tsx`](../src/components/entities/kind-fields.tsx)),
+      and the detail page's reference-name resolution
+      ([`page.tsx`](<../src/app/(dm)/campaigns/[id]/entities/[entityId]/page.tsx>)).
+      The search-index content builder reads only name/summary/description/tags (no
+      bespoke `data`), so it needs no change.
+- [x] **`HANDLED_DATA_KEYS` derived.** `kind-display.tsx` now computes the
+      already-rendered key set from `dataKeysFor(type)` (+ the reserved `_v`) instead
+      of a hand-maintained map, so a new descriptor field can no longer silently fall
+      through to the "additional data" fallback, and `_v` never renders as a row.
+      **Deferred to slice 2 (documented):** the review three-way-merge current-value
+      read (`currentValueForField`) + its `case "data"` whole-blob read stay on raw
+      `entity.data` — behavior-identical to the seam while no migration exists; they
+      adopt `readKindData` when the first bump makes the upgraded value differ.
+- [x] **One-time stamp migration** (`20260618120000_m5_5_stamp_entity_data_v`):
+      sets `data._v = 1` for existing FLOOR/ITEM rows that lack it. Convergence, not
+      correctness (`readKindData` already treats absent `_v` as 1) — it makes the
+      stored shape explicit so slice 2's job can find stale rows. Data-only (drift
+      gate clean); idempotent (`NOT (data ? '_v')`).
+- [x] **Tests:** pure [`entity-kinds.test.ts`](../tests/unit/entity-kinds.test.ts)
+      — `_v` stamping on build; `readKindData` canonical-shape/legacy-row/off-schema-
+      key-drop/non-object cases; `applyDataMigrations` chaining + no-op + non-object-
+      step coercion (synthetic migrations); `assertKindInvariants` accept + both throw
+      paths. DB-backed [`entities.test.ts`](../tests/unit/entities.test.ts) asserts the
+      stamp persists on create + re-stamps on update through the real pipeline.
+      [`kind-display.test.tsx`](../tests/unit/kind-display.test.tsx) asserts `_v` +
+      handled keys are hidden from the additional-data panel; [`floor.test.ts`](../tests/unit/floor.test.ts)
+      stays green (delegation is byte-stable).
+- [x] **Verification:** `npm run lint` (0 errors; pre-existing settings-action
+      warnings only), `npm run typecheck`, `npm run build` (entity routes compile, no
+      RSC-boundary break from the new `@/lib/entity-kinds` imports), `npm run db:deploy`
+      + Prisma drift check (**No difference detected**), and the full coverage gate
+      green (106 files / 1452 tests; statements 95.16%, branches 88.58%, functions
+      96.81%, lines 96.96%; `lib/entity-kinds` 96.5/92.9/100/97.3). Migration proven
+      against the reseeded `dcc` DB via psql: create-path stamps `_v=1`; stripping
+      `_v` then running the migration re-stamps (`UPDATE 1`) and a second run is a
+      no-op (`UPDATE 0`, idempotent). No new UI surface and no intended visual change
+      (the seam is behind existing entity detail/edit panels, covered by the jsdom
+      render tests), so no browser smoke this slice.
 
 ## M5 — Retrieval-fed generator context: flesh-out enrichment (slice 6, part 2) ✅ (2026-06-17)
 

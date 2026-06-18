@@ -15,6 +15,8 @@ import {
   allKindDataKeys,
   buildKindData,
   normalizeKindFieldValue,
+  RESERVED_DATA_KEY,
+  schemaVersionFor,
 } from "@/lib/entity-kinds";
 import { ServiceError } from "@/lib/errors";
 import { readFloorData } from "@/lib/floor";
@@ -2782,6 +2784,10 @@ function entityUpdateData(patch: ReviewPatch, type: EntityType, existingData?: u
         currentData[key] = normalizeKindFieldValue(key, readTo(patch, field));
       }
     }
+    // Re-stamp the schema version on every bespoke-data write (ADR 0011) so an
+    // edited row converges to the current `_v` (only kind types reach this branch,
+    // since `dataFields` are the registered kinds' keys).
+    currentData[RESERVED_DATA_KEY] = schemaVersionFor(type);
     data.data = currentData as Prisma.InputJsonValue;
   }
 

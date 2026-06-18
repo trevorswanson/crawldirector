@@ -34,6 +34,8 @@ export const itemDataSchema = z.object({
 export const ITEM_KIND: EntityKind = {
   type: "ITEM",
   dataSchema: itemDataSchema,
+  // v1: original shape. Bumping this requires a `migrations[0]` (ADR 0011).
+  schemaVersion: 1,
   // The flags persist as a concrete `false` when unchecked/absent (the rest of
   // the fields default to null).
   dataDefaults: { divine: false, unique: false, fleeting: false },
