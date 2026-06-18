@@ -14,7 +14,10 @@ import {
 import {
   allKindDataKeys,
   buildKindData,
+  migrateKindData,
   normalizeKindFieldValue,
+  RESERVED_DATA_KEY,
+  schemaVersionFor,
 } from "@/lib/entity-kinds";
 import { ServiceError } from "@/lib/errors";
 import { readFloorData } from "@/lib/floor";
@@ -2769,19 +2772,20 @@ function entityUpdateData(patch: ReviewPatch, type: EntityType, existingData?: u
 
   const dataPatch = Object.keys(patch).some((field) => dataFields.has(field));
   if (dataPatch) {
-    // Merge each touched bespoke `data.*` field onto the existing data, each
-    // value normalized by its entity-kind descriptor (ADR 0009) — replacing the
-    // per-field `if ("data.X" in patch)` ladder. Keyed by field name (not type)
-    // so it stays faithful to the prior type-agnostic update behavior.
-    const currentData = (
-      existingData && typeof existingData === "object" ? { ...existingData } : {}
-    ) as Record<string, unknown>;
+    // Migrate the existing data first (if it is stale) before merging the patch
+    // so that untouched renamed/retyped fields are correctly migrated before
+    // we advance the version stamp (ADR 0011).
+    const currentData = migrateKindData(type, existingData);
     for (const key of allKindDataKeys()) {
       const field = `data.${key}`;
       if (field in patch) {
         currentData[key] = normalizeKindFieldValue(key, readTo(patch, field));
       }
     }
+    // Re-stamp the schema version on every bespoke-data write (ADR 0011) so an
+    // edited row converges to the current `_v` (only kind types reach this branch,
+    // since `dataFields` are the registered kinds' keys).
+    currentData[RESERVED_DATA_KEY] = schemaVersionFor(type);
     data.data = currentData as Prisma.InputJsonValue;
   }
 

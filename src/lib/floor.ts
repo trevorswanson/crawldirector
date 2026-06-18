@@ -1,8 +1,10 @@
+import { readKindData } from "@/lib/entity-kinds";
+
 // FLOOR entity data shape (ADR 0005 + 0008). A FLOOR-type entity carries its
 // floor number, optional theme, and the absolute days-since-collapse it opened /
-// collapses in `Entity.data`. This reader is the single place that contract is
-// parsed, shared by the timeline projection (events.ts) and the order-derivation
-// in the review pipeline (review.ts) so the two can't drift.
+// collapses in `Entity.data`. This reader is the typed facade over the FLOOR kind,
+// shared by the timeline projection (events.ts) and the order-derivation in the
+// review pipeline (review.ts) so the two can't drift.
 
 export type FloorData = {
   floorNumber: number | null;
@@ -13,16 +15,16 @@ export type FloorData = {
   collapseDay: number | null;
 };
 
+// Delegates to the versioned `readKindData` read seam (ADR 0011) so every floor
+// consumer upgrades a stored row through the same path; the per-field coercion
+// below is a typed narrowing of `readKindData`'s already-normalized output.
 export function readFloorData(value: unknown): FloorData {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { floorNumber: null, theme: null, startDay: null, collapseDay: null };
-  }
-  const record = value as Record<string, unknown>;
+  const data = readKindData("FLOOR", value);
   return {
-    floorNumber: typeof record.floorNumber === "number" ? record.floorNumber : null,
-    theme: typeof record.theme === "string" && record.theme.length > 0 ? record.theme : null,
-    startDay: typeof record.startDay === "number" ? record.startDay : null,
-    collapseDay: typeof record.collapseDay === "number" ? record.collapseDay : null,
+    floorNumber: typeof data.floorNumber === "number" ? data.floorNumber : null,
+    theme: typeof data.theme === "string" && data.theme.length > 0 ? data.theme : null,
+    startDay: typeof data.startDay === "number" ? data.startDay : null,
+    collapseDay: typeof data.collapseDay === "number" ? data.collapseDay : null,
   };
 }
 

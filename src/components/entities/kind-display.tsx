@@ -2,6 +2,7 @@
 
 import { FieldLockToggle } from "@/components/entities/field-lock-toggle";
 import { Markdown } from "@/components/ui/markdown";
+import { dataKeysFor, readKindData, RESERVED_DATA_KEY } from "@/lib/entity-kinds";
 import { cn } from "@/lib/utils";
 import type { EntityDetail } from "@/server/services/entities";
 
@@ -40,10 +41,13 @@ type FloorData = {
   collapseDay?: number | null;
 };
 
-const HANDLED_DATA_KEYS: Record<string, Set<string>> = {
-  ITEM: new Set(["itemTypeId", "divine", "unique", "fleeting", "aiDescription"]),
-  FLOOR: new Set(["floorNumber", "theme", "startDay", "collapseDay"]),
-};
+// Which `data.*` keys a type's panel already renders, so the generic "additional
+// data" fallback shows only the rest. Derived from the entity-kind descriptor
+// (ADR 0011) — it can no longer drift from the schema as a hand-maintained map
+// did — plus the reserved `_v` version stamp, which is metadata, never displayed.
+function handledDataKeys(type: string): Set<string> {
+  return new Set([...dataKeysFor(type), RESERVED_DATA_KEY]);
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -134,7 +138,7 @@ function ItemDisplayPanel({
   entity,
   resolvedNames,
 }: KindDisplayProps) {
-  const data = (entity.data as ItemData) || {};
+  const data = readKindData("ITEM", entity.data) as ItemData;
   const isLocked = (field: string) =>
     entity.locked || entity.lockedFields.includes(field);
 
@@ -188,7 +192,7 @@ function ItemDisplayPanel({
 }
 
 function FloorDisplayPanel({ campaignId, entityId, entity }: KindDisplayProps) {
-  const data = (entity.data as FloorData) || {};
+  const data = readKindData("FLOOR", entity.data) as FloorData;
   const rows: Array<{ key: string; label: string; value: string }> = [
     {
       key: "data.floorNumber",
@@ -228,7 +232,7 @@ function AdditionalDataDisplay({
   entity,
 }: KindDisplayProps) {
   const data = isRecord(entity.data) ? entity.data : {};
-  const handled = HANDLED_DATA_KEYS[entity.type] ?? new Set<string>();
+  const handled = handledDataKeys(entity.type);
   const rows = Object.entries(data)
     .filter(([key]) => !handled.has(key))
     .map(([key, value]) => ({

@@ -1,6 +1,7 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Role } from "@/generated/prisma/client";
+import { RESERVED_DATA_KEY } from "@/lib/entity-kinds";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 import { createCrawlerSchema } from "@/lib/validation";
@@ -1185,6 +1186,8 @@ describe("entity locking", () => {
     expect(itemData["unique"]).toBe(true);
     expect(itemData["fleeting"]).toBe(false);
     expect(itemData["aiDescription"]).toBe("A legendary sword of myth.");
+    // Every bespoke-data create stamps the schema version (ADR 0011).
+    expect(itemData[RESERVED_DATA_KEY]).toBe(1);
 
     // 3. Update the custom fields via updateEntity
     await updateEntity(owner.id, campaign.id, item.id, {
@@ -1207,6 +1210,8 @@ describe("entity locking", () => {
     expect(updatedData["unique"]).toBe(true);
     expect(updatedData["fleeting"]).toBe(true);
     expect(updatedData["aiDescription"]).toBe("A rusty, fleeting sword.");
+    // A bespoke-data update re-stamps the schema version (ADR 0011).
+    expect(updatedData[RESERVED_DATA_KEY]).toBe(1);
 
     // 4. Lock data.divine and verify that it rejects updates to that field
     await setEntityLock(owner.id, campaign.id, item.id, {
@@ -1249,6 +1254,37 @@ describe("entity locking", () => {
     expect(finalItem?.name).toBe("Excalibur (Modified)");
     const finalData = (finalItem?.data as Record<string, unknown>) || {};
     expect(finalData["unique"]).toBe(false);
+  });
+
+  it("migrates existing data first when editing data fields during an update", async () => {
+    const owner = await makeUser("migrate-test@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const item = await createGenericEntity(owner.id, campaign.id, {
+      type: "ITEM",
+      name: "Dagger",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+      divine: false,
+    });
+
+    const entityKindsMod = await import("@/lib/entity-kinds");
+    const spy = vi.spyOn(entityKindsMod, "migrateKindData");
+
+    await updateEntity(owner.id, campaign.id, item.id, {
+      type: "ITEM",
+      name: "Dagger",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+      divine: true,
+    });
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
   });
 
   it("scopes bespoke data.* provenance to the type's entity-kind (ADR 0009)", async () => {

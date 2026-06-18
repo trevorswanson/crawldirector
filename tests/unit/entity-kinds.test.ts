@@ -1,16 +1,25 @@
 import { describe, expect, it } from "vitest";
 
+import { z } from "zod";
+
 import { FLOOR_KIND, floorDataSchema } from "@/lib/entity-kinds/floor";
 import { ITEM_KIND, itemDataSchema } from "@/lib/entity-kinds/item";
 import {
   allKindDataKeys,
   allKindDataShape,
+  applyDataMigrations,
+  assertKindInvariants,
   buildKindData,
   dataKeysFor,
   kindDataDefaults,
   kindFor,
+  migrateKindData,
   normalizeKindFieldValue,
+  readKindData,
+  RESERVED_DATA_KEY,
+  schemaVersionFor,
 } from "@/lib/entity-kinds";
+import type { EntityKind } from "@/lib/entity-kinds";
 
 describe("entity-kind registry (ADR 0009)", () => {
   it("resolves the FLOOR and ITEM descriptors by type", () => {
@@ -147,6 +156,7 @@ describe("entity-kind registry (ADR 0009)", () => {
         unique: false,
         fleeting: false,
         aiDescription: "Legend.",
+        [RESERVED_DATA_KEY]: 1,
       });
     });
 
@@ -159,12 +169,146 @@ describe("entity-kind registry (ADR 0009)", () => {
         theme: "Siege",
         startDay: null,
         collapseDay: null,
+        [RESERVED_DATA_KEY]: 1,
       });
       expect(data).not.toHaveProperty("divine");
     });
 
-    it("builds an empty data object for a type with no kind", () => {
+    it("builds an empty (unstamped) data object for a type with no kind", () => {
       expect(buildKindData("NPC", () => "ignored")).toEqual({});
+    });
+  });
+
+  describe("schema versioning + read seam (ADR 0011)", () => {
+    it("reports each kind's schema version (1 for a type with no kind)", () => {
+      expect(schemaVersionFor("FLOOR")).toBe(1);
+      expect(schemaVersionFor("ITEM")).toBe(1);
+      expect(schemaVersionFor("LOCATION")).toBe(1);
+    });
+
+    it("stamps the reserved _v on every write but never as a declared field", () => {
+      expect(buildKindData("ITEM", () => undefined)[RESERVED_DATA_KEY]).toBe(1);
+      expect(dataKeysFor("ITEM")).not.toContain(RESERVED_DATA_KEY);
+      expect(dataKeysFor("FLOOR")).not.toContain(RESERVED_DATA_KEY);
+      expect(allKindDataKeys()).not.toContain(RESERVED_DATA_KEY);
+    });
+
+    it("reads a stored blob back to its canonical shape, dropping _v", () => {
+      const stored = {
+        floorNumber: 9,
+        theme: "Siege",
+        startDay: 0,
+        collapseDay: 12,
+        [RESERVED_DATA_KEY]: 1,
+      };
+      expect(readKindData("FLOOR", stored)).toEqual({
+        floorNumber: 9,
+        theme: "Siege",
+        startDay: 0,
+        collapseDay: 12,
+      });
+    });
+
+    it("normalizes missing/wrong-typed fields and a legacy (unstamped) row", () => {
+      // No _v stamp (a pre-versioning row) is treated as v1; absent/wrong-typed
+      // fields fall to their canonical empty default, never throwing on read.
+      expect(readKindData("ITEM", { divine: "true", itemTypeId: 42 })).toEqual({
+        itemTypeId: null,
+        divine: false,
+        unique: false,
+        fleeting: false,
+        aiDescription: null,
+      });
+    });
+
+    it("drops stale/off-schema keys not declared by the descriptor", () => {
+      const out = readKindData("FLOOR", { floorNumber: 3, retired: "gone" });
+      expect(out).not.toHaveProperty("retired");
+      expect(out.floorNumber).toBe(3);
+    });
+
+    it("returns {} for a non-object blob or a type with no kind", () => {
+      expect(readKindData("FLOOR", null)).toEqual({
+        floorNumber: null,
+        theme: null,
+        startDay: null,
+        collapseDay: null,
+      });
+      expect(readKindData("FLOOR", [1, 2, 3])).toEqual({
+        floorNumber: null,
+        theme: null,
+        startDay: null,
+        collapseDay: null,
+      });
+      expect(readKindData("NPC", { anything: 1 })).toEqual({});
+    });
+  });
+
+  describe("migration chaining (ADR 0011)", () => {
+    const bumpX: (d: Record<string, unknown>) => Record<string, unknown> = (d) => ({
+      ...d,
+      x: ((d.x as number) ?? 0) + 1,
+    });
+
+    it("applies each step in order from the stored version up to the target", () => {
+      const result = applyDataMigrations({ x: 0 }, [bumpX, bumpX], 1, 3);
+      expect(result.x).toBe(2);
+    });
+
+    it("is a no-op when already at or above the target version", () => {
+      expect(applyDataMigrations({ x: 5 }, [bumpX], 2, 2)).toEqual({ x: 5 });
+      expect(applyDataMigrations({ x: 5 }, [bumpX], 3, 2)).toEqual({ x: 5 });
+    });
+
+    it("starts from the stored version, skipping already-applied steps", () => {
+      // from v2 → v3 of a 3-version chain applies only migrations[1].
+      const result = applyDataMigrations({ x: 9 }, [bumpX, bumpX], 2, 3);
+      expect(result.x).toBe(10);
+    });
+
+    it("coerces a step's non-object return back to a record", () => {
+      const drop = () => undefined as unknown as Record<string, unknown>;
+      expect(applyDataMigrations({ x: 1 }, [drop], 1, 2)).toEqual({});
+    });
+  });
+
+  describe("descriptor invariants (ADR 0011)", () => {
+    it("accepts a well-formed v1 descriptor", () => {
+      expect(() => assertKindInvariants(FLOOR_KIND)).not.toThrow();
+      expect(() => assertKindInvariants(ITEM_KIND)).not.toThrow();
+    });
+
+    it("rejects a version bump that forgot its migration", () => {
+      const bad: EntityKind = {
+        type: "BAD",
+        dataSchema: z.object({ a: z.string().optional() }),
+        schemaVersion: 2,
+      };
+      expect(() => assertKindInvariants(bad)).toThrow(/requires 1 migration/);
+    });
+
+    it("rejects a descriptor that shadows the reserved _v key", () => {
+      const bad: EntityKind = {
+        type: "BAD",
+        dataSchema: z.object({ [RESERVED_DATA_KEY]: z.string().optional() }),
+      };
+      expect(() => assertKindInvariants(bad)).toThrow(/reserved data key/);
+    });
+  });
+
+  describe("migrateKindData", () => {
+    it("returns a cloned object and leaves input unchanged", () => {
+      const input = { floorNumber: 5, [RESERVED_DATA_KEY]: 1 };
+      const out = migrateKindData("FLOOR", input);
+      expect(out).toEqual(input);
+      expect(out).not.toBe(input);
+    });
+
+    it("returns a copy even for NPC/unknown type with no kind", () => {
+      const input = { anything: 1 };
+      const out = migrateKindData("NPC", input);
+      expect(out).toEqual(input);
+      expect(out).not.toBe(input);
     });
   });
 });

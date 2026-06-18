@@ -120,4 +120,24 @@ describe("entity-kind display panel (ADR 0009)", () => {
     );
     expect(screen.getByText("Item Type")).toBeDefined();
   });
+
+  it("hides the reserved _v stamp + handled keys from the additional-data panel", () => {
+    render(
+      <KindDisplay
+        campaignId="c1"
+        entityId="e1"
+        entity={itemEntity({
+          divine: true,
+          _v: 1,
+          legacyNote: "ad-hoc extra",
+        })}
+      />,
+    );
+    // The genuine off-schema key surfaces in the fallback panel...
+    expect(screen.getByText("Additional data")).toBeDefined();
+    expect(screen.getByText("ad-hoc extra")).toBeDefined();
+    // ...but the version stamp never renders as a data row (no "Version"/"_v" label).
+    expect(screen.queryByText("_v")).toBeNull();
+    expect(screen.queryByText("Version")).toBeNull();
+  });
 });

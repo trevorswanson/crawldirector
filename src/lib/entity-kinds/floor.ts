@@ -23,4 +23,6 @@ export const floorDataSchema = z.object({
 export const FLOOR_KIND: EntityKind = {
   type: "FLOOR",
   dataSchema: floorDataSchema,
+  // v1: original shape. Bumping this requires a `migrations[0]` (ADR 0011).
+  schemaVersion: 1,
 };
