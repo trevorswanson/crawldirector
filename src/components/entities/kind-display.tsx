@@ -1,5 +1,7 @@
 "use client";
 
+import { AlertTriangle } from "lucide-react";
+
 import { FieldLockToggle } from "@/components/entities/field-lock-toggle";
 import { Markdown } from "@/components/ui/markdown";
 import { dataKeysFor, readKindData, RESERVED_DATA_KEY } from "@/lib/entity-kinds";
@@ -24,6 +26,14 @@ export interface KindDisplayProps {
    * page resolves these because the panel is a client component without DB access.
    */
   resolvedNames?: Record<string, string | null>;
+  /**
+   * Reference-field patch keys (e.g. `data.itemTypeId`) whose stored target is
+   * broken — missing, archived, or the wrong type (ADR 0011 Part B). The row
+   * renders a "broken reference" badge instead of the resolved name. DM-only: the
+   * page only flags references that don't resolve in the DM's full-canon scope, so
+   * a player's hidden target never masquerades as broken (invariant #5).
+   */
+  brokenReferences?: string[];
 }
 
 type ItemData = {
@@ -77,16 +87,37 @@ function formatDay(value: number | null | undefined): string {
   return typeof value === "number" ? `Day ${value}` : "—";
 }
 
+// A reference field whose stored target no longer resolves (ADR 0011 Part B).
+// Warning-colored so a DM spots the dangling soft FK; the archive impact warning
+// is the other half of the same integrity surface.
+function BrokenReferenceBadge() {
+  return (
+    <span
+      className="inline-flex items-center gap-[5px] border px-[6px] py-px font-mono text-[10px] uppercase tracking-[.06em]"
+      style={{
+        borderColor: "var(--destructive)",
+        color: "var(--destructive)",
+      }}
+      title="This reference points at an entity that is missing, archived, or the wrong type."
+    >
+      <AlertTriangle aria-hidden size={11} />
+      Broken reference
+    </span>
+  );
+}
+
 function DetailRows({
   rows,
   entity,
   campaignId,
   entityId,
+  brokenReferences,
 }: {
   rows: Array<{ key: string; label: string; value: string }>;
   entity: EntityDetail;
   campaignId: string;
   entityId: string;
+  brokenReferences?: string[];
 }) {
   const isLocked = (field: string) =>
     entity.locked || entity.lockedFields.includes(field);
@@ -104,9 +135,15 @@ function DetailRows({
           <span className="font-mono text-[10.5px] uppercase tracking-[.06em] text-[var(--ink-faint)]">
             {f.label}
           </span>
-          <span className="min-w-0 break-words text-[13.5px] text-[var(--ink)]">
-            {f.value}
-          </span>
+          {brokenReferences?.includes(f.key) ? (
+            <span className="min-w-0">
+              <BrokenReferenceBadge />
+            </span>
+          ) : (
+            <span className="min-w-0 break-words text-[13.5px] text-[var(--ink)]">
+              {f.value}
+            </span>
+          )}
           <FieldLockToggle
             campaignId={campaignId}
             entityId={entityId}
@@ -137,6 +174,7 @@ function ItemDisplayPanel({
   entityId,
   entity,
   resolvedNames,
+  brokenReferences,
 }: KindDisplayProps) {
   const data = readKindData("ITEM", entity.data) as ItemData;
   const isLocked = (field: string) =>
@@ -186,6 +224,7 @@ function ItemDisplayPanel({
         entity={entity}
         campaignId={campaignId}
         entityId={entityId}
+        brokenReferences={brokenReferences}
       />
     </>
   );

@@ -28,8 +28,8 @@ flesh-out, async `Job` worker).
 — a `.5` cross-cutting insertion (like M3.5) added in the 2026-06-18 roadmap
 review, scheduled **before M6** because the catalog types (M7), import (M10), and
 export (M9) are about to put real weight on `Entity.data`. Decomposed into five
-vertical slices (ADR 0011 Parts A–D); **slices 1–2 are done** (dated entries
-below):
+vertical slices (ADR 0011 Parts A–D); **slices 1–2 are done, plus slice 3a
+(reference-integrity badge + impact-aware archive)** (dated entries below):
 
 - [x] **Slice 1 — versioning foundation + `readKindData` read seam** (Part A core).
       `schemaVersion` + pure `migrations` on `EntityKind` (load-time assertion),
@@ -50,10 +50,17 @@ below):
       reads slice 1 left on raw data now route through `readKindData`: the review
       three-way-merge current-value read and its `case "data"` whole-blob read
       compare the upgraded shape. ✅ 2026-06-18.
-- [ ] **Slice 3 — reference integrity** (Part B). `validateReferences` for
-      `referenceFields` (broken-ref badge), impact-aware "N entities reference this"
-      reverse-lookup before archive, optional orphan report (feeds M10's
-      consistency-check generator).
+- [x] **Slice 3a — reference-integrity badge + impact-aware archive** (Part B,
+      pieces 1–2). `validateEntityReferences` resolves an entity's `referenceFields`
+      against live canon and flags broken (missing/archived/wrong-type) targets — a
+      DM-only "broken reference" badge on the detail read view (inv. #5: a player's
+      out-of-scope target never reads as broken); `countReferrers` reverse-lookup
+      surfaces "N entities reference this" with a confirm step before archive
+      (no cascade — soft FKs stay). ✅ 2026-06-18 (dated entry below).
+- [ ] **Slice 3b — orphan report** (Part B, piece 3). The optional campaign-scoped
+      scan (broken references + stale `_v`) that feeds the canon-integrity surface /
+      M10's consistency-check generator. Deferred from 3a: no consumer until M10, and
+      its DM surface is its own coherent slice (don't ship an unconsumed service).
 - [ ] **Slice 4 — Faction satellite** (Part C, greenfield). A 1:1 satellite for
       indexed `standing`/`strength`/`allegiance`/`resources`; proves the satellite
       read/write plumbing with review/lock/provenance still uniform on `Entity`.
@@ -159,6 +166,68 @@ below.)
       - **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
+
+## M5.5 — reference-integrity badge + impact-aware archive (slice 3a) ✅ (2026-06-18)
+
+**Goal:** deliver ADR 0011 Part B's first two pieces — make the bespoke `data.*`
+reference fields (today only ITEM's `itemTypeId → ITEM_TYPE`) *visibly* integral
+instead of silently orphaning. These are **soft FKs** (resolved at display time,
+never DB foreign keys — invariant #7 keeps relationships any-to-any), so the slice
+makes breakage visible and warns before a destructive archive; it does **not** add
+hard cascades. The optional orphan report (piece 3) is split off as slice 3b (no
+consumer until M10). Branch: `feat/m5.5-reference-integrity`. No schema change.
+
+- [x] **Pure classifier** ([`entity-references.ts`](../src/lib/entity-references.ts)):
+      `entityReferences(type, data)` enumerates an entity's set references through
+      the versioned `readKindData` seam (off-schema/empty/non-string values dropped);
+      `reverseReferenceFields(targetType)` lists every registry field that points at
+      a type — the reverse-lookup set for the archive blast radius. Both derive from
+      the `EntityKind` descriptor (ADR 0009), so a new reference field needs no
+      `type === "X"` branch.
+- [x] **Service** ([`references.ts`](../src/server/services/references.ts)):
+      `validateEntityReferences(userId, campaignId, entityId)` resolves each set
+      reference against live, non-archived canon **scoped to the requester's
+      visibility**, returning a `resolvedName` + `broken` flag (broken =
+      missing/archived/wrong-type). `countReferrers(...)` (DM-only) counts live
+      entities referencing the target via a Prisma JSON `path` filter — `0` for
+      players/non-members or a type nothing references.
+- [x] **Broken-reference badge** ([`kind-display.tsx`](../src/components/entities/kind-display.tsx)):
+      the read-view reference row renders a warning-colored "broken reference" badge
+      (`var(--destructive)` + icon) instead of the resolved name. The detail page
+      ([`page.tsx`](<../src/app/(dm)/campaigns/[id]/entities/[entityId]/page.tsx>))
+      now drives both the name resolution and the badge from the service (replacing
+      the prior inline candidate-list resolution) and **only flags broken refs for
+      DMs** — a player can't see DM-only targets, so a hidden target must not
+      masquerade as broken (invariant #5).
+- [x] **Impact-aware archive** ([`entity-forms.tsx`](../src/components/entities/entity-forms.tsx)):
+      `ArchiveEntityForm` takes the `referrerCount`; with referrers it shows
+      "N entit(y/ies) reference(s) this" up front and requires a confirm
+      ("…their references will break — archiving does not delete the referrers.
+      Archive anyway?") before submitting. With no referrers it stays the original
+      single-click archive.
+- [x] **Tests:** pure
+      [`entity-references.test.ts`](../tests/unit/entity-references.test.ts)
+      (set/empty/null/non-string refs; reverse lookup); DB-backed
+      [`references.test.ts`](../tests/unit/references.test.ts) against real Postgres
+      (valid/missing/archived/wrong-type → broken; no-ref-field/non-member/missing →
+      `[]`; **player visibility scope** — a DM-only target reads broken for a player,
+      proving why the page gates the badge to DMs; `countReferrers` count, archived
+      exclusion, DM-only `0`, JSON-path filter). UI:
+      [`kind-display.test.tsx`](../tests/unit/kind-display.test.tsx) (badge shown/
+      hidden), [`entity-forms.test.tsx`](../tests/unit/entity-forms.test.tsx)
+      (single-click vs. confirm flow, singular/plural), and
+      [`entity-page.test.tsx`](../tests/unit/entity-page.test.tsx) (service wiring,
+      referrer count passthrough, no player badge).
+- [x] **Verification:** `npm run test -- tests/unit/entity-references.test.ts
+      tests/unit/references.test.ts tests/unit/kind-display.test.tsx
+      tests/unit/entity-forms.test.tsx tests/unit/entity-page.test.tsx`,
+      `npm run lint` (0 errors; pre-existing settings-action warnings only),
+      `npm run typecheck`, `npm run build`, and the full coverage gate green (109
+      files / 1497 tests; statements 95.1%, branches 88.51%, functions 96.88%, lines
+      96.89%). **In-browser** (reseeded `dcc`, authed as `dm@example.com`): an ITEM
+      with a dangling `itemTypeId` shows the red broken-reference badge on its detail
+      view; the referenced ITEM_TYPE shows "1 entity references this." and the Archive
+      button opens the confirm step ("…Archive anyway?"), with no console errors.
 
 ## M5.5 — `MIGRATE_ENTITY_DATA` job + first real data bump (slice 2) ✅ (2026-06-18)
 

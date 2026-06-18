@@ -33,7 +33,7 @@ import { SourceBadge } from "@/components/ui/source-badge";
 import { StatusPill } from "@/components/ui/status-pill";
 import { TypeDot } from "@/components/ui/type-dot";
 import { formatEntityType } from "@/lib/entities";
-import { kindFor, readKindData } from "@/lib/entity-kinds";
+import { kindFor } from "@/lib/entity-kinds";
 import { cn } from "@/lib/utils";
 import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
@@ -52,6 +52,11 @@ import {
 } from "@/server/services/knowledge";
 import { getEntityProvenance } from "@/server/services/review";
 import { listAiKeys } from "@/server/services/ai-keys";
+import {
+  countReferrers,
+  validateEntityReferences,
+  type ReferenceCheck,
+} from "@/server/services/references";
 
 export default async function EntityPage({
   params,
@@ -74,6 +79,11 @@ export default async function EntityPage({
   if (!campaign || !entity) notFound();
 
   const isGroup = isGroupEntityType(entity.type);
+  // Bespoke per-type read-view display + reference integrity come from the
+  // entity-kind registry (ADR 0009/0011). Only types that declare reference
+  // fields need the integrity reads — gate them so a plain NPC page skips the work.
+  const kind = kindFor(entity.type);
+  const hasReferenceFields = Boolean(kind?.referenceFields);
   const [
     provenance,
     connections,
@@ -84,6 +94,8 @@ export default async function EntityPage({
     knownTo,
     knowsAbout,
     aiKeys,
+    referenceChecks,
+    referrerCount,
   ] = await Promise.all([
     getEntityProvenance(user.id, id, entityId),
     listConnectionsForEntity(user.id, id, entityId),
@@ -105,6 +117,13 @@ export default async function EntityPage({
     // Gate the AI generation panel on a configured provider key (DM-only read;
     // returns [] for players). AI is additive — no key, no panel.
     listAiKeys(user.id, id),
+    // Reference integrity (ADR 0011 Part B): resolve this entity's reference
+    // fields (broken-ref badge) and count entities that reference it back
+    // (impact-aware archive). Both are scoped/DM-aware inside the service.
+    hasReferenceFields
+      ? validateEntityReferences(user.id, id, entityId)
+      : Promise.resolve<ReferenceCheck[]>([]),
+    countReferrers(user.id, id, entityId),
   ]);
   const aiConfigured = aiKeys.length > 0;
   const candidates: ConnectionCandidate[] = candidateList.entities
@@ -138,19 +157,15 @@ export default async function EntityPage({
   // Bespoke per-type read-view display comes from the entity-kind registry
   // (ADR 0009) instead of inline `type === "ITEM"` branches. The panel is a
   // client component, so the page resolves any reference fields the descriptor
-  // declares (ITEM's `itemTypeId` → its ITEM_TYPE entity name) to display
-  // strings here.
-  const kind = kindFor(entity.type);
+  // declares (ITEM's `itemTypeId` → its ITEM_TYPE entity name) to display strings
+  // and flags broken references here via the integrity service (ADR 0011 Part B).
   const resolvedNames: Record<string, string | null> = {};
-  if (kind?.referenceFields) {
-    const entityData = readKindData(entity.type, entity.data);
-    for (const [field, targetType] of Object.entries(kind.referenceFields)) {
-      const refId = entityData[field];
-      resolvedNames[`data.${field}`] =
-        candidateList.entities.find(
-          (e) => e.id === refId && e.type === targetType,
-        )?.name ?? null;
-    }
+  const brokenReferences: string[] = [];
+  for (const check of referenceChecks) {
+    resolvedNames[check.patchKey] = check.resolvedName;
+    // Only surface the badge to DMs: a player can't see DM-only targets, so a
+    // hidden (out-of-scope) reference would otherwise read as broken (inv. #5).
+    if (check.broken && isDm) brokenReferences.push(check.patchKey);
   }
 
   return (
@@ -218,6 +233,7 @@ export default async function EntityPage({
               entityId={entityId}
               entity={entity}
               resolvedNames={resolvedNames}
+              brokenReferences={brokenReferences}
             />
           )}
 
@@ -576,7 +592,11 @@ export default async function EntityPage({
           </p>
 
           <div className="mt-4 border-t border-[var(--line)] pt-4">
-            <ArchiveEntityForm campaignId={id} entityId={entity.id} />
+            <ArchiveEntityForm
+              campaignId={id}
+              entityId={entity.id}
+              referrerCount={referrerCount}
+            />
           </div>
         </div>
       </aside>

@@ -618,16 +618,63 @@ export function QuickCreateStub({ campaignId }: { campaignId: string }) {
 export function ArchiveEntityForm({
   campaignId,
   entityId,
+  referrerCount = 0,
 }: {
   campaignId: string;
   entityId: string;
+  /**
+   * How many live entities reference this one via a bespoke `data.*` reference
+   * field (ADR 0011 Part B). When > 0, archiving asks for confirmation first and
+   * warns that those soft references will dangle — archiving never cascades.
+   */
+  referrerCount?: number;
 }) {
+  const [confirming, setConfirming] = useState(false);
+  const action = archiveEntityAction.bind(null, campaignId, entityId);
+
+  // No referrers → the original single-click archive.
+  if (referrerCount === 0) {
+    return (
+      <form action={action}>
+        <Button type="submit" variant="outline">
+          <Archive aria-hidden size={16} />
+          Archive
+        </Button>
+      </form>
+    );
+  }
+
+  const noun = referrerCount === 1 ? "entity references" : "entities reference";
+  const subject = referrerCount === 1 ? "Its reference" : "Their references";
+
   return (
-    <form action={archiveEntityAction.bind(null, campaignId, entityId)}>
-      <Button type="submit" variant="outline">
-        <Archive aria-hidden size={16} />
-        Archive
-      </Button>
+    <form action={action}>
+      {confirming ? (
+        <div className="flex flex-col gap-2">
+          <p role="alert" className="text-[11px] leading-[1.5] text-[var(--destructive)]">
+            {referrerCount} {noun} this. {subject} will break — archiving does not
+            delete the referrers. Archive anyway?
+          </p>
+          <div className="flex gap-2">
+            <SubmitButton icon={<Archive aria-hidden size={16} />} variant="destructive">
+              Archive anyway
+            </SubmitButton>
+            <Button type="button" variant="outline" onClick={() => setConfirming(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <p className="text-[11px] leading-[1.5] text-[var(--ink-faint)]">
+            {referrerCount} {noun} this.
+          </p>
+          <Button type="button" variant="outline" onClick={() => setConfirming(true)}>
+            <Archive aria-hidden size={16} />
+            Archive
+          </Button>
+        </div>
+      )}
     </form>
   );
 }

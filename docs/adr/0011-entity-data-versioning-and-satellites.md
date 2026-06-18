@@ -3,7 +3,9 @@
 - **Status:** accepted — **M5.5 in progress.** Part A's versioning foundation +
   `readKindData` read seam shipped as slice 1 (2026-06-18); the
   `MIGRATE_ENTITY_DATA` job + first real FLOOR v2 data bump shipped as slice 2
-  (2026-06-18). Reference integrity (Part B) and satellites (Part C) remain.
+  (2026-06-18); Part B's reference-integrity badge + impact-aware archive shipped as
+  slice 3a (2026-06-18). The Part B orphan report (slice 3b — deferred until M10
+  consumes it) and the satellites (Part C) remain.
   Decomposes into the slices tracked in [`11-roadmap.md`](../11-roadmap.md) (M5.5)
   and [`PROGRESS.md`](../PROGRESS.md). This ADR **extends [ADR 0009](./0009-entity-kind-registry.md)**:
   0009 consolidated each type's bespoke fields into a per-type descriptor but
