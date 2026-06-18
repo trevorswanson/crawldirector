@@ -13,7 +13,39 @@ RUN DATABASE_URL=postgresql://x:x@localhost/x npm ci
 COPY . .
 RUN npm run build
 
+# ─── Worker ───────────────────────────────────────────────────────────────────
+# The async job worker (scripts/worker.ts) can't run from the standalone runner —
+# that bundle ships only `server.js`, not scripts/ or src/. It gets its own lean
+# stage instead of reusing the fat `builder`: production deps only (no vitest /
+# playwright / eslint), plus the source it executes and `tsx` (a runtime dep) to
+# run it. The app, not the worker, owns migrations, so there is no entrypoint
+# here — just run the worker loop. Built only via `--target worker`.
+#
+# Keep this stage BEFORE `runner`: the last stage is Docker's default target, so
+# a plain `docker build .` (and `build: .` for the app service) must resolve to
+# the runner, not the worker.
+FROM node:26-alpine AS worker
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+COPY package*.json ./
+COPY prisma ./prisma
+COPY prisma.config.ts ./prisma.config.ts
+# postinstall runs `prisma generate` into src/generated/prisma (throwaway URL —
+# generate never connects). src/ is copied afterwards and .dockerignore excludes
+# src/generated/prisma, so the generated client survives the copy.
+RUN DATABASE_URL=postgresql://x:x@localhost/x npm ci --omit=dev
+
+COPY tsconfig.json ./tsconfig.json
+COPY src ./src
+COPY scripts ./scripts
+
+CMD ["npm", "run", "worker"]
+
 # ─── Runner ───────────────────────────────────────────────────────────────────
+# Default (last) stage: the lean app image. `docker build .` / `build: .` resolve
+# here, so the app service keeps working without an explicit target.
 FROM node:26-alpine AS runner
 WORKDIR /app
 
@@ -38,29 +70,3 @@ RUN chmod +x docker-entrypoint.sh
 
 EXPOSE 3000
 ENTRYPOINT ["./docker-entrypoint.sh"]
-
-# ─── Worker ───────────────────────────────────────────────────────────────────
-# The async job worker (scripts/worker.ts) can't run from the standalone runner —
-# that bundle ships only `server.js`, not scripts/ or src/. It gets its own lean
-# stage instead of reusing the fat `builder`: production deps only (no vitest /
-# playwright / eslint), plus the source it executes and `tsx` (a runtime dep) to
-# run it. The app, not the worker, owns migrations, so there is no entrypoint
-# here — just run the worker loop.
-FROM node:26-alpine AS worker
-WORKDIR /app
-
-ENV NODE_ENV=production
-
-COPY package*.json ./
-COPY prisma ./prisma
-COPY prisma.config.ts ./prisma.config.ts
-# postinstall runs `prisma generate` into src/generated/prisma (throwaway URL —
-# generate never connects). src/ is copied afterwards and .dockerignore excludes
-# src/generated/prisma, so the generated client survives the copy.
-RUN DATABASE_URL=postgresql://x:x@localhost/x npm ci --omit=dev
-
-COPY tsconfig.json ./tsconfig.json
-COPY src ./src
-COPY scripts ./scripts
-
-CMD ["npm", "run", "worker"]
