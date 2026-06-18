@@ -244,6 +244,18 @@ Floor slice). Branch: `feat/m5.5-faction-satellite`. Schema change (new table on
       satellite, and changing **standing 42 → 88** through the form persisted to the
       satellite (blob still `{_v:1}`) with a second `data.standing` provenance row —
       proving the review/provenance path is uniform on the satellite-backed field.
+- [x] **Review fixes (Codex on PR #159).** Hardened the **migration path** against
+      satellite types so a *future* FACTION `schemaVersion` bump can't wipe stored
+      values: `migrateEntityData` ([`entity-data-migration.ts`](../src/server/services/entity-data-migration.ts))
+      now loads the `faction` satellite and passes it to `readKindData`, so the
+      upgrade reads the real stored values instead of JSON-blob nulls; and
+      `entityUpdateData` re-stamps `_v` on a **satellite-only** write so a
+      pure-satellite kind's row converges to the current version after a migration
+      (no perpetual re-migration). Regression test: a stale FACTION (blob one version
+      behind, satellite populated) migrates with its `standing`/`strength`/
+      `allegiance`/`resources` intact, the blob converges to `_v`, and a re-run is a
+      no-op. Final coverage gate green (109 files / 1518 tests; statements 95.15%,
+      branches 88.63%, functions 96.89%, lines 96.91%).
 
 ## M5.5 — reference-integrity badge + impact-aware archive (slice 3a) ✅ (2026-06-18)
 
