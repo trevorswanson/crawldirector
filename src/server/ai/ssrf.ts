@@ -193,6 +193,11 @@ export function guardedLookup(
 }
 
 const guardedAgent = new Agent({
+  // undici v8 negotiates HTTP/2 by default when a TLS server offers it via ALPN.
+  // This egress path was HTTP/1.1-only under v7, and self-hosted provider
+  // endpoints (Ollama, LM Studio, vLLM) don't all speak H2 cleanly, so pin it to
+  // keep the request behavior identical to before the v8 bump.
+  allowH2: false,
   connect: { lookup: guardedLookup as never },
 });
 
