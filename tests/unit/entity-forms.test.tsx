@@ -495,6 +495,40 @@ describe("entity forms", () => {
     expect(screen.getByLabelText("Strength").getAttribute("readonly")).toBeNull();
   });
 
+  it("renders a fully-locked FACTION with empty satellite values as hidden inputs", () => {
+    // No satellite row (null) exercises the empty-value fallbacks, and locking
+    // every field renders the hidden mirror inputs for each one.
+    const lockedEmptyFaction: EntityDetail = {
+      ...factionEntity,
+      faction: null,
+      lockedFields: [
+        "data.standing",
+        "data.strength",
+        "data.allegiance",
+        "data.resources",
+      ],
+    };
+    render(
+      <EditFormProvider>
+        <EditEntityForm campaignId="c1" entity={lockedEmptyFaction} />
+      </EditFormProvider>,
+    );
+
+    for (const label of ["Standing", "Strength", "Allegiance", "Resources"]) {
+      const input = screen.getByLabelText(label) as HTMLInputElement;
+      expect(input.getAttribute("readonly")).not.toBeNull();
+      expect(input.value).toBe("");
+    }
+    // Each locked field also renders a hidden mirror input carrying its value.
+    for (const name of ["standing", "strength", "allegiance", "resources"]) {
+      const hidden = document.querySelector(
+        `input[type="hidden"][name="${name}"]`,
+      ) as HTMLInputElement | null;
+      expect(hidden).not.toBeNull();
+      expect(hidden?.value).toBe("");
+    }
+  });
+
   it("renders EditRailControls properly inside provider", () => {
     render(
       <EditFormProvider>
