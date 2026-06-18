@@ -57,4 +57,20 @@ export interface EntityKind {
    * `type === "X"` branch. Keyed by the bare field name (not the `data.` prefix).
    */
   readonly referenceFields?: Readonly<Record<string, string>>;
+  /**
+   * Satellite-table promotion (ADR 0011 Part C). Some `dataSchema` fields are
+   * physically stored in a 1:1 satellite table (keyed by `Entity.id`, the
+   * `Crawler` precedent) rather than the `Entity.data` JSON blob — so they can be
+   * indexed and aggregated at scale. They stay **canonical, reviewable, lockable**
+   * fields addressed by the same `data.<field>` review-patch key (ADR 0009); only
+   * their storage moves. The write path routes these fields to the satellite and
+   * keeps them out of `Entity.data`; the read seam (`readKindData`) merges the
+   * satellite row back over the blob. `fields` lists the satellite-backed keys
+   * (must be a subset of `dataSchema`'s keys); `relation` is the Prisma relation
+   * accessor on `Entity` (e.g. `"faction"`), recorded for documentation/clarity.
+   */
+  readonly satellite?: {
+    readonly relation: string;
+    readonly fields: readonly string[];
+  };
 }

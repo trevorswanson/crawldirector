@@ -83,6 +83,16 @@ const entityDetailSelect = {
       currentFloor: true,
     },
   },
+  // FACTION satellite (ADR 0011 Part C): the detail/edit views read these
+  // through `readKindData(type, data, faction)` like any bespoke `data.*` field.
+  faction: {
+    select: {
+      standing: true,
+      strength: true,
+      allegiance: true,
+      resources: true,
+    },
+  },
 } as const;
 
 export type EntityListItem = Awaited<
@@ -555,6 +565,16 @@ export async function updateEntity(
           currentFloor: true,
         },
       },
+      // FACTION satellite (ADR 0011 Part C): needed so the diff `from` value of a
+      // satellite-backed `data.*` field is the real stored value, not a JSON null.
+      faction: {
+        select: {
+          standing: true,
+          strength: true,
+          allegiance: true,
+          resources: true,
+        },
+      },
     },
   });
 
@@ -587,8 +607,14 @@ export async function updateEntity(
   // false, everything else → null), matching the prior `?? false` / `?? null`.
   const parsedData = parsed as Record<string, unknown>;
   // Read the existing blob through the versioned seam (ADR 0011) so the diff
-  // `from` value is the upgraded shape, not a stale stored one.
-  const existingDataRecord = readKindData(existing.type, existing.data);
+  // `from` value is the upgraded shape, not a stale stored one. The satellite row
+  // (FACTION) is merged in so satellite-backed `data.*` fields diff against their
+  // real stored value, not a JSON null (ADR 0011 Part C).
+  const existingDataRecord = readKindData(
+    existing.type,
+    existing.data,
+    existing.faction,
+  );
   const dataDefaults = kindDataDefaults(existing.type);
   for (const key of dataKeysFor(existing.type)) {
     const raw = parsedData[key];

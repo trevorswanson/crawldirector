@@ -316,6 +316,7 @@ model Entity {
   // Campaigns pointing at this entity as their current floor (FLOOR entities).
   currentFloorOf Campaign[]         @relation("CampaignCurrentFloor")
   crawler        Crawler?
+  faction        Faction?
   outEdges       Relationship[]     @relation("SourceEntity")
   inEdges        Relationship[]     @relation("TargetEntity")
   eventRoles     EventParticipant[]
@@ -346,6 +347,27 @@ model Crawler {
   killCount     Int     @default(0)
   isAlive       Boolean @default(true)
   currentFloor  Int?
+}
+
+// FACTION satellite (docs/adr/0011 Part C). A 1:1 table keyed by Entity.id, the
+// same pattern as Crawler, holding the FACTION-kind bespoke fields that M9/M12
+// must filter/sort/aggregate at scale (standing/strength are indexed for the
+// faction-power rollups). Unlike Crawler — which predates the entity-kind
+// registry — Faction's fields ARE registry-declared (src/lib/entity-kinds/
+// faction.ts) and addressed by the same reviewable/lockable `data.<field>` patch
+// keys; the satellite is only their physical home, so review/lock/provenance stay
+// uniform on Entity. Greenfield: these are new fields, no `data → satellite`
+// migration (that is the later Floor slice).
+model Faction {
+  id         String  @id
+  entity     Entity  @relation(fields: [id], references: [id], onDelete: Cascade)
+  standing   Int?
+  strength   Int?
+  allegiance String?
+  resources  String?
+
+  @@index([standing])
+  @@index([strength])
 }
 
 // ───────────── Relationships (typed, any-to-any edges) ─────────────

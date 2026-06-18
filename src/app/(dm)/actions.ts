@@ -155,6 +155,10 @@ export async function createGenericEntityAction(
     theme: formData.get("theme"),
     startDay: formData.get("startDay"),
     collapseDay: formData.get("collapseDay"),
+    standing: formData.get("standing"),
+    strength: formData.get("strength"),
+    allegiance: formData.get("allegiance"),
+    resources: formData.get("resources"),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -333,6 +337,10 @@ export async function updateEntityAction(
     theme: formData.get("theme")?.toString() ?? "",
     startDay: formData.get("startDay") ? Number(formData.get("startDay")) : undefined,
     collapseDay: formData.get("collapseDay") ? Number(formData.get("collapseDay")) : undefined,
+    standing: formData.get("standing") ? Number(formData.get("standing")) : undefined,
+    strength: formData.get("strength") ? Number(formData.get("strength")) : undefined,
+    allegiance: formData.get("allegiance")?.toString() ?? "",
+    resources: formData.get("resources")?.toString() ?? "",
   };
 
   const parsed = updateEntitySchema.safeParse({
@@ -363,6 +371,10 @@ export async function updateEntityAction(
     theme: formData.get("theme"),
     startDay: formData.get("startDay"),
     collapseDay: formData.get("collapseDay"),
+    standing: formData.get("standing"),
+    strength: formData.get("strength"),
+    allegiance: formData.get("allegiance"),
+    resources: formData.get("resources"),
   });
   if (!parsed.success) {
     return {

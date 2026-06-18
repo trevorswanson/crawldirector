@@ -107,6 +107,7 @@ const crawlerEntity: EntityDetail = {
     isAlive: true,
     currentFloor: 1,
   },
+  faction: null,
 };
 
 const genericEntity: EntityDetail = {
@@ -385,6 +386,7 @@ describe("entity forms", () => {
     createdAt: new Date(),
     updatedAt: new Date(),
     crawler: null,
+    faction: null,
     data: {
       itemTypeId: "it1",
       divine: true,
@@ -443,6 +445,88 @@ describe("entity forms", () => {
     expect(screen.getByLabelText("Unique").getAttribute("disabled")).not.toBeNull();
     expect(screen.getByLabelText("Fleeting").getAttribute("disabled")).not.toBeNull();
     expect(screen.getByLabelText("AI Description").getAttribute("readonly")).not.toBeNull();
+  });
+
+  const factionEntity: EntityDetail = {
+    ...itemEntity,
+    id: "e4",
+    type: "FACTION",
+    name: "The Vanguard",
+    data: { _v: 1 },
+    crawler: null,
+    faction: {
+      standing: 42,
+      strength: 7,
+      allegiance: "The System",
+      resources: "Three legions.",
+    },
+  };
+
+  it("renders FACTION fields prefilled from the satellite (ADR 0011 Part C)", () => {
+    render(
+      <EditFormProvider>
+        <EditEntityForm campaignId="c1" entity={factionEntity} />
+      </EditFormProvider>,
+    );
+
+    expect((screen.getByLabelText("Standing") as HTMLInputElement).value).toBe("42");
+    expect((screen.getByLabelText("Strength") as HTMLInputElement).value).toBe("7");
+    expect(
+      (screen.getByLabelText("Allegiance") as HTMLInputElement).value,
+    ).toBe("The System");
+    expect(
+      (screen.getByLabelText("Resources") as HTMLTextAreaElement).value,
+    ).toBe("Three legions.");
+  });
+
+  it("makes locked FACTION satellite fields read-only", () => {
+    const lockedFaction: EntityDetail = {
+      ...factionEntity,
+      lockedFields: ["data.standing", "data.resources"],
+    };
+    render(
+      <EditFormProvider>
+        <EditEntityForm campaignId="c1" entity={lockedFaction} />
+      </EditFormProvider>,
+    );
+
+    expect(screen.getByLabelText("Standing").getAttribute("readonly")).not.toBeNull();
+    expect(screen.getByLabelText("Resources").getAttribute("readonly")).not.toBeNull();
+    expect(screen.getByLabelText("Strength").getAttribute("readonly")).toBeNull();
+  });
+
+  it("renders a fully-locked FACTION with empty satellite values as hidden inputs", () => {
+    // No satellite row (null) exercises the empty-value fallbacks, and locking
+    // every field renders the hidden mirror inputs for each one.
+    const lockedEmptyFaction: EntityDetail = {
+      ...factionEntity,
+      faction: null,
+      lockedFields: [
+        "data.standing",
+        "data.strength",
+        "data.allegiance",
+        "data.resources",
+      ],
+    };
+    render(
+      <EditFormProvider>
+        <EditEntityForm campaignId="c1" entity={lockedEmptyFaction} />
+      </EditFormProvider>,
+    );
+
+    for (const label of ["Standing", "Strength", "Allegiance", "Resources"]) {
+      const input = screen.getByLabelText(label) as HTMLInputElement;
+      expect(input.getAttribute("readonly")).not.toBeNull();
+      expect(input.value).toBe("");
+    }
+    // Each locked field also renders a hidden mirror input carrying its value.
+    for (const name of ["standing", "strength", "allegiance", "resources"]) {
+      const hidden = document.querySelector(
+        `input[type="hidden"][name="${name}"]`,
+      ) as HTMLInputElement | null;
+      expect(hidden).not.toBeNull();
+      expect(hidden?.value).toBe("");
+    }
   });
 
   it("renders EditRailControls properly inside provider", () => {

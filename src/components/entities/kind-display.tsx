@@ -265,6 +265,51 @@ function FloorDisplayPanel({ campaignId, entityId, entity }: KindDisplayProps) {
   );
 }
 
+type FactionData = {
+  standing?: number | null;
+  strength?: number | null;
+  allegiance?: string | null;
+  resources?: string | null;
+};
+
+function FactionDisplayPanel({ campaignId, entityId, entity }: KindDisplayProps) {
+  // FACTION bespoke fields live in the 1:1 satellite (ADR 0011 Part C), merged
+  // back in by readKindData(type, data, faction). standing/strength are indexed
+  // power metrics; allegiance/resources are descriptive.
+  const data = readKindData("FACTION", entity.data, entity.faction) as FactionData;
+  const rows: Array<{ key: string; label: string; value: string }> = [
+    {
+      key: "data.standing",
+      label: "Standing",
+      value: formatDataValue(data.standing),
+    },
+    {
+      key: "data.strength",
+      label: "Strength",
+      value: formatDataValue(data.strength),
+    },
+    {
+      key: "data.allegiance",
+      label: "Allegiance",
+      value: formatDataValue(data.allegiance),
+    },
+    {
+      key: "data.resources",
+      label: "Resources",
+      value: formatDataValue(data.resources),
+    },
+  ];
+
+  return (
+    <DetailRows
+      rows={rows}
+      entity={entity}
+      campaignId={campaignId}
+      entityId={entityId}
+    />
+  );
+}
+
 function AdditionalDataDisplay({
   campaignId,
   entityId,
@@ -300,6 +345,7 @@ function AdditionalDataDisplay({
 const KIND_DISPLAY: Record<string, (props: KindDisplayProps) => React.ReactNode> = {
   ITEM: ItemDisplayPanel,
   FLOOR: FloorDisplayPanel,
+  FACTION: FactionDisplayPanel,
 };
 
 /**

@@ -28,8 +28,10 @@ flesh-out, async `Job` worker).
 — a `.5` cross-cutting insertion (like M3.5) added in the 2026-06-18 roadmap
 review, scheduled **before M6** because the catalog types (M7), import (M10), and
 export (M9) are about to put real weight on `Entity.data`. Decomposed into five
-vertical slices (ADR 0011 Parts A–D); **slices 1–2 are done, plus slice 3a
-(reference-integrity badge + impact-aware archive)** (dated entries below):
+vertical slices (ADR 0011 Parts A–D); **slices 1–2, 3a (reference-integrity
+badge + impact-aware archive), and 4 (Faction satellite) are done** (dated entries
+below). Only slice 3b (orphan report, deferred until M10 consumes it) and slice 5
+(Floor satellite / generated column) remain:
 
 - [x] **Slice 1 — versioning foundation + `readKindData` read seam** (Part A core).
       `schemaVersion` + pure `migrations` on `EntityKind` (load-time assertion),
@@ -61,9 +63,10 @@ vertical slices (ADR 0011 Parts A–D); **slices 1–2 are done, plus slice 3a
       scan (broken references + stale `_v`) that feeds the canon-integrity surface /
       M10's consistency-check generator. Deferred from 3a: no consumer until M10, and
       its DM surface is its own coherent slice (don't ship an unconsumed service).
-- [ ] **Slice 4 — Faction satellite** (Part C, greenfield). A 1:1 satellite for
+- [x] **Slice 4 — Faction satellite** (Part C, greenfield). A 1:1 satellite for
       indexed `standing`/`strength`/`allegiance`/`resources`; proves the satellite
       read/write plumbing with review/lock/provenance still uniform on `Entity`.
+      ✅ 2026-06-18 (dated entry below).
 - [ ] **Slice 5 — Floor satellite or indexed generated column** (Part C, the genuine
       `data → satellite` migration). Land whichever the hot-path query shapes warrant.
 
@@ -166,6 +169,93 @@ below.)
       - **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
+
+## M5.5 — Faction satellite (slice 4) ✅ (2026-06-18)
+
+**Goal:** deliver ADR 0011 Part C's greenfield satellite — promote the FACTION
+type's bespoke fields to a 1:1 `Faction` table (the `Crawler` precedent) so M9
+faction queries and M12 faction-power rollups can index/sort/aggregate
+`standing`/`strength`, while review/lock/provenance stay **uniform on `Entity`**.
+Greenfield: FACTION had no `data.*` fields, so these are new columns written
+straight to the satellite — no `data → satellite` migration (that's the later
+Floor slice). Branch: `feat/m5.5-faction-satellite`. Schema change (new table only).
+
+- [x] **Schema** ([`schema.prisma`](../prisma/schema.prisma)): a 1:1 `Faction`
+      table keyed by `Entity.id` (`onDelete: Cascade`) with `standing`/`strength`
+      (`Int?`, each `@@index`ed for M9/M12) + `allegiance`/`resources` (`String?`),
+      and `Entity.faction Faction?`. Migration `20260618203023_m5_5_faction_satellite`
+      (additive table only; drift gate clean).
+- [x] **Descriptor + satellite marker** ([`entity-kinds/faction.ts`](../src/lib/entity-kinds/faction.ts),
+      [`types.ts`](../src/lib/entity-kinds/types.ts)): `FACTION_KIND` declares the
+      four fields in its `dataSchema` (so ADR 0009 derivation — validation, the
+      `data.<field>` reviewable/lockable patch keys, the form/display — all apply
+      uniformly) plus a new `EntityKind.satellite { relation, fields }` marker that
+      redirects only their **storage**. `assertKindInvariants` now also rejects a
+      satellite field not in `dataSchema`.
+- [x] **Registry storage redirection** ([`entity-kinds/index.ts`](../src/lib/entity-kinds/index.ts)):
+      `satelliteFieldsFor`/`allSatelliteDataKeys` helpers; `buildKindData` keeps
+      satellite fields **out** of the `Entity.data` JSON blob (a created FACTION's
+      blob is just `{_v:1}`); `readKindData(type, raw, satellite?)` gains an optional
+      satellite row it **merges over the blob** before migrate/normalize, so the read
+      seam returns the canonical values from their physical home. FLOOR/ITEM callers
+      pass no satellite and are byte-stable.
+- [x] **Review apply path** ([`review.ts`](../src/server/services/review.ts)): create
+      writes the `Faction` row from the `data.*` patch (`factionSatelliteData`);
+      update routes patched satellite fields to a **`faction.upsert`** (so a FACTION
+      created before the satellite gains its row on first edit) and excludes them from
+      the JSON-blob merge; `currentEntityValue` includes `faction` and merges it so the
+      Review Queue's current-value (and three-way merge) reads the satellite, not a
+      stale JSON null. Lock/provenance are unchanged — `data.standing` etc. record
+      provenance and honor field locks exactly like any bespoke field.
+- [x] **Service + UI reads** ([`entities.ts`](../src/server/services/entities.ts),
+      [`kind-fields.tsx`](../src/components/entities/kind-fields.tsx),
+      [`kind-display.tsx`](../src/components/entities/kind-display.tsx),
+      [`actions.ts`](<../src/app/(dm)/actions.ts>)): `entityDetailSelect` + the
+      update-diff select include `faction`; the diff reads it through `readKindData` so
+      an unchanged field produces **no spurious patch**; `FactionFields`/`FactionDisplayPanel`
+      render the four fields (merged from the satellite) with the standard per-field
+      lock toggles; the create/update entity actions thread the four form fields
+      (incl. error-state value preservation). `handledDataKeys` already excludes them
+      from the "additional data" fallback (derived from the descriptor).
+- [x] **Tests:** pure [`entity-kinds.test.ts`](../tests/unit/entity-kinds.test.ts)
+      (satellite field lists; `buildKindData` blob = `{_v}` only; `readKindData`
+      satellite merge / absent-row defaults / partial-row; the satellite-field
+      invariant throw; FACTION schema parse). DB-backed
+      [`entities.test.ts`](../tests/unit/entities.test.ts) (create → satellite row +
+      blob = `{_v:1}` + `data.*` provenance; update → satellite write, blob unchanged;
+      **no-op resubmit creates no change set** — diff reads the satellite; **locked
+      `data.standing` blocks its edit while an unlocked field succeeds** — uniform
+      lock; **upsert creates the row for a pre-satellite FACTION**).
+      [`review.test.ts`](../tests/unit/review.test.ts) (Review Queue current-value
+      reads the satellite, not a null). UI
+      [`kind-display.test.tsx`](../tests/unit/kind-display.test.tsx) (rows from the
+      satellite; empty-row em-dashes; no additional-data leak) +
+      [`entity-forms.test.tsx`](../tests/unit/entity-forms.test.tsx) (prefill from
+      satellite; locked fields read-only).
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors; pre-existing
+      settings-action warnings only), `npm run build`,
+      `npx prisma migrate dev` (clean migration; drift gate clean), and the full
+      coverage gate green (109 files / 1516 tests; statements 95.13%, branches 88.42%,
+      functions 96.89%, lines 96.89%). **In-browser** (reseeded `dcc`, authed as
+      `dm@example.com`): created a FACTION via the service with satellite values
+      (`data` persisted as `{_v:1}`); the detail page renders the STANDING/STRENGTH/
+      ALLEGIANCE/RESOURCES rows from the satellite with per-field lock toggles and no
+      console errors (RSC boundary intact); the edit form is prefilled from the
+      satellite, and changing **standing 42 → 88** through the form persisted to the
+      satellite (blob still `{_v:1}`) with a second `data.standing` provenance row —
+      proving the review/provenance path is uniform on the satellite-backed field.
+- [x] **Review fixes (Codex on PR #159).** Hardened the **migration path** against
+      satellite types so a *future* FACTION `schemaVersion` bump can't wipe stored
+      values: `migrateEntityData` ([`entity-data-migration.ts`](../src/server/services/entity-data-migration.ts))
+      now loads the `faction` satellite and passes it to `readKindData`, so the
+      upgrade reads the real stored values instead of JSON-blob nulls; and
+      `entityUpdateData` re-stamps `_v` on a **satellite-only** write so a
+      pure-satellite kind's row converges to the current version after a migration
+      (no perpetual re-migration). Regression test: a stale FACTION (blob one version
+      behind, satellite populated) migrates with its `standing`/`strength`/
+      `allegiance`/`resources` intact, the blob converges to `_v`, and a re-run is a
+      no-op. Final coverage gate green (109 files / 1518 tests; statements 95.15%,
+      branches 88.63%, functions 96.89%, lines 96.91%).
 
 ## M5.5 — reference-integrity badge + impact-aware archive (slice 3a) ✅ (2026-06-18)
 
