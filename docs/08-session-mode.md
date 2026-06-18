@@ -36,10 +36,15 @@ human-scale spine (most DMs think in "last session / next session").
 
 - During a session the DM can **reveal** an entity or fact either broadly or to
   specific recipients. A broad reveal updates the campaign-wide visibility to
-  `PLAYER_VISIBLE` for ordinary campaign canon. A private
-  reveal creates knowledge grants for selected player memberships, crawlers,
-  NPCs, parties, guilds, or other actor entities without making the fact visible
-  to everyone.
+  `PLAYER_VISIBLE` for ordinary campaign canon. A private reveal creates
+  **`KnowledgeGrant`** rows for selected player memberships, crawlers, NPCs,
+  parties, guilds, or other actor entities without making the fact visible to
+  everyone. These are the **same** `KnowledgeGrant` rows that power the player
+  "known world" projection ([`02-architecture.md`](./02-architecture.md),
+  [`09-data-schema.md`](./09-data-schema.md)) and the in-character agent context
+  ([`06-entity-agents.md`](./06-entity-agents.md)) — one model, three readers, so
+  a session reveal immediately and consistently updates what each player *and*
+  each NPC/faction knows.
 - Each reveal is **logged**: *what* was learned, *who* learned it, and *when*.
   This reveal history is the principled source for the player interface's
   "known world" and complements agent fog-of-war

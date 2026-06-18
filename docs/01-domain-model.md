@@ -49,7 +49,11 @@ Every modeled noun is an `Entity`. Shared attributes:
 - `tags[]`, `customFields` (JSON), `attachments[]` (additional images or files).
 - timestamps, `createdBy`, `lastReviewedBy`
 
-First-class types add their own structured columns/relations on top.
+First-class types add their own structured fields on top — held in the `data`
+JSON blob and defined once per type in an entity-kind descriptor
+([`adr/0009-entity-kind-registry.md`](./adr/0009-entity-kind-registry.md);
+versioned/migratable per [`adr/0011-entity-data-versioning-and-satellites.md`](./adr/0011-entity-data-versioning-and-satellites.md)),
+with a `Crawler`-style satellite table for the heaviest-query types.
 
 ## First-class entity types
 
@@ -82,9 +86,14 @@ shopkeepers, quest-givers. Lighter than Crawler but shares the core. Many NPCs
 double as Faction members or Show hosts via relationships.
 - **Persistence is inherent.** Entities are scoped to the *campaign*, not a
   floor, so a recurring NPC persists across the whole show by default. Their
-  movement is modeled as `LOCATED_ON` edges that change over time; their
-  recurring appearances as `Event` participation. Nothing is lost when the party
-  descends a floor.
+  recurring appearances are modeled as `Event` participation, and their
+  whereabouts over time are read from that event log rather than from a single
+  mutable location edge. (Crawler position specifically is the
+  `Crawler.currentFloor` field — the single source of truth per
+  [`adr/0008-floor-model-unification-and-time-inference.md`](./adr/0008-floor-model-unification-and-time-inference.md),
+  which retired the crawler→floor `LOCATED_ON` edge; `LOCATED_ON` / `PART_OF`
+  remain for placing entities within the neighborhood/zone/location structure.)
+  Nothing is lost when the party descends a floor.
 - **Role facet.** An NPC carries a `role`/`category` (e.g. `GUIDE`, `MANAGER`,
   `ADMIN`, `HOST`, `PRODUCTION_CREW`, `ELITE`, `FACTION_LEADER`, `SHOPKEEPER`,
   `DEITY`, `QUEST_GIVER`) stored in `data` so the persistent cast is queryable —
@@ -305,10 +314,15 @@ user-facing), **anchor** (a structured `timeRef`: a `basis` of `COLLAPSE` /
 an optional `offset`, `unit`, and `anchorEventId`), and **label** (narrative
 phrasing, generated from the anchor with an optional human override). Floor is the
 macro-clock; an intra-floor `rank` (fractional index) gives real within-floor
-ordering — **derived** from a concrete floor-relative offset, or set by
-drag-to-reorder when the time is unscheduled — and the causality DAG provides a
-coherence check. The typed `timeRef` + generated phrasing + derived rank shipped
-in ADR 0004 slice 2 (`src/lib/time-ref.ts`). See
+ordering — **derived** from a resolved **absolute day** when one is known, else
+from a concrete floor-relative offset, else set by drag-to-reorder when the time
+is unscheduled — and the causality DAG provides a coherence check. The typed
+`timeRef` + generated phrasing + derived rank shipped in ADR 0004 slice 2
+(`src/lib/time-ref.ts`); floor day-anchors (`data.startDay` / `data.collapseDay`)
+plus a recursive `resolveAbsoluteDay` resolver let an `EVENT`-anchored time sort
+by its resolved day even without a causal link
+([`adr/0008-floor-model-unification-and-time-inference.md`](./adr/0008-floor-model-unification-and-time-inference.md),
+which amends ADR 0004). Cross-floor wall-clock reconciliation stays deferred. See
 [`adr/0004-event-time-model-and-ordering.md`](./adr/0004-event-time-model-and-ordering.md)
 for the full decision and migration plan.
 
@@ -321,7 +335,23 @@ To keep the world large but the database sane:
 - **Lazy population:** entities can exist as thin **stubs** (name + type +
   "referenced by") and be fleshed out later — ideal for AI to scaffold the world
   cheaply, DM to enrich on demand.
-- **Custom fields** absorb one-off attributes so the schema stays stable.
+- **Per-type fields without per-type tables.** A type's bespoke structured fields
+  live in `Entity.data` (JSON), defined once in a per-type **entity-kind
+  descriptor** ([`adr/0009-entity-kind-registry.md`](./adr/0009-entity-kind-registry.md))
+  from which validation, the form, the display, and the reviewable/lockable set
+  all derive. Those `data` shapes are **versioned and migratable** — each kind
+  carries a `schemaVersion`, every write stamps a reserved `data._v`, and pure
+  per-kind migrations upgrade old rows on read and via a batch job, so a type can
+  gain/rename/retire fields without silent data loss
+  ([`adr/0011-entity-data-versioning-and-satellites.md`](./adr/0011-entity-data-versioning-and-satellites.md)).
+- **Custom fields** (`customFields`) absorb one-off, DM-owned ad-hoc attributes —
+  distinct from `data`: `data` is registry-defined, versioned, reviewable per-type
+  canon; `customFields` is free-form and unversioned. Both keep the schema stable.
+- **Promote to a satellite when a field gets hot.** A `data.*` field that must be
+  filtered / sorted / aggregated at scale graduates to an indexed 1:1 **satellite
+  table** (the `Crawler` precedent; `Faction` and `Floor` next, via the same
+  migration machinery) while review / lock / provenance stay uniform on `Entity`
+  (ADR 0011).
 - **Soft archive** instead of delete, preserving provenance and causal history.
 
 ## Multi-tenancy boundaries

@@ -7,6 +7,15 @@ The job runs in the worker process and lands entities as auto-approved change se
 The checkbox is hidden when no dataset is present — the server checks for the file
 before rendering the form.
 
+> **Roadmap scope.** This is a **shipped onboarding** feature (the `LORE_SEED`
+> job + New Crawl checkbox; see [`PROGRESS.md`](./PROGRESS.md), 2026-06-13), driven
+> by a **DM-supplied** JSONL file. It is *distinct from* the **M10 shared canon
+> library** ([`11-roadmap.md`](./11-roadmap.md)), which will ship importable,
+> first-party canonical DCC content (the 18 floors, common mob types, archetypes)
+> as reviewable `IMPORT` change sets. Lore seeding is the bring-your-own,
+> available-now half; M10 is the curated-library half. Both import through the
+> same review pipeline.
+
 ## Legal note
 
 The official Dungeon Crawler Carl dataset is copyrighted by its author and is

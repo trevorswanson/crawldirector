@@ -109,8 +109,13 @@ model Entity {
   status       CanonStatus @default(PENDING)
   visibility   Visibility  @default(DM_ONLY)
   imageUrl     String?
-  data         Json        @default("{}")   // type-specific structured fields
-  customFields Json        @default("{}")   // DM/AI ad-hoc fields
+  data         Json        @default("{}")   // type-specific structured fields,
+                                            //   defined per type by the entity-kind
+                                            //   registry (ADR 0009); carries a
+                                            //   reserved `_v` schema-version stamp
+                                            //   for migration (ADR 0011)
+  customFields Json        @default("{}")   // DM/AI ad-hoc fields (free-form,
+                                            //   unversioned — distinct from `data`)
   tags         String[]
   version      Int         @default(1)
   locked       Boolean     @default(false)
@@ -151,6 +156,25 @@ model Crawler {
   currentFloor  Int?
   // class/species/items/skills/achievements modeled as Relationships
 }
+
+// Satellite for FACTION — the first data → satellite promotion (M5.5, ADR 0011).
+// The standing/strength fields are filtered, sorted, and aggregated (M9 queries,
+// M12 faction-power rollups + Faction-Wars tracker), so they graduate from
+// Entity.data to indexed columns; the MIGRATE_ENTITY_DATA job moves them and drops
+// them from `data`. Non-indexed faction fields stay in Entity.data. Review / lock /
+// provenance still operate on the parent Entity (the satellite is just storage).
+model Faction {
+  id          String  @id            // == Entity.id
+  entity      Entity  @relation(fields: [id], references: [id])
+  standing    Int?                   // e.g. Faction-Wars army strength/score
+  allegiance  String?
+  resources   Int?
+  @@index([standing])
+}
+// A FLOOR satellite (floorNumber/startDay/collapseDay/theme) is the heavier,
+// later M5.5 slice — many hot readers (resolveAbsoluteDay, timeline banding,
+// currentFloor). It may land as a full satellite OR as an indexed generated
+// column for floorNumber, decided against the real query shapes (ADR 0011 Part C).
 
 // ───────────── Agent profile / persona ─────────────
 // Generalized: ordered snapshots of ANY actor entity's evolving profile
@@ -286,7 +310,11 @@ model EventCausality {     // DAG edge between events; cycles blocked in service
 }
 
 // ───────────── Review pipeline ─────────────
-enum ChangeSource { DM AI PLAYER_SUGGESTION IMPORT }
+// MIGRATION (M5.5, ADR 0011) marks an auto-approved data-schema migration write —
+// attributed to a real account (the triggering DM, or Campaign.ownerId for an
+// automatic schemaVersion bump) so the required AuditLog.actorUserId FK is satisfied,
+// while provenance reads as a mechanical migration, not that account's hand edit.
+enum ChangeSource { DM AI PLAYER_SUGGESTION IMPORT MIGRATION }
 enum ChangeSetStatus { PENDING APPROVED REJECTED PARTIALLY_APPLIED SUPERSEDED }
 enum OpKind {
   CREATE_ENTITY UPDATE_ENTITY DELETE_ENTITY
@@ -411,6 +439,7 @@ model Job {              // async generation / bulk + simulation + indexing runs
   id          String @id @default(cuid())
   campaignId  String
   kind        String   // ... | AGENT_SIM | WORLD_TICK | SCENARIO | REINDEX | RECAP
+                       //   | MIGRATE_ENTITY_DATA (M5.5: upgrade stale data._v rows)
   params      Json
   status      String   // QUEUED RUNNING DONE FAILED
   resultSetId String?  // -> ChangeSet
@@ -503,19 +532,31 @@ model SessionLogEntry {             // real-time capture; NOT canon until promot
 
 ## Notes for implementers
 
-- `Entity.data` schemas per `EntityType` should be defined as **Zod schemas** in
-  `/src/lib/entitySchemas` and validated on every write; keep them versioned.
-  Examples: `NPC.data.roles: NpcRole[]` (GUIDE/MANAGER/ADMIN/HOST/
-  PRODUCTION_CREW/ELITE/FACTION_LEADER/SHOPKEEPER/DEITY/QUEST_GIVER — non-
-  exclusive, queryable); `PARTY.data`/`GUILD.data` hold formation/disband status.
+- `Entity.data` schemas per `EntityType` are defined as **Zod schemas** in the
+  per-type entity-kind descriptors under `/src/lib/entity-kinds`
+  ([ADR 0009](./adr/0009-entity-kind-registry.md)) and validated on every write —
+  validation, the data-key lists, the reviewable/lockable set, the form, and the
+  display all derive from one descriptor. They are **versioned**: each descriptor
+  carries a `schemaVersion`, every write stamps a reserved `data._v`, and pure
+  per-kind migrations upgrade older rows on read (and via the
+  `MIGRATE_ENTITY_DATA` job), so a type can evolve its fields without silent data
+  loss ([ADR 0011](./adr/0011-entity-data-versioning-and-satellites.md)).
+  Examples of bespoke `data` to add as those types gain descriptors:
+  `NPC.data.roles: NpcRole[]` (GUIDE/MANAGER/ADMIN/HOST/PRODUCTION_CREW/ELITE/
+  FACTION_LEADER/SHOPKEEPER/DEITY/QUEST_GIVER — non-exclusive, queryable);
+  `PARTY.data`/`GUILD.data` hold formation/disband status. (Today only FLOOR and
+  ITEM carry descriptors; the rest use the generic core path.)
 - Treat `BigInt` crawler audience ratings (`viewCount`, `followerCount`,
   `favoriteCount`) carefully across the JSON boundary.
 - The review service is the only writer of canon — keep mutation logic out of
   route handlers.
 - Add DB-level constraints where cheap (unique edges, FK cascades to archive not
   hard-delete where history matters).
-- Revisit whether more types deserve satellites once query patterns are known
-  (likely candidates next: `Faction`, `Floor`).
+- More types graduate to satellites as query patterns demand. **`Faction` and
+  `Floor` are now scheduled in M5.5** ([ADR 0011](./adr/0011-entity-data-versioning-and-satellites.md)),
+  promoted via the `MIGRATE_ENTITY_DATA` job (the schema-versioning machinery is
+  the promotion mechanism). Further candidates stay deferred until their query
+  shapes warrant indexing.
 - `Event.effects` v1 stores crawler-targeted consequences in `Event.effects`
   JSON: `ADJUST_STAT` deltas non-null numeric crawler fields, `SET_STAT` writes
   an absolute numeric crawler field (for nullable values like `currentFloor`),

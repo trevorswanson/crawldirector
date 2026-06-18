@@ -22,12 +22,21 @@ under *Deferred design options*). So is the **visibility-model simplification** 
 the full **M4 generator expansion** (scaffolding, usage/cost + spend caps, bulk
 flesh-out, async `Job` worker).
 
-**Next milestone: M6 — System AI persona engine**
+**Next milestone: M5.5 — Data model hardening**
 ([11-roadmap.md](./11-roadmap.md),
-[05-system-ai-persona.md](./05-system-ai-persona.md)) — not yet started or
-decomposed into slices. Decompose it into vertical slices per
-[`12-working-sessions.md`](./12-working-sessions.md) when picking it up. (Open,
-non-milestone-blocking follow-ups and deferrals live in the subsections below.)
+[adr/0011-entity-data-versioning-and-satellites.md](./adr/0011-entity-data-versioning-and-satellites.md))
+— a `.5` cross-cutting insertion (like M3.5) added in the 2026-06-18 roadmap
+review, scheduled **before M6** because the catalog types (M7), import (M10), and
+export (M9) are about to put real weight on `Entity.data`. It adds `data`
+schema-versioning (`schemaVersion` + reserved `data._v` + pure per-kind
+migrations + a `readKindData` validate-and-upgrade read seam replacing the lossy
+coercion), a `MIGRATE_ENTITY_DATA` job, reference-integrity checks, and the first
+satellite promotions (Faction, then Floor). Not yet decomposed into slices —
+decompose per [`12-working-sessions.md`](./12-working-sessions.md) when picking it
+up; the suggested slice breakdown is in the roadmap's M5.5 entry. **Then M6 —
+System AI persona engine** ([05-system-ai-persona.md](./05-system-ai-persona.md)).
+(Open, non-milestone-blocking follow-ups and deferrals live in the subsections
+below.)
 
 ### Follow-ups captured from delivered slices
 
@@ -54,9 +63,47 @@ non-milestone-blocking follow-ups and deferrals live in the subsections below.)
       graph label crowding with M12 graph analytics. Connection and timeline
       entity pickers now use M5 search/typeahead for keyword-only lookup beyond
       their initial candidate lists.
-- [ ] **M8/M12 broadcast HUD chrome.** Add a live broadcast ticker with session
-      events/reveals in M8, and at-a-glance audience-rating tickers with M12
-      broadcast/fan-economy modeling.
+- [ ] **M8/M14 broadcast HUD chrome.** Add a live broadcast ticker with session
+      events/reveals in M8, and at-a-glance audience-rating tickers with M14
+      broadcast & fan-economy modeling.
+- [ ] **Merge `COLLAPSE` + `ABSOLUTE_DAY` time bases (time-model simplification).**
+      The two bases resolve **identically** — `resolveAbsoluteDay`
+      ([`time-resolve.ts`](../src/lib/time-resolve.ts)) returns the raw `offset` for
+      both (collapse = day-0 epoch); only the generated phrase differs ("Day N since
+      the collapse" vs "Day N" — [`time-ref.ts`](../src/lib/time-ref.ts)), yet both
+      are separately selectable in
+      [`event-time-fields.tsx`](../src/components/entities/event-time-fields.tsx).
+      Retire `ABSOLUTE_DAY` as a picker, keep one day-since-collapse basis, preserve
+      the bare "Day N" wording via the existing `label` override (or a phrasing
+      toggle), and migrate `Event.inGameTime` rows `ABSOLUTE_DAY → COLLAPSE`. Touches
+      `timeBasisValues`/`phraseTimeRef`, the form, and
+      `tests/unit/{time-resolve,time-ref}.test.ts`.
+- [ ] **Roster ↔ connections dedup + roster editor (groups).** For PARTY/GUILD/
+      FACTION/ORGANIZATION the main-pane roster (`getGroupRoster`,
+      [`groups.ts`](../src/server/services/groups.ts)) and the side connections pane
+      show the *same* MEMBER_OF/LEADS/PART_OF edges, because
+      `listConnectionsForEntity` ([`relationships.ts`](../src/server/services/relationships.ts))
+      returns all edges unfiltered.
+      - **Dedup:** add an `excludeTypes` prop to
+        [`connections-panel.tsx`](../src/components/entities/connections-panel.tsx)
+        and pass `{MEMBER_OF, LEADS, PART_OF}` for group types from the entity
+        detail page, with a "membership shown in roster above" note (no silent hide).
+      - **Editor:** make the roster pane editable (add/remove member, set/clear
+        leader, edit day-bounds) reusing existing actions
+        ([`actions.ts`](<../src/app/(dm)/actions.ts>)): `createRelationshipAction`
+        (with the `direction="in"` toggle), `updateRelationshipAction`,
+        `archiveRelationshipAction`, `toggleRelationshipLockAction` — no
+        service-layer change. **Open question:** enforce a single leader, or allow
+        co-leaders? (no uniqueness today).
+- [ ] **Reconcile `PART_OF` overload (minor).** It's registered SPATIAL
+      (location→floor) in [`relationship-types.ts`](../src/lib/relationship-types.ts)
+      but `getGroupRoster` also uses it for party-in-guild roll-up, and its
+      `sourceTypes` exclude `PARTY` so the create-UI won't suggest it there. Decide:
+      broaden PART_OF's registry metadata, or split a distinct parties-in-guild
+      membership type.
+- [ ] **Connections pane should honor `rosterDay`/`asOfDay` (minor).** The roster
+      filters time-bounded membership by day; the connections pane always shows
+      current edges. Thread the day param into the pane, or document the difference.
 
 ### Deferred design options, not current blockers
 

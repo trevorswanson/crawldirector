@@ -100,6 +100,47 @@ decomposition, not a frozen spec — refine at the start of each session
   generators draw context from retrieval. Graceful degradation with no AI key
   (keyword/full-text still works). See [`07-search-retrieval.md`](./07-search-retrieval.md).
 
+## M5.5 — Data model hardening
+**Goal:** make `Entity.data` safe to evolve as the catalog types accumulate
+fields, before M7 multiplies them. The entity-kind registry
+([ADR 0009](./adr/0009-entity-kind-registry.md)) already centralized each type's
+bespoke fields; what's missing is **schema evolution** — versioning, migration,
+reference integrity, and the first satellite promotions. Full design in
+[`adr/0011-entity-data-versioning-and-satellites.md`](./adr/0011-entity-data-versioning-and-satellites.md).
+- **Versioning + migration:** add `schemaVersion` + pure per-kind `migrations` to
+  the `EntityKind` descriptor; stamp a reserved `data._v` on every write; a single
+  `readKindData` validate-and-upgrade read seam (lazy in-memory upgrade) replaces
+  the lossy "wrong type → empty default" coercion that silently drops data; a
+  one-time stamp migration marks existing rows v1.
+- **Migration execution:** a `MIGRATE_ENTITY_DATA` `Job` (reusing the
+  `EMBED_SEARCH_DOCS` worker/dedupe pattern) eagerly upgrades stale `_v` rows
+  through an auto-approved change set — a new additive `ChangeSource.MIGRATION`
+  attributed to a real account (the triggering DM via `Job.createdById`, or
+  `Campaign.ownerId` for an automatic `schemaVersion` bump) so the required
+  `AuditLog.actorUserId` is satisfied and history reads as a migration, not a hand
+  edit — recording provenance + a `MIGRATE` audit, out of the review queue;
+  idempotent. Strict unknown-`data`-key policy; derive `HANDLED_DATA_KEYS` from the
+  descriptor.
+- **Reference integrity:** `validateReferences` for `referenceFields` (broken-ref
+  badge), an impact-aware "N entities reference this" reverse-lookup before
+  archive, and an optional orphan report (feeds M10's consistency-check generator).
+- **Satellites:** **Faction** (`standing`/`strength`/`allegiance`/`resources`,
+  indexed for M9 queries + M12 faction-power rollups) is a **greenfield** 1:1
+  satellite — Faction has no bespoke `data` today, so these are new fields written
+  straight to the satellite (proves the satellite *plumbing*, low-risk). The
+  genuine `data → satellite` **migration** is **Floor** (real existing
+  `data.floorNumber`/`startDay`/`collapseDay`, many hot readers incl.
+  `campaigns.ts`): the migration job moves them to the satellite — or land the
+  lighter indexed-generated-column alternative, whichever the query shapes warrant.
+  (The migration *machinery* itself is proved earlier by a within-`data`
+  `schemaVersion` bump on FLOOR/ITEM, no satellite risk.)
+- **Done when:** every `data` write is `_v`-stamped; a kind can bump its version
+  and migrate existing rows (lazy + batch, provenance-tracked) with no silent data
+  loss; reference fields are integrity-checked; Faction is satellite-backed with
+  review/lock/provenance still uniform on `Entity`; migration round-trips and the
+  visibility/provenance invariants are test-covered. See
+  [`adr/0011-entity-data-versioning-and-satellites.md`](./adr/0011-entity-data-versioning-and-satellites.md).
+
 ## M6 — System AI persona engine (signature feature)
 **Goal:** model the in-fiction System AI as an evolving entity whose persona
 drives the generation prompts.
@@ -155,7 +196,10 @@ drives the generation prompts.
   - **Crawlers settings** (inviting other users to the campaign and managing user memberships/roles).
   - **AI Providers** (configured provider keys/endpoints, from M4).
 - **Export/import:** campaign export to JSON + Markdown (provenance included);
-  import as reviewable `IMPORT` change sets.
+  import as reviewable `IMPORT` change sets. The export **stamps each entity's
+  `data._v`** (M5.5 / ADR 0011) so an import into a newer app version migrates
+  forward through `readKindData` instead of failing or coercing — a concrete
+  reason the data-versioning layer precedes M9.
 - **Done when:** deployed, backed up, exportable; a real campaign can be run by a
   DM + players; DMs can view and restore archived entities, view detailed entity edit histories, and configure campaign settings via the three-pane layout.
 
@@ -189,29 +233,113 @@ and events from their values.
   causal links — all bounded and provenance-tracked, nothing auto-canon.
   See [`06-entity-agents.md`](./06-entity-agents.md).
 
-## M12 — Advanced worldbuilding (stretch)
-**Goal:** depth features as the world grows.
-- Richer graph analytics (centrality, "who's most connected", faction-power
-  rollups), Faction-Wars tracker, broadcast/fan-economy modeling, map/zone
-  visuals, possibly a light rules-assist layer, real-time collaboration for
-  co-DMs.
+# Advanced worldbuilding (stretch block, M12–M17)
+
+Once the platform is complete (graph + pipeline + AI generation + persona + player
+UI + sessions + hardening + shared library + multi-agent sim), the remaining work
+is **depth: making a now-enormous world legible and alive.** What was a single
+"advanced worldbuilding" bucket is split into themed milestones, each scoped on its
+own. These are **largely independent** — order them by what a campaign actually
+needs; the only soft dependencies are noted per entry.
+
+> **Scope note.** This block is *analytics and depth*, **not** data-model plumbing.
+> The concern that `Entity.data` is fragile as types accumulate fields is handled
+> by **M5.5 / [ADR 0011](./adr/0011-entity-data-versioning-and-satellites.md)**
+> (schema versioning, migration, reference integrity, satellites) — a cross-cutting
+> hardening that lands *before* the type explosion. The analytics here simply
+> *benefit* from M5.5 (e.g. faction-power rollups use the Faction satellite; the
+> consistency cockpit surfaces the orphan/stale-`_v` reports).
+
+## M12 — Graph analytics & influence
+**Goal:** turn the relationship graph into insight at scale.
+- Centrality / "power-broker" ranking (who's most connected / influential);
+  community/bloc detection (natural cliques and alliances).
+- A **connection-path explainer** ("how is Carl tied to the Maestro?") over the
+  any-to-any edge graph.
+- **Faction-power rollups** that aggregate strength/standing across a faction's
+  subtree (uses the M5.5 Faction satellite).
+- Temporal graph evolution: how alliances/rivalries churned across floors.
+- Resolves the deferred **relationship-graph label-crowding** backlog item (a real
+  data source for the graph view's scale work).
+- **Done when:** a DM can rank influence, explain how any two entities connect, and
+  see faction power roll up — over scoped, visibility-correct canon.
+
+## M13 — Faction-Wars & political tracker
+**Goal:** make the Floor-9 war (and standing political conflict) legible over time.
+- A **war board**: army strengths, territory, and standings over campaign time;
+  battle outcomes logged as Events.
+- "What shifted the war" causality rollups (builds on M12 analytics + M10's
+  event-consequence generator + M11 agents).
+- **Done when:** a DM can track faction standings over time and trace what caused a
+  shift. *(Soft deps: M12 analytics, M10, M11.)*
+
+## M14 — Broadcast & fan-economy
+**Goal:** model the show as a show — audience and money.
+- Audience-metric **trends** over time (the Crawler model already stores
+  `viewCount`/`followerCount`/`favoriteCount`; this adds the series + trend views).
+- Sponsor stock / value / ROI modeling; viral-moment tracking; show ratings.
+- The **deferred broadcast HUD tickers** (fame / audience-rating tickers from the
+  mockup) finally get an honest data source and ship here.
+- **Done when:** a DM can see audience/sponsor trends over time and the broadcast
+  HUD tickers render from real data (no fake/filler — see the design language).
+
+## M15 — Spatial / floor maps
+**Goal:** a spatial view over the FLOOR / NEIGHBORHOOD / LOCATION structure.
+- Floor / neighborhood / location **map visuals**; a "where is everyone now"
+  snapshot per floor/day.
+- Crawler movement **traces** reconstructed from the event log.
+- **Done when:** a DM can view a floor's spatial layout and where entities are on a
+  given day, derived from canon (not a separately-authored map).
+
+## M16 — Advanced authoring depth
+**Goal:** richer authoring and world-consistency tooling.
+- **Structured per-type relationship `attributes`** — when edge types start
+  carrying real structured fields, apply the same versioning discipline ADR 0011
+  defines for entity `data` (the relationship-registry parity follow-up).
+- Saved views / dashboards / smart filters over the graph.
+- A world **"consistency cockpit"** that surfaces M5.5's orphan + stale-`data._v`
+  reports and M10's consistency-check proposals in one place.
+- Bulk authoring tools.
 - **Done when:** scoped per feature when reached.
+
+## M17 — Rules-assist layer (gated on the published DCC RPG)
+**Goal:** a *light, advisory* mechanical layer — encounter/loot/stat-block hints.
+- **Explicitly deferred until the DCC RPG is published**, so rules are implemented
+  against the real, released ruleset rather than guessed.
+- **Advisory only** — never authoritative; the DM still owns canon (every
+  suggestion is a reviewable proposal, like all AI output).
+- **Done when:** the ruleset exists and a DM can get non-binding mechanical hints
+  that route through the review pipeline.
+
+> **Not yet scheduled:** real-time co-DM collaboration (presence, simultaneous
+> editing) is a plausible later capability but is not prioritized into this block.
 
 ---
 
 ## Dependency graph
 
 ```
-M0 ▶ M1 ▶ M2 ▶ M3 ▶ M3.5 ▶ M4 ▶ M5 ▶ M6 ▶ M7 ▶ M8 ▶ M9 ▶ M10 ▶ M11 ▶ M12
-          │                 │    │    │              ▲              ▲
-  linchpin┘                 │    │    └ M6 persona needs M2/M3/M4        │
-  M5 retrieval boosts M6 & M11 context ─────────────┘              │
-  M8 session mode needs M3 + M7 (+ M6 for in-voice recaps)         │
-  M11 agents need M3/M4/M6, use M5 retrieval, pair with M10        ┘
+M0 ▶ M1 ▶ M2 ▶ M3 ▶ M3.5 ▶ M4 ▶ M5 ▶ M5.5 ▶ M6 ▶ M7 ▶ M8 ▶ M9 ▶ M10 ▶ M11 ▶ ┐
+                                                                              │
+       ┌──────────────────────────────────────────────────────────────────────┘
+       └▶ { M12 analytics · M13 faction-wars · M14 broadcast · M15 maps ·
+            M16 authoring depth · M17 rules-assist }   ← flexible-order stretch block
+
+  M2   is the linchpin — every later canon write rides on the review pipeline
+  M5   retrieval boosts M6 & M11 context
+  M5.5 hardens Entity.data before M7/M9/M10 stress it
+  M6   persona needs M2/M3/M4
+  M8   session mode needs M3 + M7 (+ M6 for in-voice recaps)
+  M11  agents need M3/M4/M6, use M5 retrieval, pair with M10
+  M12+ stretch block — mostly independent; M13 leans on M12/M10/M11; M17 waits on
+       the published DCC RPG
 ```
 
 M2 is the linchpin; nothing after it should introduce a canon write path that
-bypasses the pipeline. Note that **build order ≠ doc order**: the persona (M6)
+bypasses the pipeline. **M5.5** is a small `.5` hardening insertion (like M3.5):
+it adds `Entity.data` schema versioning/migration + the first satellite tables
+*before* M7's catalog types, M9's export/import, and M10's library import put real
+weight on the JSON `data` field. Note that **build order ≠ doc order**: the persona (M6)
 and agent (M11) *designs* live in docs 05–06 alongside the other feature designs,
 but the agent runtime is sequenced late because it is the heaviest feature and
 pairs with M10's consequence generator.
@@ -236,6 +364,18 @@ scheduled into the flow of milestone work. Track active slices in
   SPELL, ACHIEVEMENT, TITLE, …) gain their own fields** and multiply the inline
   pattern — i.e. ahead of the M7 game-progression types.
 
+- **Entity `data` versioning + satellites ([ADR 0011](./adr/0011-entity-data-versioning-and-satellites.md), accepted — planned M5.5).**
+  **Extends ADR 0009.** The registry centralized each type's bespoke fields but
+  deferred *schema evolution*. ADR 0011 adds a `schemaVersion` + pure per-kind
+  `migrations`, a reserved `data._v` stamp, a `readKindData` validate-and-upgrade
+  read seam (replacing the lossy coercion that silently drops data), a
+  `MIGRATE_ENTITY_DATA` job, reference-integrity checks for `referenceFields`, and
+  the first satellite promotions (Faction, then Floor) — using the migration
+  machinery as the promotion mechanism. **Scheduled as M5.5** (this resolves the
+  "deferred satellites (Faction/Floor)" note carried in ADR 0009 and
+  [`09-data-schema.md`](./09-data-schema.md)). Lands before the M7 catalog types
+  and the M9/M10 import-export round-trip stress `Entity.data`.
+
 ## Design-driven refinements (proposals, 2026-05-29)
 
 Building the [design language](./13-design-language.md) from the
@@ -249,7 +389,9 @@ fold into the named milestones — not a re-sequencing:
   language the product promises.
 - **Canon-integrity meter** (DM / AI-origin / locked %) — the mockup's nav footer.
   Real once provenance exists: **M2** computes the figures; surface it in the
-  shell and in **M9**'s audit/provenance review screens.
+  shell and in **M9**'s audit/provenance review screens. Once **M5.5** lands it
+  can gain a **data-health** dimension (entities on a stale `data._v`, broken
+  `referenceFields`) from ADR 0011's orphan report.
 - **Global "Search · Ask the Campaign" affordance** lives in the shell from day
   one but is shown disabled until **M5** wires hybrid search + RAG Q&A. Keep the
   "Planned · M5" treatment until then.
@@ -276,7 +418,7 @@ that produces its data:
 - **In-game clock HUD** ("Floor N · Day D") → Displays the campaign's current floor and inferred day (from the most recent event's absolute day using `resolveAbsoluteDay`) globally in the top-right header on all pages. Built as an M3 follow-up.
 - **Fame / audience-rating tickers** (views/followers/favorites trends, sponsor-
   stock moves) → the `Crawler` model already tracks views/followers/favorites;
-  trends + fan-economy modeling are **M12 (broadcast/fan-economy)**. Captured in
+  trends + fan-economy modeling are **M14 (broadcast & fan-economy)**. Captured in
   `PROGRESS.md`'s open backlog.
 
 ## Definition of done (every milestone)
