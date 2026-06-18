@@ -81,9 +81,14 @@ function migrationPatchFor(row: {
   type: EntityType;
   version: number;
   data: unknown;
+  // Satellite-backed fields (ADR 0011 Part C) live in a 1:1 table, not the JSON
+  // blob, so they must be merged in before computing the upgraded shape —
+  // otherwise a satellite type's migration would read them as null and the patch
+  // would wipe the stored values on apply.
+  faction?: unknown;
 }): ReviewPatch {
   const raw = asRecord(row.data);
-  const upgraded = readKindData(row.type, row.data);
+  const upgraded = readKindData(row.type, row.data, row.faction);
   const patch: ReviewPatch = {
     _baseVersion: { to: row.version },
   };
@@ -123,6 +128,17 @@ export async function migrateEntityData(
       type: true,
       version: true,
       data: true,
+      // Satellite rows for satellite-backed kinds (ADR 0011 Part C) so their
+      // fields are migrated from their real stored value, not a JSON-blob null.
+      // A new satellite type must add its relation here.
+      faction: {
+        select: {
+          standing: true,
+          strength: true,
+          allegiance: true,
+          resources: true,
+        },
+      },
     },
   });
   const stale = rows.filter((row) => isKindDataStale(row.type, row.data));

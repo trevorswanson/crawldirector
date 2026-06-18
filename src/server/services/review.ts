@@ -2864,11 +2864,12 @@ function entityUpdateData(patch: ReviewPatch, type: EntityType, existingData?: u
     }
   }
 
-  // Only non-satellite `data.*` fields are merged into the JSON blob; satellite
-  // fields (handled above) never live there (ADR 0011 Part C).
-  const dataPatch = Object.keys(patch).some(
-    (field) => dataFields.has(field) && !satelliteDataFields.has(field),
-  );
+  // Any bespoke `data.*` field in the patch rewrites the JSON blob — even a
+  // satellite-only edit, whose field *values* are routed to the satellite above
+  // but whose version stamp still lives in the blob. Re-stamping here is what lets
+  // a satellite type's row converge to the current `_v` after a migration; without
+  // it a pure-satellite kind would stay perpetually stale (ADR 0011 Part C/D).
+  const dataPatch = Object.keys(patch).some((field) => dataFields.has(field));
   if (dataPatch) {
     // Read the existing data through the current descriptor seam before merging
     // the patch, so untouched renamed/retyped fields migrate and off-schema keys

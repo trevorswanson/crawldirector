@@ -29,6 +29,7 @@ beforeEach(async () => {
   await prisma.changeOperation.deleteMany();
   await prisma.changeSet.deleteMany();
   await prisma.crawler.deleteMany();
+  await prisma.faction.deleteMany();
   await prisma.entity.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.membership.deleteMany();
@@ -196,5 +197,60 @@ describe("migrateEntityData", () => {
     const { playerId, campaignId } = await seed();
 
     await expect(migrateEntityData(playerId, campaignId)).rejects.toThrow(ServiceError);
+  });
+
+  it("preserves satellite values when migrating a stale FACTION (ADR 0011 Part C)", async () => {
+    const { dmId, campaignId } = await seed();
+
+    // A FACTION whose satellite carries real values, but whose blob is stamped a
+    // version behind the descriptor — simulating a future FACTION schemaVersion
+    // bump. The migration must upgrade from the satellite (not a blob null), or it
+    // would wipe standing/strength/allegiance/resources on apply.
+    const faction = await prisma.entity.create({
+      data: {
+        campaignId,
+        createdById: dmId,
+        type: EntityType.FACTION,
+        name: "The Vanguard",
+        data: { _v: 0 },
+        faction: {
+          create: {
+            standing: 42,
+            strength: 7,
+            allegiance: "The System",
+            resources: "Three legions.",
+          },
+        },
+      },
+      select: { id: true },
+    });
+
+    const result = await migrateEntityData(dmId, campaignId);
+    expect(result).toEqual({ checked: 1, migrated: 1, skipped: 0 });
+
+    // The satellite values survive the migration intact…
+    const row = await prisma.faction.findUniqueOrThrow({
+      where: { id: faction.id },
+    });
+    expect(row).toMatchObject({
+      standing: 42,
+      strength: 7,
+      allegiance: "The System",
+      resources: "Three legions.",
+    });
+
+    // …the blob converged to the current `_v` (so the row is no longer stale)…
+    const stored = await prisma.entity.findUniqueOrThrow({
+      where: { id: faction.id },
+      select: { data: true },
+    });
+    expect(asRecord(stored.data)._v).toBe(1);
+
+    // …and a re-run is idempotent (nothing left stale to migrate).
+    await expect(migrateEntityData(dmId, campaignId)).resolves.toEqual({
+      checked: 0,
+      migrated: 0,
+      skipped: 0,
+    });
   });
 });
