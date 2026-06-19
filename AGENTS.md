@@ -14,8 +14,9 @@ pitch and [`docs/`](./docs) for the full plan.
 
 ## Current status
 
-🚧 **M0–M5.5 complete; M6 slice 1 complete; next up M6 slice 2 (Persona Studio
-UI + generator injection).** M5.5 (data model hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
+🚧 **M0–M5.5 complete; M6 slices 1–2 complete; next up the later M6 slices
+(`PERSONA_SHIFT` event effect, richer snapshot diffing, full persona-aware
+generator family).** M5.5 (data model hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
 seam, the `MIGRATE_ENTITY_DATA` job, reference-integrity badge + impact-aware
 archive, orphan report, the greenfield Faction satellite, and the Floor satellite
 (slice 5 — the genuine `data → satellite` migration moving FLOOR's
@@ -101,9 +102,16 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
   on `SYSTEM_AI`), `CREATE_PERSONA_SNAPSHOT` / `UPDATE_PERSONA_SNAPSHOT` review
   operations, active-snapshot exclusivity, prompt-lock enforcement, compiled
   prompt provenance, a deterministic compiler, and a read-only active System AI
-  prompt seam for persona-aware generators. Next slice: build the Persona Studio
-  surface from the console shell primitives and start injecting the active prompt
-  into the first persona-aware generator path.
+  prompt seam for persona-aware generators. Slice 2 added the DM-only **Persona
+  Studio** (`/campaigns/[id]/persona`, built from the console shell): dial
+  sliders + agenda/voice fields, a live compiled-prompt preview, prompt
+  lock/unlock + activate, the snapshot timeline, and a Review Queue deep-link —
+  all auto-approved DM edits. It also wired the active persona into the flesh-out
+  generator for dungeon-voiced kinds (BOSS/MOB_TYPE/ITEM/SYSTEM_MESSAGE/
+  ACHIEVEMENT/TITLE), recording the driving snapshot id + prompt version in
+  provenance (secret agendas never leave the DM-only snapshot). Next slices:
+  `PERSONA_SHIFT` event effect, richer snapshot diffing, and the full
+  persona-aware generator family (encounter/mob/boss/loot/System-message).
 
 For per-slice detail (files, tests, decisions) see
 [`docs/PROGRESS.md`](./docs/PROGRESS.md) — its "Open backlog" section is the

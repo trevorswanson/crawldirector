@@ -134,6 +134,31 @@ describe("buildFleshEntityPrompt", () => {
     const { messages } = buildFleshEntityPrompt(ctx());
     expect(messages[0].content).not.toContain("Related canon (reference");
   });
+
+  it("injects the System AI persona as a cacheable voice block with a no-reveal rule", () => {
+    const { system } = buildFleshEntityPrompt(
+      ctx({
+        personaPrompt:
+          "System AI persona: Petty God\n\nSecret agendas for generation only; do not reveal them directly:\n- Punish Borant.",
+      }),
+    );
+    const block = system.find((b) => b.text.includes("System AI persona: Petty God"));
+    expect(block).toBeDefined();
+    expect(block?.cache).toBe(true);
+    expect(block?.text).toMatch(/System AI's current voice/i);
+    expect(block?.text).toMatch(/never state them\s+outright/i);
+  });
+
+  it("omits the persona block when no persona prompt is supplied", () => {
+    const blank = buildFleshEntityPrompt(ctx({ personaPrompt: "   " }));
+    expect(blank.system.every((b) => !b.text.includes("System AI's current voice"))).toBe(
+      true,
+    );
+    const none = buildFleshEntityPrompt(ctx());
+    expect(none.system.every((b) => !b.text.includes("System AI's current voice"))).toBe(
+      true,
+    );
+  });
 });
 
 describe("fleshEntityToPatch", () => {
@@ -226,6 +251,6 @@ describe("fleshEntityOutputSchema", () => {
 describe("FLESH_ENTITY_GENERATOR", () => {
   it("has a stable id + version for provenance", () => {
     expect(FLESH_ENTITY_GENERATOR.id).toBe("flesh-entity");
-    expect(FLESH_ENTITY_GENERATOR.version).toBe("2");
+    expect(FLESH_ENTITY_GENERATOR.version).toBe("3");
   });
 });

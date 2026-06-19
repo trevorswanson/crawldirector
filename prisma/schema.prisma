@@ -427,9 +427,10 @@ model PersonaSnapshot {
   promptLocked   Boolean      @default(false)
   version        Int          @default(1)
 
-  campaign   Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  entity     Entity       @relation(fields: [entityId], references: [id], onDelete: Cascade)
-  provenance Provenance[]
+  campaign         Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  entity           Entity       @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  provenance       Provenance[]
+  drivenChangeSets ChangeSet[]  @relation("PersonaDrivenChangeSets")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -585,6 +586,14 @@ model ChangeSet {
   promptId      String?
   promptVersion String?
   runId         String?
+  // M6 — persona-aware generation provenance: when a generator's prompt was
+  // driven by the active System AI persona, the snapshot id + its version at
+  // generation time are recorded here (copied onto each Provenance row), so a DM
+  // can trace "this was generated under the 'gone rogue' persona". Secret-free:
+  // it's a reference, never the secret-agenda text (which stays on the DM-only
+  // snapshot). See docs/05-system-ai-persona.md.
+  personaSnapshotId    String?
+  personaPromptVersion Int?
   baseVersions  Json              @default("{}")
   operations    ChangeOperation[]
   reviewedById  String?
@@ -592,9 +601,10 @@ model ChangeSet {
   reviewNotes   String?
   provenance    Provenance[]
 
-  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  actor    User?    @relation("AuthoredChangeSets", fields: [actorUserId], references: [id], onDelete: SetNull)
-  reviewer User?    @relation("ReviewedChangeSets", fields: [reviewedById], references: [id], onDelete: SetNull)
+  campaign        Campaign         @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  actor           User?            @relation("AuthoredChangeSets", fields: [actorUserId], references: [id], onDelete: SetNull)
+  reviewer        User?            @relation("ReviewedChangeSets", fields: [reviewedById], references: [id], onDelete: SetNull)
+  personaSnapshot PersonaSnapshot? @relation("PersonaDrivenChangeSets", fields: [personaSnapshotId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

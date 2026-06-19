@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { compilePersonaPrompt } from "@/lib/persona";
+import {
+  PERSONA_VOICED_ENTITY_TYPES,
+  compilePersonaPrompt,
+  isPersonaVoicedEntityType,
+  normalizePersonaAgendas,
+  normalizePersonaDials,
+  normalizePersonaResources,
+  normalizePersonaValues,
+} from "@/lib/persona";
 
 describe("persona compiler", () => {
   it("turns a System AI snapshot into a secret-aware prompt fragment", () => {
@@ -74,5 +82,51 @@ describe("persona compiler", () => {
     expect(prompt).not.toContain("Available resources:");
     expect(prompt).not.toContain("Voice guide:");
     expect(prompt).not.toContain("Hard constraints:");
+  });
+});
+
+describe("persona studio normalizers", () => {
+  it("reads dials into a clamped, known-order record and drops junk", () => {
+    expect(
+      normalizePersonaDials({
+        theatricality: 91,
+        sentience: 150,
+        bogus: "x",
+        custom: 12,
+      }),
+    ).toEqual({ sentience: 100, theatricality: 91, custom: 12 });
+    expect(normalizePersonaDials(null)).toEqual({});
+    expect(normalizePersonaDials([1, 2])).toEqual({});
+  });
+
+  it("reads resources into ordered key/value pairs, dropping empties", () => {
+    expect(
+      normalizePersonaResources({ spotlight: "overlays", empty: "   ", n: 5 }),
+    ).toEqual([{ key: "spotlight", value: "overlays" }]);
+    expect(normalizePersonaResources(null)).toEqual([]);
+  });
+
+  it("reads values and agendas, splitting secret from overt", () => {
+    expect(normalizePersonaValues(["ratings", "  ", 3, "control"])).toEqual([
+      "ratings",
+      "control",
+    ]);
+    const agendas = normalizePersonaAgendas([
+      "Be spectacular.",
+      { text: "Punish Borant.", secret: true },
+      { text: "  ", secret: true },
+    ]);
+    expect(agendas).toEqual([
+      { text: "Be spectacular." },
+      { text: "Punish Borant.", secret: true },
+    ]);
+  });
+
+  it("flags dungeon-voiced entity kinds for persona-aware generation", () => {
+    expect(isPersonaVoicedEntityType("BOSS")).toBe(true);
+    expect(isPersonaVoicedEntityType("ITEM")).toBe(true);
+    expect(isPersonaVoicedEntityType("NPC")).toBe(false);
+    expect(isPersonaVoicedEntityType("FACTION")).toBe(false);
+    expect(PERSONA_VOICED_ENTITY_TYPES).toContain("SYSTEM_MESSAGE");
   });
 });

@@ -46,6 +46,10 @@ const {
   fleshOutEntities,
   inferRelationshipsForEntity,
   scaffoldStubEntities,
+  createPersonaSnapshot,
+  updatePersonaSnapshot,
+  setPersonaPromptLock,
+  activatePersonaSnapshot,
   askCampaign,
   searchCanon,
   searchEntityCandidates,
@@ -101,6 +105,10 @@ const {
   fleshOutEntities: vi.fn(),
   inferRelationshipsForEntity: vi.fn(),
   scaffoldStubEntities: vi.fn(),
+  createPersonaSnapshot: vi.fn(),
+  updatePersonaSnapshot: vi.fn(),
+  setPersonaPromptLock: vi.fn(),
+  activatePersonaSnapshot: vi.fn(),
   askCampaign: vi.fn(),
   searchCanon: vi.fn(),
   searchEntityCandidates: vi.fn(),
@@ -172,6 +180,12 @@ vi.mock("@/server/services/generation", () => ({
   fleshOutEntities,
   inferRelationshipsForEntity,
   scaffoldStubEntities,
+}));
+vi.mock("@/server/services/persona", () => ({
+  createPersonaSnapshot,
+  updatePersonaSnapshot,
+  setPersonaPromptLock,
+  activatePersonaSnapshot,
 }));
 vi.mock("@/server/services/ask", () => ({ askCampaign }));
 vi.mock("@/server/services/search", () => ({ searchCanon, searchEntityCandidates }));
@@ -250,6 +264,10 @@ import {
   searchEntityCandidatesAction,
   inferRelationshipsForEntityAction,
   scaffoldStubsAction,
+  createPersonaSnapshotAction,
+  updatePersonaSnapshotAction,
+  togglePersonaPromptLockAction,
+  activatePersonaSnapshotAction,
 } from "@/app/(dm)/actions";
 
 import { ServiceError } from "@/lib/errors";
@@ -2685,5 +2703,85 @@ describe("cancelJobAction", () => {
     expect((await cancelJobAction("c1", "j1"))?.error).toBe(
       "Could not cancel the job. Please try again.",
     );
+  });
+});
+
+describe("persona studio actions", () => {
+  const personaForm = (over: Record<string, string> = {}) =>
+    form({
+      label: "Petty God",
+      dial_sentience: "80",
+      dial_benevolence: "-20",
+      values: "ratings\ncontrol",
+      overtAgendas: "Be a show.",
+      secretAgendas: "Punish Borant.",
+      resources: "spotlight: overlays\nmalformed-line",
+      knowledgeScope: "OMNISCIENT",
+      voiceGuide: "Grandiose.",
+      constraints: "",
+      isActive: "on",
+      ...over,
+    });
+
+  it("creates a snapshot and redirects to it", async () => {
+    createPersonaSnapshot.mockResolvedValue({ changeSetId: "cs1", snapshotId: "snap1" });
+
+    await expect(
+      createPersonaSnapshotAction("c1", "e1", undefined, personaForm()),
+    ).rejects.toThrow("NEXT_REDIRECT");
+
+    expect(createPersonaSnapshot).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      "e1",
+      expect.objectContaining({
+        label: "Petty God",
+        dials: expect.objectContaining({ sentience: 80, benevolence: -20 }),
+        values: ["ratings", "control"],
+        overtAgendas: ["Be a show."],
+        secretAgendas: ["Punish Borant."],
+        resources: [{ key: "spotlight", value: "overlays" }],
+        isActive: true,
+      }),
+    );
+    expect(redirect).toHaveBeenCalledWith(
+      "/campaigns/c1/persona?entity=e1&snapshot=snap1",
+    );
+  });
+
+  it("surfaces a ServiceError from create without redirecting", async () => {
+    createPersonaSnapshot.mockRejectedValueOnce(new ServiceError("System AI entity not found."));
+    const result = await createPersonaSnapshotAction("c1", "e1", undefined, personaForm());
+    expect(result?.error).toBe("System AI entity not found.");
+    expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it("updates a snapshot and returns ok", async () => {
+    updatePersonaSnapshot.mockResolvedValue({ changeSetId: "cs2", snapshotId: "snap1" });
+    const result = await updatePersonaSnapshotAction("c1", "snap1", 3, undefined, personaForm());
+    expect(result?.ok).toBe(true);
+    expect(updatePersonaSnapshot).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      "snap1",
+      3,
+      expect.objectContaining({ label: "Petty God" }),
+    );
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/persona");
+  });
+
+  it("hides an unexpected update failure behind a generic message", async () => {
+    updatePersonaSnapshot.mockRejectedValueOnce(new Error("db down"));
+    const result = await updatePersonaSnapshotAction("c1", "snap1", 3, undefined, personaForm());
+    expect(result?.error).toBe("Could not update the persona snapshot.");
+  });
+
+  it("toggles the prompt lock and activates a snapshot", async () => {
+    await togglePersonaPromptLockAction("c1", "snap1", 4, true);
+    expect(setPersonaPromptLock).toHaveBeenCalledWith("u1", "c1", "snap1", 4, true);
+
+    await activatePersonaSnapshotAction("c1", "snap1", 4);
+    expect(activatePersonaSnapshot).toHaveBeenCalledWith("u1", "c1", "snap1", 4);
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/persona");
   });
 });

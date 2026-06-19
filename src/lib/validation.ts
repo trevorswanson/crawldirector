@@ -611,3 +611,65 @@ export const reviewEditValueKindSchema = z.enum([
   "number",
   "string",
 ]);
+
+// ───────────── Persona snapshots (M6 — docs/05-system-ai-persona.md) ─────────
+export const personaKnowledgeScopeValues = ["OMNISCIENT", "IN_CHARACTER"] as const;
+
+// The suggested dial set (docs/05). Stored as a free-form JSON record, so this
+// list drives only the studio UI + validation, not the schema.
+export const personaDialKeys = [
+  "sentience",
+  "compliance",
+  "volatility",
+  "benevolence",
+  "resentment",
+  "theatricality",
+] as const;
+
+const personaDial = z.preprocess(
+  (value) => (value === "" || value === null ? undefined : value),
+  z.coerce
+    .number()
+    .refine((value) => Number.isFinite(value), "Dials must be numbers.")
+    .int("Dials must be whole numbers.")
+    .min(-100, "Dials range from -100 to 100.")
+    .max(100, "Dials range from -100 to 100.")
+    .optional(),
+);
+
+const personaLine = z.string().trim().min(1).max(400);
+
+export const personaSnapshotInputSchema = z.object({
+  label: optionalText(120),
+  dials: z
+    .object({
+      sentience: personaDial,
+      compliance: personaDial,
+      volatility: personaDial,
+      benevolence: personaDial,
+      resentment: personaDial,
+      theatricality: personaDial,
+    })
+    .default({}),
+  values: z.array(personaLine).max(20, "Too many core values.").default([]),
+  overtAgendas: z.array(personaLine).max(20, "Too many agendas.").default([]),
+  secretAgendas: z
+    .array(personaLine)
+    .max(20, "Too many secret agendas.")
+    .default([]),
+  resources: z
+    .array(
+      z.object({
+        key: z.string().trim().min(1).max(80),
+        value: personaLine,
+      }),
+    )
+    .max(20, "Too many resources.")
+    .default([]),
+  knowledgeScope: z.enum(personaKnowledgeScopeValues).default("OMNISCIENT"),
+  voiceGuide: optionalText(4000),
+  constraints: optionalText(4000),
+  isActive: z.boolean().default(false),
+});
+
+export type PersonaSnapshotInput = z.infer<typeof personaSnapshotInputSchema>;

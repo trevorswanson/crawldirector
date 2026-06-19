@@ -76,10 +76,11 @@ below).
 
 **Active: M6 — System AI persona engine**
 ([05-system-ai-persona.md](./05-system-ai-persona.md)).
-Slice 1 is complete: the review-backed server foundation. **Next up: Slice 2 —
-Persona Studio UI + first generator prompt injection.** Keep the M6 work
-incremental; do not pull `PERSONA_SHIFT` event effects or full encounter/loot/
-message generators into the studio slice.
+Slices 1–2 are complete: the review-backed server foundation and the Persona
+Studio UI + first generator prompt injection. **Next up: the later M6 slices —
+`PERSONA_SHIFT` event-effect kind, richer snapshot diffing, and the full
+persona-aware generator family (encounter/mob/boss/loot/System-message).** Keep
+the M6 work incremental.
 
 - [x] **Slice 1 — Persona snapshot foundation + compiler.** Added the
       `PersonaSnapshot` table (generic to any `Entity`, first used by
@@ -89,20 +90,109 @@ message generators into the studio slice.
       `compiledPrompt`, field-level provenance on persona snapshots, the pure
       `compilePersonaPrompt` compiler, and `getActiveSystemPersonaPrompt` as the
       generator-facing read seam. ✅ 2026-06-19.
-- [ ] **Slice 2 — Persona Studio UI + prompt injection.** Build the DM-only
-      Persona Studio route from the console shell primitives with real
-      `SYSTEM_AI` entities/snapshots only (no filler data): create/edit active
-      snapshots, show compiled-prompt preview, lock/unlock the prompt, list the
-      snapshot timeline, and link resulting proposals to the Review Queue. Wire
-      `getActiveSystemPersonaPrompt` into the first persona-aware generator seam
-      behind a feature-limited path, recording the snapshot id/prompt version in
-      provenance without exposing secret agendas to players.
+- [x] **Slice 2 — Persona Studio UI + prompt injection.** Built the DM-only
+      `/campaigns/[id]/persona` Persona Studio from the console shell primitives
+      (real `SYSTEM_AI` entities/snapshots only — empty state points to the World
+      Browser, no filler): create/edit snapshots with dial sliders + agenda/voice
+      fields, a live compiled-prompt preview, prompt lock/unlock, activate, the
+      snapshot timeline rail, and a "View in Review Queue" deep-link. Wired
+      `getActiveSystemPersonaPrompt` into the flesh-out generator for the
+      dungeon-voiced kinds (`BOSS`/`MOB_TYPE`/`ITEM`/`SYSTEM_MESSAGE`/
+      `ACHIEVEMENT`/`TITLE`), recording the snapshot id + prompt version on the
+      change set (and `personaSnapshotId` onto each Provenance row). ✅ 2026-06-19
+      (dated entry below).
 - [ ] **Later M6 slices.** `PERSONA_SHIFT` event-effect kind, richer snapshot
       diffing, full persona-aware generator family (encounter, mob/boss, loot,
       System-message), and broader actor-profile studio reuse for M11.
 
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
+
+## M6 — Persona Studio UI + prompt injection (slice 2) ✅ (2026-06-19)
+
+**Goal:** turn the slice-1 server foundation into a usable DM surface and prove
+the loop the milestone is named for — the active System AI persona *driving* a
+real generator. Branch: `feat/m6-persona-studio`. Schema change (additive
+`ChangeSet` columns only).
+
+**Decision (authoring flow).** DM authoring through the studio is **auto-approved**
+(`applyAutoApprovedPersonaSnapshotChangeSet`), matching every other direct DM
+canon edit (invariant #1 models a DM edit as an auto-approved proposal with full
+provenance) and keeping the flagship tool fast. The slice's "link resulting
+proposals to the Review Queue" is met by deep-linking each snapshot's originating
+change set (`/review?selected=<id>` — the queue lists closed sets too). AI-proposed
+persona drift through the *pending* path stays a later slice.
+
+**Decision (generation provenance).** Added `ChangeSet.personaSnapshotId` (FK →
+`PersonaSnapshot`, `onDelete: SetNull`) + `ChangeSet.personaPromptVersion Int?` as
+change-set-level generation attribution (mirroring the existing `providerId`/
+`model`/`promptId`/`promptVersion`). `writeEntityProvenance` copies
+`personaSnapshotId` onto each field's `Provenance` row (the FK already existed from
+slice 1), so the `PersonaSnapshot.provenance` relation answers "what did this
+persona generate?". The snapshot's secret-agenda *text* never leaves the DM-only
+snapshot — provenance stores only a reference, and provenance is DM-only anyway.
+
+- [x] **Schema** ([`schema.prisma`](../prisma/schema.prisma), migration
+      `20260619182838_m6_persona_driven_changeset`): `ChangeSet.personaSnapshotId`
+      + `personaPromptVersion` + the `PersonaSnapshot.drivenChangeSets` back-relation
+      (additive columns only; drift gate clean).
+- [x] **Generator injection** ([`generation.ts`](../src/server/services/generation.ts),
+      [`flesh-entity.ts`](../src/server/ai/generators/flesh-entity.ts),
+      [`persona.ts`](../src/lib/persona.ts)): a pure
+      `isPersonaVoicedEntityType` (BOSS/MOB_TYPE/ITEM/SYSTEM_MESSAGE/ACHIEVEMENT/
+      TITLE) gate; `fleshOutEntityLocked` fetches `getActiveSystemPersonaPrompt`
+      for those kinds and passes it to `buildFleshEntityPrompt`, which prepends a
+      cacheable persona voice block with a no-reveal rule for secret agendas;
+      `FLESH_ENTITY_GENERATOR.version` bumped `2 → 3`; the change set records the
+      snapshot id + version. Non-voiced kinds and campaigns without an active
+      System AI persona are unaffected.
+- [x] **Studio service** ([`persona.ts`](../src/server/services/persona.ts)):
+      DM-only `getPersonaStudio` (entities + newest-first snapshot timeline +
+      active id + provenance origin per snapshot), and the auto-approved write
+      helpers `createPersonaSnapshot` / `updatePersonaSnapshot` /
+      `setPersonaPromptLock` / `activatePersonaSnapshot`, all delegating to the
+      slice-1 review apply path. Reuses exported lib normalizers
+      (`normalizePersonaDials`/`-Resources`/`-Values`/`-Agendas`).
+- [x] **Validation + actions** ([`validation.ts`](../src/lib/validation.ts),
+      [`actions.ts`](<../src/app/(dm)/actions.ts>)): `personaSnapshotInputSchema`
+      (dials clamped −100…100, bounded list/agenda/resource fields,
+      knowledge-scope enum) and the four server actions
+      (`createPersonaSnapshotAction` redirects to the new snapshot;
+      update/lock/activate revalidate the route), with FormData parsing of the
+      slider/textarea form (lenient `key: value` resource lines).
+- [x] **UI** ([`persona/page.tsx`](<../src/app/(dm)/campaigns/[id]/persona/page.tsx>),
+      [`persona-editor.tsx`](../src/components/persona/persona-editor.tsx),
+      [`dm-nav.tsx`](../src/components/console/dm-nav.tsx)): `<ConsoleScreen>` /
+      `<ScreenRail>` / `<ScreenHeader>` shell with an entity selector + snapshot
+      timeline rail, the controlled editor with six dial sliders and a **live**
+      `compilePersonaPrompt` preview (the pure compiler runs client-side, matching
+      the stored fragment), the stored compiled-prompt panel with the Review Queue
+      deep-link, prompt-locked notice, and an empty state linking the World Browser.
+      The nav's "AI · Persona Studio" is now a real link (no longer "Planned").
+- [x] **Tests:** pure [`persona.test.ts`](../tests/unit/persona.test.ts)
+      (normalizers + `isPersonaVoicedEntityType`),
+      [`flesh-entity-generator.test.ts`](../tests/unit/flesh-entity-generator.test.ts)
+      (persona voice block injected/omitted, version 3); DB-backed
+      [`persona-studio.test.ts`](../tests/unit/persona-studio.test.ts) (studio read,
+      create/update/lock/activate, non-System-AI + player rejection) and
+      [`generation.test.ts`](../tests/unit/generation.test.ts) (persona injected for
+      a BOSS with attribution copied to provenance on approval; not for an NPC); UI
+      [`persona-studio-page.test.tsx`](../tests/unit/persona-studio-page.test.tsx) +
+      [`persona-editor.test.tsx`](../tests/unit/persona-editor.test.tsx);
+      [`dm-actions.test.ts`](../tests/unit/dm-actions.test.ts) +
+      [`console-shell.test.tsx`](../tests/unit/console-shell.test.tsx).
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors;
+      pre-existing settings-action warnings only), `npm run build` (new
+      `/campaigns/[id]/persona` route), `npx prisma migrate dev` (drift gate clean),
+      and the full coverage gate green (116 files / 1591 tests; statements 95.03%,
+      branches 87.98%, functions 96.66%, lines 96.77%). **In-browser** (reseeded
+      `dcc`, authed as `dm@example.com`): the empty state renders and links the
+      World Browser; after authoring a `SYSTEM_AI` entity + active persona via the
+      service, the studio renders the title/ACTIVE PERSONA badge/LOCK PROMPT
+      control, the six dial sliders (82/18/64/−35/76/91), the live + stored
+      compiled prompt (incl. the secret-agenda section, DM-side only), and the
+      Review Queue deep-link, with no persona-related console errors (RSC boundary
+      intact).
 
 ## M6 — Persona snapshot foundation (slice 1) ✅ (2026-06-19)
 

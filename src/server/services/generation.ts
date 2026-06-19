@@ -33,6 +33,8 @@ import {
   type StubSpec,
 } from "@/server/ai/generators/scaffold-stubs";
 import { buildStubCreatePatch } from "@/server/services/entities";
+import { getActiveSystemPersonaPrompt } from "@/server/services/persona";
+import { isPersonaVoicedEntityType } from "@/lib/persona";
 import { retrieveRelatedEntityIds } from "@/server/services/retrieval";
 import {
   createPendingEntityChangeSet,
@@ -254,6 +256,14 @@ async function fleshOutEntityLocked(
   // (Mirrors inferRelationshipsForEntityLocked.)
   await assertWithinSpendCap(campaignId);
 
+  // M6 persona injection (docs/05): for dungeon-voiced kinds, flesh out in the
+  // active System AI persona's current voice. `getActiveSystemPersonaPrompt` is
+  // DM-scoped (we already asserted DM above) and returns null when no active
+  // System AI persona exists, so non-persona campaigns are unaffected.
+  const activePersona = isPersonaVoicedEntityType(entity.type)
+    ? await getActiveSystemPersonaPrompt(userId, campaignId)
+    : null;
+
   const { system, messages } = buildFleshEntityPrompt({
     campaignName: campaign.name,
     styleGuide: campaign.styleGuide,
@@ -268,6 +278,7 @@ async function fleshOutEntityLocked(
     campaignTags,
     relatedCanon,
     lockedFields,
+    personaPrompt: activePersona?.prompt ?? null,
   });
 
   let output;
@@ -322,6 +333,8 @@ async function fleshOutEntityLocked(
     model: provider.model,
     promptId: FLESH_ENTITY_GENERATOR.id,
     promptVersion: FLESH_ENTITY_GENERATOR.version,
+    personaSnapshotId: activePersona?.snapshotId,
+    personaPromptVersion: activePersona?.version,
     operations: [{ op: OpKind.UPDATE_ENTITY, targetId: entityId, patch }],
   });
 
