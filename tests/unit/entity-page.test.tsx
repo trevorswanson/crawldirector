@@ -62,9 +62,9 @@ vi.mock("@/server/services/knowledge", () => ({
   listKnowledgeOfEntity,
   listKnowledgeHeldByEntity,
 }));
-vi.mock("@/components/entities/generate-panel", () => ({
-  GeneratePanel: ({ locked }: { locked: boolean }) => (
-    <div>Generate panel{locked ? " (locked)" : ""}</div>
+vi.mock("@/components/entities/ai-actions-dialog", () => ({
+  AiActionsDialog: ({ locked }: { locked: boolean }) => (
+    <div>Entity AI actions{locked ? " (locked)" : ""}</div>
   ),
 }));
 vi.mock("@/components/entities/knowledge-panel", () => ({
@@ -396,13 +396,14 @@ describe("EntityPage", () => {
     expect(screen.queryByText(/Knowledge panel/)).toBeNull();
   });
 
-  it("shows the AI generation panel to a DM when a provider key is configured", async () => {
+  it("shows the consolidated AI action in the entity title row for a configured DM", async () => {
     getEntityForUser.mockResolvedValue(crawler());
     listAiKeys.mockResolvedValue([{ providerId: "anthropic" }]);
 
     await renderPage();
 
-    expect(screen.getByText("Generate panel")).toBeDefined();
+    const heading = screen.getByRole("heading", { name: "Carl" });
+    expect(heading.parentElement?.textContent).toContain("Entity AI actions");
   });
 
   it("hides the AI generation panel when no provider key is configured", async () => {
@@ -411,7 +412,7 @@ describe("EntityPage", () => {
 
     await renderPage();
 
-    expect(screen.queryByText("Generate panel")).toBeNull();
+    expect(screen.queryByText("Entity AI actions")).toBeNull();
   });
 
   it("hides the AI generation panel from a player viewer", async () => {
@@ -421,7 +422,7 @@ describe("EntityPage", () => {
 
     await renderPage();
 
-    expect(screen.queryByText("Generate panel")).toBeNull();
+    expect(screen.queryByText("Entity AI actions")).toBeNull();
   });
 
   it("passes rosterDay into group roster snapshots", async () => {

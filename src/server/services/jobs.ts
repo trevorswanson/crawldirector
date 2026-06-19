@@ -23,6 +23,13 @@ const jobDisplaySelect = {
 type Db = Prisma.TransactionClient;
 type JobDisplay = Prisma.JobGetPayload<{ select: typeof jobDisplaySelect }>;
 type ActiveJobStatus = "QUEUED" | "RUNNING";
+export type JobListFilters = {
+  kinds?: JobKind[];
+  statuses?: JobStatus[];
+  aiOnly?: boolean;
+};
+
+const AI_JOB_KINDS = [JobKind.BULK_FLESH, JobKind.EMBED_SEARCH_DOCS] as const;
 
 // A worker that dies mid-job never reaches completeJob/failJob, so its row stays
 // RUNNING forever — claimNextJob only revisits QUEUED rows. Treat a RUNNING job
@@ -168,10 +175,21 @@ export async function listRecentJobs(
   userId: string,
   campaignId: string,
   take: number | null = 5,
+  filters: JobListFilters = {},
 ) {
   await assertCampaignDm(userId, campaignId);
+  const kinds = filters.aiOnly
+    ? filters.kinds?.filter((kind) => AI_JOB_KINDS.includes(kind as (typeof AI_JOB_KINDS)[number])) ?? [
+        ...AI_JOB_KINDS,
+      ]
+    : filters.kinds;
+
   return prisma.job.findMany({
-    where: { campaignId },
+    where: {
+      campaignId,
+      ...(kinds ? { kind: { in: kinds } } : {}),
+      ...(filters.statuses ? { status: { in: filters.statuses } } : {}),
+    },
     orderBy: { createdAt: "desc" },
     ...(take == null ? {} : { take }),
     select: jobDisplaySelect,

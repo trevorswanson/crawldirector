@@ -137,6 +137,27 @@ M6 remains the next milestone work. The detailed decisions live in
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
 
+## Maintenance — consolidated AI actions + Job Queue filters ✅ (2026-06-19)
+
+- [x] **One AI entry point per surface.** Replaced the World Browser's separate
+      scaffold/bulk-flesh triggers with one icon-only Sparkles button, and moved
+      the entity-detail generator controls from the right rail into the title
+      row. Both open the new token-aligned, accessible portal `Dialog`; existing
+      forms/actions, lock behavior, proposal links, and background-job status
+      remain unchanged inside labeled modal sections.
+- [x] **Job Queue filters.** The DM queue now has URL-driven Job type, Status,
+      and AI-only facets in the standard console rail. `listRecentJobs` applies
+      optional kind/status filters server-side; AI-only restricts history to
+      `BULK_FLESH` and `EMBED_SEARCH_DOCS`, the job kinds that consume tokens.
+      A filtered empty result now says so rather than implying no job history.
+- [x] **Tests.** Added dialog accessibility/close behavior coverage, consolidated
+      action-dialog coverage, page placement/gating coverage, URL-filter parsing,
+      and DB-backed kind/status/AI-only job-query assertions.
+- [x] **Verification.** Focused suite: 107 tests. Full coverage: 95.03%
+      statements / 88.09% branches / 96.58% functions / 96.77% lines. Lint,
+      typecheck, and production build passed. Browser QA exercised both AI modals
+      and combined job-filter URL state with no application console errors.
+
 ## M6 — Persona Studio UI + prompt injection (slice 2) ✅ (2026-06-19)
 
 **Goal:** turn the slice-1 server foundation into a usable DM surface and prove

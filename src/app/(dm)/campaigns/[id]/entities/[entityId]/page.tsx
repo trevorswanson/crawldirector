@@ -16,7 +16,7 @@ import {
 } from "@/components/entities/timeline-panel";
 import { RosterPanel } from "@/components/entities/roster-panel";
 import { KnowledgePanel } from "@/components/entities/knowledge-panel";
-import { GeneratePanel } from "@/components/entities/generate-panel";
+import { AiActionsDialog } from "@/components/entities/ai-actions-dialog";
 import { FieldLockToggle } from "@/components/entities/field-lock-toggle";
 import { KindDisplay } from "@/components/entities/kind-display";
 import {
@@ -197,9 +197,19 @@ export default async function EntityPage({
             <StatusPill status={entity.status} />
             {entity.isStub && <HudTag>Stub</HudTag>}
           </div>
-          <h1 className="font-display text-[30px] font-bold leading-[1.05] tracking-[.01em]">
-            {entity.name}
-          </h1>
+          <div className="flex items-start justify-between gap-4">
+            <h1 className="min-w-0 font-display text-[30px] font-bold leading-[1.05] tracking-[.01em]">
+              {entity.name}
+            </h1>
+            {isDm && aiConfigured && !editing && (
+              <AiActionsDialog
+                variant="entity"
+                campaignId={id}
+                entityId={entityId}
+                locked={entity.locked}
+              />
+            )}
+          </div>
           {editing && entity.summary && (
             <p className="mt-[10px] text-[15px] leading-[1.4] text-[var(--ink-dim)]">
               {entity.summary}
@@ -518,14 +528,6 @@ export default async function EntityPage({
             candidates={candidates}
           />
         </div>
-
-        {/* AI generation — flesh out into a review proposal (M4), DM-only and
-            only with a configured provider key */}
-        {isDm && aiConfigured && !editing && (
-          <div className="border-b border-[var(--line)] px-[18px] py-4">
-            <GeneratePanel campaignId={id} entityId={entityId} locked={entity.locked} />
-          </div>
-        )}
 
         {/* knowledge — private reveals / fog of war (M3), DM-only curation */}
         {isDm && (

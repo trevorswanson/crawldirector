@@ -40,15 +40,16 @@ vi.mock("@/server/services/entities", () => ({
 }));
 vi.mock("@/server/services/events", () => ({ resolveFloorEntities }));
 vi.mock("@/server/services/ai-keys", () => ({ listAiKeys }));
-vi.mock("@/components/entities/scaffold-stubs-panel", () => ({
-  ScaffoldStubsPanel: ({ campaignId }: { campaignId: string }) => (
-    <div>Scaffold with AI {campaignId}</div>
-  ),
-}));
-vi.mock("@/components/entities/bulk-flesh-panel", () => ({
-  BulkFleshPanel: ({ campaignId }: { campaignId: string }) => (
-    <div>Flesh out with AI {campaignId}</div>
-  ),
+vi.mock("@/components/entities/ai-actions-dialog", () => ({
+  AiActionsDialog: ({
+    campaignId,
+    variant,
+    candidates,
+  }: {
+    campaignId: string;
+    variant: string;
+    candidates: unknown[];
+  }) => <div>AI actions {variant} {campaignId} ({candidates.length})</div>,
 }));
 vi.mock("next/navigation", () => ({
   notFound,
@@ -111,9 +112,8 @@ describe("CampaignPage", () => {
     expect(screen.getByText("Entity type")).toBeDefined();
     expect(screen.getByText("Locked only")).toBeDefined();
     expect(screen.getByText("Quick create c1")).toBeDefined();
-    // No provider key configured (listAiKeys → []), so the AI panels are hidden.
-    expect(screen.queryByText("Scaffold with AI c1")).toBeNull();
-    expect(screen.queryByText("Flesh out with AI c1")).toBeNull();
+    // No provider key configured (listAiKeys → []), so the consolidated AI action is hidden.
+    expect(screen.queryByText(/AI actions world c1/)).toBeNull();
     // count chip: 0 results / 2 total
     expect(screen.getByText("0 / 2")).toBeDefined();
     expect(listEntitiesForUser).toHaveBeenCalledWith("u1", "c1", {
@@ -127,7 +127,7 @@ describe("CampaignPage", () => {
     expect(getEntityTypeCounts).toHaveBeenCalledWith("u1", "c1");
   });
 
-  it("shows the AI scaffold panel when a provider key is configured", async () => {
+  it("shows one consolidated AI action when a provider key is configured", async () => {
     getCampaignForUser.mockResolvedValue({
       id: "c1",
       name: "World One",
@@ -145,10 +145,10 @@ describe("CampaignPage", () => {
       }),
     );
 
-    expect(screen.getByText("Scaffold with AI c1")).toBeDefined();
+    expect(screen.getByText("AI actions world c1 (0)")).toBeDefined();
   });
 
-  it("shows the bulk flesh-out panel only with a key AND stub candidates", async () => {
+  it("passes bulk flesh-out candidates into the consolidated AI action", async () => {
     getCampaignForUser.mockResolvedValue({
       id: "c1",
       name: "World One",
@@ -159,17 +159,17 @@ describe("CampaignPage", () => {
     });
     listAiKeys.mockResolvedValue([{ providerId: "anthropic", lastFour: "4242" }]);
 
-    // A key but no stub candidates → the bulk panel is still hidden.
+    // A key with no candidates still exposes the scaffold action.
     render(
       await CampaignPage({
         params: Promise.resolve({ id: "c1" }),
         searchParams: Promise.resolve({}),
       }),
     );
-    expect(screen.queryByText("Flesh out with AI c1")).toBeNull();
+    expect(screen.getByText("AI actions world c1 (0)")).toBeDefined();
     cleanup();
 
-    // A key AND at least one stub candidate → the bulk panel shows.
+    // Stub candidates enable the bulk-flesh section inside the same dialog.
     listFleshCandidates.mockResolvedValue([{ id: "e1", name: "Stub", type: "NPC" }]);
     render(
       await CampaignPage({
@@ -177,7 +177,7 @@ describe("CampaignPage", () => {
         searchParams: Promise.resolve({}),
       }),
     );
-    expect(screen.getByText("Flesh out with AI c1")).toBeDefined();
+    expect(screen.getByText("AI actions world c1 (1)")).toBeDefined();
     expect(listFleshCandidates).toHaveBeenCalledWith("u1", "c1");
   });
 
