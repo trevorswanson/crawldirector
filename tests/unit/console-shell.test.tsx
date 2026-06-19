@@ -151,9 +151,19 @@ describe("DmNav", () => {
 
     render(<DmNav />);
 
-    const planned = screen.getByTitle(/M6 — System AI persona engine/);
+    const planned = screen.getByTitle(/M11 — Entity agents & simulation/);
     expect(planned.getAttribute("aria-disabled")).toBe("true");
     expect(planned.textContent).toContain("Planned");
+    await waitFor(() => {});
+  });
+
+  it("links Persona Studio to the campaign persona route (M6)", async () => {
+    usePathname.mockReturnValue("/campaigns/c1");
+
+    render(<DmNav />);
+
+    const link = screen.getByRole("link", { name: /AI · Persona Studio/i });
+    expect(link.getAttribute("href")).toBe("/campaigns/c1/persona");
     await waitFor(() => {});
   });
 

@@ -20,7 +20,9 @@ export const FLESH_ENTITY_GENERATOR = {
   id: "flesh-entity",
   // v2 (M5 slice 6): the prompt now offers retrieval-surfaced related canon as
   // read-only reference context, with a rule framing how to use it.
-  version: "2",
+  // v3 (M6 slice 2): persona-aware — for dungeon-voiced entity kinds the active
+  // System AI persona is injected as a voice/agenda system block (docs/05).
+  version: "3",
 } as const;
 
 // The fields this generator may propose. Deliberately limited to the freeform
@@ -82,6 +84,15 @@ export type FleshEntityContext = {
   }>;
   /** Fields the DM has locked — excluded from the proposal. */
   lockedFields?: FleshableField[];
+  /**
+   * The active System AI persona's compiled prompt fragment (M6 — docs/05).
+   * Supplied only for dungeon-voiced entity kinds (bosses, mobs, loot, System
+   * messages, …) so the generated flavor sounds like the System AI does *right
+   * now* in this campaign. It encodes the persona's voice, overt agendas, and —
+   * for generation only — its secret agendas, which the rule below forbids
+   * stating outright in this DM-reviewed, eventually-player-visible text.
+   */
+  personaPrompt?: string | null;
 };
 
 const FLESHABLE_FIELDS: FleshableField[] = ["summary", "description", "tags"];
@@ -150,6 +161,26 @@ export function buildFleshEntityPrompt(ctx: FleshEntityContext): {
     system.push({
       cache: true,
       text: `Campaign style guide (honor this tone and these constraints):\n${ctx.styleGuide.trim()}`,
+    });
+  }
+
+  // Persona voice block (M6) — prepended for dungeon-voiced kinds so the flavor
+  // reads as the System AI's current self. Marked cacheable: it's stable across
+  // a run. The no-reveal rule keeps secret agendas out of the produced text;
+  // it's a proposal a DM reviews and players only ever read approved canon.
+  if (ctx.personaPrompt && ctx.personaPrompt.trim()) {
+    system.push({
+      cache: true,
+      text: [
+        "This entity is content the dungeon's System AI presents to crawlers, so",
+        "write it in the System AI's current voice. Adopt the persona below: let",
+        "its mood, agendas, and tone shape the flavor.",
+        "",
+        ctx.personaPrompt.trim(),
+        "",
+        "Use the secret agendas only to inform tone and subtext; never state them",
+        "outright or otherwise reveal them in the text you produce.",
+      ].join("\n"),
     });
   }
 

@@ -687,6 +687,11 @@ export async function createPendingEntityChangeSet(
     model?: string;
     promptId?: string;
     promptVersion?: string;
+    // M6 — when a persona-aware generator's prompt was driven by the active
+    // System AI persona, record the snapshot + its version so provenance can
+    // answer "which persona produced this?" (docs/05-system-ai-persona.md).
+    personaSnapshotId?: string;
+    personaPromptVersion?: number;
     operations: EntityReviewOperationInput[];
   },
 ) {
@@ -718,6 +723,8 @@ export async function createPendingEntityChangeSet(
         model: input.model,
         promptId: input.promptId,
         promptVersion: input.promptVersion,
+        personaSnapshotId: input.personaSnapshotId,
+        personaPromptVersion: input.personaPromptVersion,
         actorUserId: userId,
         baseVersions,
         operations: {
@@ -3467,6 +3474,10 @@ async function writeEntityProvenance(
       model: changeSet.model,
       promptId: changeSet.promptId,
       runId: changeSet.runId,
+      // M6 — carry the driving persona onto each field's provenance so the
+      // PersonaSnapshot.provenance relation can answer "what did this persona
+      // generate?" (the prompt version stays on the change set).
+      personaSnapshotId: changeSet.personaSnapshotId,
     })),
   });
 }

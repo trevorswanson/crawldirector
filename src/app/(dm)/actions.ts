@@ -67,6 +67,13 @@ import {
   inferRelationshipsForEntity,
   scaffoldStubEntities,
 } from "@/server/services/generation";
+import {
+  activatePersonaSnapshot,
+  createPersonaSnapshot,
+  setPersonaPromptLock,
+  updatePersonaSnapshot,
+} from "@/server/services/persona";
+import { personaSnapshotInputSchema } from "@/lib/validation";
 import { askCampaign, type AskSource } from "@/server/services/ask";
 import {
   searchEntityCandidates,
@@ -1815,4 +1822,130 @@ export async function getCampaignHeaderStatusAction(campaignId: string) {
   const user = await requireUser();
   const { getCampaignHeaderStatus } = await import("@/server/services/campaigns");
   return getCampaignHeaderStatus(user.id, campaignId);
+}
+
+// ───────────── Persona Studio (M6 — docs/05-system-ai-persona.md) ─────────────
+
+export type PersonaActionState =
+  | { error?: string; ok?: boolean; timestamp?: number }
+  | undefined;
+
+const PERSONA_DIAL_KEYS = [
+  "sentience",
+  "compliance",
+  "volatility",
+  "benevolence",
+  "resentment",
+  "theatricality",
+] as const;
+
+function nonEmptyLines(value: FormDataEntryValue | null): string[] {
+  return (value?.toString() ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+// Parse the studio form into the validated input shape. Dials come from range
+// inputs (named `dial_<key>`); list fields are line-delimited textareas;
+// resources are lenient "key: value" lines (malformed lines are dropped).
+function parsePersonaForm(formData: FormData) {
+  const dials: Record<string, number> = {};
+  for (const key of PERSONA_DIAL_KEYS) {
+    const raw = formData.get(`dial_${key}`)?.toString();
+    if (raw !== undefined && raw !== "") {
+      const num = Number(raw);
+      if (Number.isFinite(num)) dials[key] = num;
+    }
+  }
+  const resources = nonEmptyLines(formData.get("resources")).flatMap((line) => {
+    const idx = line.indexOf(":");
+    if (idx === -1) return [];
+    const key = line.slice(0, idx).trim();
+    const value = line.slice(idx + 1).trim();
+    return key && value ? [{ key, value }] : [];
+  });
+
+  return personaSnapshotInputSchema.safeParse({
+    label: formData.get("label")?.toString() ?? "",
+    dials,
+    values: nonEmptyLines(formData.get("values")),
+    overtAgendas: nonEmptyLines(formData.get("overtAgendas")),
+    secretAgendas: nonEmptyLines(formData.get("secretAgendas")),
+    resources,
+    knowledgeScope: formData.get("knowledgeScope")?.toString() || "OMNISCIENT",
+    voiceGuide: formData.get("voiceGuide")?.toString() ?? "",
+    constraints: formData.get("constraints")?.toString() ?? "",
+    isActive: formData.get("isActive") === "on" || formData.get("isActive") === "true",
+  });
+}
+
+export async function createPersonaSnapshotAction(
+  campaignId: string,
+  entityId: string,
+  _prev: PersonaActionState,
+  formData: FormData,
+): Promise<PersonaActionState> {
+  const user = await requireUser();
+  const parsed = parsePersonaForm(formData);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input.", timestamp: Date.now() };
+  }
+
+  let snapshotId: string;
+  try {
+    const result = await createPersonaSnapshot(user.id, campaignId, entityId, parsed.data);
+    snapshotId = result.snapshotId;
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    return { error: "Could not author the persona snapshot.", timestamp: Date.now() };
+  }
+
+  revalidatePath(`/campaigns/${campaignId}/persona`);
+  redirect(`/campaigns/${campaignId}/persona?entity=${entityId}&snapshot=${snapshotId}`);
+}
+
+export async function updatePersonaSnapshotAction(
+  campaignId: string,
+  snapshotId: string,
+  baseVersion: number,
+  _prev: PersonaActionState,
+  formData: FormData,
+): Promise<PersonaActionState> {
+  const user = await requireUser();
+  const parsed = parsePersonaForm(formData);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input.", timestamp: Date.now() };
+  }
+
+  try {
+    await updatePersonaSnapshot(user.id, campaignId, snapshotId, baseVersion, parsed.data);
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    return { error: "Could not update the persona snapshot.", timestamp: Date.now() };
+  }
+
+  revalidatePath(`/campaigns/${campaignId}/persona`);
+  return { ok: true, timestamp: Date.now() };
+}
+
+export async function togglePersonaPromptLockAction(
+  campaignId: string,
+  snapshotId: string,
+  baseVersion: number,
+  promptLocked: boolean,
+): Promise<void> {
+  const user = await requireUser();
+  await setPersonaPromptLock(user.id, campaignId, snapshotId, baseVersion, promptLocked);
+  revalidatePath(`/campaigns/${campaignId}/persona`);
+}
+
+export async function activatePersonaSnapshotAction(
+  campaignId: string,
+  snapshotId: string,
+  baseVersion: number,
+): Promise<void> {
+  const user = await requireUser();
+  await activatePersonaSnapshot(user.id, campaignId, snapshotId, baseVersion);
+  revalidatePath(`/campaigns/${campaignId}/persona`);
 }

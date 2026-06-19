@@ -1,5 +1,23 @@
 export type PersonaKnowledgeScope = "OMNISCIENT" | "IN_CHARACTER";
 
+// Entity kinds whose generated flavor is the dungeon's System AI "talking" to
+// crawlers (encounters, bosses, mobs, loot, System messages, achievements,
+// titles). Persona-aware generators inject the active System AI persona prompt
+// when fleshing these; everything else (e.g. real-world factions) generates
+// without it. See docs/05-system-ai-persona.md §"Prompt compilation".
+export const PERSONA_VOICED_ENTITY_TYPES = [
+  "BOSS",
+  "MOB_TYPE",
+  "ITEM",
+  "SYSTEM_MESSAGE",
+  "ACHIEVEMENT",
+  "TITLE",
+] as const;
+
+export function isPersonaVoicedEntityType(type: string): boolean {
+  return (PERSONA_VOICED_ENTITY_TYPES as readonly string[]).includes(type);
+}
+
 export type PersonaAgenda = {
   text: string;
   secret?: boolean;
@@ -74,9 +92,41 @@ function orderedDialEntries(dials: Record<string, unknown>): [string, number][] 
   return [...known, ...extra];
 }
 
+export function normalizePersonaValues(value: unknown): string[] {
+  return normalizeList(value);
+}
+
 function normalizeList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map(compactText).filter((item): item is string => item !== null);
+}
+
+// Read a stored dials JSON blob into a clamped record keyed by the known dials
+// (in canonical order), dropping non-numeric/unknown keys. Used by the studio to
+// hydrate the editor sliders from a saved snapshot.
+export function normalizePersonaDials(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, number> = {};
+  for (const [key, raw] of orderedDialEntries(value as Record<string, unknown>)) {
+    out[key] = raw;
+  }
+  return out;
+}
+
+// Read a stored resources JSON blob into ordered key/value pairs (compact,
+// string values only), for the studio editor.
+export function normalizePersonaResources(
+  value: unknown,
+): { key: string; value: string }[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  return Object.entries(value as Record<string, unknown>).flatMap(([key, raw]) => {
+    const text = compactText(raw);
+    return text ? [{ key, value: text }] : [];
+  });
+}
+
+export function normalizePersonaAgendas(value: unknown): PersonaAgenda[] {
+  return normalizeAgendas(value);
 }
 
 function normalizeAgendas(value: unknown): PersonaAgenda[] {

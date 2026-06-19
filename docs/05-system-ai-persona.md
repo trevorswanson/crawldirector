@@ -166,15 +166,22 @@ New: `PersonaSnapshot` (and the `SYSTEM_AI` entity type, plus new relationship
 types like `USED_BY` / `MANIPULATES`). The `PERSONA_SHIFT` event-effect kind and
 `personaAware` generator flag. See [`09-data-schema.md`](./09-data-schema.md).
 
-**Status (M6 slice 1, 2026-06-19):** the server-side persona foundation is live.
-`PersonaSnapshot` has a real table and review operations
+**Status (M6 slices 1–2, 2026-06-19):** the server foundation and the DM-facing
+studio are live. `PersonaSnapshot` has a real table and review operations
 (`CREATE_PERSONA_SNAPSHOT`, `UPDATE_PERSONA_SNAPSHOT`), active snapshots are
 exclusive per entity, prompt-locks block generated `compiledPrompt` edits, and
 the deterministic compiler writes a provenance-tracked cached prompt fragment.
-`getActiveSystemPersonaPrompt` is the service-layer seam future persona-aware
-generators should use. Still pending for later M6 slices: the Persona Studio UI,
-first generator injection, `PERSONA_SHIFT`, richer snapshot diffing, and the full
-persona-aware generator family.
+The **Persona Studio** (`/campaigns/[id]/persona`) lets a DM author/edit
+snapshots (dial sliders, agendas, voice, constraints) with a live compiled-prompt
+preview, lock/unlock the prompt, activate a snapshot, browse the timeline, and
+deep-link the Review Queue — all as auto-approved DM canon edits. The active
+persona is injected into the **flesh-out generator** for dungeon-voiced entity
+kinds (BOSS/MOB_TYPE/ITEM/SYSTEM_MESSAGE/ACHIEVEMENT/TITLE) via
+`getActiveSystemPersonaPrompt`; the driving snapshot id + prompt version are
+recorded on the change set (and copied onto each `Provenance` row), and secret
+agendas never leave the DM-only snapshot. Still pending for later M6 slices:
+`PERSONA_SHIFT`, richer snapshot diffing, AI-proposed persona drift through the
+pending review path, and the full persona-aware generator family.
 
 ## Build sequencing
 

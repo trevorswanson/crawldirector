@@ -30,6 +30,7 @@ import {
   scaffoldStubEntities,
 } from "@/server/services/generation";
 import { approveChangeSet, setEntityLock } from "@/server/services/review";
+import { createPersonaSnapshot } from "@/server/services/persona";
 import { recordAiUsage, setCampaignSpendCap } from "@/server/services/ai-usage";
 
 const SAMPLE_USAGE = {
@@ -121,7 +122,10 @@ describe("fleshOutEntity", () => {
     expect(changeSet?.providerId).toBe("anthropic");
     expect(changeSet?.model).toBe("claude-opus-4-8");
     expect(changeSet?.promptId).toBe("flesh-entity");
-    expect(changeSet?.promptVersion).toBe("2");
+    expect(changeSet?.promptVersion).toBe("3");
+    // No System AI persona authored → no persona attribution on the change set.
+    expect(changeSet?.personaSnapshotId).toBeNull();
+    expect(changeSet?.personaPromptVersion).toBeNull();
     expect(changeSet?.operations).toHaveLength(1);
     const op = changeSet!.operations[0];
     expect(op.op).toBe("UPDATE_ENTITY");
@@ -152,6 +156,97 @@ describe("fleshOutEntity", () => {
     const systemText = (req.system as Array<{ text: string }>).map((b) => b.text).join("\n");
     expect(systemText).toContain("Gritty and darkly funny.");
     expect(req.messages[0].content).toContain("Existing campaign tags to prefer: floor-9");
+  });
+
+  async function authorActivePersona(dmId: string, campaignId: string) {
+    const systemAi = await createGenericEntity(dmId, campaignId, {
+      type: "SYSTEM_AI",
+      name: "The System",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    await createPersonaSnapshot(dmId, campaignId, systemAi.id, {
+      label: "Petty God",
+      dials: { theatricality: 90 },
+      values: [],
+      overtAgendas: ["Make it a show."],
+      secretAgendas: ["Undermine Borant."],
+      resources: [],
+      knowledgeScope: "OMNISCIENT",
+      voiceGuide: "Grandiose and petty.",
+      constraints: "",
+      isActive: true,
+    });
+  }
+
+  it("injects the active System AI persona for dungeon-voiced kinds and records it (M6)", async () => {
+    const { dmId, campaignId } = await seed();
+    await authorActivePersona(dmId, campaignId);
+    const boss = await createGenericEntity(dmId, campaignId, {
+      type: "BOSS",
+      name: "The Maitre D'",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const provider = fakeProvider({ summary: "s", description: "d", tags: ["t"] });
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    const result = await fleshOutEntity(dmId, campaignId, boss.id);
+
+    const systemText = (
+      provider.generateStructured.mock.calls[0][0].system as Array<{ text: string }>
+    )
+      .map((b) => b.text)
+      .join("\n");
+    expect(systemText).toContain("System AI persona: Petty God");
+    expect(systemText).toMatch(/System AI's current voice/i);
+    // The secret agenda is in the DM-side prompt (informs tone); never player output.
+    expect(systemText).toContain("Undermine Borant.");
+
+    const changeSet = await prisma.changeSet.findUniqueOrThrow({
+      where: { id: result.changeSetId },
+    });
+    expect(changeSet.personaSnapshotId).toBeTruthy();
+    expect(changeSet.personaPromptVersion).toBe(1);
+
+    // Provenance is written on approval — approving the AI proposal copies the
+    // driving persona onto each field's Provenance row.
+    const op = await prisma.changeOperation.findFirstOrThrow({
+      where: { changeSetId: result.changeSetId },
+    });
+    await prisma.changeOperation.update({
+      where: { id: op.id },
+      data: { decision: "ACCEPTED" },
+    });
+    await approveChangeSet(dmId, campaignId, result.changeSetId);
+    const provenance = await prisma.provenance.findFirst({
+      where: { changeSetId: result.changeSetId },
+    });
+    expect(provenance?.personaSnapshotId).toBe(changeSet.personaSnapshotId);
+  });
+
+  it("does not inject the persona when fleshing a non-voiced kind", async () => {
+    const { dmId, campaignId, entityId } = await seed(); // entityId is an NPC
+    await authorActivePersona(dmId, campaignId);
+    const provider = fakeProvider({ summary: "s", description: "d", tags: ["t"] });
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    const result = await fleshOutEntity(dmId, campaignId, entityId);
+
+    const systemText = (
+      provider.generateStructured.mock.calls[0][0].system as Array<{ text: string }>
+    )
+      .map((b) => b.text)
+      .join("\n");
+    expect(systemText).not.toContain("System AI persona");
+    const changeSet = await prisma.changeSet.findUniqueOrThrow({
+      where: { id: result.changeSetId },
+    });
+    expect(changeSet.personaSnapshotId).toBeNull();
   });
 
   it("carries retrieval-surfaced related canon as reference, excluding unrelated entities", async () => {

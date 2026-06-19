@@ -91,7 +91,14 @@ const NAV: NavItem[] = [
       campaignId ? `/campaigns/${campaignId}/settings` : "/dashboard",
     match: (p) => /^\/campaigns\/[^/]+\/settings/.test(p),
   },
-  { label: "AI · Persona Studio", icon: SlidersHorizontal, group: "dm", planned: "M6 — System AI persona engine" },
+  {
+    label: "AI · Persona Studio",
+    icon: SlidersHorizontal,
+    group: "dm",
+    href: (campaignId) =>
+      campaignId ? `/campaigns/${campaignId}/persona` : "/dashboard",
+    match: (p) => /^\/campaigns\/[^/]+\/persona/.test(p),
+  },
   { label: "Simulation", icon: Workflow, group: "dm", planned: "M11 — Entity agents & simulation" },
   { label: "Crawler Interface", icon: MonitorSmartphone, group: "player", planned: "M7 — Player crawler interface" },
 ];
