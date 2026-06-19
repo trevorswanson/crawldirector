@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 const { requireUser, getCampaignForUser, getPersonaStudio, notFound } = vi.hoisted(
   () => ({
@@ -20,13 +20,8 @@ vi.mock("next/navigation", () => ({ notFound }));
 vi.mock("@/app/(dm)/actions", () => ({
   activatePersonaSnapshotAction: vi.fn(),
   togglePersonaPromptLockAction: vi.fn(),
-}));
-vi.mock("@/components/persona/persona-editor", () => ({
-  PersonaEditor: (props: { snapshotId?: string; fullyLocked?: boolean }) => (
-    <div data-testid="persona-editor">
-      editor:{props.snapshotId ?? "new"}:{props.fullyLocked ? "locked" : "open"}
-    </div>
-  ),
+  createPersonaSnapshotAction: vi.fn(),
+  updatePersonaSnapshotAction: vi.fn(),
 }));
 
 import PersonaStudioPage from "@/app/(dm)/campaigns/[id]/persona/page";
@@ -104,9 +99,11 @@ describe("Persona Studio page", () => {
     expect(screen.getByText("Active persona")).toBeDefined();
     expect(screen.getByRole("button", { name: /Lock prompt/i })).toBeDefined();
     expect(screen.getByText("System AI persona: Petty God")).toBeDefined();
-    expect(screen.getByTestId("persona-editor").textContent).toBe("editor:snap1:open");
+    expect(
+      (screen.getByPlaceholderText(/Petty God, Newly Awake/i) as HTMLInputElement).value,
+    ).toBe("Petty God");
     const review = screen.getByRole("link", { name: /View in Review Queue/i });
-    expect(review.getAttribute("href")).toBe("/campaigns/c1/review?selected=cs1");
+    expect(review.getAttribute("href")).toBe("/campaigns/c1/review?reopened=cs1");
   });
 
   it("surfaces the prompt-locked notice and an unlock control", async () => {
@@ -147,8 +144,38 @@ describe("Persona Studio page", () => {
 
     render(await render_({ snapshot: "new" }));
 
-    expect(screen.getByTestId("persona-editor").textContent).toBe("editor:new:open");
+    expect(
+      (screen.getByPlaceholderText(/Petty God, Newly Awake/i) as HTMLInputElement).value,
+    ).toBe("");
     expect(screen.getAllByText(/New persona snapshot/i).length).toBeGreaterThan(0);
+  });
+
+  it("resets controlled editor values when navigating to another snapshot", async () => {
+    getPersonaStudio.mockResolvedValue({
+      entities: [{ id: "e1", name: "The System" }],
+      selectedEntityId: "e1",
+      snapshots: [
+        snapshot(),
+        snapshot({
+          id: "snap2",
+          label: "Cruel Director",
+          isActive: false,
+          dials: { sentience: 20 },
+        }),
+      ],
+      activeSnapshotId: "snap1",
+    });
+
+    const view = render(await render_());
+    const label = screen.getByPlaceholderText(/Petty God, Newly Awake/i) as HTMLInputElement;
+    fireEvent.change(label, { target: { value: "Unsaved first snapshot edit" } });
+    expect(label.value).toBe("Unsaved first snapshot edit");
+
+    view.rerender(await render_({ snapshot: "snap2" }));
+
+    expect(
+      (screen.getByPlaceholderText(/Petty God, Newly Awake/i) as HTMLInputElement).value,
+    ).toBe("Cruel Director");
   });
 
   it("rejects players via notFound", async () => {

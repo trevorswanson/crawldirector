@@ -268,6 +268,7 @@ export default async function PersonaStudioPage({
             />
             <div className="px-[18px] py-5">
               <PersonaEditor
+                key={`${selectedEntityId}:${selectedSnapshot?.id ?? "new"}`}
                 campaignId={id}
                 entityId={selectedEntityId}
                 snapshotId={selectedSnapshot?.id}
@@ -292,7 +293,7 @@ export default async function PersonaStudioPage({
                 right={
                   selectedSnapshot.originChangeSetId ? (
                     <Link
-                      href={`/campaigns/${id}/review?selected=${selectedSnapshot.originChangeSetId}`}
+                      href={`/campaigns/${id}/review?reopened=${selectedSnapshot.originChangeSetId}`}
                       className="font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-faint)] transition-colors hover:text-[var(--accent)]"
                     >
                       View in Review Queue
