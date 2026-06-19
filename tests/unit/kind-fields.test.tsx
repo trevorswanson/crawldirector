@@ -45,6 +45,21 @@ describe("entity-kind form fields (ADR 0009)", () => {
     expect(document.querySelectorAll('input[type="hidden"]').length).toBe(4);
   });
 
+  it("prefills FLOOR inputs from the satellite, not the data blob (ADR 0011 Part C)", () => {
+    const FloorFields = kindFormFields("FLOOR")!;
+    // A migrated FLOOR: blob is just the version stamp, values live in `floor`.
+    const entity = {
+      type: "FLOOR",
+      data: { _v: 3 },
+      floor: { floorNumber: 9, theme: "Castle siege", startDay: 0, collapseDay: 12 },
+    } as unknown as EntityDetail;
+    render(<FloorFields entity={entity} getVal={getVal} isLocked={() => false} />);
+
+    expect((screen.getByLabelText("Floor number") as HTMLInputElement).value).toBe("9");
+    expect((screen.getByLabelText("Theme") as HTMLInputElement).value).toBe("Castle siege");
+    expect((screen.getByLabelText("Collapses on day") as HTMLInputElement).value).toBe("12");
+  });
+
   it("tolerates a FLOOR entity with no data", () => {
     const FloorFields = kindFormFields("FLOOR")!;
     render(

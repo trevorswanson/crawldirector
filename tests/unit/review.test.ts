@@ -37,6 +37,7 @@ beforeEach(async () => {
   await prisma.changeSet.deleteMany();
   await prisma.crawler.deleteMany();
   await prisma.faction.deleteMany();
+  await prisma.floor.deleteMany();
   await prisma.entity.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.membership.deleteMany();
@@ -1050,6 +1051,53 @@ describe("review service — review queue enrichment", () => {
 
     // The current value comes from the satellite row, not a stale JSON null.
     expect(operation?.currentValues["data.standing"]).toBe(42);
+  });
+
+  it("reads a migrated FLOOR's current values from the satellite (ADR 0011 Part C)", async () => {
+    const { dmId, campaignId } = await seed();
+    // A FLOOR already promoted to the satellite: the blob is just the version
+    // stamp, the anchors live in the Floor table.
+    const floor = await prisma.entity.create({
+      data: {
+        campaignId,
+        createdById: dmId,
+        type: EntityType.FLOOR,
+        name: "Larracos",
+        data: { _v: 3 },
+        floor: {
+          create: { floorNumber: 9, theme: "Castle siege", startDay: 0, collapseDay: 12 },
+        },
+      },
+      select: { id: true, version: true },
+    });
+
+    await createPendingEntityChangeSet(dmId, campaignId, {
+      source: "AI",
+      title: "Shift floor",
+      operations: [
+        {
+          op: "UPDATE_ENTITY",
+          targetId: floor.id,
+          patch: {
+            _baseVersion: { to: floor.version },
+            "data.collapseDay": { to: 20 },
+            data: { to: { collapseDay: 20 } },
+          },
+        },
+      ],
+    });
+
+    const queue = await listPendingChangeSetsForUser(dmId, campaignId);
+    const operation = queue.flatMap((cs) => cs.operations)[0];
+
+    // Both the per-field and whole-blob current values reflect the satellite.
+    expect(operation?.currentValues["data.collapseDay"]).toBe(12);
+    expect(operation?.currentValues.data).toEqual({
+      floorNumber: 9,
+      theme: "Castle siege",
+      startDay: 0,
+      collapseDay: 12,
+    });
   });
 });
 

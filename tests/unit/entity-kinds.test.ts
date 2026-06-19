@@ -20,6 +20,7 @@ import {
   readKindData,
   RESERVED_DATA_KEY,
   satelliteFieldsFor,
+  satelliteRowOf,
   schemaVersionFor,
 } from "@/lib/entity-kinds";
 import type { EntityKind } from "@/lib/entity-kinds";
@@ -171,17 +172,15 @@ describe("entity-kind registry (ADR 0009)", () => {
       });
     });
 
-    it("builds only a FLOOR's own fields (no spurious ITEM keys)", () => {
+    it("builds a satellite-only FLOOR blob (fields routed to the satellite)", () => {
+      // Post-v3 (ADR 0011 Part C) every FLOOR bespoke field lives in the Floor
+      // satellite, so the create-path blob carries only the version stamp — no
+      // floor fields and no spurious ITEM keys.
       const data = buildKindData("FLOOR", (key) =>
         ({ floorNumber: 9, theme: "Siege" }[key]),
       );
-      expect(data).toEqual({
-        floorNumber: 9,
-        theme: "Siege",
-        startDay: null,
-        collapseDay: null,
-        [RESERVED_DATA_KEY]: 2,
-      });
+      expect(data).toEqual({ [RESERVED_DATA_KEY]: 3 });
+      expect(data).not.toHaveProperty("floorNumber");
       expect(data).not.toHaveProperty("divine");
     });
 
@@ -192,7 +191,7 @@ describe("entity-kind registry (ADR 0009)", () => {
 
   describe("schema versioning + read seam (ADR 0011)", () => {
     it("reports each kind's schema version (1 for a type with no kind)", () => {
-      expect(schemaVersionFor("FLOOR")).toBe(2);
+      expect(schemaVersionFor("FLOOR")).toBe(3);
       expect(schemaVersionFor("ITEM")).toBe(1);
       expect(schemaVersionFor("LOCATION")).toBe(1);
     });
@@ -337,17 +336,29 @@ describe("entity-kind registry (ADR 0009)", () => {
   });
 
   describe("satellite-table promotion (ADR 0011 Part C)", () => {
-    it("lists FACTION's satellite-backed fields and none for other kinds", () => {
+    it("lists FACTION's and FLOOR's satellite-backed fields, none for other kinds", () => {
       expect(satelliteFieldsFor("FACTION")).toEqual([
         "standing",
         "strength",
         "allegiance",
         "resources",
       ]);
-      expect(satelliteFieldsFor("FLOOR")).toEqual([]);
+      // FLOOR is the genuine `data → satellite` migration (ADR 0011 Part C): all
+      // four bespoke fields move to the Floor satellite.
+      expect(satelliteFieldsFor("FLOOR")).toEqual([
+        "floorNumber",
+        "theme",
+        "startDay",
+        "collapseDay",
+      ]);
       expect(satelliteFieldsFor("ITEM")).toEqual([]);
       expect(satelliteFieldsFor("NPC")).toEqual([]);
       expect(allSatelliteDataKeys()).toEqual([
+        // ITEM has no satellite; FLOOR then FACTION (registry insertion order).
+        "floorNumber",
+        "theme",
+        "startDay",
+        "collapseDay",
         "standing",
         "strength",
         "allegiance",
@@ -360,6 +371,49 @@ describe("entity-kind registry (ADR 0009)", () => {
         ({ standing: 7, strength: 3, allegiance: "System", resources: "vast" }[key]),
       );
       expect(data).toEqual({ [RESERVED_DATA_KEY]: 1 });
+    });
+
+    it("keeps FLOOR satellite fields out of the create blob, stamping v3", () => {
+      // The genuine `data → satellite` move: a freshly built FLOOR blob carries
+      // only the version stamp; floorNumber/theme/startDay/collapseDay are routed
+      // to the Floor satellite by the apply path, not the JSON blob.
+      const data = buildKindData("FLOOR", (key) =>
+        ({ floorNumber: 9, theme: "Siege", startDay: 0, collapseDay: 12 }[key]),
+      );
+      expect(data).toEqual({ [RESERVED_DATA_KEY]: 3 });
+    });
+
+    it("merges a FLOOR satellite row over the (empty) blob on read", () => {
+      const out = readKindData(
+        "FLOOR",
+        { [RESERVED_DATA_KEY]: 3 },
+        { floorNumber: 9, theme: "Siege", startDay: 0, collapseDay: 12 },
+      );
+      expect(out).toEqual({
+        floorNumber: 9,
+        theme: "Siege",
+        startDay: 0,
+        collapseDay: 12,
+      });
+    });
+
+    it("reads a legacy (pre-migration) FLOOR blob when no satellite row exists", () => {
+      // The transition is lossless: a v2 row whose values still live in the blob
+      // (no satellite yet) reads them straight through, so the app is correct the
+      // instant it deploys, before MIGRATE_ENTITY_DATA has run.
+      const out = readKindData("FLOOR", {
+        floorNumber: 9,
+        theme: "Siege",
+        startDay: 0,
+        collapseDay: 12,
+        [RESERVED_DATA_KEY]: 2,
+      });
+      expect(out).toEqual({
+        floorNumber: 9,
+        theme: "Siege",
+        startDay: 0,
+        collapseDay: 12,
+      });
     });
 
     it("merges a satellite row over the blob on read", () => {
@@ -394,6 +448,18 @@ describe("entity-kind registry (ADR 0009)", () => {
         allegiance: null,
         resources: null,
       });
+    });
+
+    it("picks the satellite relation row by the type's descriptor", () => {
+      // Registry-driven: a generic reader hands the right relation to readKindData
+      // with no `type === …` switch (a new satellite type needs no new branch).
+      const floorRow = { floor: { floorNumber: 9 }, faction: null };
+      expect(satelliteRowOf("FLOOR", floorRow)).toEqual({ floorNumber: 9 });
+      const factionRow = { floor: null, faction: { standing: 7 } };
+      expect(satelliteRowOf("FACTION", factionRow)).toEqual({ standing: 7 });
+      // A type with no satellite, or a missing/non-object row → undefined.
+      expect(satelliteRowOf("ITEM", floorRow)).toBeUndefined();
+      expect(satelliteRowOf("FLOOR", null)).toBeUndefined();
     });
 
     it("validates FACTION fields through the descriptor schema", () => {

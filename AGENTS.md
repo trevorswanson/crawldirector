@@ -14,11 +14,12 @@ pitch and [`docs/`](./docs) for the full plan.
 
 ## Current status
 
-🚧 **M0–M5 complete; M5.5 (data model hardening — ADR 0011) in progress
-(slices 1–2, 3a–3b, and 4 of 5 — `data` versioning, migration job,
-reference-integrity badge + impact-aware archive, orphan report, and the
-greenfield Faction satellite — done; only the Floor satellite (5) remains), then M6
-(System AI persona engine).** The app is scaffolded
+🚧 **M0–M5.5 complete; next up M6 (System AI persona engine).** M5.5 (data model
+hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
+seam, the `MIGRATE_ENTITY_DATA` job, reference-integrity badge + impact-aware
+archive, orphan report, the greenfield Faction satellite, and the Floor satellite
+(slice 5 — the genuine `data → satellite` migration moving FLOOR's
+floorNumber/theme/startDay/collapseDay into a 1:1 `Floor` table). The app is scaffolded
 and runnable: Next.js 16 (App Router, TS, Tailwind) + Postgres/Prisma 7 +
 Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
 `npm audit`, migration-drift, coverage). Milestone-by-milestone:

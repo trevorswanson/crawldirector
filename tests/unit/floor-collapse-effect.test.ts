@@ -112,11 +112,15 @@ describe("floor collapse effect", () => {
   }
 
   async function floorsByNumber(campaignId: string) {
+    // FLOOR anchors live in the 1:1 satellite (ADR 0011 Part C), so load it and
+    // resolve through readFloorData(data, floor).
     const rows = await prisma.entity.findMany({
       where: { campaignId, type: "FLOOR" },
-      select: { id: true, data: true },
+      select: { id: true, data: true, floor: true },
     });
-    return new Map(rows.map((row) => [readFloorData(row.data).floorNumber, row]));
+    return new Map(
+      rows.map((row) => [readFloorData(row.data, row.floor).floorNumber, row]),
+    );
   }
 
   it("auto-creates the current and next floor, opening the next the same day, and advances current floor", async () => {
@@ -131,8 +135,8 @@ describe("floor collapse effect", () => {
     await approveAccepted(owner.id, campaign.id, result.changeSetId);
 
     const floors = await floorsByNumber(campaign.id);
-    expect(readFloorData(floors.get(1)!.data).collapseDay).toBe(10);
-    expect(readFloorData(floors.get(2)!.data).startDay).toBe(10);
+    expect(readFloorData(floors.get(1)!.data, floors.get(1)!.floor).collapseDay).toBe(10);
+    expect(readFloorData(floors.get(2)!.data, floors.get(2)!.floor).startDay).toBe(10);
 
     const updated = await prisma.campaign.findUnique({
       where: { id: campaign.id },
@@ -156,8 +160,8 @@ describe("floor collapse effect", () => {
 
     const floors = await floorsByNumber(campaign.id);
     expect(floors.size).toBe(2); // no duplicates created
-    expect(readFloorData(floors.get(1)!.data).collapseDay).toBe(12);
-    expect(readFloorData(floors.get(2)!.data).startDay).toBe(12);
+    expect(readFloorData(floors.get(1)!.data, floors.get(1)!.floor).collapseDay).toBe(12);
+    expect(readFloorData(floors.get(2)!.data, floors.get(2)!.floor).startDay).toBe(12);
 
     const updated = await prisma.campaign.findUnique({
       where: { id: campaign.id },

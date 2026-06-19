@@ -140,6 +140,20 @@ export function allSatelliteDataKeys(): string[] {
 }
 
 /**
+ * The 1:1 satellite row for a loaded entity, picked by its type's descriptor
+ * `satellite.relation` (ADR 0011 Part C) — so a generic reader can hand the right
+ * satellite to `readKindData` without a `type === "FACTION" | "FLOOR"` switch (a
+ * new satellite type needs no new branch). Returns `undefined` for a type with no
+ * satellite, or when the relation was not loaded on the row. The caller must have
+ * `include`/`select`ed the relation (e.g. `floor: true`).
+ */
+export function satelliteRowOf(type: string, entity: unknown): unknown {
+  const relation = kindFor(type)?.satellite?.relation;
+  if (!relation || !entity || typeof entity !== "object") return undefined;
+  return (entity as Record<string, unknown>)[relation];
+}
+
+/**
  * The normalized "empty" value for each of a type's bespoke `data.*` fields the
  * descriptor declares a non-null default for (e.g. boolean flags → `false`). The
  * patch builders fall back to `null` for any key not present here, so a type with

@@ -42,6 +42,13 @@ import {
   type ReviewPatch,
 } from "@/server/services/review";
 
+// FLOOR satellite columns (ADR 0011 Part C): floorNumber/theme/startDay/
+// collapseDay live in the 1:1 Floor table once migrated, so every floor reader
+// loads this relation and resolves through `readFloorData(data, floor)`.
+const floorSatelliteSelect = {
+  select: { floorNumber: true, theme: true, startDay: true, collapseDay: true },
+} as const;
+
 async function getMembership(userId: string, campaignId: string) {
   return prisma.membership.findUnique({
     where: { userId_campaignId: { userId, campaignId } },
@@ -930,11 +937,11 @@ export async function resolveFloorEntities(
           }
         : {}),
     },
-    select: { id: true, name: true, data: true },
+    select: { id: true, name: true, data: true, floor: floorSatelliteSelect },
   });
 
   for (const row of rows) {
-    const { floorNumber } = readFloorData(row.data);
+    const { floorNumber } = readFloorData(row.data, row.floor);
     if (floorNumber != null && wanted.has(floorNumber) && !result.has(floorNumber)) {
       result.set(floorNumber, { id: row.id, name: row.name, floorNumber });
     }
@@ -1021,7 +1028,7 @@ export async function listCampaignFloors(
             }
           : {}),
       },
-      select: { id: true, name: true, data: true },
+      select: { id: true, name: true, data: true, floor: floorSatelliteSelect },
     }),
     eventCountQuery,
   ]);
@@ -1032,7 +1039,10 @@ export async function listCampaignFloors(
   const byNumber: Record<number, FloorDescriptor> = {};
   const floorEntities: CampaignFloorMeta["floorEntities"] = [];
   for (const row of floorRows) {
-    const { floorNumber, theme, startDay, collapseDay } = readFloorData(row.data);
+    const { floorNumber, theme, startDay, collapseDay } = readFloorData(
+      row.data,
+      row.floor,
+    );
     floorEntities.push({ id: row.id, name: row.name, floorNumber });
     if (floorNumber != null && byNumber[floorNumber] === undefined) {
       byNumber[floorNumber] = {

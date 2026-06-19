@@ -2648,9 +2648,13 @@ describe("campaign floor metadata", () => {
       collapseDay: 47,
     });
 
+    // FLOOR anchors live in the 1:1 satellite once migrated (ADR 0011 Part C).
     const stored = (
-      await prisma.entity.findUnique({ where: { id: floor.id }, select: { data: true } })
-    )?.data as { startDay?: number; collapseDay?: number };
+      await prisma.entity.findUnique({
+        where: { id: floor.id },
+        select: { floor: true },
+      })
+    )?.floor as { startDay?: number; collapseDay?: number };
     expect(stored.startDay).toBe(40);
     expect(stored.collapseDay).toBe(47);
 

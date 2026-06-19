@@ -177,6 +177,33 @@ describe("entity-kind display panel (ADR 0009)", () => {
     expect(screen.queryByText("Additional data")).toBeNull();
   });
 
+  it("renders FLOOR rows from the satellite, not the data blob (ADR 0011 Part C)", () => {
+    render(
+      <KindDisplay
+        campaignId="c1"
+        entityId="e1"
+        entity={entity(
+          "FLOOR",
+          { _v: 3 },
+          {
+            floor: {
+              floorNumber: 9,
+              theme: "Castle siege",
+              startDay: 0,
+              collapseDay: 12,
+            },
+          } as unknown as Partial<EntityDetail>,
+        )}
+      />,
+    );
+    expect(screen.getByText("Floor number")).toBeDefined();
+    expect(screen.getByText("9")).toBeDefined();
+    expect(screen.getByText("Castle siege")).toBeDefined();
+    expect(screen.getByText("Day 12")).toBeDefined();
+    // No satellite values masquerading in the additional-data fallback.
+    expect(screen.queryByText("Additional data")).toBeNull();
+  });
+
   it("tolerates a FACTION with no satellite row (empty rows)", () => {
     render(
       <KindDisplay

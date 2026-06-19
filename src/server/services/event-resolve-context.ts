@@ -34,11 +34,22 @@ export async function buildCampaignResolveContext(
       type: EntityType.FLOOR,
       status: { not: CanonStatus.ARCHIVED },
     },
-    select: { data: true },
+    // FLOOR anchors live in the 1:1 satellite once migrated (ADR 0011 Part C).
+    select: {
+      data: true,
+      floor: {
+        select: {
+          floorNumber: true,
+          theme: true,
+          startDay: true,
+          collapseDay: true,
+        },
+      },
+    },
   });
   const anchorsByFloor = new Map<number, FloorAnchors>();
   for (const row of floorRows) {
-    const { floorNumber, startDay, collapseDay } = readFloorData(row.data);
+    const { floorNumber, startDay, collapseDay } = readFloorData(row.data, row.floor);
     if (floorNumber != null && !anchorsByFloor.has(floorNumber)) {
       anchorsByFloor.set(floorNumber, {
         startDay: effectiveFloorStartDay(floorNumber, startDay),

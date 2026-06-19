@@ -47,6 +47,7 @@ async function approveAcceptedChangeSet(
 beforeEach(async () => {
   await prisma.crawler.deleteMany();
   await prisma.faction.deleteMany();
+  await prisma.floor.deleteMany();
   await prisma.entity.deleteMany();
   await prisma.membership.deleteMany();
   await prisma.campaign.deleteMany();
@@ -1294,17 +1295,22 @@ describe("entity locking", () => {
 
     const stored = await prisma.entity.findUniqueOrThrow({
       where: { id: floor.id },
-      select: { data: true },
+      select: { data: true, floor: true },
     });
+    // A partial edit of a not-yet-migrated (blob-backed) FLOOR promotes it to the
+    // satellite (ADR 0011 Part C): the blob converges to just the version stamp
+    // (legacy off-schema key dropped), and the satellite carries the edited field
+    // plus the unpatched ones lifted from the blob (not nulled).
     const data = stored.data as Record<string, unknown>;
-    expect(data).toMatchObject({
+    expect(data).toEqual({ [RESERVED_DATA_KEY]: 3 });
+    expect(data).not.toHaveProperty("retiredKey");
+    expect(data).not.toHaveProperty("floorNumber");
+    expect(stored.floor).toMatchObject({
       floorNumber: 9,
       theme: "Castle siege revised",
       startDay: 0,
       collapseDay: 12,
-      [RESERVED_DATA_KEY]: 2,
     });
-    expect(data).not.toHaveProperty("retiredKey");
   });
 
   it("scopes bespoke data.* provenance to the type's entity-kind (ADR 0009)", async () => {
@@ -1376,7 +1382,7 @@ describe("entity locking", () => {
     expect(npcData).not.toHaveProperty("aiDescription");
   });
 
-  it("composes a FLOOR's stored data from its own kind only (ADR 0009 slice 3)", async () => {
+  it("creates a FLOOR with its fields in the satellite, blob = {_v} (ADR 0011 Part C)", async () => {
     const owner = await makeUser("floor-data@test.com");
     const campaign = await createCampaign(owner.id, { name: "Dungeon" });
 
@@ -1393,18 +1399,52 @@ describe("entity locking", () => {
       collapseDay: 12,
     });
 
-    const floorData =
-      ((await getEntityForUser(owner.id, campaign.id, floor.id))
-        ?.data as Record<string, unknown>) || {};
-    // Its own descriptor fields are present and normalized…
-    expect(floorData["floorNumber"]).toBe(9);
-    expect(floorData["theme"]).toBe("Castle siege");
-    expect(floorData["startDay"]).toBe(0);
-    expect(floorData["collapseDay"]).toBe(12);
-    // …and the ITEM flags that the old create path stored on every entity are gone.
-    expect(floorData).not.toHaveProperty("divine");
-    expect(floorData).not.toHaveProperty("itemTypeId");
-    expect(floorData).not.toHaveProperty("aiDescription");
+    // The genuine `data → satellite` promotion: a freshly created FLOOR writes its
+    // bespoke fields straight to the Floor satellite; the blob is just `{_v:3}`.
+    const row = await prisma.floor.findUnique({ where: { id: floor.id } });
+    expect(row).toMatchObject({
+      floorNumber: 9,
+      theme: "Castle siege",
+      startDay: 0,
+      collapseDay: 12,
+    });
+    const stored = await prisma.entity.findUniqueOrThrow({
+      where: { id: floor.id },
+      select: { data: true },
+    });
+    expect(stored.data).toEqual({ [RESERVED_DATA_KEY]: 3 });
+
+    // The read seam surfaces them as ordinary bespoke fields (merged in), and the
+    // ITEM flags the old per-entity create path stored are absent.
+    const detail = await getEntityForUser(owner.id, campaign.id, floor.id);
+    const merged = readKindData("FLOOR", detail?.data, detail?.floor) as Record<
+      string,
+      unknown
+    >;
+    expect(merged).toEqual({
+      floorNumber: 9,
+      theme: "Castle siege",
+      startDay: 0,
+      collapseDay: 12,
+    });
+    expect(merged).not.toHaveProperty("divine");
+    expect(merged).not.toHaveProperty("itemTypeId");
+
+    // They are canonical fields: each records data.* provenance like any other.
+    const provFields = (
+      await prisma.provenance.findMany({
+        where: { entityId: floor.id },
+        select: { field: true },
+      })
+    ).map((p) => p.field);
+    expect(provFields).toEqual(
+      expect.arrayContaining([
+        "data.floorNumber",
+        "data.theme",
+        "data.startDay",
+        "data.collapseDay",
+      ]),
+    );
   });
 
   describe("FACTION satellite (ADR 0011 Part C)", () => {
@@ -1636,6 +1676,104 @@ describe("entity locking", () => {
       });
       expect(row.standing).toBe(3);
       expect(row.strength).toBe(9);
+    });
+  });
+
+  describe("FLOOR satellite (ADR 0011 Part C)", () => {
+    it("diffs against the satellite, so a no-op resubmit creates no change set", async () => {
+      const owner = await makeUser("floor-noop@test.com");
+      const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+      const floor = await createGenericEntity(owner.id, campaign.id, {
+        type: "FLOOR",
+        name: "Larracos",
+        summary: "Castle",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: [],
+        floorNumber: 9,
+        theme: "Castle siege",
+        startDay: 40,
+        collapseDay: 47,
+      });
+
+      const before = await prisma.changeSet.count({
+        where: { campaignId: campaign.id },
+      });
+
+      // Resubmit identical values — the diff reads the satellite (not a JSON
+      // null), so nothing moves and no change set is filed.
+      await updateEntity(owner.id, campaign.id, floor.id, {
+        type: "FLOOR",
+        name: "Larracos",
+        summary: "Castle",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: [],
+        floorNumber: 9,
+        theme: "Castle siege",
+        startDay: 40,
+        collapseDay: 47,
+      });
+
+      const after = await prisma.changeSet.count({
+        where: { campaignId: campaign.id },
+      });
+      expect(after).toBe(before);
+    });
+
+    it("keeps lock/review uniform: a locked satellite field blocks its edit", async () => {
+      const owner = await makeUser("floor-lock@test.com");
+      const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+      const floor = await createGenericEntity(owner.id, campaign.id, {
+        type: "FLOOR",
+        name: "Larracos",
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: [],
+        floorNumber: 9,
+        startDay: 40,
+        collapseDay: 47,
+      });
+
+      await setEntityLock(owner.id, campaign.id, floor.id, {
+        lockedFields: ["data.floorNumber"],
+      });
+
+      // Editing the locked satellite-backed field is rejected…
+      await expect(
+        updateEntity(owner.id, campaign.id, floor.id, {
+          type: "FLOOR",
+          name: "Larracos",
+          summary: "",
+          description: "",
+          visibility: "DM_ONLY",
+          tags: [],
+          floorNumber: 11,
+          startDay: 40,
+          collapseDay: 47,
+        }),
+      ).rejects.toThrow("locked entity fields");
+
+      // …while editing an unlocked anchor succeeds, writing to the satellite.
+      await updateEntity(owner.id, campaign.id, floor.id, {
+        type: "FLOOR",
+        name: "Larracos",
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: [],
+        floorNumber: 9,
+        startDay: 40,
+        collapseDay: 99,
+      });
+      const row = await prisma.floor.findUniqueOrThrow({
+        where: { id: floor.id },
+      });
+      expect(row.floorNumber).toBe(9);
+      expect(row.collapseDay).toBe(99);
     });
   });
 });

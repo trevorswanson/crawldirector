@@ -22,16 +22,14 @@ under *Deferred design options*). So is the **visibility-model simplification** 
 the full **M4 generator expansion** (scaffolding, usage/cost + spend caps, bulk
 flesh-out, async `Job` worker).
 
-**In progress: M5.5 — Data model hardening**
+**Complete: M5.5 — Data model hardening**
 ([11-roadmap.md](./11-roadmap.md),
 [adr/0011-entity-data-versioning-and-satellites.md](./adr/0011-entity-data-versioning-and-satellites.md))
 — a `.5` cross-cutting insertion (like M3.5) added in the 2026-06-18 roadmap
 review, scheduled **before M6** because the catalog types (M7), import (M10), and
 export (M9) are about to put real weight on `Entity.data`. Decomposed into five
-vertical slices (ADR 0011 Parts A–D); **slices 1–2, 3a (reference-integrity
-badge + impact-aware archive), 3b (orphan report), and 4 (Faction satellite) are
-done** (dated entries below). Only slice 5 (Floor satellite / generated column)
-remains:
+vertical slices (ADR 0011 Parts A–D); **all five are done** (dated entries
+below). **Next up: M6 — System AI persona engine.**
 
 - [x] **Slice 1 — versioning foundation + `readKindData` read seam** (Part A core).
       `schemaVersion` + pure `migrations` on `EntityKind` (load-time assertion),
@@ -67,8 +65,14 @@ remains:
       indexed `standing`/`strength`/`allegiance`/`resources`; proves the satellite
       read/write plumbing with review/lock/provenance still uniform on `Entity`.
       ✅ 2026-06-18 (dated entry below).
-- [ ] **Slice 5 — Floor satellite or indexed generated column** (Part C, the genuine
-      `data → satellite` migration). Land whichever the hot-path query shapes warrant.
+- [x] **Slice 5 — Floor satellite** (Part C, the genuine `data → satellite`
+      migration). Evaluated the query shapes (every FLOOR reader loads floors
+      wholesale and resolves in memory — neither an index nor a satellite is
+      *performance*-warranted today), and landed the **full satellite** anyway:
+      its purpose is to prove the genuine migration the Faction greenfield slice
+      left unproven, front-loaded now (2 descriptors) before M7/M9/M10 add weight.
+      All four FLOOR fields move from `Entity.data` to a 1:1 `Floor` table via a
+      v2→v3 bump + the `MIGRATE_ENTITY_DATA` job. ✅ 2026-06-19 (dated entry below).
 
 **Then M6 — System AI persona engine**
 ([05-system-ai-persona.md](./05-system-ai-persona.md)).
@@ -169,6 +173,95 @@ below.)
       - **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
+
+## M5.5 — Floor satellite (slice 5) ✅ (2026-06-19)
+
+**Goal:** the genuine `data → satellite` migration ADR 0011 Part C sequenced last
+in M5.5 — promote FLOOR's real existing `data.floorNumber`/`theme`/`startDay`/
+`collapseDay` (read across many hot paths) into a 1:1 `Floor` table, the real
+proof that the versioning machinery **moves existing data** (the Faction slice was
+greenfield and deliberately left this unproven). Branch: `feat/m5.5-floor-satellite`.
+Schema change (new table only).
+
+**Decision (query-shape evaluation, per ADR 0011 Part C).** Every FLOOR reader —
+`getCampaignHeaderStatus`/`setCampaignCurrentFloor` ([`campaigns.ts`](../src/server/services/campaigns.ts)),
+`buildCampaignResolveContext` ([`event-resolve-context.ts`](../src/server/services/event-resolve-context.ts)),
+`resolveFloorEntities`/`listCampaignFloors` ([`events.ts`](../src/server/services/events.ts)),
+`assertFloorNumberAvailable`/the floor re-rank/`applyFloorCollapseEffect`
+([`review.ts`](../src/server/services/review.ts)) — loads a campaign's floors
+*wholesale* (one Entity per floor, a tiny set) and resolves in memory; nothing
+filters/sorts/aggregates by floor fields at the DB level, so neither an index nor a
+satellite is *performance*-warranted today. Landed the **full satellite** anyway
+because the slice's purpose is to prove the genuine migration before M7's catalog
+explosion and M9/M10's import/export, front-loaded while FLOOR is the only mover
+(the lighter generated-column option proves nothing and leaves a dead index).
+`floorNumber` is indexed as the canonical lookup key; `theme`/`startDay`/
+`collapseDay` are plain columns.
+
+- [x] **Schema** ([`schema.prisma`](../prisma/schema.prisma)): a 1:1 `Floor` table
+      keyed by `Entity.id` (`onDelete: Cascade`) with `floorNumber Int? @@index`,
+      `theme`/`startDay`/`collapseDay`, and `Entity.floor Floor?`. Migration
+      `20260619101511_m5_5_floor_satellite` (additive table only; drift gate clean).
+- [x] **Descriptor** ([`entity-kinds/floor.ts`](../src/lib/entity-kinds/floor.ts)):
+      `FLOOR_KIND` → `schemaVersion: 3` with `migrations[1]` = **identity** (the
+      relocation is a storage move enacted by the apply path, not a value
+      transform; the version bump marks legacy `_v:2` rows stale for the migration
+      job) plus a `satellite { relation: "floor", fields: [floorNumber, theme,
+      startDay, collapseDay] }` marker. `buildKindData` keeps all four out of the
+      blob, which converges to `{_v:3}`.
+- [x] **Registry helper** ([`entity-kinds/index.ts`](../src/lib/entity-kinds/index.ts)):
+      new `satelliteRowOf(type, entity)` picks the 1:1 satellite relation row from
+      the type's descriptor (`satellite.relation`), so generic readers
+      (`currentEntityValue`, the update diff, the migration job) hand the right
+      relation to `readKindData` with no `type === …` switch — a future satellite
+      type needs no new branch.
+- [x] **Review apply path** ([`review.ts`](../src/server/services/review.ts)):
+      `floorSatelliteData` builder; `applyCreateEntity` writes the `Floor` row;
+      `entityUpdateData` routes FLOOR `data.*` to a `floor.upsert` and drops them
+      from the blob (the genuine move). **Bug found + fixed by a test:** a *partial*
+      edit of a not-yet-migrated (blob-backed) floor was nulling the unpatched
+      satellite fields — the `upsert.create` now uses a `resolvedData` fallback
+      (current blob+satellite) so unpatched fields carry over, not reset. Every
+      in-module floor reader (`assertFloorNumberAvailable`, the re-rank block via a
+      satellite-aware `readPersistedFloorDataWithoutMigrations`, `applyFloorCollapseEffect`,
+      `currentEntityValue`) loads the satellite and resolves through
+      `readFloorData(data, floor)`.
+- [x] **Read seam + all readers** ([`floor.ts`](../src/lib/floor.ts)):
+      `readFloorData(value, satellite?)` threads the satellite to `readKindData`.
+      Threaded through `entities.ts` (detail select + update diff),
+      `campaigns.ts`, `events.ts`, `event-resolve-context.ts`,
+      `entity-data-migration.ts` (loads `floor`), and the UI `FloorDisplayPanel`/
+      `FloorFields` ([`kind-display.tsx`](../src/components/entities/kind-display.tsx),
+      [`kind-fields.tsx`](../src/components/entities/kind-fields.tsx)). A
+      pre-migration floor (no satellite row) reads its values from the blob
+      unchanged, so the transition is lossless and lazy.
+- [x] **Tests:** pure [`entity-kinds.test.ts`](../tests/unit/entity-kinds.test.ts)
+      (FLOOR v3 + satellite field list; blob = `{_v:3}` on build; satellite-merge
+      read; lossless pre-migration blob read; `satelliteRowOf`). DB-backed:
+      [`entities.test.ts`](../tests/unit/entities.test.ts) (create → satellite +
+      `data.*` provenance; partial edit of a stale floor promotes it without losing
+      unpatched fields; no-op resubmit diffs the satellite → no change set; locked
+      `data.floorNumber` uniformity), [`entity-data-migration.test.ts`](../tests/unit/entity-data-migration.test.ts)
+      (the genuine `data → satellite` move: blob → `{_v:3}`, values land in the
+      satellite, off-schema key dropped; corrupt values coerced),
+      [`review.test.ts`](../tests/unit/review.test.ts) (Review Queue current-value
+      reads a migrated FLOOR's satellite), [`events.test.ts`](../tests/unit/events.test.ts)/
+      [`floor-collapse-effect.test.ts`](../tests/unit/floor-collapse-effect.test.ts)
+      (anchors + collapse via the satellite). UI
+      [`kind-display.test.tsx`](../tests/unit/kind-display.test.tsx)/[`kind-fields.test.tsx`](../tests/unit/kind-fields.test.tsx)
+      (rows/prefill from the satellite, no additional-data leak).
+- [x] **Verification:** `npm run lint` (0 errors; pre-existing settings-action
+      warnings only), `npm run typecheck`, `npm run build`, `npx prisma migrate diff
+      … --exit-code` (**No difference detected**), and the full coverage gate green
+      (111 files / 1546 tests; statements 95.22%, branches 88.82%, functions 96.89%,
+      lines 96.99%). **In-browser** (reseeded `dcc`, authed as `dm@example.com`):
+      created a FLOOR through the service against the dev DB (blob `{_v:3}`,
+      satellite populated) and its detail page renders the FLOOR NUMBER/THEME/OPENS/
+      COLLAPSES rows from the satellite with no console errors (RSC boundary intact);
+      a legacy blob-backed `_v:2` floor (with an off-schema key) rendered correctly
+      via lazy read, then `migrateEntityData` moved it into the satellite (blob →
+      `{_v:3}`, off-schema key dropped, version 1→2) and the reloaded page rendered
+      consistently with the stale key gone. Smoke entities cleaned up.
 
 ## M5.5 — orphan report (slice 3b) ✅ (2026-06-18)
 

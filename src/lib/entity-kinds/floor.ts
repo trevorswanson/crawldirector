@@ -32,14 +32,34 @@ export const FLOOR_KIND: EntityKind = {
   dataSchema: floorDataSchema,
   // v1 stored the numeric floor anchors as the same semantic fields, but legacy
   // imports/direct JSON could leave them as strings. v2 makes the stored shape
-  // converge to numbers before the descriptor's final normalization step.
-  schemaVersion: 2,
+  // converge to numbers before the descriptor's final normalization step. v3
+  // (ADR 0011 Part C) relocates all four fields from Entity.data into the 1:1
+  // Floor satellite — the genuine `data → satellite` migration (see below).
+  schemaVersion: 3,
   migrations: [
+    // v1 → v2: coerce legacy string anchors to numbers.
     (data) => ({
       ...data,
       floorNumber: numericStringToNumber(data.floorNumber),
       startDay: numericStringToNumber(data.startDay),
       collapseDay: numericStringToNumber(data.collapseDay),
     }),
+    // v2 → v3: the fields move from Entity.data to the Floor satellite. Moving a
+    // field to a satellite column IS a version migration (ADR 0011's unifying
+    // insight), but the *relocation* is a storage concern enacted by the
+    // satellite-aware apply path (review.ts: floor.upsert writes the satellite,
+    // entityUpdateData drops the keys from the blob), not a value transform. So
+    // the pure data upgrade is the identity — preserving the values so the read
+    // seam returns them for the migration patch; bumping the version is what
+    // marks legacy `_v:2` rows stale for MIGRATE_ENTITY_DATA to re-apply through
+    // the satellite path.
+    (data) => data,
   ],
+  // All four fields physically live in the Floor satellite table (keyed by
+  // Entity.id); Entity.data converges to `{_v:3}`. See model Floor in
+  // prisma/schema.prisma and EntityKind.satellite.
+  satellite: {
+    relation: "floor",
+    fields: ["floorNumber", "theme", "startDay", "collapseDay"],
+  },
 };

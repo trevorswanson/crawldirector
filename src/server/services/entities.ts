@@ -7,7 +7,12 @@ import {
   Role,
   Visibility,
 } from "@/generated/prisma/client";
-import { dataKeysFor, kindDataDefaults, readKindData } from "@/lib/entity-kinds";
+import {
+  dataKeysFor,
+  kindDataDefaults,
+  readKindData,
+  satelliteRowOf,
+} from "@/lib/entity-kinds";
 import { ServiceError } from "@/lib/errors";
 import {
   createCrawlerSchema,
@@ -91,6 +96,16 @@ const entityDetailSelect = {
       strength: true,
       allegiance: true,
       resources: true,
+    },
+  },
+  // FLOOR satellite (ADR 0011 Part C): floorNumber/theme/startDay/collapseDay
+  // live here once migrated; read via `readKindData(type, data, floor)`.
+  floor: {
+    select: {
+      floorNumber: true,
+      theme: true,
+      startDay: true,
+      collapseDay: true,
     },
   },
 } as const;
@@ -565,14 +580,23 @@ export async function updateEntity(
           currentFloor: true,
         },
       },
-      // FACTION satellite (ADR 0011 Part C): needed so the diff `from` value of a
-      // satellite-backed `data.*` field is the real stored value, not a JSON null.
+      // FACTION/FLOOR satellites (ADR 0011 Part C): needed so the diff `from`
+      // value of a satellite-backed `data.*` field is the real stored value, not
+      // a JSON null.
       faction: {
         select: {
           standing: true,
           strength: true,
           allegiance: true,
           resources: true,
+        },
+      },
+      floor: {
+        select: {
+          floorNumber: true,
+          theme: true,
+          startDay: true,
+          collapseDay: true,
         },
       },
     },
@@ -607,13 +631,14 @@ export async function updateEntity(
   // false, everything else → null), matching the prior `?? false` / `?? null`.
   const parsedData = parsed as Record<string, unknown>;
   // Read the existing blob through the versioned seam (ADR 0011) so the diff
-  // `from` value is the upgraded shape, not a stale stored one. The satellite row
-  // (FACTION) is merged in so satellite-backed `data.*` fields diff against their
-  // real stored value, not a JSON null (ADR 0011 Part C).
+  // `from` value is the upgraded shape, not a stale stored one. The 1:1 satellite
+  // row (FACTION/FLOOR), picked from the type's descriptor, is merged in so
+  // satellite-backed `data.*` fields diff against their real stored value, not a
+  // JSON null (ADR 0011 Part C).
   const existingDataRecord = readKindData(
     existing.type,
     existing.data,
-    existing.faction,
+    satelliteRowOf(existing.type, existing),
   );
   const dataDefaults = kindDataDefaults(existing.type);
   for (const key of dataKeysFor(existing.type)) {

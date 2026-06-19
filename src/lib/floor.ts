@@ -18,8 +18,14 @@ export type FloorData = {
 // Delegates to the versioned `readKindData` read seam (ADR 0011) so every floor
 // consumer upgrades a stored row through the same path; the per-field coercion
 // below is a typed narrowing of `readKindData`'s already-normalized output.
-export function readFloorData(value: unknown): FloorData {
-  const data = readKindData("FLOOR", value);
+//
+// `satellite` is the optional 1:1 Floor satellite row (ADR 0011 Part C). Once a
+// FLOOR is migrated to v3 its floorNumber/theme/startDay/collapseDay live in the
+// satellite and Entity.data is just `{_v:3}`, so every caller that resolves floor
+// data must load + pass the relation; a pre-migration row (no satellite) reads
+// the values from the blob unchanged, so the seam is correct across the transition.
+export function readFloorData(value: unknown, satellite?: unknown): FloorData {
+  const data = readKindData("FLOOR", value, satellite);
   return {
     floorNumber: typeof data.floorNumber === "number" ? data.floorNumber : null,
     theme: typeof data.theme === "string" && data.theme.length > 0 ? data.theme : null,

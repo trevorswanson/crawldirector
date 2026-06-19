@@ -118,7 +118,20 @@ export async function getCampaignHeaderStatus(
     }),
     prisma.entity.findMany({
       where: floorWhere,
-      select: { id: true, name: true, data: true },
+      // FLOOR anchors live in the 1:1 satellite once migrated (ADR 0011 Part C).
+      select: {
+        id: true,
+        name: true,
+        data: true,
+        floor: {
+          select: {
+            floorNumber: true,
+            theme: true,
+            startDay: true,
+            collapseDay: true,
+          },
+        },
+      },
     }),
     prisma.event.findMany({
       where: eventWhere,
@@ -133,7 +146,7 @@ export async function getCampaignHeaderStatus(
   >();
   let currentFloor: CampaignHeaderStatus["currentFloor"] = null;
   for (const floor of floorRows) {
-    const data = readFloorData(floor.data);
+    const data = readFloorData(floor.data, floor.floor);
     if (typeof data.floorNumber === "number") {
       floorAnchorsByNumber.set(data.floorNumber, {
         startDay: effectiveFloorStartDay(data.floorNumber, data.startDay),
@@ -194,11 +207,23 @@ export async function setCampaignCurrentFloor(
         type: EntityType.FLOOR,
         status: { not: CanonStatus.ARCHIVED },
       },
-      select: { id: true, data: true },
+      // floorNumber lives in the 1:1 satellite once migrated (ADR 0011 Part C);
+      // read it through the satellite-aware seam.
+      select: {
+        id: true,
+        data: true,
+        floor: {
+          select: {
+            floorNumber: true,
+            theme: true,
+            startDay: true,
+            collapseDay: true,
+          },
+        },
+      },
     });
     if (!entity) throw new ServiceError("Floor entity not found.");
-    const data = (entity.data as { floorNumber?: number | null }) ?? {};
-    floorNumber = typeof data.floorNumber === "number" ? data.floorNumber : null;
+    floorNumber = readFloorData(entity.data, entity.floor).floorNumber;
   }
 
   await prisma.$transaction(async (tx) => {

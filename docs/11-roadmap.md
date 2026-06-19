@@ -135,7 +135,10 @@ reference integrity, and the first satellite promotions. Full design in
   lighter indexed-generated-column alternative, whichever the query shapes warrant.
   (The migration *machinery* itself is proved earlier by a within-`data`
   `schemaVersion` bump on FLOOR — v1 legacy numeric strings to v2 stored numbers —
-  no satellite risk.)
+  no satellite risk.) **Landed (2026-06-19): the full Floor satellite** (a FLOOR
+  v2→v3 bump moves all four fields into a 1:1 `Floor` table via the migration job);
+  the query shapes warranted neither for performance, but the satellite proves the
+  genuine migration before M7/M9/M10. See `PROGRESS.md` (slice 5).
 - **Done when:** every `data` write is `_v`-stamped; a kind can bump its version
   and migrate existing rows (lazy + batch, provenance-tracked) with no silent data
   loss; reference fields are integrity-checked and reportable campaign-wide;
