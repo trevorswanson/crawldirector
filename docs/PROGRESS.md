@@ -29,9 +29,9 @@ flesh-out, async `Job` worker).
 review, scheduled **before M6** because the catalog types (M7), import (M10), and
 export (M9) are about to put real weight on `Entity.data`. Decomposed into five
 vertical slices (ADR 0011 Parts A–D); **slices 1–2, 3a (reference-integrity
-badge + impact-aware archive), and 4 (Faction satellite) are done** (dated entries
-below). Only slice 3b (orphan report, deferred until M10 consumes it) and slice 5
-(Floor satellite / generated column) remain:
+badge + impact-aware archive), 3b (orphan report), and 4 (Faction satellite) are
+done** (dated entries below). Only slice 5 (Floor satellite / generated column)
+remains:
 
 - [x] **Slice 1 — versioning foundation + `readKindData` read seam** (Part A core).
       `schemaVersion` + pure `migrations` on `EntityKind` (load-time assertion),
@@ -59,10 +59,10 @@ below). Only slice 3b (orphan report, deferred until M10 consumes it) and slice 
       out-of-scope target never reads as broken); `countReferrers` reverse-lookup
       surfaces "N entities reference this" with a confirm step before archive
       (no cascade — soft FKs stay). ✅ 2026-06-18 (dated entry below).
-- [ ] **Slice 3b — orphan report** (Part B, piece 3). The optional campaign-scoped
-      scan (broken references + stale `_v`) that feeds the canon-integrity surface /
-      M10's consistency-check generator. Deferred from 3a: no consumer until M10, and
-      its DM surface is its own coherent slice (don't ship an unconsumed service).
+- [x] **Slice 3b — orphan report** (Part B, piece 3). The campaign-scoped
+      scan (broken references + stale `_v`) that feeds the DM canon-integrity
+      surface and M10's future consistency-check generator. ✅ 2026-06-18 (dated
+      entry below).
 - [x] **Slice 4 — Faction satellite** (Part C, greenfield). A 1:1 satellite for
       indexed `standing`/`strength`/`allegiance`/`resources`; proves the satellite
       read/write plumbing with review/lock/provenance still uniform on `Entity`.
@@ -169,6 +169,35 @@ below.)
       - **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect.
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
+
+## M5.5 — orphan report (slice 3b) ✅ (2026-06-18)
+
+**Goal:** finish ADR 0011 Part B by turning the per-entity reference checks from
+slice 3a into a campaign-scoped DM report: broken bespoke soft references plus
+stale `data._v` rows. This is the input M10's consistency-check generator can
+reuse later, but it now has a real DM surface instead of an unconsumed service.
+Branch: `codex/m5-5-orphan-report`. No schema change.
+
+- [x] **Service report** ([`references.ts`](../src/server/services/references.ts)):
+      new `getCampaignIntegrityReport(userId, campaignId)` is DM/co-DM only (players
+      and non-members are rejected because the scan spans hidden canon). It scans
+      all live campaign entities, reports broken reference fields with reason
+      (`MISSING`, `ARCHIVED`, `WRONG_TYPE` plus actual type where useful), and lists
+      stale versioned kind-data rows with stored/current schema versions.
+- [x] **DM surface** ([`integrity/page.tsx`](<../src/app/(dm)/campaigns/[id]/integrity/page.tsx>),
+      [`dm-nav.tsx`](../src/components/console/dm-nav.tsx)): added a DM-only
+      `/campaigns/[id]/integrity` page with checked/broken/stale totals, entity
+      deep links, empty states, and a shell-nav entry so the existing canon-integrity
+      language now points to an inspectable report.
+- [x] **Tests:** DB-backed [`references.test.ts`](../tests/unit/references.test.ts)
+      covers report contents, broken-reference reasons, stale `_v`, archived-row
+      exclusion, and DM-only authorization. UI
+      [`campaign-integrity-page.test.tsx`](../tests/unit/campaign-integrity-page.test.tsx)
+      covers report rows, empty state, and route authorization; [`console-shell.test.tsx`](../tests/unit/console-shell.test.tsx)
+      covers the nav link.
+- [x] **Verification:** focused tests green:
+      `npm run test -- tests/unit/references.test.ts` and
+      `npm run test -- tests/unit/campaign-integrity-page.test.tsx tests/unit/console-shell.test.tsx`.
 
 ## M5.5 — Faction satellite (slice 4) ✅ (2026-06-18)
 

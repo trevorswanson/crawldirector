@@ -1,11 +1,12 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
-import { CanonStatus, Role } from "@/generated/prisma/client";
+import { CanonStatus, EntityType, Role } from "@/generated/prisma/client";
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
 import { archiveEntity, createGenericEntity } from "@/server/services/entities";
 import {
   countReferrers,
+  getCampaignIntegrityReport,
   validateEntityReferences,
 } from "@/server/services/references";
 
@@ -294,6 +295,142 @@ describe("reference integrity service (ADR 0011 Part B)", () => {
         data: { status: CanonStatus.ARCHIVED },
       });
       expect(await countReferrers(dm.id, campaign.id, itemType.id)).toBe(0);
+    });
+  });
+
+  describe("getCampaignIntegrityReport", () => {
+    it("lists campaign-wide broken references and stale data versions for DMs", async () => {
+      const dm = await makeUser("dm@test.com");
+      const campaign = await createCampaign(dm.id, { name: "Crawl" });
+      const itemType = await createEntity(dm.id, campaign.id, {
+        type: "ITEM_TYPE",
+        name: "Archived Type",
+      });
+      const wrongType = await createEntity(dm.id, campaign.id, {
+        type: "NPC",
+        name: "Not An Item Type",
+      });
+      const missingRef = await createEntity(dm.id, campaign.id, {
+        type: "ITEM",
+        name: "Missing Ref",
+        itemTypeId: "missing-target",
+      });
+      const archivedRef = await createEntity(dm.id, campaign.id, {
+        type: "ITEM",
+        name: "Archived Ref",
+        itemTypeId: itemType.id,
+      });
+      const wrongTypeRef = await createEntity(dm.id, campaign.id, {
+        type: "ITEM",
+        name: "Wrong Type Ref",
+        itemTypeId: wrongType.id,
+      });
+      await archiveEntity(dm.id, campaign.id, itemType.id);
+      const staleFloor = await prisma.entity.create({
+        data: {
+          campaignId: campaign.id,
+          createdById: dm.id,
+          type: EntityType.FLOOR,
+          name: "Legacy Floor",
+          data: { floorNumber: "9", _v: 1 },
+        },
+        select: { id: true },
+      });
+
+      const report = await getCampaignIntegrityReport(dm.id, campaign.id);
+
+      expect(report.checkedEntities).toBe(5);
+      expect(report.brokenReferences).toEqual([
+        {
+          entityId: missingRef.id,
+          entityName: "Missing Ref",
+          entityType: "ITEM",
+          field: "itemTypeId",
+          patchKey: "data.itemTypeId",
+          targetType: "ITEM_TYPE",
+          targetId: "missing-target",
+          reason: "MISSING",
+        },
+        {
+          entityId: archivedRef.id,
+          entityName: "Archived Ref",
+          entityType: "ITEM",
+          field: "itemTypeId",
+          patchKey: "data.itemTypeId",
+          targetType: "ITEM_TYPE",
+          targetId: itemType.id,
+          reason: "ARCHIVED",
+        },
+        {
+          entityId: wrongTypeRef.id,
+          entityName: "Wrong Type Ref",
+          entityType: "ITEM",
+          field: "itemTypeId",
+          patchKey: "data.itemTypeId",
+          targetType: "ITEM_TYPE",
+          targetId: wrongType.id,
+          reason: "WRONG_TYPE",
+          actualType: "NPC",
+        },
+      ]);
+      expect(report.staleData).toEqual([
+        {
+          entityId: staleFloor.id,
+          entityName: "Legacy Floor",
+          entityType: "FLOOR",
+          storedVersion: 1,
+          currentVersion: 2,
+        },
+      ]);
+    });
+
+    it("excludes archived referrers and archived stale rows from the campaign report", async () => {
+      const dm = await makeUser("dm@test.com");
+      const campaign = await createCampaign(dm.id, { name: "Crawl" });
+      const archivedReferrer = await createEntity(dm.id, campaign.id, {
+        type: "ITEM",
+        name: "Archived Referrer",
+        itemTypeId: "missing-target",
+      });
+      const archivedStale = await prisma.entity.create({
+        data: {
+          campaignId: campaign.id,
+          createdById: dm.id,
+          type: EntityType.FLOOR,
+          name: "Archived Floor",
+          data: { floorNumber: "10", _v: 1 },
+        },
+        select: { id: true },
+      });
+      await prisma.entity.updateMany({
+        where: { id: { in: [archivedReferrer.id, archivedStale.id] } },
+        data: { status: CanonStatus.ARCHIVED },
+      });
+
+      const report = await getCampaignIntegrityReport(dm.id, campaign.id);
+
+      expect(report).toEqual({
+        checkedEntities: 0,
+        brokenReferences: [],
+        staleData: [],
+      });
+    });
+
+    it("rejects players and non-members because the report spans hidden canon", async () => {
+      const dm = await makeUser("dm@test.com");
+      const player = await makeUser("player@test.com");
+      const outsider = await makeUser("outsider@test.com");
+      const campaign = await createCampaign(dm.id, { name: "Crawl" });
+      await prisma.membership.create({
+        data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+      });
+
+      await expect(
+        getCampaignIntegrityReport(player.id, campaign.id),
+      ).rejects.toThrow("Only the DM can view canon integrity.");
+      await expect(
+        getCampaignIntegrityReport(outsider.id, campaign.id),
+      ).rejects.toThrow("You do not have access to this campaign.");
     });
   });
 });

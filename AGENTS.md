@@ -15,9 +15,9 @@ pitch and [`docs/`](./docs) for the full plan.
 ## Current status
 
 🚧 **M0–M5 complete; M5.5 (data model hardening — ADR 0011) in progress
-(slices 1–2, 3a, and 4 of 5 — `data` versioning, migration job, reference-integrity
-badge + impact-aware archive, and the greenfield Faction satellite — done; only
-the deferred orphan report (3b) and the Floor satellite (5) remain), then M6
+(slices 1–2, 3a–3b, and 4 of 5 — `data` versioning, migration job,
+reference-integrity badge + impact-aware archive, orphan report, and the
+greenfield Faction satellite — done; only the Floor satellite (5) remains), then M6
 (System AI persona engine).** The app is scaffolded
 and runnable: Next.js 16 (App Router, TS, Tailwind) + Postgres/Prisma 7 +
 Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
