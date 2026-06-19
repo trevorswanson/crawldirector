@@ -37,6 +37,13 @@
 > relationships/events remain reviewable when they are proposed rather than direct
 > DM edits.
 
+> **Implementation note (M6 slice 1):** `PersonaSnapshot` is now committed
+> schema, not just a sketch. It attaches to any `Entity`, stores the cached
+> `compiledPrompt`, and is written only through `CREATE_PERSONA_SNAPSHOT` /
+> `UPDATE_PERSONA_SNAPSHOT` review operations. `Provenance.personaSnapshotId`
+> has a real FK/index so prompt fragments and persona fields retain field-level
+> attribution.
+
 ## Sketch
 
 ```prisma
@@ -181,29 +188,34 @@ model Faction {
 // (System AI, factions, sponsors, gods, hosts, NPC crawlers). Exactly one
 // active per entity at a given point in campaign time. See docs 05 and 06.
 model PersonaSnapshot {
-  id            String      @id @default(cuid())
-  campaignId    String
-  entityId      String                     // any agent-bearing entity
-  label         String?                    // e.g. "post-court-defiance"
-  inGameTime    Json        @default("{}")
-  orderKey      Float?
-  dials         Json        @default("{}") // per entity-type traits (System AI: sentience/compliance/...; faction: ambition/aggression/...)
-  values        Json        @default("[]") // core values / ideology driving behavior
-  agendas       Json        @default("[]") // goals: [{ text, secret: bool }]
-  resources     Json        @default("{}") // capabilities the agent can actually use
+  id             String       @id @default(cuid())
+  campaignId     String
+  entityId       String                     // any agent-bearing entity
+  label          String?                    // e.g. "post-court-defiance"
+  inGameTime     Json         @default("{}")
+  orderKey       Float?
+  dials          Json         @default("{}") // per entity-type traits
+  values         Json         @default("[]") // core values / ideology
+  agendas        Json         @default("[]") // goals: [{ text, secret: bool }]
+  resources      Json         @default("{}") // capabilities the agent can use
   knowledgeScope String     @default("OMNISCIENT") // OMNISCIENT | IN_CHARACTER (fog of war)
-  voiceGuide    String?
-  constraints   String?                    // hard canon rules for generation
+  voiceGuide     String?
+  constraints    String?                    // hard canon rules for generation
   compiledPrompt String?                   // cached persona prompt fragment
-  isActive      Boolean     @default(false)
-  status        CanonStatus @default(PENDING)
-  locked        Boolean     @default(false)
-  promptLocked  Boolean     @default(false) // protects compiledPrompt from recompile/AI
-  version       Int         @default(1)
-  entity        Entity      @relation(fields: [entityId], references: [id])
-  provenance    Provenance[]
-  createdAt     DateTime    @default(now())
+  isActive       Boolean      @default(false)
+  source         ChangeSource @default(DM)
+  status         CanonStatus  @default(CANON)
+  locked         Boolean      @default(false)
+  promptLocked   Boolean      @default(false) // protects compiledPrompt
+  version        Int          @default(1)
+  campaign       Campaign     @relation(fields: [campaignId], references: [id])
+  entity         Entity       @relation(fields: [entityId], references: [id])
+  provenance     Provenance[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
   @@index([campaignId, entityId, orderKey])
+  @@index([campaignId, entityId, isActive])
+  @@index([campaignId, status])
 }
 
 // ───────────── Relationships (typed edges) ─────────────

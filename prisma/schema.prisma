@@ -89,6 +89,8 @@ enum OpKind {
   CREATE_EVENT_CAUSALITY
   DELETE_EVENT_CAUSALITY
   APPLY_EVENT_EFFECTS
+  CREATE_PERSONA_SNAPSHOT
+  UPDATE_PERSONA_SNAPSHOT
 }
 
 enum OpDecision {
@@ -265,6 +267,7 @@ model Campaign {
   provenance       Provenance[]
   auditLogs        AuditLog[]
   knowledgeGrants  KnowledgeGrant[]
+  personaSnapshots PersonaSnapshot[]
   aiKeys           AiKey[]
   aiUsage          AiUsage[]
   jobs             Job[]
@@ -321,6 +324,7 @@ model Entity {
   outEdges       Relationship[]     @relation("SourceEntity")
   inEdges        Relationship[]     @relation("TargetEntity")
   eventRoles     EventParticipant[]
+  personas       PersonaSnapshot[]
   provenance     Provenance[]
 
   createdAt DateTime @default(now())
@@ -393,6 +397,46 @@ model Floor {
   collapseDay Int?
 
   @@index([floorNumber])
+}
+
+// Generalized persona / agent-profile snapshots (M6, docs/05-system-ai-persona.md
+// and docs/06-entity-agents.md). The first studio focuses on SYSTEM_AI, but the
+// table deliberately attaches to any canon Entity so M11 can reuse it for major
+// actors. Writes route through the review service as CREATE/UPDATE_PERSONA_SNAPSHOT
+// operations; provenance is stored on this row, while relationships/events keep
+// representing what the persona does in the world graph.
+model PersonaSnapshot {
+  id             String       @id @default(cuid())
+  campaignId     String
+  entityId       String
+  label          String?
+  inGameTime     Json         @default("{}")
+  orderKey       Float?
+  dials          Json         @default("{}")
+  values         Json         @default("[]")
+  agendas        Json         @default("[]")
+  resources      Json         @default("{}")
+  knowledgeScope String       @default("OMNISCIENT")
+  voiceGuide     String?
+  constraints    String?
+  compiledPrompt String?
+  isActive       Boolean      @default(false)
+  source         ChangeSource @default(DM)
+  status         CanonStatus  @default(CANON)
+  locked         Boolean      @default(false)
+  promptLocked   Boolean      @default(false)
+  version        Int          @default(1)
+
+  campaign   Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  entity     Entity       @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  provenance Provenance[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([campaignId, entityId, orderKey])
+  @@index([campaignId, entityId, isActive])
+  @@index([campaignId, status])
 }
 
 // ───────────── Relationships (typed, any-to-any edges) ─────────────
@@ -595,13 +639,14 @@ model Provenance {
   promptId          String?
   runId             String?
 
-  campaign       Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  entity         Entity?         @relation(fields: [entityId], references: [id], onDelete: Cascade)
-  relationship   Relationship?   @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
-  event          Event?          @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  eventCausality EventCausality? @relation(fields: [eventCausalityId], references: [id], onDelete: Cascade)
-  changeSet      ChangeSet       @relation(fields: [changeSetId], references: [id], onDelete: Cascade)
-  actor          User?           @relation("ActorProvenance", fields: [actorUserId], references: [id], onDelete: SetNull)
+  campaign        Campaign         @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  entity          Entity?          @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  relationship    Relationship?    @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
+  event           Event?           @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  eventCausality  EventCausality?  @relation(fields: [eventCausalityId], references: [id], onDelete: Cascade)
+  personaSnapshot PersonaSnapshot? @relation(fields: [personaSnapshotId], references: [id], onDelete: Cascade)
+  changeSet       ChangeSet        @relation(fields: [changeSetId], references: [id], onDelete: Cascade)
+  actor           User?            @relation("ActorProvenance", fields: [actorUserId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
 
@@ -609,6 +654,7 @@ model Provenance {
   @@index([relationshipId])
   @@index([eventId])
   @@index([eventCausalityId])
+  @@index([personaSnapshotId])
   @@index([changeSetId])
 }
 
