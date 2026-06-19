@@ -471,4 +471,131 @@ describe("review service — persona snapshots", () => {
       }),
     );
   });
+
+  it("refuses to deactivate a locked active persona when creating a new active one", async () => {
+    const { dmId, campaignId, systemId } = await seed();
+    const locked = await applyAutoApprovedPersonaSnapshotChangeSet(dmId, campaignId, {
+      title: "Author locked active persona",
+      operations: [
+        {
+          op: "CREATE_PERSONA_SNAPSHOT",
+          patch: {
+            ...personaCreatePatch(systemId, "Locked Active"),
+            locked: { to: true },
+          },
+        },
+      ],
+    });
+
+    await expect(
+      applyAutoApprovedPersonaSnapshotChangeSet(dmId, campaignId, {
+        title: "Replace locked active persona",
+        operations: [
+          {
+            op: "CREATE_PERSONA_SNAPSHOT",
+            patch: personaCreatePatch(systemId, "Usurper"),
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "OPERATION_BLOCKED" });
+
+    // The locked snapshot is untouched and still active, and the rejected
+    // transaction never wrote the replacement.
+    await expect(
+      prisma.personaSnapshot.findUniqueOrThrow({
+        where: { id: locked.targetIds[0] },
+        select: { isActive: true, locked: true },
+      }),
+    ).resolves.toEqual({ isActive: true, locked: true });
+    await expect(
+      prisma.personaSnapshot.count({ where: { campaignId, entityId: systemId } }),
+    ).resolves.toBe(1);
+  });
+
+  it("flags AI proposals that would deactivate a locked active persona", async () => {
+    const { dmId, campaignId, systemId } = await seed();
+    await applyAutoApprovedPersonaSnapshotChangeSet(dmId, campaignId, {
+      title: "Author locked active persona",
+      operations: [
+        {
+          op: "CREATE_PERSONA_SNAPSHOT",
+          patch: {
+            ...personaCreatePatch(systemId, "Locked Active"),
+            locked: { to: true },
+          },
+        },
+      ],
+    });
+
+    const pending = await createPendingPersonaSnapshotChangeSet(dmId, campaignId, {
+      source: ChangeSource.AI,
+      title: "AI proposes a replacement active persona",
+      operations: [
+        {
+          op: "CREATE_PERSONA_SNAPSHOT",
+          patch: personaCreatePatch(systemId, "Replacement"),
+        },
+      ],
+    });
+
+    await expect(
+      prisma.changeOperation.findFirstOrThrow({
+        where: { changeSetId: pending.id },
+        select: { blockedByLock: true },
+      }),
+    ).resolves.toEqual({ blockedByLock: true });
+  });
+
+  it("flags activating a snapshot when another active snapshot is locked", async () => {
+    const { dmId, campaignId, systemId } = await seed();
+    await applyAutoApprovedPersonaSnapshotChangeSet(dmId, campaignId, {
+      title: "Author locked active persona",
+      operations: [
+        {
+          op: "CREATE_PERSONA_SNAPSHOT",
+          patch: {
+            ...personaCreatePatch(systemId, "Locked Active"),
+            locked: { to: true },
+          },
+        },
+      ],
+    });
+    const inactive = await applyAutoApprovedPersonaSnapshotChangeSet(dmId, campaignId, {
+      title: "Author inactive sibling",
+      operations: [
+        {
+          op: "CREATE_PERSONA_SNAPSHOT",
+          patch: {
+            ...personaCreatePatch(systemId, "Inactive Sibling"),
+            isActive: { to: false },
+          },
+        },
+      ],
+    });
+    const snapshot = await prisma.personaSnapshot.findUniqueOrThrow({
+      where: { id: inactive.targetIds[0] },
+      select: { id: true, version: true },
+    });
+
+    const pending = await createPendingPersonaSnapshotChangeSet(dmId, campaignId, {
+      title: "Activate the inactive sibling",
+      operations: [
+        {
+          op: "UPDATE_PERSONA_SNAPSHOT",
+          targetId: snapshot.id,
+          patch: {
+            _baseVersion: { to: snapshot.version },
+            isActive: { to: true },
+          },
+        },
+      ],
+    });
+
+    await expect(
+      prisma.changeOperation.findFirstOrThrow({
+        where: { changeSetId: pending.id },
+        select: { blockedByLock: true },
+      }),
+    ).resolves.toEqual({ blockedByLock: true });
+  });
 });

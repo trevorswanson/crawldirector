@@ -622,8 +622,14 @@ async function evaluatePersonaOperationFlags(
       select: { locked: true },
     });
     if (!entity) throw new ServiceError("Entity not found.");
+    // Activating a new snapshot deactivates the entity's current active one; if
+    // that active snapshot is locked, hold the create rather than silently
+    // flipping it (source-agnostic, like the UPDATE lock guard).
+    const activatesOverLock =
+      booleanWithDefault(readTo(operation.patch, "isActive"), false) &&
+      (await hasLockedActivePersona(tx, campaignId, entityId));
     return {
-      blockedByLock: source !== ChangeSource.DM && entity.locked,
+      blockedByLock: (source !== ChangeSource.DM && entity.locked) || activatesOverLock,
       isStale: false,
     };
   }
@@ -637,15 +643,30 @@ async function evaluatePersonaOperationFlags(
       campaignId,
       status: { not: CanonStatus.ARCHIVED },
     },
-    select: { version: true, locked: true, promptLocked: true },
+    select: {
+      version: true,
+      locked: true,
+      promptLocked: true,
+      entityId: true,
+      isActive: true,
+    },
   });
   if (!snapshot) throw new ServiceError("Persona snapshot not found.");
 
   const expectedVersion = baseVersions[operation.targetId];
   const fields = patchFields(operation.patch);
   const touchesCompiledPrompt = fields.includes("compiledPrompt");
+  const nextActive = fields.includes("isActive")
+    ? booleanWithDefault(readTo(operation.patch, "isActive"), false)
+    : snapshot.isActive;
+  const activatesOverLock =
+    nextActive &&
+    (await hasLockedActivePersona(tx, campaignId, snapshot.entityId, operation.targetId));
   return {
-    blockedByLock: snapshot.locked || (snapshot.promptLocked && touchesCompiledPrompt),
+    blockedByLock:
+      snapshot.locked ||
+      (snapshot.promptLocked && touchesCompiledPrompt) ||
+      activatesOverLock,
     isStale:
       typeof expectedVersion === "number" && expectedVersion !== snapshot.version,
   };
@@ -3796,6 +3817,66 @@ async function assertCanonPersonaEntity(
   return entity;
 }
 
+// True when the entity already has a locked active snapshot (optionally
+// excluding the snapshot being updated). Activating a different snapshot has to
+// deactivate the current active one; when that row is locked the activation
+// must be held instead of silently flipping it.
+async function hasLockedActivePersona(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  entityId: string,
+  exceptSnapshotId?: string,
+) {
+  const locked = await tx.personaSnapshot.findFirst({
+    where: {
+      campaignId,
+      entityId,
+      isActive: true,
+      locked: true,
+      ...(exceptSnapshotId ? { id: { not: exceptSnapshotId } } : {}),
+    },
+    select: { id: true },
+  });
+  return locked !== null;
+}
+
+// Defense-in-depth for the auto-approve path (which skips the preflight lock
+// flags): refuse to deactivate a locked active snapshot, flagging the operation
+// like the other apply-time lock guards.
+async function assertActivePersonaUnlocked(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  entityId: string,
+  operationId: string,
+  exceptSnapshotId?: string,
+) {
+  if (await hasLockedActivePersona(tx, campaignId, entityId, exceptSnapshotId)) {
+    await tx.changeOperation.update({
+      where: { id: operationId },
+      data: { blockedByLock: true },
+    });
+    throw new ServiceError("The active persona snapshot is locked.", {
+      code: "OPERATION_BLOCKED",
+    });
+  }
+}
+
+// Serialize persona activations for a single entity. The "one active snapshot
+// per entity" invariant is maintained by deactivating the current active row
+// before writing the new one; under the default Read Committed isolation two
+// concurrent approvals could each clear the prior active row and then write
+// their own, leaving two rows with isActive=true. A transaction-scoped advisory
+// lock keyed on (campaign, entity) makes the second activation wait for the
+// first to commit, so the deactivate-then-write always sees a consistent "one
+// active" set. Released automatically when the transaction ends.
+async function lockPersonaActivation(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  entityId: string,
+) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${campaignId}), hashtext(${entityId}))`;
+}
+
 function personaKnowledgeScope(value: JsonValue | undefined) {
   return value === "IN_CHARACTER" ? "IN_CHARACTER" : "OMNISCIENT";
 }
@@ -3879,6 +3960,13 @@ async function applyCreatePersonaSnapshot(
 
   const isActive = booleanWithDefault(readTo(patch, "isActive"), false);
   if (isActive) {
+    await lockPersonaActivation(tx, changeSet.campaignId, entityId);
+    await assertActivePersonaUnlocked(
+      tx,
+      changeSet.campaignId,
+      entityId,
+      operationId,
+    );
     await tx.personaSnapshot.updateMany({
       where: { campaignId: changeSet.campaignId, entityId, isActive: true },
       data: { isActive: false },
@@ -4019,6 +4107,14 @@ async function applyUpdatePersonaSnapshot(
   }
 
   if (nextActive) {
+    await lockPersonaActivation(tx, changeSet.campaignId, snapshot.entityId);
+    await assertActivePersonaUnlocked(
+      tx,
+      changeSet.campaignId,
+      snapshot.entityId,
+      operationId,
+      snapshotId,
+    );
     await tx.personaSnapshot.updateMany({
       where: {
         campaignId: changeSet.campaignId,
