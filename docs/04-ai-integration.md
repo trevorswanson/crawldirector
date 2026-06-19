@@ -157,11 +157,17 @@ When assembling context for a generation:
 
 - Start synchronous (request → wait → proposal) for single-entity generation.
 - Introduce a `Job` table + worker for bulk runs and long generations so the UI
-  isn't blocked; jobs land Change Sets in the queue and notify the DM when ready.
-  As built, `/campaigns/[id]/jobs` shows the DM recent queued/running/succeeded/
-  failed jobs across bulk flesh-out, lore seed, and semantic indexing. Manual
+  isn't blocked. AI generation jobs file Change Sets through the review pipeline
+  and notify the DM when ready. The exceptions are explicitly mechanical,
+  audited review writes: the legacy `LORE_SEED` importer and
+  `MIGRATE_ENTITY_DATA`; M10 retires lore seeding from normal campaign creation,
+  and M9 adds preflight-gated idle maintenance for migrations. As built,
+  `/campaigns/[id]/jobs` shows the DM recent queued/running/succeeded/failed jobs
+  across bulk flesh-out, lore seed, semantic indexing, and data migration. Manual
   semantic-index rebuilds reuse an active QUEUED/RUNNING rebuild instead of
-  enqueueing overlapping paid embedding work.
+  enqueueing overlapping paid embedding work. See the planned job-detail,
+  accounting, and priority work in
+  [`ADR 0013`](./adr/0013-job-priorities-and-idle-maintenance.md).
 - Track per-run **cost/usage** (tokens, estimated $) for the DM's awareness;
   store on the run/provenance record (not the key).
 
