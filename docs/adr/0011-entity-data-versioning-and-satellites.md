@@ -4,11 +4,12 @@
   `readKindData` read seam shipped as slice 1 (2026-06-18); the
   `MIGRATE_ENTITY_DATA` job + first real FLOOR v2 data bump shipped as slice 2
   (2026-06-18); Part B's reference-integrity badge + impact-aware archive shipped as
-  slice 3a (2026-06-18); Part C's greenfield Faction satellite shipped as slice 4
-  (2026-06-18) — a 1:1 `Faction` table proving the satellite read/write plumbing
-  (an `EntityKind.satellite` marker redirects storage while review/lock/provenance
-  stay uniform on `Entity`). The Part B orphan report (slice 3b — deferred until M10
-  consumes it) and the Floor satellite / generated column (slice 5) remain.
+  slice 3a (2026-06-18); Part B's orphan report shipped as slice 3b (2026-06-18);
+  Part C's greenfield Faction satellite shipped as slice 4 (2026-06-18) — a 1:1
+  `Faction` table proving the satellite read/write plumbing (an
+  `EntityKind.satellite` marker redirects storage while review/lock/provenance
+  stay uniform on `Entity`). Only the Floor satellite / generated column (slice 5)
+  remains.
   Decomposes into the slices tracked in [`11-roadmap.md`](../11-roadmap.md) (M5.5)
   and [`PROGRESS.md`](../PROGRESS.md). This ADR **extends [ADR 0009](./0009-entity-kind-registry.md)**:
   0009 consolidated each type's bespoke fields into a per-type descriptor but
@@ -149,8 +150,8 @@ as one or more shippable slices (see M5.5 in the roadmap).
    *"N entities reference this"* so the DM sees the blast radius. No hard cascade;
    the soft-FK semantics from [ADR 0009](./0009-entity-kind-registry.md) stay.
 
-3. **Orphan report.** An optional campaign-scoped orphan scan (broken references,
-   stale `_v`) feeds the canon-integrity surface and is a natural input to **M10's
+3. **Orphan report.** A campaign-scoped orphan scan (broken references, stale
+   `_v`) feeds the DM canon-integrity surface and is a natural input to **M10's
    consistency-check generator** — cross-referenced both ways.
 
 ### Part C — Satellite-table promotion (Faction, then Floor)

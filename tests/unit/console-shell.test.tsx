@@ -94,6 +94,16 @@ describe("DmNav", () => {
     await waitFor(() => {});
   });
 
+  it("links the canon integrity report to the current campaign and highlights it", async () => {
+    usePathname.mockReturnValue("/campaigns/c1/integrity");
+
+    render(<DmNav />);
+
+    const link = screen.getByRole("link", { name: /Canon Integrity/ });
+    expect(link.getAttribute("href")).toBe("/campaigns/c1/integrity");
+    await waitFor(() => {});
+  });
+
   it("links world browser to the campaign picker when no campaign is active", async () => {
     usePathname.mockReturnValue("/dashboard");
 

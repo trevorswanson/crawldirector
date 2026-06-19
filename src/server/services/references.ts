@@ -1,9 +1,16 @@
 import { CanonStatus, EntityType, Role, Visibility } from "@/generated/prisma/client";
 import {
+  isKindDataStale,
+  kindTypes,
+  RESERVED_DATA_KEY,
+  schemaVersionFor,
+} from "@/lib/entity-kinds";
+import {
   entityReferences,
   reverseReferenceFields,
   type EntityReference,
 } from "@/lib/entity-references";
+import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 
 /**
@@ -38,6 +45,44 @@ export interface ReferenceCheck extends EntityReference {
    * to DMs (a hidden target is not the same as a broken one — invariant #5).
    */
   readonly broken: boolean;
+}
+
+export type BrokenReferenceReason = "MISSING" | "ARCHIVED" | "WRONG_TYPE";
+
+export interface BrokenReferenceIssue extends EntityReference {
+  readonly entityId: string;
+  readonly entityName: string;
+  readonly entityType: string;
+  readonly reason: BrokenReferenceReason;
+  readonly actualType?: string;
+}
+
+export interface StaleDataIssue {
+  readonly entityId: string;
+  readonly entityName: string;
+  readonly entityType: string;
+  readonly storedVersion: number;
+  readonly currentVersion: number;
+}
+
+export interface CampaignIntegrityReport {
+  readonly checkedEntities: number;
+  readonly brokenReferences: BrokenReferenceIssue[];
+  readonly staleData: StaleDataIssue[];
+}
+
+function storedDataVersion(raw: unknown): number {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return 1;
+  const value = (raw as Record<string, unknown>)[RESERVED_DATA_KEY];
+  return typeof value === "number" ? value : 1;
+}
+
+async function requireDmMembership(userId: string, campaignId: string) {
+  const membership = await getMembership(userId, campaignId);
+  if (!membership) throw new ServiceError("You do not have access to this campaign.");
+  if (membership.role === Role.PLAYER) {
+    throw new ServiceError("Only the DM can view canon integrity.");
+  }
 }
 
 /**
@@ -124,4 +169,84 @@ export async function countReferrers(
     ),
   );
   return counts.reduce((sum, n) => sum + n, 0);
+}
+
+/**
+ * Campaign-scoped canon-integrity report (ADR 0011 Part B, slice 3b). This is
+ * deliberately DM-only because it scans all live canon, including DM-only rows,
+ * for broken bespoke soft references and stale `data._v` rows that should be
+ * migrated before import/export and consistency tooling consume them.
+ */
+export async function getCampaignIntegrityReport(
+  userId: string,
+  campaignId: string,
+): Promise<CampaignIntegrityReport> {
+  await requireDmMembership(userId, campaignId);
+
+  const entities = await prisma.entity.findMany({
+    where: { campaignId, status: { not: CanonStatus.ARCHIVED } },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, name: true, type: true, data: true },
+  });
+
+  const outgoing = entities.flatMap((entity) =>
+    entityReferences(entity.type, entity.data).map((ref) => ({ entity, ref })),
+  );
+  const targetIds = [...new Set(outgoing.map(({ ref }) => ref.targetId))];
+  const targets = targetIds.length
+    ? await prisma.entity.findMany({
+        where: { id: { in: targetIds }, campaignId },
+        select: { id: true, type: true, status: true },
+      })
+    : [];
+  const targetsById = new Map(targets.map((target) => [target.id, target]));
+
+  const brokenReferences = outgoing.flatMap(({ entity, ref }) => {
+    const target = targetsById.get(ref.targetId);
+    let reason: BrokenReferenceReason | null = null;
+    let actualType: string | undefined;
+
+    if (!target) {
+      reason = "MISSING";
+    } else if (target.status === CanonStatus.ARCHIVED) {
+      reason = "ARCHIVED";
+    } else if (target.type !== ref.targetType) {
+      reason = "WRONG_TYPE";
+      actualType = target.type;
+    }
+
+    if (!reason) return [];
+    return [
+      {
+        ...ref,
+        entityId: entity.id,
+        entityName: entity.name,
+        entityType: entity.type,
+        reason,
+        ...(actualType ? { actualType } : {}),
+      },
+    ];
+  });
+
+  const versionedTypes = new Set(kindTypes());
+  const staleData = entities.flatMap((entity) => {
+    if (!versionedTypes.has(entity.type) || !isKindDataStale(entity.type, entity.data)) {
+      return [];
+    }
+    return [
+      {
+        entityId: entity.id,
+        entityName: entity.name,
+        entityType: entity.type,
+        storedVersion: storedDataVersion(entity.data),
+        currentVersion: schemaVersionFor(entity.type),
+      },
+    ];
+  });
+
+  return {
+    checkedEntities: entities.length,
+    brokenReferences,
+    staleData,
+  };
 }

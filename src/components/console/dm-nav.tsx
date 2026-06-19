@@ -13,6 +13,7 @@ import {
   CalendarClock,
   MonitorSmartphone,
   Settings,
+  ShieldAlert,
   type LucideIcon,
 } from "lucide-react";
 
@@ -62,6 +63,14 @@ const NAV: NavItem[] = [
     group: "dm",
     href: (campaignId) => (campaignId ? `/campaigns/${campaignId}/jobs` : "/dashboard"),
     match: (p) => /^\/campaigns\/[^/]+\/jobs/.test(p),
+  },
+  {
+    label: "Canon Integrity",
+    icon: ShieldAlert,
+    group: "dm",
+    href: (campaignId) =>
+      campaignId ? `/campaigns/${campaignId}/integrity` : "/dashboard",
+    match: (p) => /^\/campaigns\/[^/]+\/integrity/.test(p),
   },
   {
     label: "Relationship Graph",

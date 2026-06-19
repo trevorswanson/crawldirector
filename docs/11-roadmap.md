@@ -123,7 +123,8 @@ reference integrity, and the first satellite promotions. Full design in
   descriptor.
 - **Reference integrity:** `validateReferences` for `referenceFields` (broken-ref
   badge), an impact-aware "N entities reference this" reverse-lookup before
-  archive, and an optional orphan report (feeds M10's consistency-check generator).
+  archive, and a campaign-scoped orphan report (feeds the DM canon-integrity
+  surface and M10's consistency-check generator).
 - **Satellites:** **Faction** (`standing`/`strength`/`allegiance`/`resources`,
   indexed for M9 queries + M12 faction-power rollups) is a **greenfield** 1:1
   satellite — Faction has no bespoke `data` today, so these are new fields written
@@ -137,9 +138,10 @@ reference integrity, and the first satellite promotions. Full design in
   no satellite risk.)
 - **Done when:** every `data` write is `_v`-stamped; a kind can bump its version
   and migrate existing rows (lazy + batch, provenance-tracked) with no silent data
-  loss; reference fields are integrity-checked; Faction is satellite-backed with
-  review/lock/provenance still uniform on `Entity`; migration round-trips and the
-  visibility/provenance invariants are test-covered. See
+  loss; reference fields are integrity-checked and reportable campaign-wide;
+  Faction is satellite-backed with review/lock/provenance still uniform on
+  `Entity`; migration round-trips and the visibility/provenance invariants are
+  test-covered. See
   [`adr/0011-entity-data-versioning-and-satellites.md`](./adr/0011-entity-data-versioning-and-satellites.md).
 
 ## M6 — System AI persona engine (signature feature)
