@@ -10,8 +10,7 @@ import {
   type BrokenReferenceIssue,
   type StaleDataIssue,
 } from "@/server/services/references";
-import { PageContainer } from "@/components/console/page-container";
-import { Kicker } from "@/components/ui/kicker";
+import { ConsoleScreen, ScreenHeader } from "@/components/console/screen";
 import { Panel, PanelHeader } from "@/components/ui/panel";
 
 function Stat({
@@ -123,94 +122,93 @@ export default async function CampaignIntegrityPage({
   const issueCount = report.brokenReferences.length + report.staleData.length;
 
   return (
-    <PageContainer>
-      <Kicker dim noLead className="mb-2">
-        {campaign.name}
-      </Kicker>
-      <h1 className="font-display mb-1 text-[26px] font-bold tracking-[.01em]">
-        Canon Integrity
-      </h1>
-      <p className="mb-5 max-w-2xl text-[13px] leading-[1.6] text-[var(--ink-dim)]">
-        Campaign-wide scan for broken bespoke references and stale versioned entity
-        data. The scan is DM-only because it spans all live canon, including hidden
-        rows.
-      </p>
+    <ConsoleScreen>
+      <ScreenHeader kicker={campaign.name} title="Canon Integrity" />
+      <div className="min-h-0 flex-1 overflow-y-auto px-[26px] py-7">
+        <div className="max-w-[760px]">
+          <p className="mb-5 max-w-2xl text-[13px] leading-[1.6] text-[var(--ink-dim)]">
+            Campaign-wide scan for broken bespoke references and stale versioned entity
+            data. The scan is DM-only because it spans all live canon, including hidden
+            rows.
+          </p>
 
-      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Stat label="checked" value={report.checkedEntities} />
-        <Stat
-          label="broken refs"
-          value={report.brokenReferences.length}
-          tone={report.brokenReferences.length > 0 ? "text-[var(--no)]" : "text-[var(--ink)]"}
-        />
-        <Stat
-          label="stale data"
-          value={report.staleData.length}
-          tone={report.staleData.length > 0 ? "text-[var(--sys)]" : "text-[var(--ink)]"}
-        />
-      </div>
-
-      {issueCount === 0 ? (
-        <Panel>
-          <div className="px-[18px] py-6">
-            <p className="font-display text-[17px] font-semibold">
-              No integrity issues detected.
-            </p>
-            <p className="mt-1 text-[12px] text-[var(--ink-faint)]">
-              All live reference fields resolve and all versioned data rows are
-              current.
-            </p>
+          <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Stat label="checked" value={report.checkedEntities} />
+            <Stat
+              label="broken refs"
+              value={report.brokenReferences.length}
+              tone={report.brokenReferences.length > 0 ? "text-[var(--no)]" : "text-[var(--ink)]"}
+            />
+            <Stat
+              label="stale data"
+              value={report.staleData.length}
+              tone={report.staleData.length > 0 ? "text-[var(--sys)]" : "text-[var(--ink)]"}
+            />
           </div>
-        </Panel>
-      ) : (
-        <div className="grid gap-5">
-          <Panel>
-            <PanelHeader
-              kicker="References"
-              title="Broken soft references"
-              sub="Reference fields stay soft FKs, but broken links are visible before import/export and consistency tooling consume them."
-            />
-            {report.brokenReferences.length === 0 ? (
-              <p className="px-[18px] py-4 text-[12px] text-[var(--ink-faint)]">
-                No broken references.
-              </p>
-            ) : (
-              <ul>
-                {report.brokenReferences.map((issue) => (
-                  <BrokenReferenceRow
-                    key={`${issue.entityId}:${issue.field}:${issue.targetId}`}
-                    issue={issue}
-                    campaignId={id}
-                  />
-                ))}
-              </ul>
-            )}
-          </Panel>
 
-          <Panel>
-            <PanelHeader
-              kicker="Data versions"
-              title="Stale versioned data"
-              sub="Rows listed here can be upgraded through the MIGRATE_ENTITY_DATA job path with provenance."
-            />
-            {report.staleData.length === 0 ? (
-              <p className="px-[18px] py-4 text-[12px] text-[var(--ink-faint)]">
-                No stale data rows.
-              </p>
-            ) : (
-              <ul>
-                {report.staleData.map((issue) => (
-                  <StaleDataRow
-                    key={issue.entityId}
-                    issue={issue}
-                    campaignId={id}
-                  />
-                ))}
-              </ul>
-            )}
-          </Panel>
+          {issueCount === 0 ? (
+            <Panel>
+              <div className="px-[18px] py-6">
+                <p className="font-display text-[17px] font-semibold">
+                  No integrity issues detected.
+                </p>
+                <p className="mt-1 text-[12px] text-[var(--ink-faint)]">
+                  All live reference fields resolve and all versioned data rows are
+                  current.
+                </p>
+              </div>
+            </Panel>
+          ) : (
+            <div className="grid gap-5">
+              <Panel>
+                <PanelHeader
+                  kicker="References"
+                  title="Broken soft references"
+                  sub="Reference fields stay soft FKs, but broken links are visible before import/export and consistency tooling consume them."
+                />
+                {report.brokenReferences.length === 0 ? (
+                  <p className="px-[18px] py-4 text-[12px] text-[var(--ink-faint)]">
+                    No broken references.
+                  </p>
+                ) : (
+                  <ul>
+                    {report.brokenReferences.map((issue) => (
+                      <BrokenReferenceRow
+                        key={`${issue.entityId}:${issue.field}:${issue.targetId}`}
+                        issue={issue}
+                        campaignId={id}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </Panel>
+
+              <Panel>
+                <PanelHeader
+                  kicker="Data versions"
+                  title="Stale versioned data"
+                  sub="Rows listed here can be upgraded through the MIGRATE_ENTITY_DATA job path with provenance."
+                />
+                {report.staleData.length === 0 ? (
+                  <p className="px-[18px] py-4 text-[12px] text-[var(--ink-faint)]">
+                    No stale data rows.
+                  </p>
+                ) : (
+                  <ul>
+                    {report.staleData.map((issue) => (
+                      <StaleDataRow
+                        key={issue.entityId}
+                        issue={issue}
+                        campaignId={id}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </Panel>
+            </div>
+          )}
         </div>
-      )}
-    </PageContainer>
+      </div>
+    </ConsoleScreen>
   );
 }

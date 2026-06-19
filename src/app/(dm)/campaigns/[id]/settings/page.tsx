@@ -11,7 +11,7 @@ import { AiKeysPanel } from "@/components/settings/ai-keys-panel";
 import { SettingsNav } from "@/components/settings/settings-nav";
 import { UsagePanel } from "@/components/settings/usage-panel";
 import { BuildSemanticIndexButton } from "@/components/search/build-semantic-index-button";
-import { Kicker } from "@/components/ui/kicker";
+import { ConsoleScreen, ScreenHeader, ScreenRail } from "@/components/console/screen";
 import { Panel, PanelHeader } from "@/components/ui/panel";
 
 // Campaign settings — a two-pane layout: a section sub-nav (the middle pane of
@@ -62,59 +62,45 @@ export default async function CampaignSettingsPage({
       : null;
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden bg-[var(--bg)] lg:grid-cols-[264px_minmax(0,1fr)]">
-      {/* ── Settings rail (mirrors the timeline descent rail / DM console nav:
-          --bg-1 surface, hairline right border, bordered header block) ── */}
-      <aside className="hidden min-h-0 flex-col border-r border-[var(--line)] bg-[var(--bg-1)] lg:flex">
-        <div className="border-b border-[var(--line)] px-4 py-[14px]">
-          <Kicker className="mb-[9px]">Settings</Kicker>
-          <div className="truncate font-mono text-[10px] text-[var(--ink-faint)]">
-            {campaign.name}
-          </div>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto py-2">
+    <ConsoleScreen
+      rail={
+        // Mirrors the timeline descent rail / DM console nav: --bg-1 surface,
+        // hairline right border, bordered header block.
+        <ScreenRail kicker="Settings" caption={campaign.name} bodyClassName="py-2">
           <SettingsNav activeId="ai" />
-        </div>
-      </aside>
-
+        </ScreenRail>
+      }
+    >
       {/* ── Active section: AI Provider ── */}
-      <div className="flex min-h-0 min-w-0 flex-col">
-        {/* HUD header band — same treatment as the timeline's main column. */}
-        <div className="bracket border-b border-[var(--line)] bg-[var(--bg-1)] px-[26px] py-4">
-          <Kicker className="mb-2">Settings · AI Provider</Kicker>
-          <h1 className="font-display text-[27px] font-bold leading-tight tracking-[.01em] text-[var(--ink)]">
-            AI provider
-          </h1>
-        </div>
+      <ScreenHeader kicker="Settings · AI Provider" title="AI provider" />
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-[26px] py-7">
-          <div className="max-w-[760px]">
-            <p className="mb-6 max-w-[560px] text-[12.5px] leading-[1.5] text-[var(--ink-faint)]">
-              Configure how this crawl uses AI. Generation always produces
-              reviewable proposals — never silent canon.
-            </p>
-            <AiKeysPanel campaignId={id} configured={configured} />
-            <Panel className="mt-6">
-              <PanelHeader
-                kicker="Semantic search"
-                title="Build the semantic index"
-                sub="Embeds your canon so search ranks by meaning, not just keywords. It runs in the background as a job and powers hybrid search. Requires an embedding-capable provider key above — without one, search stays keyword-only."
-              />
-              <div className="px-[18px] py-4">
-                {canBuildSemanticIndex ? (
-                  <BuildSemanticIndexButton campaignId={id} activeJob={activeSemanticJob} />
-                ) : (
-                  <p className="text-[12px] text-[var(--ink-faint)]">
-                    Add an embedding-capable provider key above to enable semantic
-                    search.
-                  </p>
-                )}
-              </div>
-            </Panel>
-            <UsagePanel campaignId={id} usage={usage} />
-          </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-[26px] py-7">
+        <div className="max-w-[760px]">
+          <p className="mb-6 max-w-[560px] text-[12.5px] leading-[1.5] text-[var(--ink-faint)]">
+            Configure how this crawl uses AI. Generation always produces
+            reviewable proposals — never silent canon.
+          </p>
+          <AiKeysPanel campaignId={id} configured={configured} />
+          <Panel className="mt-6">
+            <PanelHeader
+              kicker="Semantic search"
+              title="Build the semantic index"
+              sub="Embeds your canon so search ranks by meaning, not just keywords. It runs in the background as a job and powers hybrid search. Requires an embedding-capable provider key above — without one, search stays keyword-only."
+            />
+            <div className="px-[18px] py-4">
+              {canBuildSemanticIndex ? (
+                <BuildSemanticIndexButton campaignId={id} activeJob={activeSemanticJob} />
+              ) : (
+                <p className="text-[12px] text-[var(--ink-faint)]">
+                  Add an embedding-capable provider key above to enable semantic
+                  search.
+                </p>
+              )}
+            </div>
+          </Panel>
+          <UsagePanel campaignId={id} usage={usage} />
         </div>
       </div>
-    </div>
+    </ConsoleScreen>
   );
 }

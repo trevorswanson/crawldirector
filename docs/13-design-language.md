@@ -87,6 +87,9 @@ Typed React ports of the mockup's `console-common.jsx` kit:
 | `Panel`/`PanelHeader` | `ui/panel.tsx`             | HUD surface + header with kicker/actions  |
 | `FxToggle`     | `ui/fx-toggle.tsx`                | Broadcast-FX on/off (client)              |
 | `DmNav`        | `console/dm-nav.tsx`              | Left nav with active state + planned items|
+| `ConsoleScreen`| `console/screen.tsx`             | Full-bleed screen shell (outer grid + main column) |
+| `ScreenRail`   | `console/screen.tsx`             | Optional left rail (header block + scroll body + pinned footer) |
+| `ScreenHeader` | `console/screen.tsx`             | Main-column HUD header band (kicker/title/actions) |
 
 `Button`, `Card`, `Input`, `Textarea`, `Label` are rethemed in place: square
 (2px radius), hairline borders, mono-uppercase buttons (`primary`/`ok`/`bare`
@@ -122,30 +125,39 @@ Desktop-first console (collapses below `md`): a 232px left nav + 52px topbar.
 ### Screen shell (the per-route skeleton)
 
 Inside the app shell, every console route is built from the **same skeleton** so
-screens feel interchangeable. The canonical reference implementation is the
-Timeline (`components/timeline/campaign-timeline.tsx`); the World Browser and
-Settings follow it too. **A screen that has no dedicated `design/mockup/screen-*`
-file MUST adopt this skeleton rather than inventing its own layout** (this is what
-went wrong with the first Settings page — a centered card that read nothing like
-the rest of the console). Match the metrics below to the nearest existing screen.
+screens feel interchangeable, and that skeleton is **codified as primitives** —
+`ConsoleScreen`, `ScreenRail`, and `ScreenHeader` in
+[`../src/components/console/screen.tsx`](../src/components/console/screen.tsx).
+**Build screens from these; don't hand-roll the markup.** That drift is exactly
+what went wrong with the first Settings page (a centered card that read nothing
+like the rest of the console). The canonical usage is the Timeline
+(`components/timeline/campaign-timeline.tsx`); Settings, Jobs, Canon Integrity,
+the World Browser, and the Review Queue use them too. **A screen that has no
+dedicated `design/mockup/screen-*` file MUST adopt these primitives rather than
+inventing its own layout.**
 
-- **Outer grid — full-bleed, not a centered card.** Fill the route:
-  `grid h-full min-h-0 overflow-hidden bg-[var(--bg)]` with
-  `lg:grid-cols-[<rail>_minmax(0,1fr)]` (rail ~232–264px). No `mx-auto max-w-*`
-  wrapper around the whole screen — center *content* inside the main column
-  instead (`max-w-[760px]`), never the shell.
-- **Rail** (`<aside>`, optional): a raised surface — `bg-[var(--bg-1)]` with a
-  hairline `border-r border-[var(--line)]`, `hidden … lg:flex flex-col min-h-0`.
-  It opens with a **bordered header block**
-  (`border-b border-[var(--line)] px-4 py-[14px]`) holding a `Kicker` + a mono
-  caption, then a `min-h-0 flex-1 overflow-y-auto` body. Active items use the
-  gold left-accent (`border-l-2 border-[var(--accent)] bg-[var(--bg-3)]`),
-  mirroring `DmNav`.
-- **Main column** (`flex min-h-0 min-w-0 flex-col`) opens with a **HUD header
-  band** — `border-b border-[var(--line)] bg-[var(--bg-1)] px-[26px] py-4`, often
-  `.bracket` — containing a `Kicker` eyebrow, a `font-display` title, and any
-  right-aligned actions/`HudTag`s. The scrolling content lives below it in a
-  `min-h-0 flex-1 overflow-y-auto` region, so the header stays put while the body
+- **`ConsoleScreen` — the outer grid (full-bleed, not a centered card).** Fills
+  the route with `grid h-full min-h-0 overflow-hidden bg-[var(--bg)]` and, when a
+  `rail` is passed, `lg:grid-cols-[264px_minmax(0,1fr)]`. It also renders the main
+  column (`flex min-h-0 min-w-0 flex-col`). The `264px` rail track is the **single
+  source of truth for rail width** — every railed screen goes through this
+  component, so the rail never changes size between routes. There is no
+  `mx-auto max-w-*` wrapper around the shell — center *content* inside the main
+  column instead (`max-w-[760px]`), never the shell.
+- **`ScreenRail` — the optional `rail`.** A raised `<aside>` — `bg-[var(--bg-1)]`
+  with a hairline `border-r border-[var(--line)]`, `hidden … lg:flex`. Pass a
+  `kicker` + `caption` for its **bordered header block**, the scrolling rail
+  `children`, and any pinned `footer` content (e.g. filters) that sits below the
+  scroll region. For a rail whose header is a mini-toolbar (tabs/filters) rather
+  than a kicker + caption — like the Review Queue — pass custom `header` content
+  instead; a rail with no header at all (the World Browser's facet list) just
+  omits all three. Active items use the gold left-accent
+  (`border-l-2 border-[var(--accent)] bg-[var(--bg-3)]`), mirroring `DmNav`.
+- **`ScreenHeader` — the main column's HUD header band.** A bracketed
+  `border-b border-[var(--line)] bg-[var(--bg-1)] px-[26px] py-4` block taking a
+  `kicker` eyebrow, a `font-display` `title`, and optional right-aligned `actions`
+  (`HudTag`s, buttons). Put the scrolling body below it in a
+  `min-h-0 flex-1 overflow-y-auto` region so the header stays put while the body
   scrolls.
 
 ## Principles

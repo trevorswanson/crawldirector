@@ -13,6 +13,7 @@ import {
   listFleshCandidates,
   type EntityStatusFilter,
 } from "@/server/services/entities";
+import { ConsoleScreen, ScreenRail } from "@/components/console/screen";
 import { Kicker } from "@/components/ui/kicker";
 import { TypeDot } from "@/components/ui/type-dot";
 import { SourceBadge } from "@/components/ui/source-badge";
@@ -180,9 +181,10 @@ export default async function CampaignPage({
   }
 
   return (
-    <div className="grid h-full grid-cols-1 lg:grid-cols-[248px_minmax(0,1fr)]">
-      {/* FACETS */}
-      <div className="order-2 hidden overflow-y-auto border-r border-[var(--line)] bg-[var(--bg-1)] px-4 pb-10 pt-4 lg:order-1 lg:block">
+    <ConsoleScreen
+      rail={
+        // FACETS
+        <ScreenRail bodyClassName="px-4 pb-10 pt-4">
 
         <Kicker dim noLead className="mb-[10px]">
           Entity type
@@ -343,10 +345,10 @@ export default async function CampaignPage({
             </div>
           </>
         )}
-      </div>
-
+        </ScreenRail>
+      }
+    >
       {/* RESULTS */}
-      <div className="order-1 flex min-h-0 min-w-0 flex-col lg:order-2">
         <div className="flex flex-wrap items-center gap-3 border-b border-[var(--line)] bg-[var(--bg-1)] px-[22px] py-[14px]">
           <CampaignSearch
             initialQuery={filters.q ?? ""}
@@ -476,7 +478,6 @@ export default async function CampaignPage({
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </ConsoleScreen>
   );
 }

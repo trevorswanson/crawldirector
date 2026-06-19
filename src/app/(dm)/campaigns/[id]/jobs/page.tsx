@@ -4,9 +4,8 @@ import { Role } from "@/generated/prisma/client";
 import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
 import { listRecentJobs } from "@/server/services/jobs";
-import { PageContainer } from "@/components/console/page-container";
+import { ConsoleScreen, ScreenHeader } from "@/components/console/screen";
 import { JobQueueList } from "@/components/jobs/job-queue-list";
-import { Kicker } from "@/components/ui/kicker";
 
 export default async function CampaignJobsPage({
   params,
@@ -25,19 +24,18 @@ export default async function CampaignJobsPage({
   const jobs = await listRecentJobs(user.id, id, null);
 
   return (
-    <PageContainer>
-      <Kicker dim noLead className="mb-2">
-        Jobs - {campaign.name}
-      </Kicker>
-      <h1 className="font-display mb-1 text-[26px] font-bold tracking-[.01em]">
-        Job Queue
-      </h1>
-      <p className="mb-5 max-w-2xl text-[13px] leading-[1.6] text-[var(--ink-dim)]">
-        Full background job history kicked off by the DM console. The worker
-        updates these rows as jobs move from queued to running, succeeded, or
-        failed; queued and running jobs can be canceled here.
-      </p>
-      <JobQueueList jobs={jobs} campaignId={id} />
-    </PageContainer>
+    <ConsoleScreen>
+      <ScreenHeader kicker={campaign.name} title="Job Queue" />
+      <div className="min-h-0 flex-1 overflow-y-auto px-[26px] py-7">
+        <div className="max-w-[760px]">
+          <p className="mb-5 max-w-2xl text-[13px] leading-[1.6] text-[var(--ink-dim)]">
+            Full background job history kicked off by the DM console. The worker
+            updates these rows as jobs move from queued to running, succeeded, or
+            failed; queued and running jobs can be canceled here.
+          </p>
+          <JobQueueList jobs={jobs} campaignId={id} />
+        </div>
+      </div>
+    </ConsoleScreen>
   );
 }
