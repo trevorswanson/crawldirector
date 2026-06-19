@@ -165,7 +165,11 @@ relevant milestone exists.
   [`src/components/ui`](./src/components/ui) (+ the console shell in
   `src/components/console`). **Match the milestone mockup** in
   [`docs/design/mockup/`](./docs/design/mockup); treat it as the UI acceptance
-  target, not loose inspiration. If implementation constraints require a
+  target, not loose inspiration. **When a screen has no dedicated `screen-*`
+  mockup** (e.g. Settings, Jobs, Canon Integrity), reuse the standard **console
+  screen shell** — the full-bleed rail + HUD-header skeleton used by the
+  Timeline/World Browser — instead of inventing a layout (see "Screen shell" in
+  the design-language doc). If implementation constraints require a
   deviation, document it in `docs/PROGRESS.md` (or an ADR for durable decisions)
   in the same change. The spec is
   [`docs/13-design-language.md`](./docs/13-design-language.md). Honor the

@@ -119,6 +119,35 @@ Desktop-first console (collapses below `md`): a 232px left nav + 52px topbar.
   disabled with a "Planned · Mn" tooltip** so the nav doubles as a roadmap without
   faking pages. Keep the planned list in sync with [`11-roadmap.md`](./11-roadmap.md).
 
+### Screen shell (the per-route skeleton)
+
+Inside the app shell, every console route is built from the **same skeleton** so
+screens feel interchangeable. The canonical reference implementation is the
+Timeline (`components/timeline/campaign-timeline.tsx`); the World Browser and
+Settings follow it too. **A screen that has no dedicated `design/mockup/screen-*`
+file MUST adopt this skeleton rather than inventing its own layout** (this is what
+went wrong with the first Settings page — a centered card that read nothing like
+the rest of the console). Match the metrics below to the nearest existing screen.
+
+- **Outer grid — full-bleed, not a centered card.** Fill the route:
+  `grid h-full min-h-0 overflow-hidden bg-[var(--bg)]` with
+  `lg:grid-cols-[<rail>_minmax(0,1fr)]` (rail ~232–264px). No `mx-auto max-w-*`
+  wrapper around the whole screen — center *content* inside the main column
+  instead (`max-w-[760px]`), never the shell.
+- **Rail** (`<aside>`, optional): a raised surface — `bg-[var(--bg-1)]` with a
+  hairline `border-r border-[var(--line)]`, `hidden … lg:flex flex-col min-h-0`.
+  It opens with a **bordered header block**
+  (`border-b border-[var(--line)] px-4 py-[14px]`) holding a `Kicker` + a mono
+  caption, then a `min-h-0 flex-1 overflow-y-auto` body. Active items use the
+  gold left-accent (`border-l-2 border-[var(--accent)] bg-[var(--bg-3)]`),
+  mirroring `DmNav`.
+- **Main column** (`flex min-h-0 min-w-0 flex-col`) opens with a **HUD header
+  band** — `border-b border-[var(--line)] bg-[var(--bg-1)] px-[26px] py-4`, often
+  `.bracket` — containing a `Kicker` eyebrow, a `font-display` title, and any
+  right-aligned actions/`HudTag`s. The scrolling content lives below it in a
+  `min-h-0 flex-1 overflow-y-auto` region, so the header stays put while the body
+  scrolls.
+
 ## Principles
 
 - **Mockup-first implementation.** Before building or revising a screen, open the

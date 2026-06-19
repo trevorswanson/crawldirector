@@ -62,22 +62,33 @@ export default async function CampaignSettingsPage({
       : null;
 
   return (
-    <div className="h-full overflow-y-auto bg-[var(--bg)]">
-      <div className="mx-auto grid max-w-[1040px] grid-cols-1 lg:grid-cols-[216px_minmax(0,1fr)]">
-        {/* ── Section sub-nav ── */}
-        <aside className="border-b border-[var(--line)] px-4 py-6 lg:min-h-full lg:border-b-0 lg:border-r">
-          <Kicker noLead className="mb-[10px] px-3">
-            {campaign.name} · Settings
-          </Kicker>
+    <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden bg-[var(--bg)] lg:grid-cols-[264px_minmax(0,1fr)]">
+      {/* ── Settings rail (mirrors the timeline descent rail / DM console nav:
+          --bg-1 surface, hairline right border, bordered header block) ── */}
+      <aside className="hidden min-h-0 flex-col border-r border-[var(--line)] bg-[var(--bg-1)] lg:flex">
+        <div className="border-b border-[var(--line)] px-4 py-[14px]">
+          <Kicker className="mb-[9px]">Settings</Kicker>
+          <div className="truncate font-mono text-[10px] text-[var(--ink-faint)]">
+            {campaign.name}
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto py-2">
           <SettingsNav activeId="ai" />
-        </aside>
+        </div>
+      </aside>
 
-        {/* ── Active section: AI Provider ── */}
-        <div className="px-6 py-7">
-          <div className="mx-auto max-w-[760px]">
-            <h1 className="mb-1 font-display text-[22px] font-semibold tracking-[.01em] text-[var(--ink)]">
-              AI provider
-            </h1>
+      {/* ── Active section: AI Provider ── */}
+      <div className="flex min-h-0 min-w-0 flex-col">
+        {/* HUD header band — same treatment as the timeline's main column. */}
+        <div className="bracket border-b border-[var(--line)] bg-[var(--bg-1)] px-[26px] py-4">
+          <Kicker className="mb-2">Settings · AI Provider</Kicker>
+          <h1 className="font-display text-[27px] font-bold leading-tight tracking-[.01em] text-[var(--ink)]">
+            AI provider
+          </h1>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-[26px] py-7">
+          <div className="max-w-[760px]">
             <p className="mb-6 max-w-[560px] text-[12.5px] leading-[1.5] text-[var(--ink-faint)]">
               Configure how this crawl uses AI. Generation always produces
               reviewable proposals — never silent canon.
