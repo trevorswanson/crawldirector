@@ -30,6 +30,7 @@ beforeEach(async () => {
   await prisma.changeSet.deleteMany();
   await prisma.crawler.deleteMany();
   await prisma.faction.deleteMany();
+  await prisma.floor.deleteMany();
   await prisma.entity.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.membership.deleteMany();
@@ -81,17 +82,22 @@ describe("migrateEntityData", () => {
     expect(result).toEqual({ checked: 1, migrated: 1, skipped: 0 });
     const stored = await prisma.entity.findUniqueOrThrow({
       where: { id: floor.id },
-      select: { data: true, version: true },
+      select: { data: true, version: true, floor: true },
     });
+    // The genuine `data → satellite` migration (ADR 0011 Part C): the floor's
+    // bespoke fields moved out of the JSON blob into the Floor satellite (legacy
+    // string anchors coerced to numbers en route), the blob converged to just the
+    // version stamp, and the stale off-schema key was dropped.
     const data = asRecord(stored.data);
-    expect(data).toMatchObject({
+    expect(data).toEqual({ _v: 3 });
+    expect(data).not.toHaveProperty("retiredKey");
+    expect(data).not.toHaveProperty("floorNumber");
+    expect(stored.floor).toMatchObject({
       floorNumber: 9,
       theme: "Castle siege",
       startDay: 0,
       collapseDay: 12,
-      _v: 2,
     });
-    expect(data).not.toHaveProperty("retiredKey");
     expect(stored.version).toBe(2);
 
     const changeSet = await prisma.changeSet.findFirstOrThrow({
@@ -160,14 +166,16 @@ describe("migrateEntityData", () => {
 
     const stored = await prisma.entity.findUniqueOrThrow({
       where: { id: floor.id },
-      select: { data: true },
+      select: { data: true, floor: true },
     });
-    expect(asRecord(stored.data)).toMatchObject({
+    // Corrupt (wrong-typed) values coerce to their empty defaults as they move to
+    // the satellite; the blob converges to the version stamp.
+    expect(asRecord(stored.data)).toEqual({ _v: 3 });
+    expect(stored.floor).toMatchObject({
       floorNumber: null,
       theme: null,
       startDay: 1,
       collapseDay: null,
-      _v: 2,
     });
   });
 

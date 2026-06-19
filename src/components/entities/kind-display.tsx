@@ -231,7 +231,10 @@ function ItemDisplayPanel({
 }
 
 function FloorDisplayPanel({ campaignId, entityId, entity }: KindDisplayProps) {
-  const data = readKindData("FLOOR", entity.data) as FloorData;
+  // FLOOR bespoke fields live in the 1:1 satellite (ADR 0011 Part C), merged back
+  // in by readKindData(type, data, floor). floorNumber is the indexed canonical
+  // floor key; theme/startDay/collapseDay are the timeline anchors.
+  const data = readKindData("FLOOR", entity.data, entity.floor) as FloorData;
   const rows: Array<{ key: string; label: string; value: string }> = [
     {
       key: "data.floorNumber",

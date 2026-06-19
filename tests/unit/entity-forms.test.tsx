@@ -108,6 +108,7 @@ const crawlerEntity: EntityDetail = {
     currentFloor: 1,
   },
   faction: null,
+  floor: null,
 };
 
 const genericEntity: EntityDetail = {
@@ -387,6 +388,7 @@ describe("entity forms", () => {
     updatedAt: new Date(),
     crawler: null,
     faction: null,
+    floor: null,
     data: {
       itemTypeId: "it1",
       divine: true,

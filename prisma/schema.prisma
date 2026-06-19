@@ -317,6 +317,7 @@ model Entity {
   currentFloorOf Campaign[]         @relation("CampaignCurrentFloor")
   crawler        Crawler?
   faction        Faction?
+  floor          Floor?
   outEdges       Relationship[]     @relation("SourceEntity")
   inEdges        Relationship[]     @relation("TargetEntity")
   eventRoles     EventParticipant[]
@@ -368,6 +369,30 @@ model Faction {
 
   @@index([standing])
   @@index([strength])
+}
+
+// FLOOR satellite (docs/adr/0011 Part C). The genuine `data → satellite`
+// migration: unlike Faction (greenfield), FLOOR has real existing
+// `data.floorNumber`/`theme`/`startDay`/`collapseDay` rows read across many hot
+// paths (the absolute-day resolver, campaigns.ts floor anchors, timeline floor
+// banding, currentFloor resolution — ADRs 0005, 0008). A FLOOR `schemaVersion`
+// 2→3 bump moves those fields into this 1:1 table (keyed by Entity.id, the
+// Crawler/Faction precedent) and the MIGRATE_ENTITY_DATA job drops them from
+// Entity.data — the real proof the versioning machinery promotes existing data.
+// They stay registry-declared (src/lib/entity-kinds/floor.ts), reviewable,
+// lockable canon addressed by the same `data.<field>` patch keys; only their
+// physical home moves, so review/lock/provenance stay uniform on Entity.
+// floorNumber is the campaign-unique canonical floor key (ADR 0008), indexed for
+// the uniqueness/by-number lookups (assertFloorNumberAvailable, resolveFloorEntities).
+model Floor {
+  id          String  @id
+  entity      Entity  @relation(fields: [id], references: [id], onDelete: Cascade)
+  floorNumber Int?
+  theme       String?
+  startDay    Int?
+  collapseDay Int?
+
+  @@index([floorNumber])
 }
 
 // ───────────── Relationships (typed, any-to-any edges) ─────────────

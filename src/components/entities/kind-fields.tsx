@@ -35,7 +35,9 @@ function FloorFields({ entity, getVal, isLocked }: KindFieldsProps) {
   // the one-line flavour under the header. startDay/collapseDay are the absolute
   // days-since-collapse the floor opened / collapses — anchors that let
   // FLOOR_START / FLOOR_COLLAPSE event times resolve to absolute days (ADR 0008).
-  const existingData = readKindData("FLOOR", entity.data) as {
+  // FLOOR bespoke fields live in the 1:1 Floor satellite (ADR 0011 Part C),
+  // merged back in by readKindData(type, data, floor).
+  const existingData = readKindData("FLOOR", entity.data, entity.floor) as {
     floorNumber?: number | null;
     theme?: string | null;
     startDay?: number | null;

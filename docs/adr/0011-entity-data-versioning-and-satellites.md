@@ -1,6 +1,6 @@
 # ADR 0011 — Entity `data` schema versioning, migration & satellite promotion
 
-- **Status:** accepted — **M5.5 in progress.** Part A's versioning foundation +
+- **Status:** accepted — **M5.5 complete.** Part A's versioning foundation +
   `readKindData` read seam shipped as slice 1 (2026-06-18); the
   `MIGRATE_ENTITY_DATA` job + first real FLOOR v2 data bump shipped as slice 2
   (2026-06-18); Part B's reference-integrity badge + impact-aware archive shipped as
@@ -8,8 +8,16 @@
   Part C's greenfield Faction satellite shipped as slice 4 (2026-06-18) — a 1:1
   `Faction` table proving the satellite read/write plumbing (an
   `EntityKind.satellite` marker redirects storage while review/lock/provenance
-  stay uniform on `Entity`). Only the Floor satellite / generated column (slice 5)
-  remains.
+  stay uniform on `Entity`). Part C's **Floor satellite** shipped as slice 5
+  (2026-06-19) — the genuine `data → satellite` migration: a FLOOR `schemaVersion`
+  2→3 bump moves the real existing `data.floorNumber`/`theme`/`startDay`/
+  `collapseDay` into a 1:1 `Floor` table via the `MIGRATE_ENTITY_DATA` job, the
+  real proof the machinery promotes existing data. The query shapes warranted
+  neither an index nor a satellite for current *performance* (every FLOOR reader
+  loads floors wholesale and resolves in memory), but the full satellite landed to
+  prove the migration before M7/M9/M10 add weight; `floorNumber` is indexed as the
+  canonical lookup key. The generated-column alternative was evaluated and
+  rejected (a dead index that proves nothing).
   Decomposes into the slices tracked in [`11-roadmap.md`](../11-roadmap.md) (M5.5)
   and [`PROGRESS.md`](../PROGRESS.md). This ADR **extends [ADR 0009](./0009-entity-kind-registry.md)**:
   0009 consolidated each type's bespoke fields into a per-type descriptor but
@@ -201,6 +209,19 @@ versioning layer (Part A/D) makes a clean promotion possible.
    *generated column* for `floorNumber` (and any other purely-lookup field) while
    the values stay in `data`. The slice lands whichever the actual query shapes
    warrant; a full satellite is not assumed.
+
+   **Landed (slice 5, 2026-06-19): the full satellite.** The query-shape audit
+   found that *no* FLOOR reader filters/sorts/aggregates by floor fields at the DB
+   level — every one loads a campaign's floors wholesale (one Entity per floor) and
+   resolves in memory — so neither option is *performance*-warranted today. The
+   full satellite was chosen anyway because the slice's job is to *prove the genuine
+   `data → satellite` migration* (the Faction greenfield slice deliberately left it
+   unproven) before M7's catalog types and M9/M10's import/export put weight on the
+   machinery — front-loaded while FLOOR is the only mover. All four fields move to a
+   1:1 `Floor` table; `floorNumber` is indexed as the canonical lookup key. The
+   generated-column alternative was rejected: it would add a dead index *and* prove
+   nothing about the migration. See [`PROGRESS.md`](../PROGRESS.md) for the reader
+   inventory and the partial-edit fallback bug the tests caught.
 
 ### Part D — Migration execution (`MIGRATE_ENTITY_DATA` job)
 

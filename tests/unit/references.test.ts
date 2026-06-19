@@ -379,7 +379,7 @@ describe("reference integrity service (ADR 0011 Part B)", () => {
           entityName: "Legacy Floor",
           entityType: "FLOOR",
           storedVersion: 1,
-          currentVersion: 2,
+          currentVersion: 3,
         },
       ]);
     });

@@ -10,6 +10,7 @@ import {
   isKindDataStale,
   kindTypes,
   readKindData,
+  satelliteRowOf,
 } from "@/lib/entity-kinds";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
@@ -83,12 +84,16 @@ function migrationPatchFor(row: {
   data: unknown;
   // Satellite-backed fields (ADR 0011 Part C) live in a 1:1 table, not the JSON
   // blob, so they must be merged in before computing the upgraded shape —
-  // otherwise a satellite type's migration would read them as null and the patch
-  // would wipe the stored values on apply.
+  // otherwise a *populated* satellite type's migration would read them as null
+  // and the patch would wipe the stored values on apply. The right relation is
+  // picked from the type's descriptor (satelliteRowOf). For the FLOOR `data →
+  // satellite` move the satellite is still empty (null), so the merge is skipped
+  // and the values are read from the blob — exactly what the patch must carry.
   faction?: unknown;
+  floor?: unknown;
 }): ReviewPatch {
   const raw = asRecord(row.data);
-  const upgraded = readKindData(row.type, row.data, row.faction);
+  const upgraded = readKindData(row.type, row.data, satelliteRowOf(row.type, row));
   const patch: ReviewPatch = {
     _baseVersion: { to: row.version },
   };
@@ -137,6 +142,14 @@ export async function migrateEntityData(
           strength: true,
           allegiance: true,
           resources: true,
+        },
+      },
+      floor: {
+        select: {
+          floorNumber: true,
+          theme: true,
+          startDay: true,
+          collapseDay: true,
         },
       },
     },

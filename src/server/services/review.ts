@@ -19,6 +19,7 @@ import {
   normalizeKindFieldValue,
   readKindData,
   RESERVED_DATA_KEY,
+  satelliteRowOf,
   schemaVersionFor,
 } from "@/lib/entity-kinds";
 import { ServiceError } from "@/lib/errors";
@@ -143,6 +144,13 @@ const satelliteDataFields = new Set(
   allSatelliteDataKeys().map((key) => `data.${key}`),
 );
 
+// Reusable select for the FLOOR satellite (ADR 0011 Part C), so every floor
+// reader in this module loads the same columns and resolves floor data through
+// `readFloorData(data, floor)` across the migration transition.
+const floorSatelliteSelect = {
+  select: { floorNumber: true, theme: true, startDay: true, collapseDay: true },
+} as const;
+
 function typeDataFields(type: string): Set<string> {
   return new Set(dataKeysFor(type).map((key) => `data.${key}`));
 }
@@ -178,11 +186,24 @@ function optionalNumber(value: JsonValue | undefined) {
   return typeof value === "number" ? value : null;
 }
 
-function readPersistedFloorDataWithoutMigrations(value: unknown): FloorData {
-  const data =
+function readPersistedFloorDataWithoutMigrations(
+  value: unknown,
+  satellite?: unknown,
+): FloorData {
+  const blob =
     value && typeof value === "object" && !Array.isArray(value)
       ? (value as Record<string, unknown>)
       : {};
+  // Once a FLOOR is satellite-backed (ADR 0011 Part C) its anchors are typed Int
+  // columns, the authoritative persisted shape — so read them from the satellite
+  // (no migration ambiguity to detect). A pre-migration floor (no satellite row)
+  // reads the raw blob, preserving the slice-2 string→number "storage resolved"
+  // detection the rank rebuild depends on.
+  const sat =
+    satellite && typeof satellite === "object" && !Array.isArray(satellite)
+      ? (satellite as Record<string, unknown>)
+      : null;
+  const data = sat ?? blob;
   return {
     floorNumber: typeof data.floorNumber === "number" ? data.floorNumber : null,
     theme: typeof data.theme === "string" && data.theme.length > 0 ? data.theme : null,
@@ -210,10 +231,13 @@ async function assertFloorNumberAvailable(
       status: { not: CanonStatus.ARCHIVED },
       ...(excludeEntityId ? { id: { not: excludeEntityId } } : {}),
     },
-    select: { id: true, name: true, data: true },
+    // floorNumber lives in the Floor satellite once migrated (ADR 0011 Part C);
+    // read it through the satellite-aware seam so the uniqueness check stays
+    // correct across a mixed migration state (some floors still blob-backed).
+    select: { id: true, name: true, data: true, floor: floorSatelliteSelect },
   });
   const clash = floors.find(
-    (floor) => readFloorData(floor.data).floorNumber === floorNumber,
+    (floor) => readFloorData(floor.data, floor.floor).floorNumber === floorNumber,
   );
   if (clash) {
     throw new ServiceError(
@@ -1067,7 +1091,7 @@ async function enrichReviewQueueItems(
   const targets = entityTargetIds.size
     ? await prisma.entity.findMany({
         where: { campaignId, id: { in: [...entityTargetIds] } },
-        include: { crawler: true, faction: true },
+        include: { crawler: true, faction: true, floor: true },
       })
     : [];
   const targetById = new Map(targets.map((target) => [target.id, target]));
@@ -1255,7 +1279,9 @@ function stringFromReviewValue(value: JsonValue | undefined) {
 }
 
 function currentEntityValue(
-  entity: Prisma.EntityGetPayload<{ include: { crawler: true; faction: true } }>,
+  entity: Prisma.EntityGetPayload<{
+    include: { crawler: true; faction: true; floor: true };
+  }>,
   field: string,
 ): unknown {
   switch (field) {
@@ -1274,9 +1300,10 @@ function currentEntityValue(
     case "isStub":
       return entity.isStub;
     case "data":
-      // Merge the satellite row so a FACTION's `data.*` blob reflects its
-      // satellite-backed fields, not stale JSON nulls (ADR 0011 Part C).
-      return readKindData(entity.type, entity.data, entity.faction);
+      // Merge the satellite row so a FACTION's / FLOOR's `data.*` blob reflects
+      // its satellite-backed fields, not stale JSON nulls (ADR 0011 Part C). The
+      // right relation is picked from the type's descriptor (satelliteRowOf).
+      return readKindData(entity.type, entity.data, satelliteRowOf(entity.type, entity));
     case "customFields":
       return entity.customFields;
   }
@@ -1287,7 +1314,11 @@ function currentEntityValue(
   if (field.startsWith("data.")) {
     const key = field.slice("data.".length);
     if (typeDataFields(entity.type).has(field)) {
-      const metadata = readKindData(entity.type, entity.data, entity.faction);
+      const metadata = readKindData(
+        entity.type,
+        entity.data,
+        satelliteRowOf(entity.type, entity),
+      );
       return metadata[key];
     }
     return undefined;
@@ -2516,6 +2547,15 @@ async function applyCreateEntity(
             },
           }
         : {}),
+      // FLOOR's bespoke fields likewise live in the 1:1 Floor satellite (ADR 0011
+      // Part C); a freshly-created FLOOR's blob is just `{_v:3}`.
+      ...(type === EntityType.FLOOR
+        ? {
+            floor: {
+              create: floorSatelliteData(patch),
+            },
+          }
+        : {}),
     },
     select: { id: true },
   });
@@ -2558,6 +2598,9 @@ async function applyUpdateEntity(
       locked: true,
       lockedFields: true,
       data: true,
+      // FLOOR's anchors live in the satellite once migrated (ADR 0011 Part C);
+      // the floor re-rank below resolves `before` through readFloorData(data, floor).
+      floor: floorSatelliteSelect,
     },
   });
   if (!entity) throw new ServiceError("Entity not found.");
@@ -2598,7 +2641,12 @@ async function applyUpdateEntity(
     }
   }
 
-  const data = entityUpdateData(patch, entity.type, entity.data);
+  const data = entityUpdateData(
+    patch,
+    entity.type,
+    entity.data,
+    satelliteRowOf(entity.type, entity),
+  );
   await tx.entity.update({
     where: { id: entityId },
     data,
@@ -2622,8 +2670,11 @@ async function applyUpdateEntity(
     // Migration can persist a raw `"61"` anchor as `61` without changing the
     // semantic read shape; existing ranks still need rebuilding because they may
     // have been computed before that anchor was resolvable.
-    const persistedBefore = readPersistedFloorDataWithoutMigrations(entity.data);
-    const before = readFloorData(entity.data);
+    const persistedBefore = readPersistedFloorDataWithoutMigrations(
+      entity.data,
+      entity.floor,
+    );
+    const before = readFloorData(entity.data, entity.floor);
     const afterFloorNumber =
       "data.floorNumber" in patch
         ? optionalNumber(readTo(patch, "data.floorNumber"))
@@ -2734,12 +2785,52 @@ async function applyDeleteEntity(
 // Build the FACTION satellite row from a change-set patch (ADR 0011 Part C). The
 // fields are addressed by their reviewable `data.*` patch keys (FACTION's
 // entity-kind descriptor), but persist to the 1:1 Faction table, not Entity.data.
-function factionSatelliteData(patch: ReviewPatch): Prisma.FactionCreateWithoutEntityInput {
+// Read a satellite field's value for the *create* side of an upsert: the patched
+// value when this op touches the field, otherwise the entity's current resolved
+// value (`fallback`). The fallback matters when a satellite row is created from a
+// *partial* update of a not-yet-migrated (blob-backed) entity — the unpatched
+// fields must carry over from the blob into the new satellite row, not reset to
+// null. On the pure-create path there is no fallback and the patch carries every
+// field. `fallback` is `readKindData`'s already-normalized current data.
+function satelliteCreateRead(
+  patch: ReviewPatch,
+  fallback: Record<string, unknown> | undefined,
+  key: string,
+): JsonValue | undefined {
+  return `data.${key}` in patch
+    ? readTo(patch, `data.${key}`)
+    : (fallback?.[key] as JsonValue | undefined);
+}
+
+function factionSatelliteData(
+  patch: ReviewPatch,
+  fallback?: Record<string, unknown>,
+): Prisma.FactionCreateWithoutEntityInput {
+  const read = (key: string) => satelliteCreateRead(patch, fallback, key);
   return {
-    standing: optionalNumber(readTo(patch, "data.standing")),
-    strength: optionalNumber(readTo(patch, "data.strength")),
-    allegiance: nullableString(readTo(patch, "data.allegiance")),
-    resources: nullableString(readTo(patch, "data.resources")),
+    standing: optionalNumber(read("standing")),
+    strength: optionalNumber(read("strength")),
+    allegiance: nullableString(read("allegiance")),
+    resources: nullableString(read("resources")),
+  };
+}
+
+// Build the FLOOR satellite row from a change-set patch (ADR 0011 Part C). Like
+// factionSatelliteData, the fields are addressed by their reviewable `data.*`
+// patch keys (FLOOR's entity-kind descriptor) but persist to the 1:1 Floor table,
+// not Entity.data. This is the write half of the genuine `data → satellite`
+// migration: MIGRATE_ENTITY_DATA re-applies a legacy floor's stored values as a
+// `data.*` patch, which this routes into the satellite.
+function floorSatelliteData(
+  patch: ReviewPatch,
+  fallback?: Record<string, unknown>,
+): Prisma.FloorCreateWithoutEntityInput {
+  const read = (key: string) => satelliteCreateRead(patch, fallback, key);
+  return {
+    floorNumber: optionalNumber(read("floorNumber")),
+    theme: nullableString(read("theme")),
+    startDay: optionalNumber(read("startDay")),
+    collapseDay: optionalNumber(read("collapseDay")),
   };
 }
 
@@ -2766,10 +2857,20 @@ function crawlerCreateData(patch: ReviewPatch) {
   };
 }
 
-function entityUpdateData(patch: ReviewPatch, type: EntityType, existingData?: unknown): Prisma.EntityUpdateInput {
+function entityUpdateData(
+  patch: ReviewPatch,
+  type: EntityType,
+  existingData?: unknown,
+  existingSatellite?: unknown,
+): Prisma.EntityUpdateInput {
   const data: Prisma.EntityUpdateInput = {
     version: { increment: 1 },
   };
+  // The entity's current resolved bespoke data (blob + satellite). Used as the
+  // create-side fallback for a satellite upsert so a *partial* edit of a
+  // not-yet-migrated (blob-backed) entity carries its unpatched fields into the
+  // new satellite row instead of nulling them (ADR 0011 Part C).
+  const resolvedData = readKindData(type, existingData, existingSatellite);
   if ("status" in patch) {
     data.status = (readTo(patch, "status") as CanonStatus) ?? CanonStatus.CANON;
   }
@@ -2859,7 +2960,39 @@ function entityUpdateData(patch: ReviewPatch, type: EntityType, existingData?: u
     }
     if (Object.keys(factionData).length > 0) {
       data.faction = {
-        upsert: { create: factionSatelliteData(patch), update: factionData },
+        upsert: {
+          create: factionSatelliteData(patch, resolvedData),
+          update: factionData,
+        },
+      };
+    }
+  }
+
+  // FLOOR's bespoke fields are reviewable `data.*` canon stored in the 1:1 Floor
+  // satellite (ADR 0011 Part C). Route the patched ones there and upsert so a
+  // legacy FLOOR (created before the satellite existed) gains its row on the
+  // migration's first edit — this is the apply half of the `data → satellite`
+  // move. They are excluded from the JSON merge below.
+  if (type === EntityType.FLOOR) {
+    const floorData: Prisma.FloorUpdateInput = {};
+    if ("data.floorNumber" in patch) {
+      floorData.floorNumber = optionalNumber(readTo(patch, "data.floorNumber"));
+    }
+    if ("data.theme" in patch) {
+      floorData.theme = nullableString(readTo(patch, "data.theme"));
+    }
+    if ("data.startDay" in patch) {
+      floorData.startDay = optionalNumber(readTo(patch, "data.startDay"));
+    }
+    if ("data.collapseDay" in patch) {
+      floorData.collapseDay = optionalNumber(readTo(patch, "data.collapseDay"));
+    }
+    if (Object.keys(floorData).length > 0) {
+      data.floor = {
+        upsert: {
+          create: floorSatelliteData(patch, resolvedData),
+          update: floorData,
+        },
       };
     }
   }
@@ -4232,18 +4365,23 @@ async function applyFloorCollapseEffect(
     );
   }
 
-  // Live FLOOR entities for this floor and the next, keyed by their number.
+  // Live FLOOR entities for this floor and the next, keyed by their number. Floor
+  // anchors live in the satellite once migrated (ADR 0011 Part C), so load it and
+  // resolve through readFloorData(data, floor).
   const floorRows = await tx.entity.findMany({
     where: {
       campaignId: changeSet.campaignId,
       type: EntityType.FLOOR,
       status: { not: CanonStatus.ARCHIVED },
     },
-    select: { id: true, data: true },
+    select: { id: true, data: true, floor: floorSatelliteSelect },
   });
-  const floorByNumber = new Map<number, { id: string; data: unknown }>();
+  const floorByNumber = new Map<
+    number,
+    { id: string; data: unknown; floor: unknown }
+  >();
   for (const row of floorRows) {
-    const { floorNumber: n } = readFloorData(row.data);
+    const { floorNumber: n } = readFloorData(row.data, row.floor);
     if (n != null && !floorByNumber.has(n)) floorByNumber.set(n, row);
   }
 
@@ -4265,7 +4403,7 @@ async function applyFloorCollapseEffect(
   if (current) {
     await applyUpdateEntity(tx, changeSet, operationId, current.id, {
       "data.collapseDay": {
-        from: readFloorData(current.data).collapseDay,
+        from: readFloorData(current.data, current.floor).collapseDay,
         to: day,
       },
     });
@@ -4283,7 +4421,7 @@ async function applyFloorCollapseEffect(
   if (next) {
     await applyUpdateEntity(tx, changeSet, operationId, next.id, {
       "data.startDay": {
-        from: readFloorData(next.data).startDay,
+        from: readFloorData(next.data, next.floor).startDay,
         to: day,
       },
     });
