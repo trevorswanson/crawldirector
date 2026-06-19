@@ -1804,6 +1804,13 @@ export async function getCampaignCanonIntegrityAction(campaignId: string) {
   return getCampaignCanonIntegrity(user.id, campaignId);
 }
 
+export async function getCampaignIntegrityIssueCountAction(campaignId: string) {
+  const user = await requireUser();
+  const { getCampaignIntegrityReport } = await import("@/server/services/references");
+  const report = await getCampaignIntegrityReport(user.id, campaignId);
+  return report.brokenReferences.length + report.staleData.length;
+}
+
 export async function getCampaignHeaderStatusAction(campaignId: string) {
   const user = await requireUser();
   const { getCampaignHeaderStatus } = await import("@/server/services/campaigns");

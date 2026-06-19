@@ -5,6 +5,7 @@ const {
   createCampaign,
   isLoreSeedDatasetAvailable,
   getCampaignCanonIntegrity,
+  getCampaignIntegrityReport,
   getCampaignHeaderStatus,
   setCampaignCurrentFloor,
   createCrawler,
@@ -59,6 +60,7 @@ const {
   createCampaign: vi.fn(),
   isLoreSeedDatasetAvailable: vi.fn().mockReturnValue(true),
   getCampaignCanonIntegrity: vi.fn(),
+  getCampaignIntegrityReport: vi.fn(),
   getCampaignHeaderStatus: vi.fn(),
   setCampaignCurrentFloor: vi.fn(),
   createCrawler: vi.fn(),
@@ -118,6 +120,9 @@ vi.mock("@/server/services/campaigns", () => ({
   getCampaignCanonIntegrity,
   getCampaignHeaderStatus,
   setCampaignCurrentFloor,
+}));
+vi.mock("@/server/services/references", () => ({
+  getCampaignIntegrityReport,
 }));
 vi.mock("@/server/services/entities", () => ({
   archiveEntity,
@@ -191,6 +196,7 @@ import {
   createGenericEntityAction,
   quickCreateEntityAction,
   getCampaignCanonIntegrityAction,
+  getCampaignIntegrityIssueCountAction,
   getCampaignHeaderStatusAction,
   editChangeOperationFieldAction,
   editEventEffectsOperationAction,
@@ -493,6 +499,21 @@ describe("getCampaignCanonIntegrityAction", () => {
 
     expect(getCampaignCanonIntegrity).toHaveBeenCalledWith("u1", "c1");
     expect(result).toBe(integrity);
+  });
+});
+
+describe("getCampaignIntegrityIssueCountAction", () => {
+  it("returns the total integrity issue count for the current user", async () => {
+    getCampaignIntegrityReport.mockResolvedValue({
+      checkedEntities: 8,
+      brokenReferences: [{ entityId: "e1" }, { entityId: "e2" }],
+      staleData: [{ entityId: "e3" }],
+    });
+
+    const result = await getCampaignIntegrityIssueCountAction("c1");
+
+    expect(getCampaignIntegrityReport).toHaveBeenCalledWith("u1", "c1");
+    expect(result).toBe(3);
   });
 });
 
