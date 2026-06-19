@@ -31,6 +31,7 @@ import {
   type ReviewFieldInit,
   type ReviewStructuredField,
 } from "@/components/review/operation-diff-editor";
+import { ConsoleScreen, ScreenRail } from "@/components/console/screen";
 import { Button } from "@/components/ui/button";
 import { HudTag } from "@/components/ui/hud-tag";
 import { Kicker } from "@/components/ui/kicker";
@@ -174,9 +175,11 @@ export default async function ReviewQueuePage({
   const queueIsEmpty = changeSets.length === 0 && !doneSummary && !reopenedChangeSet;
 
   return (
-    <div className="grid h-full grid-cols-1 overflow-hidden bg-[var(--bg)] lg:grid-cols-[324px_minmax(0,1fr)]">
-      <aside className="hidden min-h-0 flex-col border-r border-[var(--line)] bg-[var(--bg-1)] lg:flex">
-        <div className="border-b border-[var(--line)] px-4 py-[13px]">
+    <ConsoleScreen
+      rail={
+        <ScreenRail
+          header={
+            <>
           <Kicker noLead className="mb-[10px]">
             {showClosed
               ? `Review Queue · Closed · ${changeSets.length} sets`
@@ -206,9 +209,9 @@ export default async function ReviewQueuePage({
               </Link>
             ))}
           </div>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto">
+            </>
+          }
+        >
           {filteredChangeSets.length === 0 ? (
             <div className="px-4 py-6 text-sm text-[var(--ink-faint)]">
               No {showClosed ? "closed" : "pending"} {activeSource.toLowerCase() == "all" ? "" : activeSource.toLowerCase()} proposals.
@@ -246,10 +249,9 @@ export default async function ReviewQueuePage({
               );
             })
           )}
-        </div>
-      </aside>
-
-      <main className="flex min-h-0 min-w-0 flex-col">
+        </ScreenRail>
+      }
+    >
         {query.error && (
           <div
             role="alert"
@@ -352,8 +354,7 @@ export default async function ReviewQueuePage({
             Select a proposal to review.
           </div>
         )}
-      </main>
-    </div>
+    </ConsoleScreen>
   );
 }
 

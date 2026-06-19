@@ -51,8 +51,8 @@ import {
   withoutFloorCandidates,
   type ParticipantRowValue,
 } from "@/components/entities/participant-rows";
+import { ConsoleScreen, ScreenHeader, ScreenRail } from "@/components/console/screen";
 import { HudTag } from "@/components/ui/hud-tag";
-import { Kicker } from "@/components/ui/kicker";
 import { SourceBadge } from "@/components/ui/source-badge";
 import { TypeDot } from "@/components/ui/type-dot";
 import { findCausalityWarnings } from "@/lib/causality";
@@ -1287,17 +1287,77 @@ export function CampaignTimeline({
   };
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden bg-[var(--bg)] lg:grid-cols-[264px_minmax(0,1fr)]">
-      {/* ── The descent rail ── */}
-      <aside className="hidden min-h-0 flex-col border-r border-[var(--line)] bg-[var(--bg-1)] lg:flex">
-        <div className="border-b border-[var(--line)] px-4 py-[14px]">
-          <Kicker className="mb-[9px]">The Descent</Kicker>
-          <div className="font-mono text-[10px] text-[var(--ink-faint)]">
-            {events.length} {events.length === 1 ? "event" : "events"} logged
-          </div>
-        </div>
+    <ConsoleScreen
+      rail={
+        // ── The descent rail ──
+        <ScreenRail
+          kicker="The Descent"
+          caption={`${events.length} ${events.length === 1 ? "event" : "events"} logged`}
+          bodyClassName="p-[10px_10px_16px]"
+          footer={
+            <>
+              {canEdit && floors.floorEntities.length > 0 && (
+                <div className="border-t border-[var(--line)] px-[14px] py-[13px]">
+                  <label
+                    htmlFor="current-floor"
+                    className="mb-[9px] block font-mono text-[9px] uppercase tracking-[.18em] text-[var(--ink-faint)]"
+                  >
+                    Current floor
+                  </label>
+                  <select
+                    id="current-floor"
+                    value={floors.currentFloorId ?? ""}
+                    onChange={(domEvent) => handleFloorChange(domEvent.target.value)}
+                    className="w-full border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[7px] font-mono text-[11px] text-[var(--ink)]"
+                  >
+                    <option value="">— None —</option>
+                    {floors.floorEntities.map((floor) => (
+                      <option key={floor.id} value={floor.id}>
+                        {floor.floorNumber != null ? `F${String(floor.floorNumber).padStart(2, "0")} · ` : ""}
+                        {floor.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-[10px_10px_16px]">
+              <div className="border-t border-[var(--line)] px-[14px] py-[15px]">
+                <div className="mb-[9px] font-mono text-[9px] uppercase tracking-[.18em] text-[var(--ink-faint)]">
+                  Filter by origin
+                </div>
+                <div className="flex flex-wrap gap-[5px]">
+                  {TIMELINE_FILTERS.map((option) => {
+                    const on = filter === option;
+                    const color = filterColor(option);
+                    return (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => setFilter(option)}
+                        className="border px-[9px] py-1 font-mono text-[10px] uppercase tracking-[.08em]"
+                        style={{
+                          background: on
+                            ? option === "ALL"
+                              ? "var(--accent)"
+                              : `color-mix(in srgb, ${color} 16%, transparent)`
+                            : "transparent",
+                          color: on
+                            ? option === "ALL"
+                              ? "var(--accent-ink)"
+                              : color
+                            : "var(--ink-dim)",
+                          borderColor: on ? color : "var(--line-strong)",
+                        }}
+                      >
+                        {filterLabel(option)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          }
+        >
           <div className="px-[6px] pb-2 pt-1 font-mono text-[9px] uppercase tracking-[.18em] text-[var(--ink-faint)]">
             Floors 01 — {String(ladderMax).padStart(2, "0")}
           </div>
@@ -1371,80 +1431,14 @@ export function CampaignTimeline({
               );
             })}
           </div>
-        </div>
-
-        {canEdit && floors.floorEntities.length > 0 && (
-          <div className="border-t border-[var(--line)] px-[14px] py-[13px]">
-            <label
-              htmlFor="current-floor"
-              className="mb-[9px] block font-mono text-[9px] uppercase tracking-[.18em] text-[var(--ink-faint)]"
-            >
-              Current floor
-            </label>
-            <select
-              id="current-floor"
-              value={floors.currentFloorId ?? ""}
-              onChange={(domEvent) => handleFloorChange(domEvent.target.value)}
-              className="w-full border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[7px] font-mono text-[11px] text-[var(--ink)]"
-            >
-              <option value="">— None —</option>
-              {floors.floorEntities.map((floor) => (
-                <option key={floor.id} value={floor.id}>
-                  {floor.floorNumber != null ? `F${String(floor.floorNumber).padStart(2, "0")} · ` : ""}
-                  {floor.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        <div className="border-t border-[var(--line)] px-[14px] py-[15px]">
-          <div className="mb-[9px] font-mono text-[9px] uppercase tracking-[.18em] text-[var(--ink-faint)]">
-            Filter by origin
-          </div>
-          <div className="flex flex-wrap gap-[5px]">
-            {TIMELINE_FILTERS.map((option) => {
-              const on = filter === option;
-              const color = filterColor(option);
-              return (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => setFilter(option)}
-                  className="border px-[9px] py-1 font-mono text-[10px] uppercase tracking-[.08em]"
-                  style={{
-                    background: on
-                      ? option === "ALL"
-                        ? "var(--accent)"
-                        : `color-mix(in srgb, ${color} 16%, transparent)`
-                      : "transparent",
-                    color: on
-                      ? option === "ALL"
-                        ? "var(--accent-ink)"
-                        : color
-                      : "var(--ink-dim)",
-                    borderColor: on ? color : "var(--line-strong)",
-                  }}
-                >
-                  {filterLabel(option)}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </aside>
-
-      {/* ── Main timeline column ── */}
-      <div className="flex min-h-0 min-w-0 flex-col">
-        <div className="bracket border-b border-[var(--line)] bg-[var(--bg-1)] px-[26px] py-4">
-          <div className="flex flex-wrap items-start justify-between gap-[18px]">
-            <div>
-              <Kicker className="mb-2">Timeline · most recent first</Kicker>
-              <h1 className="font-display text-[27px] font-bold leading-tight tracking-[.01em]">
-                Crawl Timeline
-              </h1>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
+        </ScreenRail>
+      }
+    >
+        <ScreenHeader
+          kicker="Timeline · most recent first"
+          title="Crawl Timeline"
+          actions={
+            <>
               <HudTag>
                 {shownEvents.length} / {events.length} shown
               </HudTag>
@@ -1481,9 +1475,9 @@ export function CampaignTimeline({
                   Log event
                 </button>
               )}
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        />
 
         {(removedEventId || removedCausalityId) && (
           <div className="border-b border-[var(--line)] bg-[var(--bg-2)] px-[26px] py-3">
@@ -1702,7 +1696,6 @@ export function CampaignTimeline({
             )}
           </div>
         </div>
-      </div>
-    </div>
+    </ConsoleScreen>
   );
 }
