@@ -197,10 +197,28 @@ drives the generation prompts.
   audit/provenance review screens (including global audit log and per-entity history/audit trails)
   & a unified archive/trash bin (to view and restore soft-deleted entities); performance pass on
   graph/search queries (indexes / materialized views); accessibility + responsive polish.
+- **Global administration foundation** ([ADR 0012](./adr/0012-shared-canon-library-and-import.md)):
+  add an app-wide super-admin capability, distinct from the per-campaign
+  `OWNER`/`CO_DM`/`PLAYER` membership roles, and a guarded `/admin` shell for
+  CrawlDirector-wide operations. The super-admin owns the one shared-library
+  campaign; M10 adds its browsing, suggestion, and import workflows. A library
+  read policy must be an explicit, DM-only exception, never a blanket bypass of
+  the campaign-membership gate.
 - **Campaign settings layout refactoring:** Redesign the settings page to use a three-pane layout where the middle pane is a sub-navigation for:
   - **General settings** (campaign name, description, dungeon public visibility toggle).
   - **Crawlers settings** (inviting other users to the campaign and managing user memberships/roles).
   - **AI Providers** (configured provider keys/endpoints, from M4).
+- **Job history, cost, and safety** ([ADR 0013](./adr/0013-job-priorities-and-idle-maintenance.md)):
+  promote the Jobs surface from a terse status list to a DM-readable operational
+  record. A detail view shows affected entities/relationships, per-item outcomes,
+  repair or migration impact, and the exact derived documents updated. AI jobs
+  aggregate their linked `AiUsage` rows (input/output/cache tokens and known
+  estimated USD; never secrets) rather than duplicating accounting data in a
+  free-form result. Add user-work versus maintenance priority classes, FIFO
+  within a class, and idle-only maintenance scheduling. A data migration must
+  preflight every candidate: only lossless/validating rows may auto-run; a
+  potential drop or other impact becomes a persisted dry-run preview for the DM,
+  not an automatic write.
 - **Export/import:** campaign export to JSON + Markdown (provenance included);
   import as reviewable `IMPORT` change sets. The export **stamps each entity's
   `data._v`** (M5.5 / ADR 0011) so an import into a newer app version migrates
@@ -208,16 +226,42 @@ drives the generation prompts.
   reason the data-versioning layer precedes M9.
 - **Done when:** deployed, backed up, exportable; a real campaign can be run by a
   DM + players; DMs can view and restore archived entities, view detailed entity edit histories, and configure campaign settings via the three-pane layout.
+  The global-admin shell is access-controlled, and a DM can inspect a job's
+  affected records, safety preview, and AI spend before deciding whether to run
+  a non-clean maintenance repair.
 
 ## M10 — Shared canon library & event-consequence AI
 **Goal:** leverage and scale.
-- Importable canonical DCC content (the 18 floors, common mob types, archetypes)
-  as reviewable `IMPORT` change sets.
+- **Admin-controlled shared canon library** ([ADR 0012](./adr/0012-shared-canon-library-and-import.md)):
+  the super-admin maintains a singleton library campaign containing reusable DCC
+  canon (the 18 floors, common mob types, archetypes). Other DMs may browse it
+  read-only and submit proposed library edits; those edits are attributed to the
+  proposer and enter the **library campaign's** Review Queue as
+  `PLAYER_SUGGESTION`, where only the library admin can approve them. Players
+  receive neither the cross-campaign browse entitlement nor write access.
+- **Reviewable, relationship-aware library import:** importing selected library
+  entities creates a target-campaign `PENDING` change set with `IMPORT`
+  provenance — never an auto-approved seed. A first-class import-link mapping,
+  kept outside `Entity.data`, records each approved local entity/relationship's
+  immutable library origin. The import planner re-scans library edges whenever a
+  selection is made and proposes every edge whose two origins are now resident in
+  the target campaign, whether the endpoints were selected together or on
+  different days. Same-batch edge operations declare dependencies on their
+  proposed endpoint imports, so partial review cannot create a dangling edge;
+  repeat import is idempotent. Imported content is a one-way local snapshot — a
+  later library edit never silently changes campaign canon.
+- **Replace new-campaign lore seeding with library import.** The current
+  `LORE_SEED` path auto-approves imported entities and is not the product
+  onboarding flow once the shared library exists. New campaigns start empty (or
+  with DM-authored setup); DMs choose and review library imports instead.
 - Event-consequence generator (propose downstream effects + causal links,
   including `PERSONA_SHIFT` effects that drift the System AI in reaction to
   events — M6); consistency-check generator (non-mutating → proposals).
-- **Done when:** a DM can seed a world from the library and let AI propose
-  causal consequences of logged events.
+- **Done when:** a super-admin can curate the library and review cross-campaign
+  suggestions; a DM can browse it, import entities and their recovered
+  relationships through the target campaign's Review Queue, including edges
+  discovered across separate import sessions; and AI can propose causal
+  consequences of logged events.
 
 ## M11 — Entity agents & multi-agent simulation (signature feature)
 **Goal:** let major entities role-play themselves to propose believable actions
@@ -381,6 +425,20 @@ scheduled into the flow of milestone work. Track active slices in
   "deferred satellites (Faction/Floor)" note carried in ADR 0009 and
   [`09-data-schema.md`](./09-data-schema.md)). Lands before the M7 catalog types
   and the M9/M10 import-export round-trip stress `Entity.data`.
+
+- **Shared library / global administration ([ADR 0012](./adr/0012-shared-canon-library-and-import.md), proposed — M9/M10).**
+  M9 establishes the guarded app-wide administrator and library-campaign
+  identity; M10 supplies the external-DM read/suggestion policy and the
+  dependency-aware, provenance-preserving library importer. The library origin
+  is relational import metadata, not a type-specific `Entity.data` field, so it
+  survives schema evolution and can reliably reconnect graph edges across import
+  sessions.
+
+- **Job priorities & idle-time maintenance ([ADR 0013](./adr/0013-job-priorities-and-idle-maintenance.md), proposed — M9).**
+  The worker must favor DM-initiated work over maintenance, make job outcomes and
+  AI spend inspectable, and never auto-apply a data migration that has a detected
+  loss or impact. This closes the safety gap left by one-way schema migrations
+  before M9/M10 make import and repair operations more common.
 
 ## Design-driven refinements (proposals, 2026-05-29)
 

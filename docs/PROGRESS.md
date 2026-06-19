@@ -105,6 +105,35 @@ the M6 work incremental.
       diffing, full persona-aware generator family (encounter, mob/boss, loot,
       System-message), and broader actor-profile studio reuse for M11.
 
+### Scheduled roadmap additions (2026-06-19)
+
+These are accepted as roadmap/backlog design, not active implementation work;
+M6 remains the next milestone work. The detailed decisions live in
+[ADR 0012](./adr/0012-shared-canon-library-and-import.md) and
+[ADR 0013](./adr/0013-job-priorities-and-idle-maintenance.md).
+
+- [ ] **M9/M10 — Global admin + shared canon library.** Add a global
+      super-admin and guarded `/admin` shell; create a singleton admin-owned
+      shared-library campaign. Permit read-only library browsing only through an
+      explicit DM entitlement, route external-DM suggestions to the library
+      campaign's queue as `PLAYER_SUGGESTION`, and replace new-campaign DCC lore
+      seeding with reviewed `IMPORT` proposals. Use relational import links plus
+      dependency-aware review operations so library relationships are proposed
+      when both endpoints arrive, including across separate import sessions; no
+      imported library update silently syncs into a DM's campaign.
+- [ ] **M9 — Job inspection + AI spend attribution.** Add structured job outcome
+      detail (affected records, embedding/document ids, repair/migration diff),
+      and link each AI usage record to its originating job so the Jobs page can
+      aggregate input/output/cache tokens and known cost without exposing keys.
+- [ ] **M9 — Safe priorities + idle maintenance.** Add user-work and maintenance
+      priority classes (FIFO within class); the worker may enqueue/claim
+      maintenance only when no user work is available. Before any automatic
+      entity-data migration, compute and persist a dry-run impact report. Auto-run
+      only validation-clean, lossless candidates; leave unknown/off-schema fields,
+      removed fields, or other impacts for an explicit DM-reviewed repair. Treat
+      the current lossless FLOOR satellite move separately from this future-risk
+      policy; do not imply it has already lost data.
+
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
 
