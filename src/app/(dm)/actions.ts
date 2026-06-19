@@ -73,7 +73,12 @@ import {
   searchCanon,
   type EntitySearchCandidate,
 } from "@/server/services/search";
-import { cancelJob, enqueueBuildSemanticIndexJob, enqueueJob } from "@/server/services/jobs";
+import {
+  cancelJob,
+  enqueueBuildSemanticIndexJob,
+  enqueueJob,
+  enqueueMigrateEntityDataJob,
+} from "@/server/services/jobs";
 import { isLoreSeedDatasetAvailable } from "@/server/services/seeding";
 import {
   approveChangeSet,
@@ -792,6 +797,42 @@ export async function enqueueBuildSemanticIndexAction(
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
     logActionError("Enqueue semantic index action failed", error);
     return { error: "Failed to queue job. Please try again.", timestamp: Date.now() };
+  }
+}
+
+// Enqueue a mechanical data-format repair pass for stale versioned entity
+// details. The worker upgrades rows through the migration service, which records
+// review/audit history for the automated canon writes.
+export async function enqueueMigrateEntityDataAction(
+  campaignId: string,
+  _prev: GenerateActionState,
+  _formData: FormData,
+): Promise<GenerateActionState> {
+  void _prev;
+  void _formData;
+  const user = await requireUser();
+  try {
+    const result = await enqueueMigrateEntityDataJob(user.id, campaignId);
+    revalidatePath(`/campaigns/${campaignId}/integrity`);
+    revalidatePath(`/campaigns/${campaignId}/jobs`);
+    if (!result.created) {
+      const status = result.status === "RUNNING" ? "running" : "queued";
+      return {
+        success: `Data repair is already ${status}. Check the Job Queue for status.`,
+        activeJobStatus: result.status,
+        timestamp: Date.now(),
+      };
+    }
+    return {
+      success:
+        "Data repair queued — older saved entity details will update when the worker finishes.",
+      activeJobStatus: result.status,
+      timestamp: Date.now(),
+    };
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    logActionError("Enqueue data repair action failed", error);
+    return { error: "Failed to queue data repair. Please try again.", timestamp: Date.now() };
   }
 }
 

@@ -189,11 +189,23 @@ Branch: `codex/m5-5-orphan-report`. No schema change.
       `/campaigns/[id]/integrity` page with checked/broken/stale totals, entity
       deep links, empty states, and a shell-nav entry so the existing canon-integrity
       language now points to an inspectable report.
+- [x] **DM repair affordance follow-up** ([`actions.ts`](<../src/app/(dm)/actions.ts>),
+      [`migrate-entity-data-button.tsx`](../src/components/integrity/migrate-entity-data-button.tsx),
+      [`job-queue-list.tsx`](../src/components/jobs/job-queue-list.tsx)): cleaned
+      the integrity page copy so DMs see "broken entity links" and "older saved
+      data formats" instead of descriptor/job internals, added a "Repair data
+      versions" button that enqueues the existing data-repair worker job with
+      active-job dedupe, and renamed the job history display from "Data migration"
+      to "Data repair."
 - [x] **Tests:** DB-backed [`references.test.ts`](../tests/unit/references.test.ts)
       covers report contents, broken-reference reasons, stale `_v`, archived-row
       exclusion, and DM-only authorization. UI
       [`campaign-integrity-page.test.tsx`](../tests/unit/campaign-integrity-page.test.tsx)
-      covers report rows, empty state, and route authorization; [`console-shell.test.tsx`](../tests/unit/console-shell.test.tsx)
+      covers report rows, repair controls, empty state, and route authorization;
+      [`migrate-entity-data-button.test.tsx`](../tests/unit/migrate-entity-data-button.test.tsx)
+      covers the new client repair control; [`dm-actions.test.ts`](../tests/unit/dm-actions.test.ts)
+      covers the enqueue action; [`job-queue.test.tsx`](../tests/unit/job-queue.test.tsx)
+      covers the DM-facing job label; [`console-shell.test.tsx`](../tests/unit/console-shell.test.tsx)
       covers the nav link.
 - [x] **Verification:** focused tests green:
       `npm run test -- tests/unit/references.test.ts` and
