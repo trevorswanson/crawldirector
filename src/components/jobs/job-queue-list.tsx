@@ -16,14 +16,14 @@ const kindLabels: Record<JobKind, string> = {
   BULK_FLESH: "Bulk flesh-out",
   LORE_SEED: "Lore seed",
   EMBED_SEARCH_DOCS: "Semantic index",
-  MIGRATE_ENTITY_DATA: "Data migration",
+  MIGRATE_ENTITY_DATA: "Data repair",
 };
 
 const kindDescriptions: Record<JobKind, string> = {
   BULK_FLESH: "Files draft entity proposals from selected stubs.",
   LORE_SEED: "Imports the configured lore dataset into canon.",
   EMBED_SEARCH_DOCS: "Builds embeddings for hybrid campaign search.",
-  MIGRATE_ENTITY_DATA: "Upgrades stale entity data to the current schema.",
+  MIGRATE_ENTITY_DATA: "Updates older saved entity details to the current app format.",
 };
 
 function statusColor(status: JobStatus): string {
@@ -72,7 +72,7 @@ function resultSummary(job: JobQueueItem): string | null {
     const migrated = typeof result.migrated === "number" ? result.migrated : null;
     const skipped = typeof result.skipped === "number" ? result.skipped : null;
     if (migrated === null) return null;
-    const parts = [`${migrated} migrated`];
+    const parts = [`${migrated} repaired`];
     if (skipped !== null && skipped > 0) parts.push(`${skipped} skipped`);
     return parts.join(", ");
   }
@@ -100,7 +100,7 @@ export function JobQueueList({
         <div>
           <p className="font-display text-[18px] font-semibold">No jobs queued yet.</p>
           <p className="mt-2 max-w-md text-[12.5px] leading-[1.6] text-[var(--ink-dim)]">
-            Background work such as semantic indexing, data migrations, bulk flesh-out runs, and
+            Background work such as semantic indexing, data repairs, bulk flesh-out runs, and
             lore seeding will appear here.
           </p>
         </div>

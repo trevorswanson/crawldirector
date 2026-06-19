@@ -1,16 +1,18 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { Role } from "@/generated/prisma/client";
+import { JobKind, Role } from "@/generated/prisma/client";
 import { formatEntityType } from "@/lib/entities";
 import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
+import { getActiveCampaignJob } from "@/server/services/jobs";
 import {
   getCampaignIntegrityReport,
   type BrokenReferenceIssue,
   type StaleDataIssue,
 } from "@/server/services/references";
 import { ConsoleScreen, ScreenHeader } from "@/components/console/screen";
+import { MigrateEntityDataButton } from "@/components/integrity/migrate-entity-data-button";
 import { Panel, PanelHeader } from "@/components/ui/panel";
 
 function Stat({
@@ -37,9 +39,9 @@ function Stat({
 function reasonLabel(issue: BrokenReferenceIssue) {
   switch (issue.reason) {
     case "MISSING":
-      return "Target missing from this campaign.";
+      return "The saved target is no longer in this campaign.";
     case "ARCHIVED":
-      return "Target is archived.";
+      return "The saved target is archived.";
     case "WRONG_TYPE":
       return `Expected ${formatEntityType(issue.targetType)}; actual ${formatEntityType(issue.actualType ?? "UNKNOWN")}.`;
   }
@@ -68,11 +70,22 @@ function BrokenReferenceRow({
           <span className="font-mono text-[var(--ink-dim)]">{issue.targetId}</span>.
         </p>
         <p className="mt-1 text-[12px] text-[var(--ink-dim)]">{reasonLabel(issue)}</p>
+        <p className="mt-1 text-[12px] text-[var(--ink-faint)]">
+          Open the entity and choose a valid target, clear the field, or restore the
+          archived target if it still belongs in play.
+        </p>
       </div>
-      <div className="flex items-start justify-start md:justify-end">
+      <div className="flex flex-wrap items-start justify-start gap-2 md:justify-end">
         <span className="border border-[color-mix(in_srgb,var(--no)_50%,transparent)] bg-[color-mix(in_srgb,var(--no)_10%,transparent)] px-2 py-1 font-mono text-[10px] uppercase tracking-[.08em] text-[var(--no)]">
           {issue.reason}
         </span>
+        <Link
+          href={`/campaigns/${campaignId}/entities/${issue.entityId}`}
+          className="border border-[var(--line)] px-2 py-1 font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-faint)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+          aria-label={`Open entity ${issue.entityName}`}
+        >
+          Open entity
+        </Link>
       </div>
     </li>
   );
@@ -95,7 +108,8 @@ function StaleDataRow({
           {issue.entityName}
         </Link>
         <p className="mt-1 text-[12px] text-[var(--ink-faint)]">
-          {formatEntityType(issue.entityType)} data is behind the descriptor version.
+          {formatEntityType(issue.entityType)} details are using an older saved
+          format.
         </p>
       </div>
       <div className="font-mono text-[11px] uppercase tracking-[.08em] text-[var(--sys)] md:text-right">
@@ -120,6 +134,20 @@ export default async function CampaignIntegrityPage({
 
   const report = await getCampaignIntegrityReport(user.id, id);
   const issueCount = report.brokenReferences.length + report.staleData.length;
+  const activeDataRepairJobRow =
+    report.staleData.length > 0
+      ? await getActiveCampaignJob(user.id, id, JobKind.MIGRATE_ENTITY_DATA)
+      : null;
+  const activeDataRepairJob =
+    activeDataRepairJobRow &&
+    (activeDataRepairJobRow.status === "QUEUED" || activeDataRepairJobRow.status === "RUNNING")
+      ? {
+          id: activeDataRepairJobRow.id,
+          status: activeDataRepairJobRow.status,
+          createdAt: activeDataRepairJobRow.createdAt,
+          startedAt: activeDataRepairJobRow.startedAt,
+        }
+      : null;
 
   return (
     <ConsoleScreen>
@@ -127,9 +155,8 @@ export default async function CampaignIntegrityPage({
       <div className="min-h-0 flex-1 overflow-y-auto px-[26px] py-7">
         <div className="max-w-[760px]">
           <p className="mb-5 max-w-2xl text-[13px] leading-[1.6] text-[var(--ink-dim)]">
-            Campaign-wide scan for broken bespoke references and stale versioned entity
-            data. The scan is DM-only because it spans all live canon, including hidden
-            rows.
+            Checks every live entity for broken links and older saved data formats.
+            Only DMs can see this because the scan includes hidden campaign canon.
           </p>
 
           <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -163,12 +190,12 @@ export default async function CampaignIntegrityPage({
               <Panel>
                 <PanelHeader
                   kicker="References"
-                  title="Broken soft references"
-                  sub="Reference fields stay soft FKs, but broken links are visible before import/export and consistency tooling consume them."
+                  title="Broken entity links"
+                  sub="These fields point at a missing, archived, or wrong-type entity. Each one needs a DM decision: choose the right target, clear the field, or restore the archived target."
                 />
                 {report.brokenReferences.length === 0 ? (
                   <p className="px-[18px] py-4 text-[12px] text-[var(--ink-faint)]">
-                    No broken references.
+                    No broken entity links.
                   </p>
                 ) : (
                   <ul>
@@ -185,13 +212,21 @@ export default async function CampaignIntegrityPage({
 
               <Panel>
                 <PanelHeader
-                  kicker="Data versions"
-                  title="Stale versioned data"
-                  sub="Rows listed here can be upgraded through the MIGRATE_ENTITY_DATA job path with provenance."
+                  kicker="Data repair"
+                  title="Older saved data formats"
+                  sub="These entries still load, but they need a background cleanup so future tools read the latest shape. Queue a repair pass; the worker updates them and records the change in history."
                 />
+                {report.staleData.length > 0 && (
+                  <div className="border-b border-[var(--line)] px-[18px] py-3">
+                    <MigrateEntityDataButton
+                      campaignId={id}
+                      activeJob={activeDataRepairJob}
+                    />
+                  </div>
+                )}
                 {report.staleData.length === 0 ? (
                   <p className="px-[18px] py-4 text-[12px] text-[var(--ink-faint)]">
-                    No stale data rows.
+                    No data-format repairs needed.
                   </p>
                 ) : (
                   <ul>

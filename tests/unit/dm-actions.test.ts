@@ -50,6 +50,7 @@ const {
   searchEntityCandidates,
   enqueueJob,
   enqueueBuildSemanticIndexJob,
+  enqueueMigrateEntityDataJob,
   signOut,
   redirect,
   revalidatePath,
@@ -103,6 +104,7 @@ const {
   searchEntityCandidates: vi.fn(),
   enqueueJob: vi.fn(),
   enqueueBuildSemanticIndexJob: vi.fn(),
+  enqueueMigrateEntityDataJob: vi.fn(),
   signOut: vi.fn(),
   redirect: vi.fn(() => {
     throw new Error("NEXT_REDIRECT");
@@ -172,6 +174,7 @@ vi.mock("@/server/services/jobs", () => ({
   cancelJob,
   enqueueJob,
   enqueueBuildSemanticIndexJob,
+  enqueueMigrateEntityDataJob,
 }));
 vi.mock("@/server/services/seeding", () => ({ isLoreSeedDatasetAvailable }));
 vi.mock("@/server/auth", () => ({ signOut }));
@@ -234,6 +237,7 @@ import {
   fleshOutEntitiesAction,
   enqueueBulkFleshAction,
   enqueueBuildSemanticIndexAction,
+  enqueueMigrateEntityDataAction,
   cancelJobAction,
   askCampaignAction,
   searchCampaignPreviewAction,
@@ -2576,6 +2580,53 @@ describe("enqueueBuildSemanticIndexAction", () => {
     enqueueBuildSemanticIndexJob.mockRejectedValueOnce(new Error("db down"));
     expect((await enqueueBuildSemanticIndexAction("c1", undefined, new FormData()))?.error).toBe(
       "Failed to queue job. Please try again.",
+    );
+  });
+});
+
+describe("enqueueMigrateEntityDataAction", () => {
+  it("enqueues a MIGRATE_ENTITY_DATA job and revalidates integrity and jobs", async () => {
+    enqueueMigrateEntityDataJob.mockResolvedValue({
+      id: "j1",
+      status: "QUEUED",
+      created: true,
+    });
+
+    const result = await enqueueMigrateEntityDataAction("c1", undefined, new FormData());
+
+    expect(enqueueMigrateEntityDataJob).toHaveBeenCalledWith("u1", "c1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/integrity");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/jobs");
+    expect(result?.success).toContain("Data repair queued");
+    expect(result?.activeJobStatus).toBe("QUEUED");
+    expect(result?.error).toBeUndefined();
+  });
+
+  it("does not treat an already active data repair as a new queued job", async () => {
+    enqueueMigrateEntityDataJob.mockResolvedValue({
+      id: "j1",
+      status: "RUNNING",
+      created: false,
+    });
+
+    const result = await enqueueMigrateEntityDataAction("c1", undefined, new FormData());
+
+    expect(result?.success).toContain("Data repair is already running");
+    expect(result?.activeJobStatus).toBe("RUNNING");
+    expect(result?.error).toBeUndefined();
+  });
+
+  it("surfaces a ServiceError message and a generic fallback for unexpected errors", async () => {
+    enqueueMigrateEntityDataJob.mockRejectedValueOnce(
+      new ServiceError("You do not have permission."),
+    );
+    expect((await enqueueMigrateEntityDataAction("c1", undefined, new FormData()))?.error).toBe(
+      "You do not have permission.",
+    );
+
+    enqueueMigrateEntityDataJob.mockRejectedValueOnce(new Error("db down"));
+    expect((await enqueueMigrateEntityDataAction("c1", undefined, new FormData()))?.error).toBe(
+      "Failed to queue data repair. Please try again.",
     );
   });
 });
