@@ -166,6 +166,16 @@ New: `PersonaSnapshot` (and the `SYSTEM_AI` entity type, plus new relationship
 types like `USED_BY` / `MANIPULATES`). The `PERSONA_SHIFT` event-effect kind and
 `personaAware` generator flag. See [`09-data-schema.md`](./09-data-schema.md).
 
+**Status (M6 slice 1, 2026-06-19):** the server-side persona foundation is live.
+`PersonaSnapshot` has a real table and review operations
+(`CREATE_PERSONA_SNAPSHOT`, `UPDATE_PERSONA_SNAPSHOT`), active snapshots are
+exclusive per entity, prompt-locks block generated `compiledPrompt` edits, and
+the deterministic compiler writes a provenance-tracked cached prompt fragment.
+`getActiveSystemPersonaPrompt` is the service-layer seam future persona-aware
+generators should use. Still pending for later M6 slices: the Persona Studio UI,
+first generator injection, `PERSONA_SHIFT`, richer snapshot diffing, and the full
+persona-aware generator family.
+
 ## Build sequencing
 
 Lands as **M6** in [`11-roadmap.md`](./11-roadmap.md) — immediately after the AI

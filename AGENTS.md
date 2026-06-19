@@ -14,8 +14,8 @@ pitch and [`docs/`](./docs) for the full plan.
 
 ## Current status
 
-🚧 **M0–M5.5 complete; next up M6 (System AI persona engine).** M5.5 (data model
-hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
+🚧 **M0–M5.5 complete; M6 slice 1 complete; next up M6 slice 2 (Persona Studio
+UI + generator injection).** M5.5 (data model hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
 seam, the `MIGRATE_ENTITY_DATA` job, reference-integrity badge + impact-aware
 archive, orphan report, the greenfield Faction satellite, and the Floor satellite
 (slice 5 — the genuine `data → satellite` migration moving FLOOR's
@@ -96,6 +96,14 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
   bounded existing-name sample and the service performs post-hoc canon-name
   collision filtering before filing proposals. With search + Ask + retrieval-fed
   generators, M5's "done when" bar is met.
+- **M6 — System AI persona engine 🚧.** Slice 1 delivered the server-side
+  foundation: `PersonaSnapshot` canon rows attached to any entity (first focused
+  on `SYSTEM_AI`), `CREATE_PERSONA_SNAPSHOT` / `UPDATE_PERSONA_SNAPSHOT` review
+  operations, active-snapshot exclusivity, prompt-lock enforcement, compiled
+  prompt provenance, a deterministic compiler, and a read-only active System AI
+  prompt seam for persona-aware generators. Next slice: build the Persona Studio
+  surface from the console shell primitives and start injecting the active prompt
+  into the first persona-aware generator path.
 
 For per-slice detail (files, tests, decisions) see
 [`docs/PROGRESS.md`](./docs/PROGRESS.md) — its "Open backlog" section is the

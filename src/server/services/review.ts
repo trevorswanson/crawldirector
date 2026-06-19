@@ -29,6 +29,7 @@ import {
   eventEffectRequiresTarget,
   type EventEffectKind,
 } from "@/lib/event-effect-kinds";
+import { compilePersonaPrompt } from "@/lib/persona";
 import { buildCampaignResolveContext } from "@/server/services/event-resolve-context";
 import { generateRankBetween } from "@/lib/rank";
 import {
@@ -73,6 +74,12 @@ export type EventReviewOperationInput = {
     | "CREATE_EVENT_CAUSALITY"
     | "DELETE_EVENT_CAUSALITY"
     | "APPLY_EVENT_EFFECTS";
+  targetId?: string;
+  patch: ReviewPatch;
+};
+
+export type PersonaReviewOperationInput = {
+  op: "CREATE_PERSONA_SNAPSHOT" | "UPDATE_PERSONA_SNAPSHOT";
   targetId?: string;
   patch: ReviewPatch;
 };
@@ -591,6 +598,80 @@ function isEventReviewOp(op: OpKind): op is EventReviewOperationInput["op"] {
   );
 }
 
+function isPersonaReviewOp(op: OpKind): op is PersonaReviewOperationInput["op"] {
+  return (
+    op === OpKind.CREATE_PERSONA_SNAPSHOT ||
+    op === OpKind.UPDATE_PERSONA_SNAPSHOT
+  );
+}
+
+async function evaluatePersonaOperationFlags(
+  tx: Prisma.TransactionClient,
+  operation: PersonaReviewOperationInput,
+  campaignId: string,
+  baseVersions: Record<string, number>,
+  source: ChangeSource,
+) {
+  if (operation.op === OpKind.CREATE_PERSONA_SNAPSHOT) {
+    const entityId = readTo(operation.patch, "entityId");
+    if (typeof entityId !== "string") {
+      return { blockedByLock: false, isStale: false };
+    }
+    const entity = await tx.entity.findFirst({
+      where: { id: entityId, campaignId, status: CanonStatus.CANON },
+      select: { locked: true },
+    });
+    if (!entity) throw new ServiceError("Entity not found.");
+    // Activating a new snapshot deactivates the entity's current active one; if
+    // that active snapshot is locked, hold the create rather than silently
+    // flipping it (source-agnostic, like the UPDATE lock guard).
+    const activatesOverLock =
+      booleanWithDefault(readTo(operation.patch, "isActive"), false) &&
+      (await hasLockedActivePersona(tx, campaignId, entityId));
+    return {
+      blockedByLock: (source !== ChangeSource.DM && entity.locked) || activatesOverLock,
+      isStale: false,
+    };
+  }
+
+  if (!operation.targetId) {
+    return { blockedByLock: false, isStale: false };
+  }
+  const snapshot = await tx.personaSnapshot.findFirst({
+    where: {
+      id: operation.targetId,
+      campaignId,
+      status: { not: CanonStatus.ARCHIVED },
+    },
+    select: {
+      version: true,
+      locked: true,
+      promptLocked: true,
+      entityId: true,
+      isActive: true,
+    },
+  });
+  if (!snapshot) throw new ServiceError("Persona snapshot not found.");
+
+  const expectedVersion = baseVersions[operation.targetId];
+  const fields = patchFields(operation.patch);
+  const touchesCompiledPrompt = fields.includes("compiledPrompt");
+  const nextActive = fields.includes("isActive")
+    ? booleanWithDefault(readTo(operation.patch, "isActive"), false)
+    : snapshot.isActive;
+  const activatesOverLock =
+    nextActive &&
+    (await hasLockedActivePersona(tx, campaignId, snapshot.entityId, operation.targetId));
+  return {
+    blockedByLock:
+      snapshot.locked ||
+      (snapshot.promptLocked && touchesCompiledPrompt) ||
+      activatesOverLock,
+    isStale:
+      typeof expectedVersion === "number" && expectedVersion !== snapshot.version,
+  };
+}
+
 export async function createPendingEntityChangeSet(
   userId: string,
   campaignId: string,
@@ -983,6 +1064,143 @@ export async function createPendingEventChangeSet(
   );
 }
 
+export async function createPendingPersonaSnapshotChangeSet(
+  userId: string,
+  campaignId: string,
+  input: {
+    source?: ChangeSource;
+    title: string;
+    summary?: string;
+    runId?: string;
+    providerId?: string;
+    model?: string;
+    promptId?: string;
+    promptVersion?: string;
+    operations: PersonaReviewOperationInput[];
+  },
+) {
+  await assertCampaignDm(userId, campaignId);
+  const baseVersions = operationBaseVersions(input.operations);
+  const source = input.source ?? ChangeSource.DM;
+
+  return prisma.$transaction(async (tx) => {
+    const flaggedOperations = [];
+    for (const operation of input.operations) {
+      flaggedOperations.push({
+        operation,
+        ...(await evaluatePersonaOperationFlags(
+          tx,
+          operation,
+          campaignId,
+          baseVersions,
+          source,
+        )),
+      });
+    }
+
+    return tx.changeSet.create({
+      data: {
+        campaignId,
+        source,
+        title: input.title,
+        summary: input.summary,
+        runId: input.runId,
+        providerId: input.providerId,
+        model: input.model,
+        promptId: input.promptId,
+        promptVersion: input.promptVersion,
+        actorUserId: userId,
+        baseVersions,
+        operations: {
+          create: flaggedOperations.map(({ operation, blockedByLock, isStale }) => ({
+            op: operation.op,
+            targetType: "PERSONA_SNAPSHOT",
+            targetId: operation.targetId,
+            patch: operation.patch as Prisma.InputJsonValue,
+            blockedByLock,
+            isStale,
+          })),
+        },
+      },
+      select: { id: true, title: true, status: true },
+    });
+  });
+}
+
+export async function applyAutoApprovedPersonaSnapshotChangeSet(
+  userId: string,
+  campaignId: string,
+  input: {
+    source?: ChangeSource;
+    auditAction?: string;
+    title: string;
+    summary?: string;
+    operations: PersonaReviewOperationInput[];
+  },
+) {
+  await assertCampaignDm(userId, campaignId);
+  const source = input.source ?? ChangeSource.DM;
+  const baseVersions = operationBaseVersions(input.operations);
+
+  return prisma.$transaction(async (tx) => {
+    const changeSet = await tx.changeSet.create({
+      data: {
+        campaignId,
+        source,
+        title: input.title,
+        summary: input.summary,
+        actorUserId: userId,
+        baseVersions,
+        operations: {
+          create: input.operations.map((operation) => ({
+            op: operation.op,
+            targetType: "PERSONA_SNAPSHOT",
+            targetId: operation.targetId,
+            patch: operation.patch as Prisma.InputJsonValue,
+          })),
+        },
+      },
+      include: { operations: true },
+    });
+
+    const appliedIds: string[] = [];
+    const applyingChangeSet = { ...changeSet, reviewedById: userId };
+    for (const operation of changeSet.operations) {
+      const targetId = await applyPersonaSnapshotOperation(
+        tx,
+        applyingChangeSet,
+        operation,
+      );
+      appliedIds.push(targetId);
+      await tx.changeOperation.update({
+        where: { id: operation.id },
+        data: { targetId, decision: OpDecision.ACCEPTED },
+      });
+    }
+
+    await tx.changeSet.update({
+      where: { id: changeSet.id },
+      data: {
+        status: ChangeSetStatus.APPROVED,
+        reviewedById: userId,
+        reviewedAt: new Date(),
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        campaignId,
+        actorUserId: userId,
+        action: input.auditAction ?? "AUTO_APPROVE",
+        targetType: "CHANGE_SET",
+        targetId: changeSet.id,
+        detail: { appliedIds },
+      },
+    });
+
+    return { changeSetId: changeSet.id, targetIds: appliedIds };
+  });
+}
+
 export async function listPendingChangeSetsForUser(
   userId: string,
   campaignId: string,
@@ -1088,6 +1306,16 @@ async function enrichReviewQueueItems(
       ),
     ),
   );
+  const personaTargetIds = Array.from(
+    new Set(
+      changeSets.flatMap((changeSet) =>
+        changeSet.operations
+          .filter((operation) => operation.targetType === "PERSONA_SNAPSHOT")
+          .map((operation) => operation.targetId)
+          .filter((targetId): targetId is string => Boolean(targetId)),
+      ),
+    ),
+  );
   const targets = entityTargetIds.size
     ? await prisma.entity.findMany({
         where: { campaignId, id: { in: [...entityTargetIds] } },
@@ -1129,6 +1357,33 @@ async function enrichReviewQueueItems(
   const relationshipById = new Map(
     relationshipTargets.map((relationship) => [relationship.id, relationship]),
   );
+  const personaTargets = personaTargetIds.length
+    ? await prisma.personaSnapshot.findMany({
+        where: { campaignId, id: { in: personaTargetIds } },
+        select: {
+          id: true,
+          entityId: true,
+          label: true,
+          inGameTime: true,
+          orderKey: true,
+          dials: true,
+          values: true,
+          agendas: true,
+          resources: true,
+          knowledgeScope: true,
+          voiceGuide: true,
+          constraints: true,
+          compiledPrompt: true,
+          isActive: true,
+          status: true,
+          locked: true,
+          promptLocked: true,
+          version: true,
+          entity: { select: { name: true, type: true } },
+        },
+      })
+    : [];
+  const personaById = new Map(personaTargets.map((snapshot) => [snapshot.id, snapshot]));
 
   return changeSets.map((changeSet) => ({
     ...changeSet,
@@ -1146,14 +1401,28 @@ async function enrichReviewQueueItems(
         operation.targetType === "RELATIONSHIP" && operation.targetId
           ? relationshipById.get(operation.targetId)
           : undefined;
+      const personaTarget =
+        operation.targetType === "PERSONA_SNAPSHOT" && operation.targetId
+          ? personaById.get(operation.targetId)
+          : undefined;
       const relationshipLabel =
         operation.targetType === "RELATIONSHIP"
           ? relationshipEdgeLabel(relationshipTarget, patch, targetById)
+          : null;
+      const personaLabel =
+        operation.targetType === "PERSONA_SNAPSHOT"
+          ? personaTarget
+            ? `${personaTarget.entity.name} persona${
+                personaTarget.label ? `: ${personaTarget.label}` : ""
+              }`
+            : stringFromReviewValue(readTo(patch, "label")) ?? "Persona snapshot"
           : null;
       const targetEntityType =
         target?.type ??
         (eventTarget ? "EVENT" : null) ??
         (operation.targetType === "EVENT" ? "EVENT" : null) ??
+        (personaTarget ? "PERSONA" : null) ??
+        (operation.targetType === "PERSONA_SNAPSHOT" ? "PERSONA" : null) ??
         relationshipTarget?.type ??
         (operation.targetType === "RELATIONSHIP"
           ? stringFromReviewValue(readTo(patch, "type"))
@@ -1168,6 +1437,8 @@ async function enrichReviewQueueItems(
             ? currentRelationshipValue(relationshipTarget, field)
             : eventTarget
               ? currentEventValue(eventTarget, field)
+              : personaTarget
+                ? currentPersonaSnapshotValue(personaTarget, field)
             : undefined;
         if (current !== undefined) currentValues[field] = current;
       }
@@ -1177,14 +1448,21 @@ async function enrichReviewQueueItems(
         targetLabel:
           target?.name ??
           eventTarget?.title ??
+          personaLabel ??
           relationshipLabel ??
           stringFromReviewValue(readTo(patch, "name")) ??
           stringFromReviewValue(readTo(patch, "title")) ??
           operation.targetId ??
           null,
         targetEntityType,
-        targetLocked: Boolean(target?.locked) || Boolean(relationshipTarget?.locked),
-        lockedFields: target?.lockedFields ?? [],
+        targetLocked:
+          Boolean(target?.locked) ||
+          Boolean(relationshipTarget?.locked) ||
+          Boolean(personaTarget?.locked) ||
+          Boolean(personaTarget?.promptLocked),
+        lockedFields:
+          target?.lockedFields ??
+          (personaTarget?.promptLocked ? ["compiledPrompt"] : []),
         currentValues,
         effectPreviews:
           operation.op === OpKind.APPLY_EVENT_EFFECTS
@@ -1274,6 +1552,64 @@ function currentRelationshipValue(
   return undefined;
 }
 
+function currentPersonaSnapshotValue(
+  snapshot: {
+    entityId: string;
+    label: string | null;
+    inGameTime: Prisma.JsonValue;
+    orderKey: number | null;
+    dials: Prisma.JsonValue;
+    values: Prisma.JsonValue;
+    agendas: Prisma.JsonValue;
+    resources: Prisma.JsonValue;
+    knowledgeScope: string;
+    voiceGuide: string | null;
+    constraints: string | null;
+    compiledPrompt: string | null;
+    isActive: boolean;
+    status: CanonStatus;
+    locked: boolean;
+    promptLocked: boolean;
+  },
+  field: string,
+): unknown {
+  switch (field) {
+    case "entityId":
+      return snapshot.entityId;
+    case "label":
+      return snapshot.label;
+    case "inGameTime":
+      return snapshot.inGameTime;
+    case "orderKey":
+      return snapshot.orderKey;
+    case "dials":
+      return snapshot.dials;
+    case "values":
+      return snapshot.values;
+    case "agendas":
+      return snapshot.agendas;
+    case "resources":
+      return snapshot.resources;
+    case "knowledgeScope":
+      return snapshot.knowledgeScope;
+    case "voiceGuide":
+      return snapshot.voiceGuide;
+    case "constraints":
+      return snapshot.constraints;
+    case "compiledPrompt":
+      return snapshot.compiledPrompt;
+    case "isActive":
+      return snapshot.isActive;
+    case "status":
+      return snapshot.status;
+    case "locked":
+      return snapshot.locked;
+    case "promptLocked":
+      return snapshot.promptLocked;
+  }
+  return undefined;
+}
+
 function stringFromReviewValue(value: JsonValue | undefined) {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
@@ -1354,7 +1690,9 @@ export async function setChangeOperationDecision(
     const eventOperation =
       (operation.targetType === "EVENT" || operation.targetType === "EVENT_CAUSALITY") &&
       isEventReviewOp(operation.op);
-    if (!entityOperation && !relationshipOperation && !eventOperation) {
+    const personaOperation =
+      operation.targetType === "PERSONA_SNAPSHOT" && isPersonaReviewOp(operation.op);
+    if (!entityOperation && !relationshipOperation && !eventOperation && !personaOperation) {
       throw new ServiceError("Unsupported operation target.");
     }
     if (input.decision === OpDecision.EDITED) {
@@ -1405,6 +1743,18 @@ export async function setChangeOperationDecision(
               baseVersionsObject(changeSet.baseVersions),
               changeSet.source,
             )
+          : personaOperation
+            ? await evaluatePersonaOperationFlags(
+                tx,
+                {
+                  op: operation.op as PersonaReviewOperationInput["op"],
+                  targetId: operation.targetId ?? undefined,
+                  patch: patchForFlags,
+                },
+                campaignId,
+                baseVersionsObject(changeSet.baseVersions),
+                changeSet.source,
+              )
           : await evaluateEntityOperationFlags(
               tx,
               {
@@ -1501,7 +1851,9 @@ export async function setChangeOperationFieldDecision(
     const eventOperation =
       (operation.targetType === "EVENT" || operation.targetType === "EVENT_CAUSALITY") &&
       isEventReviewOp(operation.op);
-    if (!entityOperation && !relationshipOperation && !eventOperation) {
+    const personaOperation =
+      operation.targetType === "PERSONA_SNAPSHOT" && isPersonaReviewOp(operation.op);
+    if (!entityOperation && !relationshipOperation && !eventOperation && !personaOperation) {
       throw new ServiceError("Unsupported operation target.");
     }
     const flags =
@@ -1521,6 +1873,18 @@ export async function setChangeOperationFieldDecision(
               baseVersionsObject(changeSet.baseVersions),
               changeSet.source,
             )
+          : personaOperation
+            ? await evaluatePersonaOperationFlags(
+                tx,
+                {
+                  op: operation.op as PersonaReviewOperationInput["op"],
+                  targetId: operation.targetId ?? undefined,
+                  patch: editedPatch,
+                },
+                campaignId,
+                baseVersionsObject(changeSet.baseVersions),
+                changeSet.source,
+              )
           : await evaluateEntityOperationFlags(
               tx,
               {
@@ -1681,6 +2045,12 @@ async function applyReviewOperation(
     isEventReviewOp(operation.op)
   ) {
     return applyEventOperation(tx, changeSet, operation, patchOverride);
+  }
+  if (
+    operation.targetType === "PERSONA_SNAPSHOT" &&
+    isPersonaReviewOp(operation.op)
+  ) {
+    return applyPersonaSnapshotOperation(tx, changeSet, operation, patchOverride);
   }
   throw new ServiceError("Unsupported operation target.");
 }
@@ -1882,6 +2252,27 @@ async function refreshPendingOperationFlags(
             where: { id: operation.id },
             data: flags,
           });
+          continue;
+        }
+        if (
+          operation.targetType === "PERSONA_SNAPSHOT" &&
+          isPersonaReviewOp(operation.op)
+        ) {
+          const flags = await evaluatePersonaFlagsForRefresh(
+            tx,
+            {
+              op: operation.op,
+              targetId: operation.targetId ?? undefined,
+              patch: effectiveOperationPatch(operation),
+            },
+            campaignId,
+            baseVersions,
+            changeSet.source,
+          );
+          await tx.changeOperation.update({
+            where: { id: operation.id },
+            data: flags,
+          });
         }
       }
     }
@@ -1923,6 +2314,33 @@ async function evaluateRelationshipFlagsForRefresh(
     if (error instanceof ServiceError && error.message === "Relationship not found.") {
       // The edge was archived/removed under the proposal — hold it as stale
       // rather than throwing while refreshing the queue.
+      return { blockedByLock: false, isStale: true };
+    }
+    throw error;
+  }
+}
+
+async function evaluatePersonaFlagsForRefresh(
+  tx: Prisma.TransactionClient,
+  operation: PersonaReviewOperationInput,
+  campaignId: string,
+  baseVersions: Record<string, number>,
+  source: ChangeSource,
+) {
+  try {
+    return await evaluatePersonaOperationFlags(
+      tx,
+      operation,
+      campaignId,
+      baseVersions,
+      source,
+    );
+  } catch (error) {
+    if (
+      error instanceof ServiceError &&
+      (error.message === "Persona snapshot not found." ||
+        error.message === "Entity not found.")
+    ) {
       return { blockedByLock: false, isStale: true };
     }
     throw error;
@@ -3346,6 +3764,410 @@ async function writeRelationshipProvenance(
     data: fields.map((field) => ({
       campaignId: changeSet.campaignId,
       relationshipId,
+      changeSetId: changeSet.id,
+      source: changeSet.source,
+      field,
+      actorUserId: changeSet.actorUserId,
+      providerId: changeSet.providerId,
+      model: changeSet.model,
+      promptId: changeSet.promptId,
+      runId: changeSet.runId,
+    })),
+  });
+}
+
+async function applyPersonaSnapshotOperation(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operation: Prisma.ChangeOperationGetPayload<object>,
+  patchOverride?: ReviewPatch,
+) {
+  if (operation.targetType !== "PERSONA_SNAPSHOT") {
+    throw new ServiceError("Unsupported operation target.");
+  }
+  const patch = patchOverride ?? (operation.patch as ReviewPatch);
+
+  switch (operation.op) {
+    case OpKind.CREATE_PERSONA_SNAPSHOT:
+      return applyCreatePersonaSnapshot(tx, changeSet, operation.id, patch);
+    case OpKind.UPDATE_PERSONA_SNAPSHOT:
+      if (!operation.targetId) throw new ServiceError("Missing persona snapshot target.");
+      return applyUpdatePersonaSnapshot(
+        tx,
+        changeSet,
+        operation.id,
+        operation.targetId,
+        patch,
+      );
+    default:
+      throw new ServiceError("Unsupported persona snapshot operation.");
+  }
+}
+
+async function assertCanonPersonaEntity(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  entityId: string,
+) {
+  const entity = await tx.entity.findFirst({
+    where: { id: entityId, campaignId, status: CanonStatus.CANON },
+    select: { id: true },
+  });
+  if (!entity) throw new ServiceError("Entity not found.");
+  return entity;
+}
+
+// True when the entity already has a locked active snapshot (optionally
+// excluding the snapshot being updated). Activating a different snapshot has to
+// deactivate the current active one; when that row is locked the activation
+// must be held instead of silently flipping it.
+async function hasLockedActivePersona(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  entityId: string,
+  exceptSnapshotId?: string,
+) {
+  const locked = await tx.personaSnapshot.findFirst({
+    where: {
+      campaignId,
+      entityId,
+      isActive: true,
+      locked: true,
+      ...(exceptSnapshotId ? { id: { not: exceptSnapshotId } } : {}),
+    },
+    select: { id: true },
+  });
+  return locked !== null;
+}
+
+// Defense-in-depth for the auto-approve path (which skips the preflight lock
+// flags): refuse to deactivate a locked active snapshot, flagging the operation
+// like the other apply-time lock guards.
+async function assertActivePersonaUnlocked(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  entityId: string,
+  operationId: string,
+  exceptSnapshotId?: string,
+) {
+  if (await hasLockedActivePersona(tx, campaignId, entityId, exceptSnapshotId)) {
+    await tx.changeOperation.update({
+      where: { id: operationId },
+      data: { blockedByLock: true },
+    });
+    throw new ServiceError("The active persona snapshot is locked.", {
+      code: "OPERATION_BLOCKED",
+    });
+  }
+}
+
+// Serialize persona activations for a single entity. The "one active snapshot
+// per entity" invariant is maintained by deactivating the current active row
+// before writing the new one; under the default Read Committed isolation two
+// concurrent approvals could each clear the prior active row and then write
+// their own, leaving two rows with isActive=true. A transaction-scoped advisory
+// lock keyed on (campaign, entity) makes the second activation wait for the
+// first to commit, so the deactivate-then-write always sees a consistent "one
+// active" set. Released automatically when the transaction ends.
+async function lockPersonaActivation(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  entityId: string,
+) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${campaignId}), hashtext(${entityId}))`;
+}
+
+function personaKnowledgeScope(value: JsonValue | undefined) {
+  return value === "IN_CHARACTER" ? "IN_CHARACTER" : "OMNISCIENT";
+}
+
+function jsonArray(value: JsonValue | undefined): Prisma.InputJsonValue {
+  return Array.isArray(value) ? (value as Prisma.InputJsonValue) : [];
+}
+
+type PersonaPromptBase = {
+  label: string | null;
+  dials: Prisma.JsonValue;
+  values: Prisma.JsonValue;
+  agendas: Prisma.JsonValue;
+  resources: Prisma.JsonValue;
+  knowledgeScope: string;
+  voiceGuide: string | null;
+  constraints: string | null;
+};
+
+function compilePromptFromPersonaPatch(
+  patch: ReviewPatch,
+  existing?: PersonaPromptBase,
+) {
+  const explicit = nullableString(readTo(patch, "compiledPrompt"));
+  if (explicit) return explicit;
+  const resources = "resources" in patch
+    ? jsonObject(readTo(patch, "resources"))
+    : existing?.resources;
+  return compilePersonaPrompt({
+    label:
+      "label" in patch ? nullableString(readTo(patch, "label")) : existing?.label,
+    dials: ("dials" in patch ? jsonObject(readTo(patch, "dials")) : existing?.dials) as
+      | Record<string, unknown>
+      | undefined,
+    values: "values" in patch ? jsonArray(readTo(patch, "values")) : existing?.values,
+    agendas:
+      "agendas" in patch ? jsonArray(readTo(patch, "agendas")) : existing?.agendas,
+    resources:
+      resources && typeof resources === "object" && !Array.isArray(resources)
+        ? (resources as Record<string, unknown>)
+        : undefined,
+    knowledgeScope:
+      "knowledgeScope" in patch
+        ? personaKnowledgeScope(readTo(patch, "knowledgeScope"))
+        : existing?.knowledgeScope,
+    voiceGuide:
+      "voiceGuide" in patch
+        ? nullableString(readTo(patch, "voiceGuide"))
+        : existing?.voiceGuide,
+    constraints:
+      "constraints" in patch
+        ? nullableString(readTo(patch, "constraints"))
+        : existing?.constraints,
+  });
+}
+
+function personaPromptSourceFieldChanged(patch: ReviewPatch) {
+  return [
+    "label",
+    "dials",
+    "values",
+    "agendas",
+    "resources",
+    "knowledgeScope",
+    "voiceGuide",
+    "constraints",
+  ].some((field) => field in patch);
+}
+
+async function applyCreatePersonaSnapshot(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operationId: string,
+  patch: ReviewPatch,
+) {
+  const entityId = readTo(patch, "entityId");
+  if (typeof entityId !== "string") {
+    throw new ServiceError("Persona snapshot entity is required.");
+  }
+  await assertCanonPersonaEntity(tx, changeSet.campaignId, entityId);
+
+  const isActive = booleanWithDefault(readTo(patch, "isActive"), false);
+  if (isActive) {
+    await lockPersonaActivation(tx, changeSet.campaignId, entityId);
+    await assertActivePersonaUnlocked(
+      tx,
+      changeSet.campaignId,
+      entityId,
+      operationId,
+    );
+    await tx.personaSnapshot.updateMany({
+      where: { campaignId: changeSet.campaignId, entityId, isActive: true },
+      data: { isActive: false },
+    });
+  }
+
+  const compiledPrompt = compilePromptFromPersonaPatch(patch);
+  const snapshot = await tx.personaSnapshot.create({
+    data: {
+      campaignId: changeSet.campaignId,
+      entityId,
+      label: nullableString(readTo(patch, "label")),
+      inGameTime: jsonObject(readTo(patch, "inGameTime")),
+      orderKey: optionalNumber(readTo(patch, "orderKey")),
+      dials: jsonObject(readTo(patch, "dials")),
+      values: jsonArray(readTo(patch, "values")),
+      agendas: jsonArray(readTo(patch, "agendas")),
+      resources: jsonObject(readTo(patch, "resources")),
+      knowledgeScope: personaKnowledgeScope(readTo(patch, "knowledgeScope")),
+      voiceGuide: nullableString(readTo(patch, "voiceGuide")),
+      constraints: nullableString(readTo(patch, "constraints")),
+      compiledPrompt,
+      isActive,
+      source: changeSet.source,
+      status: CanonStatus.CANON,
+      locked: booleanWithDefault(readTo(patch, "locked"), false),
+      promptLocked: booleanWithDefault(readTo(patch, "promptLocked"), false),
+    },
+    select: { id: true },
+  });
+
+  await writePersonaSnapshotProvenance(tx, changeSet, snapshot.id, {
+    ...patch,
+    compiledPrompt: { to: compiledPrompt },
+  });
+  await tx.auditLog.create({
+    data: {
+      campaignId: changeSet.campaignId,
+      actorUserId: changeSet.reviewedById ?? changeSet.actorUserId ?? "",
+      action: "APPLY_OPERATION",
+      targetType: "CHANGE_OPERATION",
+      targetId: operationId,
+      detail: { personaSnapshotId: snapshot.id, op: OpKind.CREATE_PERSONA_SNAPSHOT },
+    },
+  });
+  return snapshot.id;
+}
+
+async function applyUpdatePersonaSnapshot(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operationId: string,
+  snapshotId: string,
+  patch: ReviewPatch,
+) {
+  const snapshot = await tx.personaSnapshot.findFirst({
+    where: {
+      id: snapshotId,
+      campaignId: changeSet.campaignId,
+      status: { not: CanonStatus.ARCHIVED },
+    },
+    select: {
+      id: true,
+      entityId: true,
+      label: true,
+      inGameTime: true,
+      orderKey: true,
+      dials: true,
+      values: true,
+      agendas: true,
+      resources: true,
+      knowledgeScope: true,
+      voiceGuide: true,
+      constraints: true,
+      compiledPrompt: true,
+      isActive: true,
+      locked: true,
+      promptLocked: true,
+      version: true,
+    },
+  });
+  if (!snapshot) throw new ServiceError("Persona snapshot not found.");
+
+  const expectedVersion = baseVersionsObject(changeSet.baseVersions)[snapshotId];
+  if (typeof expectedVersion === "number" && expectedVersion !== snapshot.version) {
+    await tx.changeOperation.update({
+      where: { id: operationId },
+      data: { isStale: true },
+    });
+    throw new ServiceError("Persona snapshot changed since this proposal was created.", {
+      code: "OPERATION_STALE",
+    });
+  }
+
+  const touchesCompiledPrompt = patchFields(patch).includes("compiledPrompt");
+  if (snapshot.locked || (snapshot.promptLocked && touchesCompiledPrompt)) {
+    await tx.changeOperation.update({
+      where: { id: operationId },
+      data: { blockedByLock: true },
+    });
+    throw new ServiceError("This persona snapshot is locked.", {
+      code: "OPERATION_BLOCKED",
+    });
+  }
+
+  const data: Prisma.PersonaSnapshotUpdateInput = { version: { increment: 1 } };
+  if ("status" in patch) {
+    data.status = (readTo(patch, "status") as CanonStatus) ?? CanonStatus.CANON;
+  }
+  if ("label" in patch) data.label = nullableString(readTo(patch, "label"));
+  if ("inGameTime" in patch) data.inGameTime = jsonObject(readTo(patch, "inGameTime"));
+  if ("orderKey" in patch) data.orderKey = optionalNumber(readTo(patch, "orderKey"));
+  if ("dials" in patch) data.dials = jsonObject(readTo(patch, "dials"));
+  if ("values" in patch) data.values = jsonArray(readTo(patch, "values"));
+  if ("agendas" in patch) data.agendas = jsonArray(readTo(patch, "agendas"));
+  if ("resources" in patch) data.resources = jsonObject(readTo(patch, "resources"));
+  if ("knowledgeScope" in patch) {
+    data.knowledgeScope = personaKnowledgeScope(readTo(patch, "knowledgeScope"));
+  }
+  if ("voiceGuide" in patch) {
+    data.voiceGuide = nullableString(readTo(patch, "voiceGuide"));
+  }
+  if ("constraints" in patch) {
+    data.constraints = nullableString(readTo(patch, "constraints"));
+  }
+  if ("compiledPrompt" in patch) {
+    data.compiledPrompt = nullableString(readTo(patch, "compiledPrompt"));
+  } else if (personaPromptSourceFieldChanged(patch) && !snapshot.promptLocked) {
+    data.compiledPrompt = compilePromptFromPersonaPatch(patch, snapshot);
+  }
+  const nextActive = "isActive" in patch
+    ? booleanWithDefault(readTo(patch, "isActive"), false)
+    : snapshot.isActive;
+  if ("isActive" in patch) data.isActive = nextActive;
+  if ("locked" in patch) data.locked = booleanWithDefault(readTo(patch, "locked"), false);
+  if ("promptLocked" in patch) {
+    data.promptLocked = booleanWithDefault(readTo(patch, "promptLocked"), false);
+  }
+
+  if (nextActive) {
+    await lockPersonaActivation(tx, changeSet.campaignId, snapshot.entityId);
+    await assertActivePersonaUnlocked(
+      tx,
+      changeSet.campaignId,
+      snapshot.entityId,
+      operationId,
+      snapshotId,
+    );
+    await tx.personaSnapshot.updateMany({
+      where: {
+        campaignId: changeSet.campaignId,
+        entityId: snapshot.entityId,
+        id: { not: snapshotId },
+        isActive: true,
+      },
+      data: { isActive: false },
+    });
+  }
+  if (data.status === CanonStatus.ARCHIVED) data.isActive = false;
+
+  await tx.personaSnapshot.update({
+    where: { id: snapshotId },
+    data,
+    select: { id: true },
+  });
+
+  const provenancePatch: ReviewPatch = { ...patch };
+  if (
+    !("compiledPrompt" in provenancePatch) &&
+    typeof data.compiledPrompt === "string"
+  ) {
+    provenancePatch.compiledPrompt = {
+      from: snapshot.compiledPrompt,
+      to: data.compiledPrompt,
+    };
+  }
+  await writePersonaSnapshotProvenance(tx, changeSet, snapshotId, provenancePatch);
+  await tx.auditLog.create({
+    data: {
+      campaignId: changeSet.campaignId,
+      actorUserId: changeSet.reviewedById ?? changeSet.actorUserId ?? "",
+      action: "APPLY_OPERATION",
+      targetType: "CHANGE_OPERATION",
+      targetId: operationId,
+      detail: { personaSnapshotId: snapshotId, op: OpKind.UPDATE_PERSONA_SNAPSHOT },
+    },
+  });
+  return snapshotId;
+}
+
+async function writePersonaSnapshotProvenance(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  personaSnapshotId: string,
+  patch: ReviewPatch,
+) {
+  const fields = patchFields(patch).filter((field) => field !== "_baseVersion");
+  await tx.provenance.createMany({
+    data: fields.map((field) => ({
+      campaignId: changeSet.campaignId,
+      personaSnapshotId,
       changeSetId: changeSet.id,
       source: changeSet.source,
       field,

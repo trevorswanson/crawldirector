@@ -29,7 +29,7 @@ flesh-out, async `Job` worker).
 review, scheduled **before M6** because the catalog types (M7), import (M10), and
 export (M9) are about to put real weight on `Entity.data`. Decomposed into five
 vertical slices (ADR 0011 Parts A–D); **all five are done** (dated entries
-below). **Next up: M6 — System AI persona engine.**
+below).
 
 - [x] **Slice 1 — versioning foundation + `readKindData` read seam** (Part A core).
       `schemaVersion` + pure `migrations` on `EntityKind` (load-time assertion),
@@ -74,10 +74,70 @@ below). **Next up: M6 — System AI persona engine.**
       All four FLOOR fields move from `Entity.data` to a 1:1 `Floor` table via a
       v2→v3 bump + the `MIGRATE_ENTITY_DATA` job. ✅ 2026-06-19 (dated entry below).
 
-**Then M6 — System AI persona engine**
+**Active: M6 — System AI persona engine**
 ([05-system-ai-persona.md](./05-system-ai-persona.md)).
+Slice 1 is complete: the review-backed server foundation. **Next up: Slice 2 —
+Persona Studio UI + first generator prompt injection.** Keep the M6 work
+incremental; do not pull `PERSONA_SHIFT` event effects or full encounter/loot/
+message generators into the studio slice.
+
+- [x] **Slice 1 — Persona snapshot foundation + compiler.** Added the
+      `PersonaSnapshot` table (generic to any `Entity`, first used by
+      `SYSTEM_AI`), Prisma migration `20260619110632_m6_persona_snapshots`,
+      `CREATE_PERSONA_SNAPSHOT` / `UPDATE_PERSONA_SNAPSHOT` review operations,
+      active-snapshot exclusivity per entity, prompt-lock checks for
+      `compiledPrompt`, field-level provenance on persona snapshots, the pure
+      `compilePersonaPrompt` compiler, and `getActiveSystemPersonaPrompt` as the
+      generator-facing read seam. ✅ 2026-06-19.
+- [ ] **Slice 2 — Persona Studio UI + prompt injection.** Build the DM-only
+      Persona Studio route from the console shell primitives with real
+      `SYSTEM_AI` entities/snapshots only (no filler data): create/edit active
+      snapshots, show compiled-prompt preview, lock/unlock the prompt, list the
+      snapshot timeline, and link resulting proposals to the Review Queue. Wire
+      `getActiveSystemPersonaPrompt` into the first persona-aware generator seam
+      behind a feature-limited path, recording the snapshot id/prompt version in
+      provenance without exposing secret agendas to players.
+- [ ] **Later M6 slices.** `PERSONA_SHIFT` event-effect kind, richer snapshot
+      diffing, full persona-aware generator family (encounter, mob/boss, loot,
+      System-message), and broader actor-profile studio reuse for M11.
+
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
+
+## M6 — Persona snapshot foundation (slice 1) ✅ (2026-06-19)
+
+**Goal:** establish the M6 server-side canon foundation before building the
+Persona Studio UI: `PersonaSnapshot` rows are first-class reviewable canon, the
+System AI persona can compile into a deterministic prompt fragment, and future
+persona-aware generators have a service-layer seam for the active compiled
+prompt. Branch: `codex/m6-persona-foundation`. Schema change.
+
+- [x] **Schema** ([`schema.prisma`](../prisma/schema.prisma),
+      migration `20260619110632_m6_persona_snapshots`): new `PersonaSnapshot`
+      model keyed to `Campaign` + any `Entity`, with dials/values/agendas/
+      resources, `knowledgeScope`, `voiceGuide`, `constraints`, cached
+      `compiledPrompt`, active/locked/promptLocked flags, `source`, `status`, and
+      versioning. `Provenance.personaSnapshotId` now has a real FK/index. `OpKind`
+      now includes `CREATE_PERSONA_SNAPSHOT` and `UPDATE_PERSONA_SNAPSHOT`.
+- [x] **Compiler** ([`persona.ts`](../src/lib/persona.ts)): deterministic prompt
+      compiler for System AI snapshots. It turns dials into behavioral bands,
+      separates overt agendas from secret generation-only agendas, includes
+      resources/knowledge scope/voice/constraints, and is pure so services/tests
+      can use it without Prisma.
+- [x] **Review pipeline** ([`review.ts`](../src/server/services/review.ts)):
+      pending and auto-approved persona change-set helpers; apply paths for
+      create/update; active-snapshot exclusivity per entity; staleness checks via
+      `version`; `locked` and `promptLocked` blocking; Review Queue enrichment
+      with labels/current values; persona-specific provenance copied from the
+      change set (including generated `compiledPrompt` provenance).
+- [x] **Generator seam** ([`persona.ts`](../src/server/services/persona.ts)):
+      `getActiveSystemPersonaPrompt(userId, campaignId)` is DM-only and returns
+      the active `SYSTEM_AI` snapshot id/entity id/compiled prompt/prompt lock/
+      version for future persona-aware generators.
+- [x] **Tests:** [`persona.test.ts`](../tests/unit/persona.test.ts) covers the
+      compiler's secret-aware output. [`persona-review.test.ts`](../tests/unit/persona-review.test.ts)
+      covers creating active snapshots through review, provenance, active
+      exclusivity, active prompt resolution, and AI prompt-lock blocking.
 
 ### Follow-ups captured from delivered slices
 
