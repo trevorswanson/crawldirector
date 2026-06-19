@@ -18,7 +18,10 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { getCampaignCanonIntegrityAction } from "@/app/(dm)/actions";
+import {
+  getCampaignCanonIntegrityAction,
+  getCampaignIntegrityIssueCountAction,
+} from "@/app/(dm)/actions";
 import type { CanonIntegrity } from "@/server/services/campaigns";
 
 
@@ -65,14 +68,6 @@ const NAV: NavItem[] = [
     match: (p) => /^\/campaigns\/[^/]+\/jobs/.test(p),
   },
   {
-    label: "Canon Integrity",
-    icon: ShieldAlert,
-    group: "dm",
-    href: (campaignId) =>
-      campaignId ? `/campaigns/${campaignId}/integrity` : "/dashboard",
-    match: (p) => /^\/campaigns\/[^/]+\/integrity/.test(p),
-  },
-  {
     label: "Relationship Graph",
     icon: Network,
     group: "dm",
@@ -105,22 +100,40 @@ export function DmNav() {
   const pathname = usePathname();
   const campaignId = campaignIdFromPathname(pathname);
   const [integrity, setIntegrity] = useState<CanonIntegrity | null>(null);
+  const [integrityIssueCount, setIntegrityIssueCount] = useState<{
+    campaignId: string;
+    count: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!campaignId) {
       Promise.resolve().then(() => {
         setIntegrity(null);
+        setIntegrityIssueCount(null);
       });
       return;
     }
 
     let active = true;
+
     getCampaignCanonIntegrityAction(campaignId)
       .then((data) => {
         if (active) setIntegrity(data);
       })
       .catch((err) => {
+        if (!active) return;
+        setIntegrity(null);
         console.error("Error loading canon integrity:", err);
+      });
+
+    getCampaignIntegrityIssueCountAction(campaignId)
+      .then((count) => {
+        if (active) setIntegrityIssueCount({ campaignId, count });
+      })
+      .catch((err) => {
+        if (!active) return;
+        setIntegrityIssueCount(null);
+        console.error("Error loading canon integrity issue count:", err);
       });
 
     return () => {
@@ -130,6 +143,11 @@ export function DmNav() {
 
   const dm = NAV.filter((n) => n.group === "dm");
   const player = NAV.filter((n) => n.group === "player");
+  const activeIssueCount =
+    integrityIssueCount?.campaignId === campaignId ? integrityIssueCount.count : null;
+  const hasIntegrityIssues = (activeIssueCount ?? 0) > 0;
+  const integrityIssueLabel =
+    activeIssueCount === 1 ? "1 issue" : `${activeIssueCount ?? 0} issues`;
 
   return (
     <nav className="flex h-full flex-col overflow-y-auto border-r border-[var(--line)] bg-[var(--bg-1)] py-3">
@@ -147,7 +165,22 @@ export function DmNav() {
 
       {integrity && (
         <div className="border-t border-[var(--line)] px-[18px] pt-[14px] pb-1">
-          <p className="kicker dim mb-2 text-[9px] nolead">Canon integrity</p>
+          {hasIntegrityIssues ? (
+            <Link
+              href={`/campaigns/${campaignId}/integrity`}
+              aria-label={`Open canon integrity report: ${integrityIssueLabel}`}
+              className="kicker dim nolead mb-2 flex items-center gap-1.5 text-[9px] transition-colors hover:text-[var(--accent)]"
+            >
+              <ShieldAlert
+                aria-hidden
+                size={13}
+                className="shrink-0 text-[var(--accent)]"
+              />
+              <span>Canon integrity</span>
+            </Link>
+          ) : (
+            <p className="kicker dim mb-2 text-[9px] nolead">Canon integrity</p>
+          )}
           <div className="mb-[7px] flex gap-[5px] items-center">
             {[
               { label: "DM", color: "var(--ink-dim)", weight: integrity.dmPercent },

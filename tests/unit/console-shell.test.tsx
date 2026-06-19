@@ -8,12 +8,12 @@ const { usePathname } = vi.hoisted(() => ({
 
 vi.mock("next/navigation", () => ({ usePathname }));
 vi.mock("next/link", () => ({
-  default: ({ href, children, className }: {
+  default: ({ href, children, className, ...props }: {
     href: string;
     children: React.ReactNode;
     className?: string;
-  }) => (
-    <a href={href} className={className}>
+  } & React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+    <a href={href} className={className} {...props}>
       {children}
     </a>
   ),
@@ -30,11 +30,15 @@ vi.mock("@/app/(dm)/actions", () => ({
     lockedCount: 14,
     totalFields: 100,
   }),
+  getCampaignIntegrityIssueCountAction: vi.fn().mockResolvedValue(0),
 }));
 
 import { DmNav } from "@/components/console/dm-nav";
 import { CampaignSwitcher } from "@/components/console/campaign-switcher";
-import { getCampaignCanonIntegrityAction } from "@/app/(dm)/actions";
+import {
+  getCampaignCanonIntegrityAction,
+  getCampaignIntegrityIssueCountAction,
+} from "@/app/(dm)/actions";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -94,13 +98,12 @@ describe("DmNav", () => {
     await waitFor(() => {});
   });
 
-  it("links the canon integrity report to the current campaign and highlights it", async () => {
+  it("keeps the canon integrity report out of the primary nav", async () => {
     usePathname.mockReturnValue("/campaigns/c1/integrity");
 
     render(<DmNav />);
 
-    const link = screen.getByRole("link", { name: /Canon Integrity/ });
-    expect(link.getAttribute("href")).toBe("/campaigns/c1/integrity");
+    expect(screen.queryByRole("link", { name: /^Canon Integrity$/i })).toBeNull();
     await waitFor(() => {});
   });
 
@@ -125,6 +128,22 @@ describe("DmNav", () => {
     });
 
     expect(screen.getByText(/64% DM · 22% AI-origin · 14% locked/)).toBeDefined();
+    expect(screen.queryByRole("link", { name: /Open canon integrity report/i })).toBeNull();
+  });
+
+  it("links the footer canon integrity warning to the report when issues exist", async () => {
+    usePathname.mockReturnValue("/campaigns/c1");
+    vi.mocked(getCampaignIntegrityIssueCountAction).mockResolvedValueOnce(3);
+
+    render(<DmNav />);
+
+    const link = await screen.findByRole("link", {
+      name: /Open canon integrity report: 3 issues/i,
+    });
+
+    expect(link.getAttribute("href")).toBe("/campaigns/c1/integrity");
+    expect(link.textContent).toContain("Canon integrity");
+    expect(link.querySelector("svg")?.className.baseVal).toContain("text-[var(--accent)]");
   });
 
   it("shows unbuilt sections as disabled roadmap entries", async () => {

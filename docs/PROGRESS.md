@@ -197,6 +197,10 @@ Branch: `codex/m5-5-orphan-report`. No schema change.
       versions" button that enqueues the existing data-repair worker job with
       active-job dedupe, and renamed the job history display from "Data migration"
       to "Data repair."
+- [x] **Shell access refinement** ([`dm-nav.tsx`](../src/components/console/dm-nav.tsx),
+      [`actions.ts`](<../src/app/(dm)/actions.ts>)): removed Canon Integrity as a
+      primary nav item; the footer meter now shows a gold shield link to the
+      report only when the campaign has broken-reference or stale-data issues.
 - [x] **Tests:** DB-backed [`references.test.ts`](../tests/unit/references.test.ts)
       covers report contents, broken-reference reasons, stale `_v`, archived-row
       exclusion, and DM-only authorization. UI
