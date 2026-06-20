@@ -5,11 +5,11 @@ import { Pencil, Save } from "lucide-react";
 
 import {
   EffectRows,
-  type EffectRowValue,
+  effectViewToRow,
 } from "@/components/entities/effect-rows";
 import type { EntityCandidate } from "@/components/entities/entity-typeahead";
 import { Button } from "@/components/ui/button";
-import { effectStatLabels } from "@/lib/event-effects";
+import { describeDialShifts, effectStatLabels } from "@/lib/event-effects";
 import type { EventEffectKind, EventEffectStat } from "@/lib/validation";
 
 // Serializable seed for one reviewed effect, read off the operation's patch
@@ -24,34 +24,12 @@ export type ReviewEffectSeed = {
   delta: number | null;
   valueNumber: number | null;
   value: boolean | null;
+  // PERSONA_SHIFT: per-dial integer deltas. Null for non-persona kinds.
+  dialShifts: Record<string, number> | null;
   note: string | null;
   before?: number | boolean | null;
   after?: number | boolean | null;
 };
-
-function toRow(
-  seed: ReviewEffectSeed,
-  candidatesById: Map<string, EntityCandidate>,
-): EffectRowValue {
-  return {
-    id: seed.id,
-    kind: seed.kind,
-    // Unresolved targets (e.g. an archived crawler) fall back to a bare id so
-    // the typeahead still submits the original target rather than dropping it.
-    target: seed.targetEntityId
-      ? candidatesById.get(seed.targetEntityId) ?? {
-          id: seed.targetEntityId,
-          name: seed.targetEntityId,
-          type: "CRAWLER",
-        }
-      : null,
-    stat: seed.stat ?? "gold",
-    delta: seed.delta != null ? String(seed.delta) : "",
-    valueNumber: seed.valueNumber != null ? String(seed.valueNumber) : "",
-    alive: seed.value === true ? "alive" : "dead",
-    note: seed.note ?? "",
-  };
-}
 
 /**
  * Structured editor for a pending APPLY_EVENT_EFFECTS operation, replacing the
@@ -65,6 +43,9 @@ function toRow(
 function describeSeed(seed: ReviewEffectSeed): string {
   if (seed.kind === "COLLAPSE_FLOOR") {
     return "Floor collapses — closes the current floor and opens the next the same day";
+  }
+  if (seed.kind === "PERSONA_SHIFT") {
+    return `Persona shift: ${describeDialShifts(seed.dialShifts)}`;
   }
   if (seed.before !== undefined && seed.after !== undefined) {
     const label =
@@ -94,19 +75,21 @@ function formatEffectValue(
 export function EffectOperationEditor({
   action,
   candidates,
+  personaCandidates = [],
   effects,
   rejected,
   readOnly = false,
 }: {
   action: (formData: FormData) => void | Promise<void>;
   candidates: EntityCandidate[];
+  personaCandidates?: EntityCandidate[];
   effects: ReviewEffectSeed[];
   rejected: boolean;
   readOnly?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const candidatesById = new Map(
-    candidates.map((candidate) => [candidate.id, candidate]),
+    [...candidates, ...personaCandidates].map((candidate) => [candidate.id, candidate]),
   );
 
   if (!editing) {
@@ -156,11 +139,27 @@ export function EffectOperationEditor({
     );
   }
 
-  const initial = effects.map((seed) => toRow(seed, candidatesById));
+  const initial = effects.map((seed) =>
+    effectViewToRow(
+      { ...seed, targetId: seed.targetEntityId },
+      {
+        crawlerCandidates: candidates,
+        personaCandidates,
+        // Unresolved targets (e.g. an archived entity) fall back to a bare id so
+        // the typeahead still submits the original target rather than dropping it.
+        resolveName: (id) => id,
+      },
+    ),
+  );
   return (
     <form action={action}>
       <div className="border-t border-[var(--line)] px-3 py-3">
-        <EffectRows candidates={candidates} initial={initial} allowAdd={false} />
+        <EffectRows
+          candidates={candidates}
+          personaCandidates={personaCandidates}
+          initial={initial}
+          allowAdd={false}
+        />
       </div>
       <div className="flex gap-2 border-t border-[var(--line)] px-3 py-3">
         <Button type="submit" size="sm" variant="outline">

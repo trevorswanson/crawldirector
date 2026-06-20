@@ -16,6 +16,7 @@ import {
   type EventEffectKind,
   type EventEffectStat,
 } from "@/lib/event-effect-kinds";
+import { PERSONA_DIAL_KEYS, PERSONA_DIAL_LABELS } from "@/lib/persona";
 
 export type EffectRowValue = {
   id?: string;
@@ -26,9 +27,64 @@ export type EffectRowValue = {
   valueNumber: string;
   // "alive" | "dead" — only meaningful for SET_ALIVE.
   alive: "alive" | "dead";
+  // PERSONA_SHIFT: per-dial delta strings keyed by dial name (empty = no change).
+  dialShifts: Record<string, string>;
   note: string;
 };
 
+
+// Convert a stored dialShifts map (numbers) into the editor's string form.
+export function dialShiftsToStrings(
+  dialShifts: Record<string, number> | null | undefined,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (dialShifts) {
+    for (const [key, value] of Object.entries(dialShifts)) out[key] = String(value);
+  }
+  return out;
+}
+
+// Seed an editor row from a projected event effect, resolving the target name
+// from the right candidate pool for the effect's kind (crawler vs. SYSTEM_AI
+// persona). Shared by the entity + campaign timeline edit forms.
+export function effectViewToRow(
+  effect: {
+    id: string;
+    kind: EventEffectKind;
+    targetId: string | null;
+    stat: EventEffectStat | null;
+    delta: number | null;
+    valueNumber: number | null;
+    value: boolean | null;
+    dialShifts: Record<string, number> | null;
+    note: string | null;
+  },
+  options: {
+    crawlerCandidates: EntityCandidate[];
+    personaCandidates: EntityCandidate[];
+    resolveName: (targetId: string) => string;
+  },
+): EffectRowValue {
+  const isPersona = eventEffectKindMeta[effect.kind].target === "PERSONA";
+  const pool = isPersona ? options.personaCandidates : options.crawlerCandidates;
+  return {
+    id: effect.id,
+    kind: effect.kind,
+    target: effect.targetId
+      ? pool.find((candidate) => candidate.id === effect.targetId) ?? {
+          id: effect.targetId,
+          name: options.resolveName(effect.targetId),
+          type: isPersona ? "SYSTEM_AI" : "CRAWLER",
+        }
+      : null,
+    stat: effect.stat ?? "gold",
+    delta: effect.delta != null ? String(effect.delta) : "",
+    valueNumber: effect.valueNumber != null ? String(effect.valueNumber) : "",
+    alive: effect.value ? "alive" : "dead",
+    dialShifts: dialShiftsToStrings(effect.dialShifts),
+    note: effect.note ?? "",
+  };
+}
 
 function emptyRow(): EffectRowValue {
   return {
@@ -38,27 +94,34 @@ function emptyRow(): EffectRowValue {
     delta: "",
     valueNumber: "",
     alive: "dead",
+    dialShifts: {},
     note: "",
   };
 }
 
 /**
- * Editor for an event's structured effects (deltas applied to a crawler on
- * approval). Emits indexed `effectKind_N` / `effectTarget_N` / `effectStat_N` /
- * `effectDelta_N` / `effectValueNumber_N` / `effectValue_N` / `effectNote_N` / `effectId_N` fields
+ * Editor for an event's structured effects (deltas applied to a crawler — or a
+ * SYSTEM_AI persona — on approval). Emits indexed `effectKind_N` /
+ * `effectTarget_N` / `effectStat_N` / `effectDelta_N` / `effectValueNumber_N` /
+ * `effectValue_N` / `effectDial_N_<dial>` / `effectNote_N` / `effectId_N` fields
  * counted by a hidden `effectCount`, parsed by `parseEffectRows`. `candidates`
- * should be the campaign's crawler entities (the only valid effect targets).
+ * are the campaign's crawler entities (the valid targets for stat/alive effects);
+ * `personaCandidates` are the SYSTEM_AI entities a PERSONA_SHIFT can drift.
  */
 export function EffectRows({
   candidates,
+  personaCandidates = [],
   initial,
   allowAdd = true,
   searchCandidates,
+  searchPersonaCandidates,
 }: {
   candidates: EntityCandidate[];
+  personaCandidates?: EntityCandidate[];
   initial?: EffectRowValue[];
   allowAdd?: boolean;
   searchCandidates?: (query: string) => Promise<EntityCandidate[]>;
+  searchPersonaCandidates?: (query: string) => Promise<EntityCandidate[]>;
 }) {
   const [rows, setRows] = useState(
     (initial ?? []).map((row, index) => ({ key: index, ...row })),
@@ -132,11 +195,23 @@ export function EffectRows({
             {eventEffectRequiresTarget(row.kind) ? (
               <EntityTypeahead
                 name={`effectTarget_${index}`}
-                candidates={candidates}
-                searchCandidates={searchCandidates}
+                candidates={
+                  eventEffectKindMeta[row.kind].target === "PERSONA"
+                    ? personaCandidates
+                    : candidates
+                }
+                searchCandidates={
+                  eventEffectKindMeta[row.kind].target === "PERSONA"
+                    ? searchPersonaCandidates
+                    : searchCandidates
+                }
                 value={row.target}
                 onChange={(target) => patchRow(row.key, { target })}
-                placeholder="Search crawler..."
+                placeholder={
+                  eventEffectKindMeta[row.kind].target === "PERSONA"
+                    ? "Search System AI..."
+                    : "Search crawler..."
+                }
               />
             ) : (
               <span className="self-center font-mono text-[10.5px] text-[var(--ink-faint)]">
@@ -203,6 +278,30 @@ export function EffectRows({
               <option value="dead">Mark dead</option>
               <option value="alive">Mark alive</option>
             </select>
+          ) : eventEffectKindMeta[row.kind].usesDials ? (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {PERSONA_DIAL_KEYS.map((dial) => (
+                <label
+                  key={dial}
+                  className="grid grid-cols-[minmax(0,1fr)_72px] items-center gap-2 font-mono text-[10px] uppercase tracking-[.06em] text-[var(--ink-faint)]"
+                >
+                  {PERSONA_DIAL_LABELS[dial]}
+                  <input
+                    name={`effectDial_${index}_${dial}`}
+                    type="number"
+                    aria-label={`${PERSONA_DIAL_LABELS[dial]} shift`}
+                    value={row.dialShifts[dial] ?? ""}
+                    onChange={(event) =>
+                      patchRow(row.key, {
+                        dialShifts: { ...row.dialShifts, [dial]: event.target.value },
+                      })
+                    }
+                    placeholder="±0"
+                    className="border border-[var(--line-strong)] bg-[var(--bg)] px-2 py-[5px] text-right text-[12px] text-[var(--ink)]"
+                  />
+                </label>
+              ))}
+            </div>
           ) : null}
           <input
             name={`effectNote_${index}`}

@@ -34,7 +34,20 @@ export type PersonaSnapshotPromptInput = {
   constraints?: string | null;
 };
 
-const dialLabels: Record<string, string> = {
+// The canonical System AI behavior dials, in display order. A single source of
+// truth shared by the compiler, the Persona Studio editor, and the
+// PERSONA_SHIFT event effect (which deltas these dials on the active snapshot).
+export const PERSONA_DIAL_KEYS = [
+  "sentience",
+  "compliance",
+  "volatility",
+  "benevolence",
+  "resentment",
+  "theatricality",
+] as const;
+export type PersonaDialKey = (typeof PERSONA_DIAL_KEYS)[number];
+
+export const PERSONA_DIAL_LABELS: Record<PersonaDialKey, string> = {
   sentience: "Sentience",
   compliance: "Compliance",
   volatility: "Volatility",
@@ -43,14 +56,15 @@ const dialLabels: Record<string, string> = {
   theatricality: "Theatricality",
 };
 
-const dialOrder = [
-  "sentience",
-  "compliance",
-  "volatility",
-  "benevolence",
-  "resentment",
-  "theatricality",
-];
+// Clamp a dial to its canonical [-100, 100] integer range. Used when applying a
+// PERSONA_SHIFT delta so a drift can't push a dial out of range.
+export function clampPersonaDial(value: number): number {
+  return Math.max(-100, Math.min(100, Math.round(value)));
+}
+
+const dialLabels: Record<string, string> = PERSONA_DIAL_LABELS;
+
+const dialOrder: readonly string[] = PERSONA_DIAL_KEYS;
 
 function compactText(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0
@@ -60,7 +74,7 @@ function compactText(value: unknown): string | null {
 
 function numericDial(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value)
-    ? Math.max(-100, Math.min(100, Math.round(value)))
+    ? clampPersonaDial(value)
     : null;
 }
 

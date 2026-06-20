@@ -16,7 +16,7 @@ vi.mock("next/link", () => ({
 }));
 
 import { EventEffectsSection } from "@/components/entities/event-effects-section";
-import { describeEffect } from "@/lib/event-effects";
+import { describeDialShifts, describeEffect } from "@/lib/event-effects";
 import type { EventEffectView } from "@/server/services/events";
 
 afterEach(cleanup);
@@ -29,6 +29,7 @@ const baseEffect: EventEffectView = {
   delta: 50,
   valueNumber: null,
   value: null,
+  dialShifts: null,
   note: "Loot",
   applied: false,
   appliedChangeSetId: null,
@@ -58,6 +59,25 @@ describe("describeEffect", () => {
         value: false,
       }),
     ).toBe("Marked dead");
+  });
+
+  it("describes a persona shift and floor collapse", () => {
+    expect(
+      describeEffect({
+        ...baseEffect,
+        kind: "PERSONA_SHIFT",
+        stat: null,
+        delta: null,
+        dialShifts: { resentment: 20, compliance: -15 },
+      }),
+    ).toBe("Persona shift: Compliance −15, Resentment +20");
+    expect(describeEffect({ ...baseEffect, kind: "COLLAPSE_FLOOR", targetId: null, stat: null }))
+      .toBe("Floor collapses → next floor opens");
+  });
+
+  it("describeDialShifts falls back to 'no change' with no meaningful deltas", () => {
+    expect(describeDialShifts(null)).toBe("no change");
+    expect(describeDialShifts({ resentment: 0 })).toBe("no change");
   });
 });
 

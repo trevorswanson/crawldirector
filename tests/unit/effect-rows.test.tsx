@@ -12,6 +12,8 @@ const crawlers = [
   { id: "e2", name: "Donut", type: "CRAWLER" },
 ];
 
+const personas = [{ id: "sys1", name: "The System", type: "SYSTEM_AI" }];
+
 afterEach(cleanup);
 
 function field(container: HTMLElement, name: string) {
@@ -79,6 +81,7 @@ describe("EffectRows", () => {
         delta: "500",
         valueNumber: "",
         alive: "dead",
+        dialShifts: {},
         note: "Loot",
       },
     ];
@@ -125,6 +128,7 @@ describe("EffectRows", () => {
         delta: "",
         valueNumber: "",
         alive: "dead",
+        dialShifts: {},
         note: "",
       },
     ];
@@ -150,6 +154,57 @@ describe("EffectRows", () => {
     expect(
       (screen.getByRole("button", { name: /Add effect/ }) as HTMLButtonElement).disabled,
     ).toBe(false);
+  });
+
+  it("shows dial inputs and the persona target pool for a PERSONA_SHIFT row", () => {
+    const { container } = render(
+      <form>
+        <EffectRows candidates={crawlers} personaCandidates={personas} />
+      </form>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Add effect/ }));
+    fireEvent.change(screen.getByLabelText("Effect kind"), {
+      target: { value: "PERSONA_SHIFT" },
+    });
+    // Crawler stat/alive controls give way to per-dial delta inputs.
+    expect(screen.queryByLabelText("Stat to adjust")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Resentment shift"), {
+      target: { value: "20" },
+    });
+    fireEvent.change(screen.getByLabelText("Compliance shift"), {
+      target: { value: "-15" },
+    });
+    // The target typeahead lists the SYSTEM_AI candidate, not the crawlers.
+    fireEvent.click(screen.getByRole("button", { name: /The System/ }));
+
+    expect(field(container, "effectKind_0").value).toBe("PERSONA_SHIFT");
+    expect(field(container, "effectTarget_0").value).toBe("sys1");
+    expect(field(container, "effectDial_0_resentment").value).toBe("20");
+    expect(field(container, "effectDial_0_compliance").value).toBe("-15");
+  });
+
+  it("prefills a PERSONA_SHIFT row's dial deltas and persona target", () => {
+    const initial: EffectRowValue[] = [
+      {
+        id: "fx-shift",
+        kind: "PERSONA_SHIFT",
+        target: personas[0],
+        stat: "gold",
+        delta: "",
+        valueNumber: "",
+        alive: "dead",
+        dialShifts: { resentment: "30" },
+        note: "Court ruling",
+      },
+    ];
+    const { container } = render(
+      <form>
+        <EffectRows candidates={crawlers} personaCandidates={personas} initial={initial} />
+      </form>,
+    );
+    expect(field(container, "effectDial_0_resentment").value).toBe("30");
+    expect(field(container, "effectNote_0").value).toBe("Court ruling");
+    expect(screen.getByText("The System")).toBeDefined();
   });
 
   it("hides the crawler target + stat inputs for a floor-collapse effect row", () => {

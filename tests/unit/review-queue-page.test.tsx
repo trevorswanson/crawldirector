@@ -241,6 +241,7 @@ describe("ReviewQueuePage", () => {
       entities: [
         { id: "crawler-1", name: "Carl", type: "CRAWLER" },
         { id: "npc-1", name: "Princess Donut", type: "NPC" },
+        { id: "system-1", name: "The System", type: "SYSTEM_AI" },
       ],
     });
     listPendingChangeSetsForUser.mockResolvedValue([
@@ -302,6 +303,17 @@ describe("ReviewQueuePage", () => {
                     pendingChangeSetId: "cs-fx",
                     pendingOperationId: "op-fx",
                   },
+                  {
+                    id: "fx-2",
+                    kind: "PERSONA_SHIFT",
+                    targetEntityId: "system-1",
+                    dialShifts: { resentment: 20, compliance: -15 },
+                    note: "Court ruling",
+                    applied: false,
+                    reviewStatus: "PENDING",
+                    pendingChangeSetId: "cs-fx",
+                    pendingOperationId: "op-fx",
+                  },
                 ],
               },
             },
@@ -348,6 +360,9 @@ describe("ReviewQueuePage", () => {
     expect(screen.getByText("Carl")).toBeDefined();
     expect(screen.getByText("Gold 500 → 1,000")).toBeDefined();
     expect(screen.getByText("— Boss loot")).toBeDefined();
+    // The persona-shift row resolves its SYSTEM_AI target and describes its drift.
+    expect(screen.getByText("The System")).toBeDefined();
+    expect(screen.getByText("Persona shift: Compliance −15, Resentment +20")).toBeDefined();
     expect(screen.getByText("No effects in this proposal.")).toBeDefined();
   });
 

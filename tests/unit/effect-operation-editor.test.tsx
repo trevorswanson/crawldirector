@@ -12,6 +12,8 @@ const candidates = [
   { id: "crawler-2", name: "Princess Donut", type: "CRAWLER" },
 ];
 
+const personaCandidates = [{ id: "sys-1", name: "The System", type: "SYSTEM_AI" }];
+
 const noop = () => {};
 
 afterEach(cleanup);
@@ -27,6 +29,7 @@ describe("EffectOperationEditor", () => {
         delta: 500,
         valueNumber: null,
         value: null,
+        dialShifts: null,
         note: "Loot",
         before: 500,
         after: 1000,
@@ -39,6 +42,7 @@ describe("EffectOperationEditor", () => {
         delta: null,
         valueNumber: null,
         value: false,
+        dialShifts: null,
         note: null,
         before: true,
         after: false,
@@ -77,6 +81,48 @@ describe("EffectOperationEditor", () => {
     ).toBe("crawler-2");
   });
 
+  it("summarizes a persona shift and seeds its dial deltas + persona target on Edit", () => {
+    const effects: ReviewEffectSeed[] = [
+      {
+        id: "fx-shift",
+        kind: "PERSONA_SHIFT",
+        targetEntityId: "sys-1",
+        stat: null,
+        delta: null,
+        valueNumber: null,
+        value: null,
+        dialShifts: { resentment: 20, compliance: -15 },
+        note: "Court ruling",
+      },
+    ];
+
+    const { container } = render(
+      <EffectOperationEditor
+        action={noop}
+        candidates={candidates}
+        personaCandidates={personaCandidates}
+        effects={effects}
+        rejected={false}
+      />,
+    );
+
+    // Read-first summary resolves the SYSTEM_AI target name + describes the shift.
+    expect(screen.getByText("The System")).toBeDefined();
+    expect(screen.getByText("Persona shift: Compliance −15, Resentment +20")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit effect 1" }));
+
+    expect(
+      container.querySelector<HTMLInputElement>('input[name="effectDial_0_resentment"]')?.value,
+    ).toBe("20");
+    expect(
+      container.querySelector<HTMLInputElement>('input[name="effectDial_0_compliance"]')?.value,
+    ).toBe("-15");
+    expect(
+      container.querySelector<HTMLInputElement>('input[name="effectTarget_0"]')?.value,
+    ).toBe("sys-1");
+  });
+
   it("falls back to the raw id when the target is not a known crawler", () => {
     const effects: ReviewEffectSeed[] = [
       {
@@ -87,6 +133,7 @@ describe("EffectOperationEditor", () => {
         delta: null,
         valueNumber: 40,
         value: null,
+        dialShifts: null,
         note: null,
         before: 120,
         after: 40,
@@ -161,6 +208,7 @@ describe("EffectOperationEditor", () => {
             delta: 50,
             valueNumber: null,
             value: null,
+            dialShifts: null,
             note: null,
             before: 100,
             after: 150,
@@ -189,6 +237,7 @@ describe("EffectOperationEditor", () => {
             delta: -50,
             valueNumber: null,
             value: null,
+            dialShifts: null,
             note: null,
           },
           {
@@ -199,6 +248,7 @@ describe("EffectOperationEditor", () => {
             delta: null,
             valueNumber: 40,
             value: null,
+            dialShifts: null,
             note: null,
           },
           {
@@ -209,6 +259,7 @@ describe("EffectOperationEditor", () => {
             delta: null,
             valueNumber: null,
             value: true,
+            dialShifts: null,
             note: null,
           },
         ]}
@@ -235,6 +286,7 @@ describe("EffectOperationEditor", () => {
             delta: null,
             valueNumber: 40,
             value: null,
+            dialShifts: null,
             note: null,
             before: null,
             after: 40,
@@ -261,6 +313,7 @@ describe("EffectOperationEditor", () => {
             delta: null,
             valueNumber: null,
             value: null,
+            dialShifts: null,
             note: null,
           },
         ]}

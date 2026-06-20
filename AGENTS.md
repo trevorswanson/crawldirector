@@ -14,9 +14,9 @@ pitch and [`docs/`](./docs) for the full plan.
 
 ## Current status
 
-🚧 **M0–M5.5 complete; M6 slices 1–2 complete; next up the later M6 slices
-(`PERSONA_SHIFT` event effect, richer snapshot diffing, full persona-aware
-generator family).** M5.5 (data model hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
+🚧 **M0–M5.5 complete; M6 slices 1–3 complete; next up the later M6 slices
+(richer snapshot diffing, AI-proposed persona drift through the pending review
+path, full persona-aware generator family).** M5.5 (data model hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
 seam, the `MIGRATE_ENTITY_DATA` job, reference-integrity badge + impact-aware
 archive, orphan report, the greenfield Faction satellite, and the Floor satellite
 (slice 5 — the genuine `data → satellite` migration moving FLOOR's
@@ -109,9 +109,15 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
   all auto-approved DM edits. It also wired the active persona into the flesh-out
   generator for dungeon-voiced kinds (BOSS/MOB_TYPE/ITEM/SYSTEM_MESSAGE/
   ACHIEVEMENT/TITLE), recording the driving snapshot id + prompt version in
-  provenance (secret agendas never leave the DM-only snapshot). Next slices:
-  `PERSONA_SHIFT` event effect, richer snapshot diffing, and the full
-  persona-aware generator family (encounter/mob/boss/loot/System-message).
+  provenance (secret agendas never leave the DM-only snapshot). Slice 3 added the
+  `PERSONA_SHIFT` event-effect kind: a structured effect that drifts a target
+  `SYSTEM_AI`'s active persona by per-dial deltas when the event's effects are
+  applied, materializing as a new active snapshot (the prior preserved as
+  history) whose provenance points back at the apply change set — so persona
+  drift lives in the causality graph (manual shifts work now; it honors persona
+  locks and clamps dials). Next slices: richer snapshot diffing, AI-proposed
+  persona drift through the pending review path, and the full persona-aware
+  generator family (encounter/mob/boss/loot/System-message).
 
 For per-slice detail (files, tests, decisions) see
 [`docs/PROGRESS.md`](./docs/PROGRESS.md) — its "Open backlog" section is the

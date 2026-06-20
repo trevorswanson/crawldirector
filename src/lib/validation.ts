@@ -6,7 +6,10 @@ import {
   eventEffectRequiresTarget,
   eventEffectStatValues,
 } from "@/lib/event-effect-kinds";
+import { PERSONA_DIAL_KEYS } from "@/lib/persona";
 import { optionalInt, optionalText } from "@/lib/zod-field-helpers";
+
+const personaDialKeySet = new Set<string>(PERSONA_DIAL_KEYS);
 
 // Shared Zod schemas. Per docs/02-architecture.md every Server Action validates
 // its input at the boundary with one of these.
@@ -469,6 +472,14 @@ export const eventEffectSchema = z
           : value === true || value === "true" || value === "on" || value === "alive",
       z.boolean().optional(),
     ),
+    // PERSONA_SHIFT: per-dial integer deltas applied to the target SYSTEM_AI's
+    // active persona snapshot. Keyed by dial name; unknown keys are rejected and
+    // empty values are dropped by the form parser before validation.
+    dialShifts: z.preprocess(
+      (value) =>
+        value && typeof value === "object" && !Array.isArray(value) ? value : undefined,
+      z.record(z.string(), z.coerce.number().int("Dial shift must be a whole number.")).optional(),
+    ),
     note: optionalText(200),
   })
   .superRefine((effect, ctx) => {
@@ -497,6 +508,22 @@ export const eventEffectSchema = z
     }
     if (effect.kind === "SET_ALIVE" && effect.value === undefined) {
       ctx.addIssue({ code: "custom", message: "Choose alive or dead.", path: ["value"] });
+    }
+    if (effect.kind === "PERSONA_SHIFT") {
+      const entries = Object.entries(effect.dialShifts ?? {});
+      if (entries.some(([key]) => !personaDialKeySet.has(key))) {
+        ctx.addIssue({ code: "custom", message: "Unknown persona dial.", path: ["dialShifts"] });
+      }
+      const meaningful = entries.filter(
+        ([key, value]) => personaDialKeySet.has(key) && value !== 0,
+      );
+      if (meaningful.length === 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Enter at least one non-zero dial shift.",
+          path: ["dialShifts"],
+        });
+      }
     }
   });
 export type EventEffectInput = z.infer<typeof eventEffectSchema>;
