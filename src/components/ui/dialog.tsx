@@ -6,6 +6,9 @@ import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
+const FOCUSABLE_SELECTOR =
+  'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
 /** A small, token-aligned modal primitive for focused DM console work. */
 export function Dialog({
   open,
@@ -30,7 +33,34 @@ export function Dialog({
       ? document.activeElement
       : null;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onOpenChange(false);
+      if (event.key === "Escape") {
+        onOpenChange(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      // Trap focus inside the modal so Tab/Shift+Tab can't reach background
+      // controls hidden behind the overlay (aria-modal contract).
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+
+      // The close button is always rendered, so there is at least one target.
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+      );
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+
+      if (event.shiftKey) {
+        if (active === first || active === dialog || !dialog.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !dialog.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      }
     };
 
     document.addEventListener("keydown", onKeyDown);
