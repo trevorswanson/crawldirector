@@ -76,10 +76,12 @@ export function GeneratePanel({
   campaignId,
   entityId,
   locked,
+  showHeading = true,
 }: {
   campaignId: string;
   entityId: string;
   locked: boolean;
+  showHeading?: boolean;
 }) {
   const [fleshState, fleshFormAction] = useActionState<GenerateActionState, FormData>(
     fleshOutEntityAction.bind(null, campaignId, entityId),
@@ -92,9 +94,11 @@ export function GeneratePanel({
 
   return (
     <div>
-      <Kicker dim noLead className="mb-3">
-        AI generation
-      </Kicker>
+      {showHeading && (
+        <Kicker dim noLead className="mb-3">
+          AI generation
+        </Kicker>
+      )}
       <p className="mb-3 text-[11px] leading-[1.5] text-[var(--ink-faint)]">
         Draft a richer summary, description, and tags. The result lands in the
         Review Queue as a proposal — nothing becomes canon until you approve it.

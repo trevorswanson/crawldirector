@@ -22,6 +22,15 @@ describe("JobQueueList", () => {
     expect(screen.getByText(/No jobs queued yet/i)).toBeTruthy();
   });
 
+  it("distinguishes an empty filtered queue from an empty job history", () => {
+    type FilteredProps = Parameters<typeof JobQueueList>[0] & { filtered: boolean };
+    const FilteredJobQueueList = JobQueueList as (props: FilteredProps) => ReturnType<typeof JobQueueList>;
+
+    render(<FilteredJobQueueList jobs={[]} filtered />);
+
+    expect(screen.getByText("No jobs match these filters.")).toBeTruthy();
+  });
+
   it("renders semantic, data repair, bulk, and lore job statuses with safe summaries", () => {
     render(
       <JobQueueList

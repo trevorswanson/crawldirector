@@ -34,8 +34,14 @@ function ScaffoldSubmit() {
   );
 }
 
-export function ScaffoldStubsPanel({ campaignId }: { campaignId: string }) {
-  const [open, setOpen] = useState(false);
+export function ScaffoldStubsPanel({
+  campaignId,
+  embedded = false,
+}: {
+  campaignId: string;
+  embedded?: boolean;
+}) {
+  const [open, setOpen] = useState(embedded);
   const [state, action] = useActionState<GenerateActionState, FormData>(
     scaffoldStubsAction.bind(null, campaignId),
     undefined,
@@ -48,22 +54,30 @@ export function ScaffoldStubsPanel({ campaignId }: { campaignId: string }) {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="inline-flex h-7 items-center gap-[6px] border px-2.5 py-1 font-mono text-[11px] uppercase tracking-[.06em] transition-[filter,color] hover:brightness-110"
-        style={{
-          borderColor: "var(--ai)",
-          background: "color-mix(in srgb, var(--ai) 12%, transparent)",
-          color: "var(--ai)",
-        }}
-        aria-expanded={open}
-      >
-        <Sparkles aria-hidden size={13} />
-        Scaffold with AI
-      </button>
+      {!embedded && (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="inline-flex h-7 items-center gap-[6px] border px-2.5 py-1 font-mono text-[11px] uppercase tracking-[.06em] transition-[filter,color] hover:brightness-110"
+          style={{
+            borderColor: "var(--ai)",
+            background: "color-mix(in srgb, var(--ai) 12%, transparent)",
+            color: "var(--ai)",
+          }}
+          aria-expanded={open}
+        >
+          <Sparkles aria-hidden size={13} />
+          Scaffold with AI
+        </button>
+      )}
       {open && (
-        <div className="fade-in order-last -mx-[22px] -mb-[14px] mt-0 w-[calc(100%+44px)] border-t border-[var(--line)] bg-[var(--bg-2)] px-[22px] py-[12px]">
+        <div
+          className={
+            embedded
+              ? "fade-in"
+              : "fade-in order-last -mx-[22px] -mb-[14px] mt-0 w-[calc(100%+44px)] border-t border-[var(--line)] bg-[var(--bg-2)] px-[22px] py-[12px]"
+          }
+        >
           <p className="mb-2 text-[11px] leading-[1.5] text-[var(--ink-faint)]">
             Describe a set of entities to scaffold (e.g. “the shopkeepers and
             stalls of the Bone Market”). Each lands as a stub proposal in the

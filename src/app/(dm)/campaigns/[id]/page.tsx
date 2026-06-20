@@ -23,8 +23,7 @@ import {
   RestoreEntityUndoForm,
 } from "@/components/entities/entity-forms";
 import { CampaignSearch } from "@/components/entities/campaign-search";
-import { ScaffoldStubsPanel } from "@/components/entities/scaffold-stubs-panel";
-import { BulkFleshPanel } from "@/components/entities/bulk-flesh-panel";
+import { AiActionsDialog } from "@/components/entities/ai-actions-dialog";
 import { listAiKeys } from "@/server/services/ai-keys";
 import { listRecentJobs } from "@/server/services/jobs";
 import { formatEntityType } from "@/lib/entities";
@@ -363,9 +362,13 @@ export default async function CampaignPage({
             {filteredTotal} / {total}
           </span>
           <QuickCreateStub campaignId={id} />
-          {aiConfigured && <ScaffoldStubsPanel campaignId={id} />}
-          {aiConfigured && fleshCandidates.length > 0 && (
-            <BulkFleshPanel campaignId={id} candidates={fleshCandidates} recentJobs={recentJobs} />
+          {aiConfigured && (
+            <AiActionsDialog
+              variant="world"
+              campaignId={id}
+              candidates={fleshCandidates}
+              recentJobs={recentJobs}
+            />
           )}
         </div>
 

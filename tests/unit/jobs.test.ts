@@ -249,6 +249,55 @@ describe("listRecentJobs", () => {
     const { playerId, campaignId } = await seed();
     await expect(listRecentJobs(playerId, campaignId)).rejects.toThrow(ServiceError);
   });
+
+  it("filters job history by kind and status", async () => {
+    const { dmId, campaignId } = await seed();
+    const bulk = await enqueueJob(dmId, campaignId, JobKind.BULK_FLESH, { entityIds: ["e1"] });
+    const lore = await enqueueJob(dmId, campaignId, JobKind.LORE_SEED, {});
+    const embedding = await enqueueJob(dmId, campaignId, JobKind.EMBED_SEARCH_DOCS, {});
+    await prisma.job.update({
+      where: { id: lore.id },
+      data: { status: JobStatus.SUCCEEDED, finishedAt: new Date() },
+    });
+    await prisma.job.update({
+      where: { id: embedding.id },
+      data: { status: JobStatus.FAILED, finishedAt: new Date(), error: "Provider failed" },
+    });
+
+    const listFilteredJobs = listRecentJobs as (
+      userId: string,
+      campaignId: string,
+      take: number | null,
+      filters: { kinds?: JobKind[]; statuses?: JobStatus[]; aiOnly?: boolean },
+    ) => ReturnType<typeof listRecentJobs>;
+    const jobs = await listFilteredJobs(dmId, campaignId, null, {
+      kinds: [JobKind.BULK_FLESH, JobKind.EMBED_SEARCH_DOCS],
+      statuses: [JobStatus.QUEUED, JobStatus.FAILED],
+    });
+
+    expect(jobs.map((job) => job.id)).toEqual(expect.arrayContaining([bulk.id, embedding.id]));
+    expect(jobs).toHaveLength(2);
+  });
+
+  it("limits AI-only history to token-consuming job kinds", async () => {
+    const { dmId, campaignId } = await seed();
+    await enqueueJob(dmId, campaignId, JobKind.BULK_FLESH, { entityIds: ["e1"] });
+    await enqueueJob(dmId, campaignId, JobKind.LORE_SEED, {});
+    await enqueueJob(dmId, campaignId, JobKind.EMBED_SEARCH_DOCS, {});
+    await enqueueJob(dmId, campaignId, JobKind.MIGRATE_ENTITY_DATA, {});
+
+    const listFilteredJobs = listRecentJobs as (
+      userId: string,
+      campaignId: string,
+      take: number | null,
+      filters: { kinds?: JobKind[]; statuses?: JobStatus[]; aiOnly?: boolean },
+    ) => ReturnType<typeof listRecentJobs>;
+    const jobs = await listFilteredJobs(dmId, campaignId, null, { aiOnly: true });
+
+    expect(jobs.map((job) => job.kind).sort()).toEqual(
+      [JobKind.BULK_FLESH, JobKind.EMBED_SEARCH_DOCS].sort(),
+    );
+  });
 });
 
 // ─── getActiveCampaignJob ───────────────────────────────────────────────────

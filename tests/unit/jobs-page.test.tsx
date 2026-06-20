@@ -45,13 +45,37 @@ afterEach(() => cleanup());
 
 describe("CampaignJobsPage", () => {
   it("renders the DM job queue with recent campaign jobs", async () => {
-    render(await CampaignJobsPage({ params: Promise.resolve({ id: "c1" }) }));
+    render(
+      await CampaignJobsPage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
 
     expect(screen.getByText("Job Queue")).toBeTruthy();
     expect(screen.getByText(/World One/)).toBeTruthy();
-    expect(screen.getByText("Semantic index")).toBeTruthy();
+    expect(screen.getAllByText("Semantic index")).toHaveLength(2);
     expect(screen.getByText(/4 embedded/i)).toBeTruthy();
-    expect(listRecentJobs).toHaveBeenCalledWith("u1", "c1", null);
+    expect(listRecentJobs).toHaveBeenCalledWith("u1", "c1", null, {
+      kinds: undefined,
+      statuses: undefined,
+      aiOnly: false,
+    });
+  });
+
+  it("parses job facets from the URL and passes them to the job-history service", async () => {
+    render(
+      await CampaignJobsPage({
+        params: Promise.resolve({ id: "c1" }),
+        searchParams: Promise.resolve({ kind: "BULK_FLESH", status: "RUNNING", ai: "1" }),
+      } as Parameters<typeof CampaignJobsPage>[0]),
+    );
+
+    expect(listRecentJobs).toHaveBeenCalledWith("u1", "c1", null, {
+      kinds: ["BULK_FLESH"],
+      statuses: ["RUNNING"],
+      aiOnly: true,
+    });
   });
 
   it("404s when the campaign is not visible to the user", async () => {

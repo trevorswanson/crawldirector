@@ -108,12 +108,14 @@ export function BulkFleshPanel({
   campaignId,
   candidates,
   recentJobs = [],
+  embedded = false,
 }: {
   campaignId: string;
   candidates: BulkFleshCandidate[];
   recentJobs?: RecentBulkJob[];
+  embedded?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(embedded);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [handledRun, setHandledRun] = useState<number | undefined>(undefined);
   const [state, action] = useActionState<BulkGenerateActionState, FormData>(
@@ -148,22 +150,30 @@ export function BulkFleshPanel({
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="inline-flex h-7 items-center gap-[6px] border px-2.5 py-1 font-mono text-[11px] uppercase tracking-[.06em] transition-[filter,color] hover:brightness-110"
-        style={{
-          borderColor: "var(--ai)",
-          background: "color-mix(in srgb, var(--ai) 12%, transparent)",
-          color: "var(--ai)",
-        }}
-        aria-expanded={open}
-      >
-        <Sparkles aria-hidden size={13} />
-        Flesh out with AI
-      </button>
+      {!embedded && (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="inline-flex h-7 items-center gap-[6px] border px-2.5 py-1 font-mono text-[11px] uppercase tracking-[.06em] transition-[filter,color] hover:brightness-110"
+          style={{
+            borderColor: "var(--ai)",
+            background: "color-mix(in srgb, var(--ai) 12%, transparent)",
+            color: "var(--ai)",
+          }}
+          aria-expanded={open}
+        >
+          <Sparkles aria-hidden size={13} />
+          Flesh out with AI
+        </button>
+      )}
       {open && (
-        <div className="fade-in order-last -mx-[22px] -mb-[14px] mt-0 w-[calc(100%+44px)] border-t border-[var(--line)] bg-[var(--bg-2)] px-[22px] py-[12px]">
+        <div
+          className={
+            embedded
+              ? "fade-in"
+              : "fade-in order-last -mx-[22px] -mb-[14px] mt-0 w-[calc(100%+44px)] border-t border-[var(--line)] bg-[var(--bg-2)] px-[22px] py-[12px]"
+          }
+        >
           <p className="mb-2 text-[11px] leading-[1.5] text-[var(--ink-faint)]">
             Pick the stub entities to flesh out. Each lands as its own draft
             proposal in the Review Queue — nothing becomes canon until you

@@ -12,7 +12,7 @@ export type JobQueueItem = {
   finishedAt: Date | null;
 };
 
-const kindLabels: Record<JobKind, string> = {
+export const jobKindLabels: Record<JobKind, string> = {
   BULK_FLESH: "Bulk flesh-out",
   LORE_SEED: "Lore seed",
   EMBED_SEARCH_DOCS: "Semantic index",
@@ -90,18 +90,23 @@ function timingText(job: JobQueueItem): string {
 export function JobQueueList({
   jobs,
   campaignId,
+  filtered = false,
 }: {
   jobs: JobQueueItem[];
   campaignId?: string;
+  filtered?: boolean;
 }) {
   if (jobs.length === 0) {
     return (
       <div className="grid min-h-48 place-items-center border border-dashed border-[var(--line)] bg-[var(--bg)] p-8 text-center">
         <div>
-          <p className="font-display text-[18px] font-semibold">No jobs queued yet.</p>
+          <p className="font-display text-[18px] font-semibold">
+            {filtered ? "No jobs match these filters." : "No jobs queued yet."}
+          </p>
           <p className="mt-2 max-w-md text-[12.5px] leading-[1.6] text-[var(--ink-dim)]">
-            Background work such as semantic indexing, data repairs, bulk flesh-out runs, and
-            lore seeding will appear here.
+            {filtered
+              ? "Try clearing a filter or expanding the selected job types and statuses."
+              : "Background work such as semantic indexing, data repairs, bulk flesh-out runs, and lore seeding will appear here."}
           </p>
         </div>
       </div>
@@ -116,7 +121,7 @@ export function JobQueueList({
           <li key={job.id} className="panel flex flex-col gap-2 p-[14px]">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="font-display text-[16px] font-semibold">{kindLabels[job.kind]}</p>
+                <p className="font-display text-[16px] font-semibold">{jobKindLabels[job.kind]}</p>
                 <p className="mt-1 text-[12px] leading-[1.5] text-[var(--ink-dim)]">
                   {kindDescriptions[job.kind]}
                 </p>
@@ -137,7 +142,7 @@ export function JobQueueList({
                   >
                     <button
                       type="submit"
-                      aria-label={`Cancel ${kindLabels[job.kind]} job`}
+                      aria-label={`Cancel ${jobKindLabels[job.kind]} job`}
                       className="border border-[var(--line)] px-[8px] py-[5px] font-mono text-[9px] uppercase tracking-[.08em] text-[var(--ink-faint)] transition-colors hover:border-[var(--no)] hover:text-[var(--no)]"
                     >
                       Cancel
