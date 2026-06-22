@@ -1,17 +1,18 @@
-export function formatEntityType(type: string) {
-  return type
+// Title-case an UPPER_SNAKE enum value for display ("MOB_TYPE" → "Mob Type").
+function titleCaseEnum(value: string) {
+  return value
     .toLowerCase()
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
 }
 
+export function formatEntityType(type: string) {
+  return titleCaseEnum(type);
+}
+
 export function formatVisibility(visibility: string) {
-  return visibility
-    .toLowerCase()
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+  return titleCaseEnum(visibility);
 }
 
 export function formatTags(tags: string[]) {
