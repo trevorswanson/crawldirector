@@ -5,12 +5,13 @@ import {
   EntityType,
   EventParticipantRole,
   OpDecision,
+  Prisma,
   Visibility,
 } from "@/generated/prisma/client";
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
 import { archiveEntity, createCrawler } from "@/server/services/entities";
-import { archiveEvent, createEvent } from "@/server/services/events";
+import { applyEventEffects, archiveEvent, createEvent, updateEvent } from "@/server/services/events";
 import {
   applyAutoApprovedEntityChangeSet,
   applyAutoApprovedPersonaSnapshotChangeSet,
@@ -256,6 +257,103 @@ describe("AI patch-carried event effects", () => {
     });
     await expect(prisma.event.findUniqueOrThrow({ where: { id: event.id } })).resolves.toMatchObject({
       effects: [expect.objectContaining({ id: "duplicated-generated-effect", delta: 25 })],
+    });
+  });
+
+  it("applies one stored effect when malformed event data repeats its queued id", async () => {
+    const { owner, campaign, crawler, event } = await setup("stored-duplicate@test.com");
+    await updateEvent(owner.id, campaign.id, event.id, {
+      title: "The hunters enter the arena",
+      secret: false,
+      effects: [
+        {
+          id: "stored-duplicate-effect",
+          kind: "ADJUST_STAT",
+          targetEntityId: crawler.id,
+          stat: "gold",
+          delta: 25,
+        },
+      ],
+    });
+    const submitted = await applyEventEffects(owner.id, campaign.id, event.id);
+    const stored = await prisma.event.findUniqueOrThrow({ where: { id: event.id } });
+    const [effect] = stored.effects as Array<Record<string, unknown>>;
+    await prisma.event.update({
+      where: { id: event.id },
+      data: { effects: [effect, { ...effect }] as Prisma.InputJsonValue },
+    });
+
+    await acceptAndApprove(owner.id, campaign.id, submitted.changeSetId, submitted.operationId!);
+
+    await expect(prisma.crawler.findUniqueOrThrow({ where: { id: crawler.id } })).resolves.toMatchObject({
+      gold: 125,
+    });
+    await expect(prisma.event.findUniqueOrThrow({ where: { id: event.id } })).resolves.toMatchObject({
+      effects: [
+        expect.objectContaining({
+          id: "stored-duplicate-effect",
+          applied: true,
+          reviewStatus: "APPLIED",
+        }),
+      ],
+    });
+  });
+
+  it("flags a fractional generated stat delta stale before it can mutate canon", async () => {
+    const { owner, campaign, crawler, event } = await setup("generated-fractional@test.com");
+    const { changeSet, operation } = await createAiEffectProposal(owner.id, campaign.id, event.id, [
+      {
+        id: "fractional-generated-effect",
+        kind: "ADJUST_STAT",
+        targetEntityId: crawler.id,
+        stat: "gold",
+        delta: 1.5,
+      },
+    ]);
+    await setChangeOperationDecision(owner.id, campaign.id, changeSet.id, operation.id, {
+      decision: OpDecision.ACCEPTED,
+    });
+
+    await listPendingChangeSetsForUser(owner.id, campaign.id);
+
+    await expect(prisma.changeOperation.findUniqueOrThrow({ where: { id: operation.id } })).resolves.toMatchObject({
+      isStale: true,
+    });
+    await expect(approveChangeSet(owner.id, campaign.id, changeSet.id)).rejects.toThrow(/stale/i);
+    await expect(prisma.crawler.findUniqueOrThrow({ where: { id: crawler.id } })).resolves.toMatchObject({
+      gold: 100,
+    });
+    await expect(prisma.event.findUniqueOrThrow({ where: { id: event.id } })).resolves.toMatchObject({
+      effects: [],
+    });
+  });
+
+  it("flags an unknown generated persona dial stale before it can mutate canon", async () => {
+    const { owner, campaign, event } = await setup("generated-unknown-dial@test.com");
+    const systemId = await makeSystemWithActivePersona(owner.id, campaign.id);
+    const { changeSet, operation } = await createAiEffectProposal(owner.id, campaign.id, event.id, [
+      {
+        id: "unknown-dial-generated-effect",
+        kind: "PERSONA_SHIFT",
+        targetEntityId: systemId,
+        dialShifts: { resentment: 10, definitelyNotADial: 15 },
+      },
+    ]);
+    await setChangeOperationDecision(owner.id, campaign.id, changeSet.id, operation.id, {
+      decision: OpDecision.ACCEPTED,
+    });
+
+    await listPendingChangeSetsForUser(owner.id, campaign.id);
+
+    await expect(prisma.changeOperation.findUniqueOrThrow({ where: { id: operation.id } })).resolves.toMatchObject({
+      isStale: true,
+    });
+    await expect(approveChangeSet(owner.id, campaign.id, changeSet.id)).rejects.toThrow(/stale/i);
+    await expect(
+      prisma.personaSnapshot.findMany({ where: { campaignId: campaign.id, entityId: systemId } }),
+    ).resolves.toHaveLength(1);
+    await expect(prisma.event.findUniqueOrThrow({ where: { id: event.id } })).resolves.toMatchObject({
+      effects: [],
     });
   });
 

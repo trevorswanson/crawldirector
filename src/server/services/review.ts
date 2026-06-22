@@ -30,6 +30,7 @@ import {
   eventEffectRequiresTarget,
   type EventEffectKind,
 } from "@/lib/event-effect-kinds";
+import { eventEffectSchema } from "@/lib/validation";
 import {
   clampPersonaDial,
   compilePersonaPrompt,
@@ -2377,8 +2378,16 @@ async function evaluateApplyEventEffectsOperationFlags(
   });
   if (!event) return { blockedByLock: false, isStale: true };
 
+  const rawPatchEffects = readTo(patch, "effects");
+  const canonicalAiPatchEffects =
+    changeSet.source === ChangeSource.AI && "effects" in patch
+      ? parseCanonicalAiPatchEffects(rawPatchEffects)
+      : undefined;
+  if (canonicalAiPatchEffects === null) {
+    return { blockedByLock: false, isStale: true };
+  }
   const reviewedEffects = uniqueEventEffectsById(
-    parseEventEffects(readTo(patch, "effects")),
+    canonicalAiPatchEffects ?? parseEventEffects(rawPatchEffects),
   );
   if ("effects" in patch && reviewedEffects.length === 0) {
     return { blockedByLock: false, isStale: false };
@@ -4389,6 +4398,21 @@ function uniqueEventEffectsById(effects: StoredEventEffect[]) {
   });
 }
 
+// Generator output is persisted as a review patch rather than a validated event
+// form submission. Run every raw AI row through the public effect schema before
+// normalization, so fractional stats and unknown persona dial keys cannot be
+// stripped or deferred into an approval-time database error.
+function parseCanonicalAiPatchEffects(value: JsonValue | undefined) {
+  if (!Array.isArray(value)) return null;
+  const normalized: JsonValue[] = [];
+  for (const rawEffect of value) {
+    const parsed = eventEffectSchema.safeParse(rawEffect);
+    if (!parsed.success) return null;
+    normalized.push(parsed.data as unknown as JsonValue);
+  }
+  return parseEventEffects(normalized);
+}
+
 function assertValidDeclaredEffect(effect: StoredEventEffect) {
   if (effect.kind === "ADJUST_STAT") {
     if (!effect.stat) throw new ServiceError("Effect is missing a stat to adjust.");
@@ -5506,11 +5530,19 @@ async function applyApplyEventEffects(
   });
   if (!event) throw new ServiceError("Event not found.");
 
-  const effects = parseEventEffects(event.effects as JsonValue);
-  const reviewedEffects = uniqueEventEffectsById(
-    parseEventEffects(readTo(patch, "effects")),
-  );
+  const effects = uniqueEventEffectsById(parseEventEffects(event.effects as JsonValue));
   const patchCarriesEffects = "effects" in patch;
+  const rawPatchEffects = readTo(patch, "effects");
+  const canonicalAiPatchEffects =
+    changeSet.source === ChangeSource.AI && patchCarriesEffects
+      ? parseCanonicalAiPatchEffects(rawPatchEffects)
+      : undefined;
+  if (canonicalAiPatchEffects === null) {
+    throw new ServiceError("Effect review patch is invalid.");
+  }
+  const reviewedEffects = uniqueEventEffectsById(
+    canonicalAiPatchEffects ?? parseEventEffects(rawPatchEffects),
+  );
   if (patchCarriesEffects && reviewedEffects.length === 0) {
     throw new ServiceError("Effect review patch has no valid effects.");
   }
@@ -5549,19 +5581,23 @@ async function applyApplyEventEffects(
       effect.reviewStatus = "REJECTED";
     }
   }
+  const pendingIds = new Set<string>();
   const pending = effects.filter((effect) => {
     if (effect.applied) return false;
+    if (pendingIds.has(effect.id)) return false;
     if (reviewedIds.size > 0) {
-      return (
+      const belongsToReviewedOperation =
         reviewedIds.has(effect.id) &&
-        effectBelongsToOperation(effect, changeSet.id, operationId)
-      );
+        effectBelongsToOperation(effect, changeSet.id, operationId);
+      if (belongsToReviewedOperation) pendingIds.add(effect.id);
+      return belongsToReviewedOperation;
     }
-    return (
+    const belongsToPendingOperation =
       effect.pendingOperationId === operationId ||
       effect.pendingChangeSetId === changeSet.id ||
-      (!effect.pendingOperationId && !effect.pendingChangeSetId)
-    );
+      (!effect.pendingOperationId && !effect.pendingChangeSetId);
+    if (belongsToPendingOperation) pendingIds.add(effect.id);
+    return belongsToPendingOperation;
   });
   if (pending.length === 0) {
     throw new ServiceError("This event has no effects left to apply.");
