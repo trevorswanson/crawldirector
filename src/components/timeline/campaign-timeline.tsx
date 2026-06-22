@@ -53,6 +53,7 @@ import {
   type ParticipantRowValue,
 } from "@/components/entities/participant-rows";
 import { ConsoleScreen, ScreenHeader, ScreenRail } from "@/components/console/screen";
+import { ConsequenceGenerator } from "@/components/timeline/consequence-generator";
 import { HudTag } from "@/components/ui/hud-tag";
 import { SourceBadge } from "@/components/ui/source-badge";
 import { TypeDot } from "@/components/ui/type-dot";
@@ -783,6 +784,7 @@ export function CampaignTimeline({
   floors,
   candidates,
   canEdit,
+  aiConfigured = false,
   initialEventId,
   truncated,
   loadOlderHref,
@@ -793,6 +795,7 @@ export function CampaignTimeline({
   floors: CampaignFloorMeta;
   candidates: EntityCandidate[];
   canEdit: boolean;
+  aiConfigured?: boolean;
   // Deep-link target (e.g. from a causality link on another page): scroll to and
   // highlight this event on mount.
   initialEventId?: string;
@@ -1235,6 +1238,10 @@ export function CampaignTimeline({
             <p className="mt-[6px] max-w-[660px] text-[12.5px] leading-[1.55] text-[var(--ink-dim)]">
               {event.summary}
             </p>
+          )}
+
+          {canEdit && aiConfigured && !event.locked && editingId !== event.id && (
+            <ConsequenceGenerator campaignId={campaignId} eventId={event.id} />
           )}
 
           {editingId !== event.id && event.participants.length > 0 && (

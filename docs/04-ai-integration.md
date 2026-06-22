@@ -101,8 +101,9 @@ Planned generator families (build incrementally — see roadmap):
   time — see status above.)**
 - **Bulk scaffolding:** generate N stubs ("10 mob types for the ice floor",
   "the nine Faction-Wars armies").
-- **Event & consequence generation:** "given this event, propose downstream
-  effects and causal links" — directly feeds the causality graph.
+- **Event & consequence generation:** given an existing event, propose bounded
+  effects and causal links as a structured, `PENDING` Review Queue change set —
+  directly feeds the causality graph without auto-applying canon.
 - **Crawler-interface flavor:** in-fiction System messages, achievement text,
   loot descriptions for the player-facing UI.
 - **Consistency checks (non-mutating):** scan canon for contradictions and
