@@ -1422,14 +1422,16 @@ async function enrichReviewQueueItems(
         operation.targetType === "RELATIONSHIP"
           ? relationshipEdgeLabel(relationshipTarget, patch, targetById)
           : null;
-      const personaLabel =
-        operation.targetType === "PERSONA_SNAPSHOT"
-          ? personaTarget
-            ? `${personaTarget.entity.name} persona${
-                personaTarget.label ? `: ${personaTarget.label}` : ""
-              }`
-            : stringFromReviewValue(readTo(patch, "label")) ?? "Persona snapshot"
-          : null;
+      let personaLabel: string | null = null;
+      if (operation.targetType === "PERSONA_SNAPSHOT") {
+        if (personaTarget) {
+          const suffix = personaTarget.label ? `: ${personaTarget.label}` : "";
+          personaLabel = `${personaTarget.entity.name} persona${suffix}`;
+        } else {
+          personaLabel =
+            stringFromReviewValue(readTo(patch, "label")) ?? "Persona snapshot";
+        }
+      }
       const targetEntityType =
         target?.type ??
         (eventTarget ? "EVENT" : null) ??
@@ -1444,15 +1446,16 @@ async function enrichReviewQueueItems(
       const fields = patchFields(patch).filter((field) => field !== "_baseVersion");
       const currentValues: Record<string, unknown> = {};
       for (const field of fields) {
-        const current = target
-          ? currentEntityValue(target, field)
-          : relationshipTarget
-            ? currentRelationshipValue(relationshipTarget, field)
-            : eventTarget
-              ? currentEventValue(eventTarget, field)
-              : personaTarget
-                ? currentPersonaSnapshotValue(personaTarget, field)
-            : undefined;
+        let current: unknown;
+        if (target) {
+          current = currentEntityValue(target, field);
+        } else if (relationshipTarget) {
+          current = currentRelationshipValue(relationshipTarget, field);
+        } else if (eventTarget) {
+          current = currentEventValue(eventTarget, field);
+        } else if (personaTarget) {
+          current = currentPersonaSnapshotValue(personaTarget, field);
+        }
         if (current !== undefined) currentValues[field] = current;
       }
 
@@ -1852,11 +1855,12 @@ export async function setChangeOperationFieldDecision(
     const allRejected =
       fields.length > 0 &&
       fields.every((field) => fieldDecisions[field] === "REJECTED");
-    const decision = acceptedFields.length > 0
-      ? OpDecision.EDITED
-      : allRejected
-        ? OpDecision.REJECTED
-        : OpDecision.PENDING;
+    let decision: OpDecision = OpDecision.PENDING;
+    if (acceptedFields.length > 0) {
+      decision = OpDecision.EDITED;
+    } else if (allRejected) {
+      decision = OpDecision.REJECTED;
+    }
     const entityOperation =
       operation.targetType === "ENTITY" && isEntityReviewOp(operation.op);
     const relationshipOperation =
@@ -2012,12 +2016,12 @@ export async function approveChangeSet(
     }
 
     const rejectedCount = changeSet.operations.length - applicableOperations.length;
-    const status =
-      applicableOperations.length === 0
-        ? ChangeSetStatus.REJECTED
-        : rejectedCount > 0
-          ? ChangeSetStatus.PARTIALLY_APPLIED
-          : ChangeSetStatus.APPROVED;
+    let status: ChangeSetStatus = ChangeSetStatus.APPROVED;
+    if (applicableOperations.length === 0) {
+      status = ChangeSetStatus.REJECTED;
+    } else if (rejectedCount > 0) {
+      status = ChangeSetStatus.PARTIALLY_APPLIED;
+    }
     await tx.changeSet.update({
       where: { id: changeSet.id },
       data: {
@@ -2822,11 +2826,10 @@ export async function setEntityLock(
       select: { id: true, locked: true, lockedFields: true },
     });
 
-    const action = lockedChanged
-      ? nextLocked
-        ? "LOCK"
-        : "UNLOCK"
-      : "SET_FIELD_LOCKS";
+    let action = "SET_FIELD_LOCKS";
+    if (lockedChanged) {
+      action = nextLocked ? "LOCK" : "UNLOCK";
+    }
     await tx.auditLog.create({
       data: {
         campaignId,
