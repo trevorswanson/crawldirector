@@ -33,6 +33,7 @@ import {
   eventEffectKindValues,
   eventEffectRequiresTarget,
 } from "@/lib/event-effect-kinds";
+import { PERSONA_DIAL_KEYS } from "@/lib/persona";
 import { resolveAbsoluteDay } from "@/lib/time-resolve";
 import { buildCampaignResolveContext } from "@/server/services/event-resolve-context";
 import { prisma } from "@/server/db";
@@ -95,6 +96,9 @@ export type EventEffectView = {
   delta: number | null;
   valueNumber: number | null;
   value: boolean | null;
+  // PERSONA_SHIFT: per-dial integer deltas applied to the target's active
+  // persona snapshot. Null for non-persona kinds.
+  dialShifts: Record<string, number> | null;
   note: string | null;
   applied: boolean;
   appliedChangeSetId: string | null;
@@ -102,6 +106,19 @@ export type EventEffectView = {
   pendingOperationId: string | null;
   reviewStatus: "PENDING" | "REJECTED" | "SUPERSEDED" | "APPLIED" | null;
 };
+
+// Read a stored dialShifts JSON blob into a record of known dials with finite
+// integer deltas (unknown keys / non-integers dropped). Null when empty.
+function readDialShifts(value: unknown): Record<string, number> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const out: Record<string, number> = {};
+  for (const key of PERSONA_DIAL_KEYS) {
+    const raw = record[key];
+    if (typeof raw === "number" && Number.isInteger(raw)) out[key] = raw;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
 
 // Project the event.effects JSON for display. Players get an empty list.
 function projectEventEffects(value: unknown, isPlayer: boolean): EventEffectView[] {
@@ -130,6 +147,7 @@ function projectEventEffects(value: unknown, isPlayer: boolean): EventEffectView
       valueNumber:
         typeof record.valueNumber === "number" ? record.valueNumber : null,
       value: typeof record.value === "boolean" ? record.value : null,
+      dialShifts: readDialShifts(record.dialShifts),
       note: typeof record.note === "string" ? record.note : null,
       applied: record.applied === true,
       appliedChangeSetId:
@@ -431,6 +449,7 @@ export async function createEvent(
         ...(typeof effect.delta === "number" ? { delta: effect.delta } : {}),
         ...(typeof effect.valueNumber === "number" ? { valueNumber: effect.valueNumber } : {}),
         ...(typeof effect.value === "boolean" ? { value: effect.value } : {}),
+        ...(effect.dialShifts ? { dialShifts: effect.dialShifts } : {}),
         ...(effect.note ? { note: effect.note } : {}),
       })),
     };
@@ -509,6 +528,7 @@ export async function updateEvent(
         ...(typeof effect.delta === "number" ? { delta: effect.delta } : {}),
         ...(typeof effect.valueNumber === "number" ? { valueNumber: effect.valueNumber } : {}),
         ...(typeof effect.value === "boolean" ? { value: effect.value } : {}),
+        ...(effect.dialShifts ? { dialShifts: effect.dialShifts } : {}),
         ...(effect.note ? { note: effect.note } : {}),
       })),
     };
@@ -1482,6 +1502,35 @@ export async function applyEventEffects(
       throw new ServiceError(
         "This event's in-game day can't be resolved yet, so the collapse has no date to anchor. " +
           "Give it an absolute day (or anchor it to a floor/event whose day is known) before applying.",
+      );
+    }
+  }
+  // Pre-flight persona shifts the same way: a drift needs an active persona on
+  // the target to nudge, so surface a clear message inline rather than failing
+  // deep in the approve transaction.
+  const personaShiftTargets = Array.from(
+    new Set(
+      effects
+        .filter((effect) => effect.kind === "PERSONA_SHIFT")
+        .map((effect) => effect.targetEntityId)
+        .filter((id): id is string => typeof id === "string"),
+    ),
+  );
+  if (personaShiftTargets.length > 0) {
+    const active = await prisma.personaSnapshot.findMany({
+      where: {
+        campaignId,
+        entityId: { in: personaShiftTargets },
+        isActive: true,
+        status: { not: CanonStatus.ARCHIVED },
+      },
+      select: { entityId: true },
+    });
+    const activeByEntity = new Set(active.map((snapshot) => snapshot.entityId));
+    if (personaShiftTargets.some((id) => !activeByEntity.has(id))) {
+      throw new ServiceError(
+        "A persona shift needs the System AI to have an active persona snapshot. " +
+          "Activate one in the Persona Studio first.",
       );
     }
   }

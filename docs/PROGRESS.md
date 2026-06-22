@@ -76,11 +76,12 @@ below).
 
 **Active: M6 — System AI persona engine**
 ([05-system-ai-persona.md](./05-system-ai-persona.md)).
-Slices 1–2 are complete: the review-backed server foundation and the Persona
-Studio UI + first generator prompt injection. **Next up: the later M6 slices —
-`PERSONA_SHIFT` event-effect kind, richer snapshot diffing, and the full
-persona-aware generator family (encounter/mob/boss/loot/System-message).** Keep
-the M6 work incremental.
+Slices 1–3 are complete: the review-backed server foundation, the Persona
+Studio UI + first generator prompt injection, and the `PERSONA_SHIFT`
+event-effect kind (manual persona drift living in the causality graph). **Next
+up: richer snapshot diffing, AI-proposed persona drift through the pending
+review path, and the full persona-aware generator family
+(encounter/mob/boss/loot/System-message).** Keep the M6 work incremental.
 
 - [x] **Slice 1 — Persona snapshot foundation + compiler.** Added the
       `PersonaSnapshot` table (generic to any `Entity`, first used by
@@ -101,9 +102,17 @@ the M6 work incremental.
       `ACHIEVEMENT`/`TITLE`), recording the snapshot id + prompt version on the
       change set (and `personaSnapshotId` onto each Provenance row). ✅ 2026-06-19
       (dated entry below).
-- [ ] **Later M6 slices.** `PERSONA_SHIFT` event-effect kind, richer snapshot
-      diffing, full persona-aware generator family (encounter, mob/boss, loot,
-      System-message), and broader actor-profile studio reuse for M11.
+- [x] **Slice 3 — `PERSONA_SHIFT` event-effect kind.** A new structured event
+      effect that drifts a target `SYSTEM_AI`'s active persona by per-dial deltas
+      when the event's effects are applied — the drift lands as a brand-new active
+      snapshot (the prior is preserved as history) whose provenance points back at
+      the apply change set, so "why did the persona change" traces through the
+      causality graph. Manual shifts work now; AI-proposed drift through the
+      pending path stays a later slice. ✅ 2026-06-20 (dated entry below).
+- [ ] **Later M6 slices.** Richer snapshot diffing, AI-proposed persona drift
+      through the pending review path, full persona-aware generator family
+      (encounter, mob/boss, loot, System-message), and broader actor-profile
+      studio reuse for M11.
 
 ### Scheduled roadmap additions (2026-06-19)
 
@@ -136,6 +145,85 @@ M6 remains the next milestone work. The detailed decisions live in
 
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
+
+## M6 — `PERSONA_SHIFT` event-effect kind (slice 3) ✅ (2026-06-20)
+
+**Goal:** the roadmap's `PERSONA_SHIFT` bullet — let System AI persona drift live
+in the same causality graph as everything else, so a DM can record *why* the
+persona changed (e.g. "court overturns the ruling → compliance −15, resentment
++20"). Manual shifts work now; AI-proposed drift through the *pending* path stays
+a later slice. Branch: `feat/m6-persona-shift-effect`. No schema change (effects
+are JSON on `Event`; the drift writes a `PersonaSnapshot` through the existing
+apply path).
+
+**Decision (one effect = one new snapshot).** A `PERSONA_SHIFT` effect carries a
+**multi-dial delta map** (`dialShifts`), matching the design doc's
+`PersonaShift { compliance −15, resentment +20 }`. On apply it materializes as a
+single **new active** snapshot that carries the prior active snapshot's
+values/agendas/voice/constraints forward, nudging only the targeted dials
+(clamped to −100…100) and recompiling the prompt — the prior snapshot stays as
+inactive history (the persona is an ordered series along campaign time). It
+routes through the slice-1 `applyCreatePersonaSnapshot` path, so it reuses
+one-active-per-entity exclusivity, **refuses to deactivate a locked active
+snapshot** (surfaces as a blocked op — invariant #2), and writes provenance
+pointing at the apply change set (the `PersonaSnapshot.provenance` relation
+answers "what drove this snapshot"). The new snapshot is anchored to the event's
+in-game time, and the target `SYSTEM_AI` is recorded as an `AFFECTED` participant.
+
+- [x] **Registry + validation** ([`event-effect-kinds.ts`](../src/lib/event-effect-kinds.ts),
+      [`persona.ts`](../src/lib/persona.ts), [`validation.ts`](../src/lib/validation.ts)):
+      added `PERSONA_SHIFT` to the effect-kind registry with a new `PERSONA`
+      target kind + `usesDials` meta; exported the canonical `PERSONA_DIAL_KEYS`/
+      `PERSONA_DIAL_LABELS`/`clampPersonaDial` from the persona lib (single source
+      of truth, also adopted by the studio form parser); extended `eventEffectSchema`
+      with a `dialShifts` record requiring ≥1 non-zero known-dial delta and
+      rejecting unknown dials.
+- [x] **Phrasing** ([`event-effects.ts`](../src/lib/event-effects.ts)):
+      `describeDialShifts` ("Compliance −15, Resentment +20", canonical order) +
+      a `describeEffect` `PERSONA_SHIFT` branch.
+- [x] **Service** ([`review.ts`](../src/server/services/review.ts),
+      [`events.ts`](../src/server/services/events.ts)): `StoredEventEffect.dialShifts`
+      parse/serialize; `assertValidDeclaredEffect` validates the deltas; a
+      kind-aware `assertDeclaredEffectTarget` (crawler kinds resolve a crawler,
+      `PERSONA_SHIFT` resolves a `SYSTEM_AI`) replaces the bare crawler check in
+      create/update event; the flag-eval crawler probe skips non-crawler kinds; the
+      apply dispatch gains a `PERSONA_SHIFT` branch → `applyPersonaShiftEffect`
+      (loads the active snapshot, applies clamped deltas, files a new active
+      snapshot via `applyCreatePersonaSnapshot`). `applyEventEffects` pre-flights a
+      missing active persona inline (parity with the COLLAPSE_FLOOR pre-flight);
+      `EventEffectView`/projection + the create/update patch builders carry
+      `dialShifts`.
+- [x] **UI** ([`effect-rows.tsx`](../src/components/entities/effect-rows.tsx),
+      [`actions.ts`](<../src/app/(dm)/actions.ts>),
+      [`timeline-panel.tsx`](../src/components/entities/timeline-panel.tsx),
+      [`campaign-timeline.tsx`](../src/components/timeline/campaign-timeline.tsx),
+      [`effect-operation-editor.tsx`](../src/components/review/effect-operation-editor.tsx),
+      [`review/page.tsx`](<../src/app/(dm)/campaigns/[id]/review/page.tsx>)): the
+      effect-row editor renders per-dial delta inputs + a `SYSTEM_AI` target
+      typeahead for `PERSONA_SHIFT` (candidate pool chosen by the kind's target);
+      `parseEffectRows` collects `effectDial_<i>_<dial>` fields; both timelines and
+      the Review Queue effect editor thread persona candidates + a persona search
+      action; a shared `effectViewToRow` helper centralizes the view→row mapping.
+- [x] **Tests:** new DB-backed
+      [`persona-shift-effect.test.ts`](../tests/unit/persona-shift-effect.test.ts)
+      (schema validation; the drift creates a new active snapshot with clamped
+      dials + preserved history + provenance + AFFECTED participant; declare-via-edit
+      path; non-System-AI target rejected; no-active-persona pre-flight; locked
+      active persona blocks the shift; projection of declared dialShifts). UI/pure:
+      [`effect-rows.test.tsx`](../tests/unit/effect-rows.test.tsx),
+      [`effect-operation-editor.test.tsx`](../tests/unit/effect-operation-editor.test.tsx),
+      [`event-effects-section.test.tsx`](../tests/unit/event-effects-section.test.tsx)
+      (`describeEffect`/`describeDialShifts`),
+      [`dm-actions.test.ts`](../tests/unit/dm-actions.test.ts) (dial form parsing),
+      [`campaign-timeline.test.tsx`](../tests/unit/campaign-timeline.test.tsx)
+      (persona typeahead → search action), and
+      [`review-queue-page.test.tsx`](../tests/unit/review-queue-page.test.tsx)
+      (persona-shift summary in the queue).
+- [x] **Verification:** `npm run lint` (0 errors; pre-existing settings-action
+      warnings only), `npm run typecheck`, `npm run build` (routes unchanged), and
+      the full coverage gate green (statements 95.08%, branches 88.38%, functions
+      96.69%, lines 96.82%). In-browser verification was deferred (the local dev
+      server occupies the only Next dev port — see the preview note in memory).
 
 ## Maintenance — consolidated AI actions + Job Queue filters ✅ (2026-06-19)
 

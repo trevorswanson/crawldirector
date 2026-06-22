@@ -25,6 +25,7 @@ import {
 } from "@/components/entities/entity-typeahead";
 import {
   EffectRows,
+  effectViewToRow,
   type EffectRowValue,
 } from "@/components/entities/effect-rows";
 import { EventEffectsSection } from "@/components/entities/event-effects-section";
@@ -145,6 +146,7 @@ function EditEventForm({
   self,
   candidates,
   crawlerCandidates,
+  personaCandidates,
   anchorCandidates,
   resolveName,
   onSubmit,
@@ -157,11 +159,13 @@ function EditEventForm({
   onRemoveCausality,
   searchParticipants,
   searchCrawlers,
+  searchPersona,
 }: {
   event: EntityEvent;
   self: EntityCandidate;
   candidates: EntityCandidate[];
   crawlerCandidates: EntityCandidate[];
+  personaCandidates: EntityCandidate[];
   anchorCandidates: { id: string; title: string }[];
   resolveName: (targetId: string) => string;
   onSubmit: (formData: FormData) => Promise<void>;
@@ -174,6 +178,7 @@ function EditEventForm({
   onRemoveCausality: (linkId: string) => void;
   searchParticipants?: (query: string) => Promise<EntityCandidate[]>;
   searchCrawlers?: (query: string) => Promise<EntityCandidate[]>;
+  searchPersona?: (query: string) => Promise<EntityCandidate[]>;
 }) {
   // Prefill the participant editor with the full current set: a row for every
   // role the viewed entity holds (it can have more than one) followed by the
@@ -189,22 +194,9 @@ function EditEventForm({
   // immutable history (preserved by the service).
   const initialEffects: EffectRowValue[] = event.effects
     .filter((effect) => !effect.applied)
-    .map((effect) => ({
-      id: effect.id,
-      kind: effect.kind,
-      target: effect.targetId
-        ? crawlerCandidates.find((candidate) => candidate.id === effect.targetId) ?? {
-            id: effect.targetId,
-            name: resolveName(effect.targetId),
-            type: "CRAWLER",
-          }
-        : null,
-      stat: effect.stat ?? "gold",
-      delta: effect.delta != null ? String(effect.delta) : "",
-      valueNumber: effect.valueNumber != null ? String(effect.valueNumber) : "",
-      alive: effect.value ? "alive" : "dead",
-      note: effect.note ?? "",
-    }));
+    .map((effect) =>
+      effectViewToRow(effect, { crawlerCandidates, personaCandidates, resolveName }),
+    );
   const [pending, startTransition] = useTransition();
 
   const handleSubmit = (formData: FormData) => {
@@ -246,8 +238,10 @@ function EditEventForm({
         />
         <EffectRows
           candidates={crawlerCandidates}
+          personaCandidates={personaCandidates}
           initial={initialEffects}
           searchCandidates={searchCrawlers}
+          searchPersonaCandidates={searchPersona}
         />
         <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
           <input type="checkbox" name="secret" value="true" defaultChecked={event.secret} />
@@ -400,6 +394,10 @@ export function TimelinePanel({
   const crawlerCandidates = [self, ...candidates].filter(
     (candidate) => candidate.type === "CRAWLER",
   );
+  // PERSONA_SHIFT effects target the campaign's SYSTEM_AI entities.
+  const personaCandidates = [self, ...candidates].filter(
+    (candidate) => candidate.type === "SYSTEM_AI",
+  );
   // Floors are set via the time picker, not as participants (ADR 0008 §3).
   const participantCandidates = withoutFloorCandidates(candidates);
   const nameById = new Map(
@@ -463,6 +461,10 @@ export function TimelinePanel({
   const searchCrawlers = (query: string) =>
     searchEntityCandidatesAction(campaignId, query, {
       types: ["CRAWLER"],
+    });
+  const searchPersona = (query: string) =>
+    searchEntityCandidatesAction(campaignId, query, {
+      types: ["SYSTEM_AI"],
     });
 
   const handleSubmit = async (formData: FormData) => {
@@ -698,6 +700,7 @@ export function TimelinePanel({
                           self={self}
                           candidates={candidates}
                           crawlerCandidates={crawlerCandidates}
+                          personaCandidates={personaCandidates}
                           anchorCandidates={anchorCandidates}
                           resolveName={resolveName}
                           onSubmit={handleEdit(e.id)}
@@ -713,6 +716,7 @@ export function TimelinePanel({
                           onRemoveCausality={setRemovedCausalityId}
                           searchParticipants={searchParticipants}
                           searchCrawlers={searchCrawlers}
+                          searchPersona={searchPersona}
                         />
                       ) : null}
                       <div className="flex flex-wrap gap-[6px]">
@@ -859,7 +863,9 @@ export function TimelinePanel({
           )}
           <EffectRows
             candidates={crawlerCandidates}
+            personaCandidates={personaCandidates}
             searchCandidates={searchCrawlers}
+            searchPersonaCandidates={searchPersona}
           />
           <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
             <input

@@ -26,10 +26,16 @@ import { ServiceError } from "@/lib/errors";
 import { readFloorData, type FloorData } from "@/lib/floor";
 import {
   eventEffectKindValues,
+  eventEffectKindMeta,
   eventEffectRequiresTarget,
   type EventEffectKind,
 } from "@/lib/event-effect-kinds";
-import { compilePersonaPrompt } from "@/lib/persona";
+import {
+  clampPersonaDial,
+  compilePersonaPrompt,
+  normalizePersonaDials,
+  PERSONA_DIAL_KEYS,
+} from "@/lib/persona";
 import { buildCampaignResolveContext } from "@/server/services/event-resolve-context";
 import { generateRankBetween } from "@/lib/rank";
 import {
@@ -2391,12 +2397,39 @@ async function evaluateApplyEventEffectsOperationFlags(
       isStale = true;
       continue;
     }
-    // Subject-derived kinds (COLLAPSE_FLOOR) touch no hand-picked crawler, so the
-    // crawler lock/staleness probe doesn't apply — their floor writes are
-    // lock-checked when the op is actually applied.
+    const target = eventEffectKindMeta[reviewed.kind].target;
+    // Subject-derived kinds (COLLAPSE_FLOOR, target NONE) touch no hand-picked
+    // entity — their floor-anchor writes are lock-checked when the op is applied.
+    if (target === "NONE") continue;
     if (!reviewed.targetEntityId) continue;
     try {
       assertValidDeclaredEffect(reviewed);
+      if (target === "PERSONA") {
+        // A PERSONA_SHIFT drifts the target System AI's active persona into a
+        // brand-new active snapshot, deactivating the current one. Surface the
+        // same preconditions the apply (applyPersonaShiftEffect →
+        // applyCreatePersonaSnapshot) enforces so they route through the
+        // blocked/stale review workflow instead of throwing inside the approval
+        // transaction: a missing/archived target or no active snapshot to shift
+        // is stale; a locked active snapshot blocks the op (its activation can't
+        // be flipped — same guard as assertActivePersonaUnlocked).
+        await assertPersonaShiftTarget(tx, changeSet.campaignId, reviewed.targetEntityId);
+        const active = await tx.personaSnapshot.findFirst({
+          where: {
+            campaignId: changeSet.campaignId,
+            entityId: reviewed.targetEntityId,
+            isActive: true,
+            status: { not: CanonStatus.ARCHIVED },
+          },
+          select: { locked: true },
+        });
+        if (!active) {
+          isStale = true;
+          continue;
+        }
+        blockedByLock ||= active.locked;
+        continue;
+      }
       const crawler = await loadEffectTargetCrawler(
         tx,
         changeSet.campaignId,
@@ -4240,6 +4273,9 @@ type StoredEventEffect = {
   delta?: number;
   valueNumber?: number;
   value?: boolean;
+  // PERSONA_SHIFT: per-dial integer deltas applied to the target's active
+  // persona snapshot.
+  dialShifts?: Record<string, number>;
   note: string | null;
   applied: boolean;
   appliedChangeSetId: string | null;
@@ -4249,6 +4285,22 @@ type StoredEventEffect = {
 };
 
 const eventEffectKinds = new Set<string>(eventEffectKindValues);
+const personaDialKeySet = new Set<string>(PERSONA_DIAL_KEYS);
+
+// Read a stored/patched dialShifts blob into a record of known dials with finite
+// integer deltas; unknown keys and non-integers are dropped. Undefined when empty
+// so a non-persona effect carries no dialShifts.
+function parseStoredDialShifts(value: JsonValue | undefined): Record<string, number> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, JsonValue>;
+  const out: Record<string, number> = {};
+  for (const [key, raw] of Object.entries(record)) {
+    if (personaDialKeySet.has(key) && typeof raw === "number" && Number.isInteger(raw)) {
+      out[key] = raw;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
 // Crawler numeric fields an event effect can update -> `crawler.*` patch field +
 // a floor the result is clamped to (DCC stats never go negative; level and floor
 // are 1-based).
@@ -4292,6 +4344,7 @@ function parseEventEffects(value: JsonValue | undefined): StoredEventEffect[] {
       valueNumber:
         typeof record.valueNumber === "number" ? record.valueNumber : undefined,
       value: typeof record.value === "boolean" ? record.value : undefined,
+      dialShifts: parseStoredDialShifts(record.dialShifts),
       note:
         typeof record.note === "string" && record.note.length > 0 ? record.note : null,
       applied: record.applied === true,
@@ -4329,6 +4382,14 @@ function assertValidDeclaredEffect(effect: StoredEventEffect) {
   if (effect.kind === "SET_ALIVE" && typeof effect.value !== "boolean") {
     throw new ServiceError("Effect needs an alive/dead value.");
   }
+  if (effect.kind === "PERSONA_SHIFT") {
+    const meaningful = Object.entries(effect.dialShifts ?? {}).filter(
+      ([key, value]) => personaDialKeySet.has(key) && Number.isInteger(value) && value !== 0,
+    );
+    if (meaningful.length === 0) {
+      throw new ServiceError("Persona shift needs at least one non-zero dial delta.");
+    }
+  }
 }
 
 function serializeEventEffects(
@@ -4342,6 +4403,7 @@ function serializeEventEffects(
     ...(typeof effect.delta === "number" ? { delta: effect.delta } : {}),
     ...(typeof effect.valueNumber === "number" ? { valueNumber: effect.valueNumber } : {}),
     ...(typeof effect.value === "boolean" ? { value: effect.value } : {}),
+    ...(effect.dialShifts ? { dialShifts: effect.dialShifts } : {}),
     ...(effect.note ? { note: effect.note } : {}),
     applied: effect.applied,
     ...(effect.appliedChangeSetId
@@ -4401,6 +4463,44 @@ async function loadEffectTargetCrawler(
     throw new ServiceError("Effect target must be a crawler.");
   }
   return entity.crawler;
+}
+
+// A PERSONA_SHIFT effect targets a SYSTEM_AI entity — the persona it drifts.
+// Validate the target is live canon of that type at declaration time so a bad
+// target is caught early (parity with the crawler check).
+async function assertPersonaShiftTarget(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  entityId: string,
+) {
+  const entity = await tx.entity.findFirst({
+    where: {
+      id: entityId,
+      campaignId,
+      status: CanonStatus.CANON,
+      type: EntityType.SYSTEM_AI,
+    },
+    select: { id: true },
+  });
+  if (!entity) {
+    throw new ServiceError("Persona shift target must be a System AI entity.");
+  }
+}
+
+// Validate a declared effect's hand-picked target by kind (crawler kinds resolve
+// a crawler; PERSONA_SHIFT resolves a SYSTEM_AI). Subject-derived kinds
+// (COLLAPSE_FLOOR) carry no target and are skipped.
+async function assertDeclaredEffectTarget(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  effect: StoredEventEffect,
+) {
+  if (!eventEffectRequiresTarget(effect.kind) || !effect.targetEntityId) return;
+  if (effect.kind === "PERSONA_SHIFT") {
+    await assertPersonaShiftTarget(tx, campaignId, effect.targetEntityId);
+  } else {
+    await loadEffectTargetCrawler(tx, campaignId, effect.targetEntityId);
+  }
 }
 
 // Build the entity patch an effect applies (absolute `to` values the
@@ -4927,9 +5027,7 @@ async function applyCreateEvent(
     }));
     for (const effect of effects) {
       assertValidDeclaredEffect(effect);
-      if (eventEffectRequiresTarget(effect.kind) && effect.targetEntityId) {
-        await loadEffectTargetCrawler(tx, changeSet.campaignId, effect.targetEntityId);
-      }
+      await assertDeclaredEffectTarget(tx, changeSet.campaignId, effect);
     }
   }
 
@@ -5091,9 +5189,7 @@ async function applyUpdateEvent(
     }));
     for (const effect of declared) {
       assertValidDeclaredEffect(effect);
-      if (eventEffectRequiresTarget(effect.kind) && effect.targetEntityId) {
-        await loadEffectTargetCrawler(tx, changeSet.campaignId, effect.targetEntityId);
-      }
+      await assertDeclaredEffectTarget(tx, changeSet.campaignId, effect);
     }
     nextEffects = [...applied, ...declared];
     data.effects = serializeEventEffects(nextEffects);
@@ -5293,6 +5389,78 @@ async function applyFloorCollapseEffect(
   }
 }
 
+// Materialize a PERSONA_SHIFT effect: drift the target SYSTEM_AI's active
+// persona by the given per-dial deltas. The shift is enacted as a *new* active
+// snapshot (the prior one is preserved as history, ADR M6 — the persona is an
+// ordered series along campaign time), carrying the prior snapshot's
+// values/agendas/voice/etc. forward with only the dials nudged. The new snapshot
+// routes through the same `applyCreatePersonaSnapshot` apply path as a studio
+// edit, so it recompiles the prompt, enforces one-active-per-entity, refuses to
+// deactivate a *locked* active snapshot (surfacing as a blocked op — invariant
+// #2), and records provenance pointing back to this change set. Anchored to the
+// event's in-game time so the timeline shows when the drift happened.
+async function applyPersonaShiftEffect(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operationId: string,
+  entityId: string,
+  dialShifts: Record<string, number>,
+  note: string | null,
+  eventInGameTime: JsonValue,
+) {
+  await assertPersonaShiftTarget(tx, changeSet.campaignId, entityId);
+  const active = await tx.personaSnapshot.findFirst({
+    where: {
+      campaignId: changeSet.campaignId,
+      entityId,
+      isActive: true,
+      status: { not: CanonStatus.ARCHIVED },
+    },
+    select: {
+      label: true,
+      dials: true,
+      values: true,
+      agendas: true,
+      resources: true,
+      knowledgeScope: true,
+      voiceGuide: true,
+      constraints: true,
+    },
+  });
+  if (!active) {
+    throw new ServiceError(
+      "The System AI has no active persona snapshot to shift. Activate one first.",
+    );
+  }
+
+  // Apply the deltas to the current dials, clamped to the canonical range.
+  // `dialShifts` is already validated to known integer dials by parseEventEffects.
+  const currentDials = normalizePersonaDials(active.dials);
+  const nextDials: Record<string, number> = { ...currentDials };
+  for (const [key, delta] of Object.entries(dialShifts)) {
+    nextDials[key] = clampPersonaDial((currentDials[key] ?? 0) + delta);
+  }
+
+  // Carry the prior persona forward, nudging only the dials; the new snapshot
+  // becomes active and is anchored to the event's time. Locks are not inherited —
+  // a drift produces a fresh, editable snapshot.
+  const patch: ReviewPatch = {
+    entityId: { to: entityId },
+    label: { to: note ?? active.label },
+    inGameTime: { to: eventInGameTime },
+    orderKey: { to: orderKeyFromInGameTime(eventInGameTime) },
+    dials: { to: nextDials },
+    values: { to: active.values as JsonValue },
+    agendas: { to: active.agendas as JsonValue },
+    resources: { to: active.resources as JsonValue },
+    knowledgeScope: { to: active.knowledgeScope },
+    voiceGuide: { to: active.voiceGuide },
+    constraints: { to: active.constraints },
+    isActive: { to: true },
+  };
+  await applyCreatePersonaSnapshot(tx, changeSet, operationId, patch);
+}
+
 // Apply an event's unapplied effects to entity state. Each effect's entity write
 // goes through `applyUpdateEntity`, so it is lock-aware (a locked target / field
 // blocks the whole operation), version-bumped, and provenance-tracked. Marks the
@@ -5366,6 +5534,7 @@ async function applyApplyEventEffects(
       effect.delta = reviewed.delta;
       effect.valueNumber = reviewed.valueNumber;
       effect.value = reviewed.value;
+      effect.dialShifts = reviewed.dialShifts;
       effect.note = reviewed.note;
     }
     assertValidDeclaredEffect(effect);
@@ -5374,6 +5543,23 @@ async function applyApplyEventEffects(
       // floor, not a hand-picked crawler. Materializes as floor open/collapse
       // anchors + a current-floor advance rather than a `crawler.*` patch.
       await applyFloorCollapseEffect(tx, changeSet, operationId, event.inGameTime as JsonValue);
+    } else if (effect.kind === "PERSONA_SHIFT") {
+      // Drift the target SYSTEM_AI's active persona by the dial deltas. The
+      // result is a brand-new active snapshot (the prior one is preserved as
+      // history), so the persona arc lives in the causality graph: event →
+      // this change set → new snapshot (its provenance points back here).
+      const targetEntityId = effect.targetEntityId;
+      if (!targetEntityId) throw new ServiceError("Persona shift needs a target.");
+      await applyPersonaShiftEffect(
+        tx,
+        changeSet,
+        operationId,
+        targetEntityId,
+        effect.dialShifts ?? {},
+        effect.note,
+        event.inGameTime as JsonValue,
+      );
+      affectedParticipantIds.add(targetEntityId);
     } else {
       const targetEntityId = effect.targetEntityId;
       if (!targetEntityId) {

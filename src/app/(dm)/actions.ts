@@ -27,8 +27,11 @@ import {
 } from "@/lib/validation";
 import {
   eventEffectKindValues,
+  eventEffectKindMeta,
   eventEffectRequiresTarget,
+  type EventEffectKind,
 } from "@/lib/event-effect-kinds";
+import { PERSONA_DIAL_KEYS } from "@/lib/persona";
 import {
   archiveRelationship,
   createRelationship,
@@ -1316,6 +1319,19 @@ function parseEffectRows(formData: FormData) {
     if (valueNumber != null && valueNumber !== "") effect.valueNumber = valueNumber;
     const value = formData.get(`effectValue_${index}`);
     if (value != null && value !== "") effect.value = value;
+    // PERSONA_SHIFT: gather per-dial deltas from `effectDial_<index>_<dial>`,
+    // skipping blank inputs. Validation rejects the effect if none are non-zero.
+    if (kind != null && eventEffectKindValues.includes(kind as never) &&
+        eventEffectKindMeta[kind as EventEffectKind].usesDials) {
+      const dialShifts: Record<string, string> = {};
+      for (const dial of PERSONA_DIAL_KEYS) {
+        const raw = formData.get(`effectDial_${index}_${dial}`);
+        if (raw != null && raw.toString().trim() !== "") {
+          dialShifts[dial] = raw.toString();
+        }
+      }
+      if (Object.keys(dialShifts).length > 0) effect.dialShifts = dialShifts;
+    }
     effects.push(effect);
   }
   return effects;
@@ -1829,15 +1845,6 @@ export async function getCampaignHeaderStatusAction(campaignId: string) {
 export type PersonaActionState =
   | { error?: string; ok?: boolean; timestamp?: number }
   | undefined;
-
-const PERSONA_DIAL_KEYS = [
-  "sentience",
-  "compliance",
-  "volatility",
-  "benevolence",
-  "resentment",
-  "theatricality",
-] as const;
 
 function nonEmptyLines(value: FormDataEntryValue | null): string[] {
   return (value?.toString() ?? "")

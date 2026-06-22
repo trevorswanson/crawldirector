@@ -60,6 +60,7 @@ import {
   eventEffectRequiresTarget,
   type EventEffectKind,
 } from "@/lib/event-effect-kinds";
+import { PERSONA_DIAL_KEYS } from "@/lib/persona";
 import {
   formatInputValue,
   formatReviewValue,
@@ -69,6 +70,19 @@ import { phraseTimeRef, readTimeRef } from "@/lib/time-ref";
 import { cn } from "@/lib/utils";
 
 const effectStatSet = new Set<string>(eventEffectStatValues);
+
+// Read a stored dialShifts blob into known dials with integer deltas (PERSONA_SHIFT
+// seed); null when empty.
+function readSeedDialShifts(value: unknown): Record<string, number> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const out: Record<string, number> = {};
+  for (const key of PERSONA_DIAL_KEYS) {
+    const raw = record[key];
+    if (typeof raw === "number" && Number.isInteger(raw)) out[key] = raw;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
 
 const SOURCE_FILTERS = ["ALL", "AI", "PLAYER", "IMPORT"] as const;
 type SourceFilter = (typeof SOURCE_FILTERS)[number];
@@ -145,6 +159,9 @@ export default async function ReviewQueuePage({
     : [];
   const crawlerCandidates = entityCandidates.filter(
     (entity) => entity.type === "CRAWLER",
+  );
+  const personaCandidates = entityCandidates.filter(
+    (entity) => entity.type === "SYSTEM_AI",
   );
   const activeSource = sourceFilter(query.source);
   const filteredChangeSets = changeSets.filter((changeSet) =>
@@ -330,6 +347,7 @@ export default async function ReviewQueuePage({
             campaignId={id}
             changeSet={selected}
             crawlerCandidates={crawlerCandidates}
+            personaCandidates={personaCandidates}
             entityCandidates={entityCandidates}
             run={selected.runId ? runGroups.find((run) => run.runId === selected.runId) : undefined}
             readOnly={showClosed || Boolean(reopenedChangeSet)}
@@ -416,6 +434,7 @@ function ReviewDetail({
   campaignId,
   changeSet,
   crawlerCandidates,
+  personaCandidates,
   entityCandidates,
   run,
   readOnly = false,
@@ -424,6 +443,7 @@ function ReviewDetail({
   campaignId: string;
   changeSet: ReviewQueueItem;
   crawlerCandidates: EntityCandidate[];
+  personaCandidates: EntityCandidate[];
   entityCandidates: EntityCandidate[];
   run?: PendingRunGroup;
   readOnly?: boolean;
@@ -555,6 +575,7 @@ function ReviewDetail({
             campaignId={campaignId}
             changeSetId={changeSet.id}
             crawlerCandidates={crawlerCandidates}
+            personaCandidates={personaCandidates}
             entityCandidates={entityCandidates}
             operation={operation}
             readOnly={readOnly}
@@ -569,6 +590,7 @@ function OperationBlock({
   campaignId,
   changeSetId,
   crawlerCandidates,
+  personaCandidates,
   entityCandidates,
   operation,
   readOnly,
@@ -576,6 +598,7 @@ function OperationBlock({
   campaignId: string;
   changeSetId: string;
   crawlerCandidates: EntityCandidate[];
+  personaCandidates: EntityCandidate[];
   entityCandidates: EntityCandidate[];
   operation: ReviewQueueOperation;
   readOnly: boolean;
@@ -670,6 +693,7 @@ function OperationBlock({
             operation.id,
           )}
           candidates={crawlerCandidates}
+          personaCandidates={personaCandidates}
           effects={readEffectSeeds(
             operation.patch as ReviewPatch,
             operation.editedPatch as ReviewPatch | null,
@@ -958,6 +982,7 @@ function readEffectSeeds(
       valueNumber:
         typeof record.valueNumber === "number" ? record.valueNumber : null,
       value: typeof record.value === "boolean" ? record.value : null,
+      dialShifts: readSeedDialShifts(record.dialShifts),
       note: typeof record.note === "string" ? record.note : null,
       before: preview?.before,
       after: preview?.after,

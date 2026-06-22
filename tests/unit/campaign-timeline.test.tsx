@@ -486,6 +486,49 @@ describe("CampaignTimeline", () => {
     expect(submitted.get("effectDelta_0")).toBe("100");
   });
 
+  it("logs a new event with a PERSONA_SHIFT effect via the persona typeahead", async () => {
+    createCampaignEventAction.mockResolvedValue(undefined);
+    searchEntityCandidatesAction.mockResolvedValue([
+      { id: "sys1", name: "The System", type: "SYSTEM_AI" },
+    ]);
+    renderTimeline({
+      events: [],
+      candidates: [...candidates, { id: "sys1", name: "The System", type: "SYSTEM_AI" }],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Log event" }));
+    fireEvent.change(screen.getByPlaceholderText("What happened?"), {
+      target: { value: "Court overturns the ruling" },
+    });
+    fireEvent.click(screen.getByTitle("Remove participant row"));
+
+    fireEvent.click(screen.getByRole("button", { name: /add effect/i }));
+    fireEvent.change(screen.getByLabelText("Effect kind"), {
+      target: { value: "PERSONA_SHIFT" },
+    });
+    // Drive the SYSTEM_AI typeahead, which invokes the persona search action.
+    fireEvent.change(screen.getByPlaceholderText("Search System AI..."), {
+      target: { value: "Sys" },
+    });
+    await waitFor(() =>
+      expect(searchEntityCandidatesAction).toHaveBeenCalledWith("c1", "Sys", {
+        types: ["SYSTEM_AI"],
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /The System/ }));
+    fireEvent.change(screen.getByLabelText("Resentment shift"), {
+      target: { value: "20" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Log event/ }));
+
+    await waitFor(() => expect(createCampaignEventAction).toHaveBeenCalledTimes(1));
+    const [, , submitted] = createCampaignEventAction.mock.calls[0];
+    expect(submitted.get("effectKind_0")).toBe("PERSONA_SHIFT");
+    expect(submitted.get("effectTarget_0")).toBe("sys1");
+    expect(submitted.get("effectDial_0_resentment")).toBe("20");
+  });
+
   it("surfaces action errors and lets the DM cancel", async () => {
     createCampaignEventAction.mockResolvedValue({ error: "Could not log the event." });
     renderTimeline({ events: [] });
@@ -630,6 +673,7 @@ describe("CampaignTimeline", () => {
               delta: 12000,
               valueNumber: null,
               value: null,
+              dialShifts: null,
               note: null,
               applied: false,
               appliedChangeSetId: null,
@@ -667,6 +711,7 @@ describe("CampaignTimeline", () => {
               delta: 12000,
               valueNumber: null,
               value: null,
+              dialShifts: null,
               note: null,
               applied: false,
               appliedChangeSetId: null,
@@ -719,6 +764,7 @@ describe("CampaignTimeline", () => {
               delta: null,
               valueNumber: 1,
               value: null,
+              dialShifts: null,
               note: "Entered the crawl",
               applied: false,
               appliedChangeSetId: null,
@@ -1205,6 +1251,7 @@ describe("CampaignTimeline", () => {
           delta: 0,
           valueNumber: null,
           value: null,
+          dialShifts: null,
           note: "Bonus chest",
           applied: false,
           appliedChangeSetId: null,
@@ -1220,6 +1267,7 @@ describe("CampaignTimeline", () => {
           delta: null,
           valueNumber: null,
           value: null,
+          dialShifts: null,
           note: null,
           applied: false,
           appliedChangeSetId: null,
@@ -1235,6 +1283,7 @@ describe("CampaignTimeline", () => {
           delta: null,
           valueNumber: 100,
           value: null,
+          dialShifts: null,
           note: null,
           applied: false,
           appliedChangeSetId: null,

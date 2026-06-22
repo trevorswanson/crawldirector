@@ -940,6 +940,57 @@ describe("review queue actions", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
   });
 
+  it("parses PERSONA_SHIFT dial inputs into a dialShifts patch", async () => {
+    const fd = new FormData();
+    fd.set("effectCount", "1");
+    fd.set("effectId_0", "fx-shift");
+    fd.set("effectKind_0", "PERSONA_SHIFT");
+    fd.set("effectTarget_0", "system-1");
+    fd.set("effectDial_0_resentment", "20");
+    fd.set("effectDial_0_compliance", "-15");
+    // Blank dial inputs are dropped, not sent as 0.
+    fd.set("effectDial_0_sentience", "");
+    fd.set("effectNote_0", "Court ruling");
+
+    await editEventEffectsOperationAction("c1", "cs1", "op1", fd);
+
+    expect(setChangeOperationDecision).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      "cs1",
+      "op1",
+      {
+        decision: "EDITED",
+        editedPatch: {
+          effects: {
+            to: [
+              {
+                id: "fx-shift",
+                kind: "PERSONA_SHIFT",
+                targetEntityId: "system-1",
+                dialShifts: { resentment: 20, compliance: -15 },
+                note: "Court ruling",
+              },
+            ],
+          },
+        },
+      },
+    );
+  });
+
+  it("rejects a PERSONA_SHIFT with no non-zero dial deltas", async () => {
+    const fd = new FormData();
+    fd.set("effectCount", "1");
+    fd.set("effectId_0", "fx-shift");
+    fd.set("effectKind_0", "PERSONA_SHIFT");
+    fd.set("effectTarget_0", "system-1");
+    fd.set("effectDial_0_resentment", "0");
+
+    await editEventEffectsOperationAction("c1", "cs1", "op1", fd);
+
+    expect(setChangeOperationDecision).not.toHaveBeenCalled();
+  });
+
   it("ignores unsupported new effect rows without stable ids", async () => {
     const fd = new FormData();
     fd.set("effectCount", "1");

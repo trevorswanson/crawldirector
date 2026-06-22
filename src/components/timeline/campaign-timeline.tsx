@@ -43,6 +43,7 @@ import {
 } from "@/components/entities/entity-typeahead";
 import {
   EffectRows,
+  effectViewToRow,
   type EffectRowValue,
 } from "@/components/entities/effect-rows";
 import { EventTimeFields } from "@/components/entities/event-time-fields";
@@ -181,17 +182,21 @@ function NewEventForm({
   campaignId,
   candidates,
   crawlerCandidates,
+  personaCandidates,
   anchorCandidates,
   searchParticipants,
   searchCrawlers,
+  searchPersona,
   onClose,
 }: {
   campaignId: string;
   candidates: EntityCandidate[];
   crawlerCandidates: EntityCandidate[];
+  personaCandidates: EntityCandidate[];
   anchorCandidates: { id: string; title: string }[];
   searchParticipants?: (query: string) => Promise<EntityCandidate[]>;
   searchCrawlers?: (query: string) => Promise<EntityCandidate[]>;
+  searchPersona?: (query: string) => Promise<EntityCandidate[]>;
   onClose: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -345,7 +350,9 @@ function NewEventForm({
 
       <EffectRows
         candidates={crawlerCandidates}
+        personaCandidates={personaCandidates}
         searchCandidates={searchCrawlers}
+        searchPersonaCandidates={searchPersona}
       />
 
       {error && (
@@ -379,11 +386,13 @@ function EditEventForm({
   event,
   candidates,
   crawlerCandidates,
+  personaCandidates,
   anchorCandidates,
   resolveName,
   causeCandidates,
   searchParticipants,
   searchCrawlers,
+  searchPersona,
   onFocusEvent,
   onRemoveCausality,
   onClose,
@@ -392,11 +401,13 @@ function EditEventForm({
   event: CampaignTimelineEvent;
   candidates: EntityCandidate[];
   crawlerCandidates: EntityCandidate[];
+  personaCandidates: EntityCandidate[];
   anchorCandidates: { id: string; title: string }[];
   resolveName: (targetId: string) => string;
   causeCandidates: { id: string; title: string }[];
   searchParticipants?: (query: string) => Promise<EntityCandidate[]>;
   searchCrawlers?: (query: string) => Promise<EntityCandidate[]>;
+  searchPersona?: (query: string) => Promise<EntityCandidate[]>;
   onFocusEvent: (eventId: string) => void;
   onRemoveCausality: (linkId: string) => void;
   onClose: () => void;
@@ -414,22 +425,9 @@ function EditEventForm({
   );
   const initialEffects: EffectRowValue[] = event.effects
     .filter((effect) => !effect.applied)
-    .map((effect) => ({
-      id: effect.id,
-      kind: effect.kind,
-      target: effect.targetId
-        ? crawlerCandidates.find((candidate) => candidate.id === effect.targetId) ?? {
-            id: effect.targetId,
-            name: resolveName(effect.targetId),
-            type: "CRAWLER",
-          }
-        : null,
-      stat: effect.stat ?? "gold",
-      delta: effect.delta != null ? String(effect.delta) : "",
-      valueNumber: effect.valueNumber != null ? String(effect.valueNumber) : "",
-      alive: effect.value ? "alive" : "dead",
-      note: effect.note ?? "",
-    }));
+    .map((effect) =>
+      effectViewToRow(effect, { crawlerCandidates, personaCandidates, resolveName }),
+    );
 
   const [pending, startTransition] = useTransition();
 
@@ -491,8 +489,10 @@ function EditEventForm({
         />
         <EffectRows
           candidates={crawlerCandidates}
+          personaCandidates={personaCandidates}
           initial={initialEffects}
           searchCandidates={searchCrawlers}
+          searchPersonaCandidates={searchPersona}
         />
       </form>
 
@@ -877,11 +877,19 @@ export function CampaignTimeline({
   const crawlerCandidates = candidates.filter(
     (candidate) => candidate.type === "CRAWLER",
   );
+  // PERSONA_SHIFT effects target the campaign's SYSTEM_AI entities.
+  const personaCandidates = candidates.filter(
+    (candidate) => candidate.type === "SYSTEM_AI",
+  );
   const searchParticipants = (query: string) =>
     searchEntityCandidatesAction(campaignId, query);
   const searchCrawlers = (query: string) =>
     searchEntityCandidatesAction(campaignId, query, {
       types: ["CRAWLER"],
+    });
+  const searchPersona = (query: string) =>
+    searchEntityCandidatesAction(campaignId, query, {
+      types: ["SYSTEM_AI"],
     });
   const nameById = new Map(
     candidates.map((candidate) => [candidate.id, candidate.name] as const),
@@ -1210,11 +1218,13 @@ export function CampaignTimeline({
               event={event}
               candidates={candidates}
               crawlerCandidates={crawlerCandidates}
+              personaCandidates={personaCandidates}
               anchorCandidates={anchorCandidates}
               resolveName={resolveName}
               causeCandidates={causeCandidates}
               searchParticipants={searchParticipants}
               searchCrawlers={searchCrawlers}
+              searchPersona={searchPersona}
               onFocusEvent={focusEvent}
               onRemoveCausality={setRemovedCausalityId}
               onClose={() => setEditingId(null)}
@@ -1531,9 +1541,11 @@ export function CampaignTimeline({
                   campaignId={campaignId}
                   candidates={candidates}
                   crawlerCandidates={crawlerCandidates}
+                  personaCandidates={personaCandidates}
                   anchorCandidates={anchorCandidates}
                   searchParticipants={searchParticipants}
                   searchCrawlers={searchCrawlers}
+                  searchPersona={searchPersona}
                   onClose={() => setOpen(false)}
                 />
               </div>

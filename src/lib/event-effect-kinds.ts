@@ -19,6 +19,7 @@ export const eventEffectKindValues = [
   "SET_STAT",
   "SET_ALIVE",
   "COLLAPSE_FLOOR",
+  "PERSONA_SHIFT",
 ] as const;
 export type EventEffectKind = (typeof eventEffectKindValues)[number];
 
@@ -37,8 +38,10 @@ export type EventEffectStat = (typeof eventEffectStatValues)[number];
 // What an effect points at. CRAWLER kinds carry a hand-picked crawler
 // `targetEntityId` and mutate `crawler.*`. NONE kinds derive their subject from
 // the event (e.g. COLLAPSE_FLOOR acts on the event's own floor) and need no
-// target. Future non-crawler entity targets would add their EntityType here.
-export type EffectTargetKind = "CRAWLER" | "NONE";
+// target. PERSONA kinds carry a hand-picked SYSTEM_AI `targetEntityId` and drift
+// its active persona snapshot's dials (PERSONA_SHIFT). Future non-crawler entity
+// targets would add their EntityType here.
+export type EffectTargetKind = "CRAWLER" | "NONE" | "PERSONA";
 
 export type EventEffectKindMeta = {
   label: string;
@@ -48,13 +51,16 @@ export type EventEffectKindMeta = {
   usesStat: boolean;
   // Shows the alive/dead selector (SET_ALIVE).
   usesAlive: boolean;
+  // Shows the per-dial delta inputs (PERSONA_SHIFT).
+  usesDials: boolean;
 };
 
 export const eventEffectKindMeta: Record<EventEffectKind, EventEffectKindMeta> = {
-  ADJUST_STAT: { label: "Adjust stat", target: "CRAWLER", usesStat: true, usesAlive: false },
-  SET_STAT: { label: "Set stat", target: "CRAWLER", usesStat: true, usesAlive: false },
-  SET_ALIVE: { label: "Set alive/dead", target: "CRAWLER", usesStat: false, usesAlive: true },
-  COLLAPSE_FLOOR: { label: "Collapse floor", target: "NONE", usesStat: false, usesAlive: false },
+  ADJUST_STAT: { label: "Adjust stat", target: "CRAWLER", usesStat: true, usesAlive: false, usesDials: false },
+  SET_STAT: { label: "Set stat", target: "CRAWLER", usesStat: true, usesAlive: false, usesDials: false },
+  SET_ALIVE: { label: "Set alive/dead", target: "CRAWLER", usesStat: false, usesAlive: true, usesDials: false },
+  COLLAPSE_FLOOR: { label: "Collapse floor", target: "NONE", usesStat: false, usesAlive: false, usesDials: false },
+  PERSONA_SHIFT: { label: "Persona shift", target: "PERSONA", usesStat: false, usesAlive: false, usesDials: true },
 };
 
 // Whether a kind needs a hand-picked target entity (vs deriving it from the event).
