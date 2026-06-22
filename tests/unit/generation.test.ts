@@ -1,35 +1,43 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ChangeSource, EventParticipantRole, Visibility } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { ProviderError } from "@/server/ai/types";
 
 // Mock the provider seam only — no SDK, no network. The generation
 // orchestration, the generator's prompt/patch logic, and the review pipeline all
 // run for real against the test database.
-const { resolveCampaignProvider } = vi.hoisted(() => ({
+const { resolveCampaignProvider, resolveCampaignEmbedder } = vi.hoisted(() => ({
   resolveCampaignProvider: vi.fn(),
+  resolveCampaignEmbedder: vi.fn(),
 }));
 
-// Partial mock: stub only the provider seam (no SDK, no network). Everything else
-// — including `describeProviderError` and the `resolveCampaignEmbedder` that
-// retrieval's `searchCanon` calls (M5 slice 6) — stays real. With no AI key
-// configured the real embedder resolves to null, so these tests exercise the
-// full-text retrieval path.
+// Partial mock: stub the chat-provider seam (no SDK, no network) and default
+// retrieval's embedder to null, so ordinary tests use real full-text search.
+// `describeProviderError` and all review/DB behavior remain real; the dedicated
+// spend-cap test opts into a fake embedder to exercise paid retrieval.
 vi.mock("@/server/ai", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/server/ai")>()),
   resolveCampaignProvider,
+  resolveCampaignEmbedder,
 }));
 
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
-import { createGenericEntity } from "@/server/services/entities";
+import { createCrawler, createGenericEntity } from "@/server/services/entities";
+import { createEvent, setEventLock } from "@/server/services/events";
 import {
   fleshOutEntities,
   fleshOutEntity,
   inferRelationshipsForEntity,
+  proposeEventConsequences,
   scaffoldStubEntities,
 } from "@/server/services/generation";
-import { approveChangeSet, setEntityLock } from "@/server/services/review";
+import {
+  applyAutoApprovedEventChangeSet,
+  approveChangeSet,
+  setEntityLock,
+} from "@/server/services/review";
 import { createPersonaSnapshot } from "@/server/services/persona";
 import { recordAiUsage, setCampaignSpendCap } from "@/server/services/ai-usage";
 
@@ -85,10 +93,15 @@ async function seed() {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  resolveCampaignEmbedder.mockResolvedValue(null);
   await prisma.aiUsage.deleteMany();
   await prisma.provenance.deleteMany();
   await prisma.changeOperation.deleteMany();
   await prisma.changeSet.deleteMany();
+  await prisma.eventCausality.deleteMany();
+  await prisma.eventParticipant.deleteMany();
+  await prisma.personaSnapshot.deleteMany();
+  await prisma.event.deleteMany();
   await prisma.crawler.deleteMany();
   await prisma.searchDoc.deleteMany();
   await prisma.entity.deleteMany();
@@ -100,6 +113,302 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await prisma.$disconnect();
+});
+
+async function makeConsequenceCrawler(userId: string, campaignId: string, name = "Carl") {
+  return createCrawler(userId, campaignId, {
+    name,
+    summary: "A crawler in trouble.",
+    description: "",
+    visibility: Visibility.DM_ONLY,
+    tags: [],
+    level: 1,
+    gold: 100,
+    viewCount: BigInt(0),
+    followerCount: BigInt(0),
+    favoriteCount: BigInt(0),
+    killCount: 0,
+    isAlive: true,
+  });
+}
+
+async function makeConsequenceEvent(
+  userId: string,
+  campaignId: string,
+  title: string,
+  participants: Array<{ entityId: string; role: EventParticipantRole }> = [],
+) {
+  return createEvent(userId, campaignId, {
+    title,
+    summary: "The Dungeon makes its move.",
+    basis: "ABSOLUTE_DAY",
+    offset: 5,
+    secret: false,
+    participants,
+  });
+}
+
+function fakeConsequenceProvider(data: unknown, over: { id?: string; model?: string } = {}) {
+  const model = over.model ?? "claude-opus-4-8";
+  return {
+    id: over.id ?? "anthropic",
+    model,
+    generate: vi.fn(),
+    generateStructured: vi.fn().mockResolvedValue({ data, usage: SAMPLE_USAGE, model }),
+  };
+}
+
+describe("proposeEventConsequences", () => {
+  it("files review-only crawler effects and causal links, then applies them only after approval", async () => {
+    const { dmId, campaignId } = await seed();
+    const crawler = await makeConsequenceCrawler(dmId, campaignId);
+    const source = await makeConsequenceEvent(dmId, campaignId, "Arena ambush", [
+      { entityId: crawler.id, role: EventParticipantRole.ACTOR },
+    ]);
+    const consequence = await makeConsequenceEvent(dmId, campaignId, "Arena aftermath");
+    const provider = fakeConsequenceProvider({
+      effects: [
+        {
+          kind: "ADJUST_STAT",
+          targetEntityId: crawler.id,
+          stat: "gold",
+          delta: 25,
+          note: "The loot payout lands.",
+        },
+      ],
+      causalLinks: [{ effectEventId: consequence.id, weight: 1, note: "The ambush causes it." }],
+    });
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    const result = await proposeEventConsequences(dmId, campaignId, source.id);
+
+    expect(result).toMatchObject({
+      providerId: "anthropic",
+      model: "claude-opus-4-8",
+      operationCount: 2,
+    });
+    const proposal = await prisma.changeSet.findUniqueOrThrow({
+      where: { id: result.changeSetId },
+      include: { operations: true },
+    });
+    expect(proposal).toMatchObject({
+      status: "PENDING",
+      source: ChangeSource.AI,
+      providerId: "anthropic",
+      model: "claude-opus-4-8",
+      promptId: "event-consequences",
+      promptVersion: "1",
+    });
+    expect(proposal.operations.map((operation) => operation.op).sort()).toEqual([
+      "APPLY_EVENT_EFFECTS",
+      "CREATE_EVENT_CAUSALITY",
+    ]);
+    await expect(prisma.event.findUniqueOrThrow({ where: { id: source.id } })).resolves.toMatchObject({
+      effects: [],
+    });
+    await expect(prisma.crawler.findUniqueOrThrow({ where: { id: crawler.id } })).resolves.toMatchObject({
+      gold: 100,
+    });
+    expect(
+      await prisma.eventCausality.count({ where: { campaignId, causeId: source.id, effectId: consequence.id } }),
+    ).toBe(0);
+
+    await prisma.changeOperation.updateMany({
+      where: { changeSetId: result.changeSetId, decision: "PENDING" },
+      data: { decision: "ACCEPTED" },
+    });
+    await approveChangeSet(dmId, campaignId, result.changeSetId);
+
+    await expect(prisma.crawler.findUniqueOrThrow({ where: { id: crawler.id } })).resolves.toMatchObject({
+      gold: 125,
+    });
+    await expect(
+      prisma.eventCausality.findFirst({ where: { campaignId, causeId: source.id, effectId: consequence.id } }),
+    ).resolves.not.toBeNull();
+  });
+
+  it("proposes a persona shift for an active System AI and preserves AI provenance on approval", async () => {
+    const { dmId, campaignId } = await seed();
+    const system = await createGenericEntity(dmId, campaignId, {
+      type: "SYSTEM_AI",
+      name: "The System",
+      summary: "Dungeon intelligence.",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    await createPersonaSnapshot(dmId, campaignId, system.id, {
+      label: "Broadcast Host",
+      dials: { resentment: 25, theatricality: 50 },
+      values: [],
+      overtAgendas: [],
+      secretAgendas: [],
+      resources: [],
+      knowledgeScope: "OMNISCIENT",
+      voiceGuide: "Cruelly enthusiastic.",
+      constraints: "",
+      isActive: true,
+    });
+    const source = await makeConsequenceEvent(dmId, campaignId, "The System watches", [
+      { entityId: system.id, role: EventParticipantRole.ACTOR },
+    ]);
+    resolveCampaignProvider.mockResolvedValue(
+      fakeConsequenceProvider({
+        effects: [
+          {
+            kind: "PERSONA_SHIFT",
+            targetEntityId: system.id,
+            dialShifts: { resentment: 15 },
+            note: "The ratings turn ugly.",
+          },
+        ],
+        causalLinks: [],
+      }),
+    );
+
+    const result = await proposeEventConsequences(dmId, campaignId, source.id);
+    const proposal = await prisma.changeSet.findUniqueOrThrow({
+      where: { id: result.changeSetId },
+      include: { operations: true },
+    });
+    const patch = proposal.operations[0]!.patch as { effects: { to: Array<{ targetEntityId: string }> } };
+    expect(patch.effects.to[0]!.targetEntityId).toBe(system.id);
+    await prisma.changeOperation.updateMany({
+      where: { changeSetId: result.changeSetId },
+      data: { decision: "ACCEPTED" },
+    });
+    await approveChangeSet(dmId, campaignId, result.changeSetId);
+
+    const snapshots = await prisma.personaSnapshot.findMany({
+      where: { campaignId, entityId: system.id },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(snapshots).toHaveLength(2);
+    expect(snapshots[1]).toMatchObject({ isActive: true, source: ChangeSource.AI });
+    await expect(
+      prisma.provenance.findFirst({
+        where: { personaSnapshotId: snapshots[1]!.id, changeSetId: result.changeSetId, source: ChangeSource.AI },
+      }),
+    ).resolves.not.toBeNull();
+  });
+
+  it("rejects players and locked source events before resolving a provider", async () => {
+    const { dmId, playerId, campaignId } = await seed();
+    const source = await makeConsequenceEvent(dmId, campaignId, "Broadcast interruption");
+    const provider = fakeConsequenceProvider({ effects: [], causalLinks: [] });
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    await expect(proposeEventConsequences(playerId, campaignId, source.id)).rejects.toBeInstanceOf(
+      ServiceError,
+    );
+    expect(resolveCampaignProvider).not.toHaveBeenCalled();
+
+    await setEventLock(dmId, campaignId, source.id, true);
+    await expect(proposeEventConsequences(dmId, campaignId, source.id)).rejects.toThrow(/locked/i);
+    expect(resolveCampaignProvider).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing provider before the model call", async () => {
+    const { dmId, campaignId } = await seed();
+    const source = await makeConsequenceEvent(dmId, campaignId, "No provider event");
+    resolveCampaignProvider.mockResolvedValue(null);
+
+    await expect(proposeEventConsequences(dmId, campaignId, source.id)).rejects.toThrow(/No AI provider/i);
+  });
+
+  it("surfaces a provider failure safely without a proposal or usage record", async () => {
+    const { dmId, campaignId } = await seed();
+    const crawler = await makeConsequenceCrawler(dmId, campaignId);
+    const source = await makeConsequenceEvent(dmId, campaignId, "Provider failure", [
+      { entityId: crawler.id, role: EventParticipantRole.ACTOR },
+    ]);
+    const provider = fakeConsequenceProvider({ effects: [], causalLinks: [] });
+    provider.generateStructured.mockRejectedValue({ status: 500, message: "x-api-key: sk-leak" });
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    const error = await proposeEventConsequences(dmId, campaignId, source.id).catch((caught) => caught);
+    expect(error).toBeInstanceOf(ServiceError);
+    expect(error.message).not.toContain("sk-leak");
+    expect(await prisma.changeSet.count({ where: { campaignId, source: ChangeSource.AI } })).toBe(0);
+    expect(await prisma.aiUsage.count({ where: { campaignId } })).toBe(0);
+  });
+
+  it("records paid usage but files no proposal when all model ids are unusable", async () => {
+    const { dmId, campaignId } = await seed();
+    const source = await makeConsequenceEvent(dmId, campaignId, "Invalid ids");
+    await makeConsequenceEvent(dmId, campaignId, "A valid causal candidate");
+    resolveCampaignProvider.mockResolvedValue(
+      fakeConsequenceProvider({
+        effects: [{ kind: "SET_ALIVE", targetEntityId: "not-a-crawler", value: false }],
+        causalLinks: [{ effectEventId: "not-an-event" }],
+      }),
+    );
+
+    await expect(proposeEventConsequences(dmId, campaignId, source.id)).rejects.toThrow(/usable/i);
+    expect(await prisma.changeSet.count({ where: { campaignId, source: ChangeSource.AI } })).toBe(0);
+    const usages = await prisma.aiUsage.findMany({ where: { campaignId } });
+    expect(usages).toHaveLength(1);
+    expect(usages[0]!.changeSetId).toBeNull();
+  });
+
+  it("filters existing causal links and collapse proposals when collapse preflight fails", async () => {
+    const { dmId, campaignId } = await seed();
+    const source = await makeConsequenceEvent(dmId, campaignId, "Unanchored floor event");
+    const consequence = await makeConsequenceEvent(dmId, campaignId, "Existing consequence");
+    await applyAutoApprovedEventChangeSet(dmId, campaignId, {
+      title: "Record existing causality",
+      operations: [
+        {
+          op: "CREATE_EVENT_CAUSALITY",
+          patch: {
+            causeId: { to: source.id },
+            effectId: { to: consequence.id },
+          },
+        },
+      ],
+    });
+    const provider = fakeConsequenceProvider({
+      effects: [{ kind: "COLLAPSE_FLOOR", note: "The floor falls." }],
+      causalLinks: [{ effectEventId: consequence.id }],
+    });
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    await expect(proposeEventConsequences(dmId, campaignId, source.id)).rejects.toThrow(/usable/i);
+    const prompt = provider.generateStructured.mock.calls[0]![0].messages[0].content as string;
+    expect(prompt).toContain("COLLAPSE_FLOOR allowed: no");
+    expect(await prisma.aiUsage.count({ where: { campaignId } })).toBe(1);
+  });
+
+  it("re-checks the spend cap after retrieval spends on a query embedding", async () => {
+    const { dmId, campaignId } = await seed();
+    const crawler = await makeConsequenceCrawler(dmId, campaignId);
+    const source = await makeConsequenceEvent(dmId, campaignId, "Embedding cap", [
+      { entityId: crawler.id, role: EventParticipantRole.ACTOR },
+    ]);
+    const provider = fakeConsequenceProvider({ effects: [], causalLinks: [] });
+    resolveCampaignProvider.mockResolvedValue(provider);
+    resolveCampaignEmbedder.mockResolvedValue({
+      id: "openai",
+      model: "gpt-4o-mini",
+      embeddingModel: "gpt-4o-mini",
+      embeddingDimensions: 1536,
+      generate: vi.fn(),
+      generateStructured: vi.fn(),
+      embed: vi.fn().mockResolvedValue({
+        vectors: [Array.from({ length: 1536 }, () => 0.01)],
+        model: "gpt-4o-mini",
+        usage: { inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      }),
+      redactSecrets: (value: string) => value,
+    });
+    await setCampaignSpendCap(dmId, campaignId, 0.01);
+
+    await expect(proposeEventConsequences(dmId, campaignId, source.id)).rejects.toThrow(/spend cap/i);
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+    await expect(
+      prisma.aiUsage.findFirst({ where: { campaignId, generatorId: "search-query-embed" } }),
+    ).resolves.not.toBeNull();
+  });
 });
 
 describe("fleshOutEntity", () => {
