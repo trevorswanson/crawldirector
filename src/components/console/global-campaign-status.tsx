@@ -60,12 +60,14 @@ export function GlobalCampaignStatus() {
 
   if (!campaignId || loadedStatus?.campaignId !== campaignId) return null;
   const status = loadedStatus.status;
-  const floorLabel =
-    status?.currentFloor == null
-      ? null
-      : status.currentFloor.floorNumber == null
-        ? status.currentFloor.name
-        : `Floor ${status.currentFloor.floorNumber}`;
+  const currentFloor = status?.currentFloor;
+  let floorLabel: string | null = null;
+  if (currentFloor) {
+    floorLabel =
+      currentFloor.floorNumber == null
+        ? currentFloor.name
+        : `Floor ${currentFloor.floorNumber}`;
+  }
   const dayLabel = status?.currentDay == null ? null : `Day ${status.currentDay}`;
   const label = [floorLabel, dayLabel].filter(Boolean).join(" · ");
   if (!label) return null;
