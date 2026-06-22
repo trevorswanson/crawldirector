@@ -155,6 +155,16 @@ export function DmNav() {
   const hasIntegrityIssues = (activeIssueCount ?? 0) > 0;
   const integrityIssueLabel =
     activeIssueCount === 1 ? "1 issue" : `${activeIssueCount ?? 0} issues`;
+  // Single source of truth for the canon-integrity breakdown — drives both the
+  // stacked bar and the text summary so they can't drift.
+  const integritySegments = integrity
+    ? [
+        { code: "DM", text: "DM", color: "var(--ink-dim)", weight: integrity.dmPercent },
+        { code: "AI", text: "AI-origin", color: "var(--ai)", weight: integrity.aiPercent },
+        { code: "PLR", text: "Player", color: "var(--player)", weight: integrity.playerPercent },
+        { code: "LCK", text: "locked", color: "var(--sys)", weight: integrity.lockedPercent },
+      ].filter((segment) => segment.weight > 0)
+    : [];
 
   return (
     <nav className="flex h-full flex-col overflow-y-auto border-r border-[var(--line)] bg-[var(--bg-1)] py-3">
@@ -189,34 +199,22 @@ export function DmNav() {
             <p className="kicker dim mb-2 text-[9px] nolead">Canon integrity</p>
           )}
           <div className="mb-[7px] flex gap-[5px] items-center">
-            {[
-              { label: "DM", color: "var(--ink-dim)", weight: integrity.dmPercent },
-              { label: "AI", color: "var(--ai)", weight: integrity.aiPercent },
-              { label: "PLR", color: "var(--player)", weight: integrity.playerPercent },
-              { label: "LCK", color: "var(--sys)", weight: integrity.lockedPercent },
-            ]
-              .filter((item) => item.weight > 0)
-              .map(({ label, color, weight }) => (
-                <div
-                  key={label}
-                  className="opacity-70"
-                  title={`${label}: ${weight}%`}
-                  style={{
-                    flex: weight,
-                    height: "4px",
-                    backgroundColor: color,
-                  }}
-                />
-              ))}
+            {integritySegments.map(({ code, color, weight }) => (
+              <div
+                key={code}
+                className="opacity-70"
+                title={`${code}: ${weight}%`}
+                style={{
+                  flex: weight,
+                  height: "4px",
+                  backgroundColor: color,
+                }}
+              />
+            ))}
           </div>
           <p className="font-mono text-[9px] text-[var(--ink-faint)] leading-none">
-            {[
-              integrity.dmPercent > 0 && `${integrity.dmPercent}% DM`,
-              integrity.aiPercent > 0 && `${integrity.aiPercent}% AI-origin`,
-              integrity.playerPercent > 0 && `${integrity.playerPercent}% Player`,
-              integrity.lockedPercent > 0 && `${integrity.lockedPercent}% locked`,
-            ]
-              .filter(Boolean)
+            {integritySegments
+              .map((segment) => `${segment.weight}% ${segment.text}`)
               .join(" · ")}
           </p>
         </div>
