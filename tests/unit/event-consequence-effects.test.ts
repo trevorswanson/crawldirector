@@ -35,6 +35,7 @@ function makeUser(email: string) {
 }
 
 beforeEach(async () => {
+  await prisma.aiUsage.deleteMany();
   await prisma.provenance.deleteMany();
   await prisma.changeOperation.deleteMany();
   await prisma.changeSet.deleteMany();
@@ -44,6 +45,7 @@ beforeEach(async () => {
   await prisma.event.deleteMany();
   await prisma.relationship.deleteMany();
   await prisma.crawler.deleteMany();
+  await prisma.searchDoc.deleteMany();
   await prisma.faction.deleteMany();
   await prisma.floor.deleteMany();
   await prisma.entity.deleteMany();
@@ -54,6 +56,22 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+  await prisma.aiUsage.deleteMany();
+  await prisma.provenance.deleteMany();
+  await prisma.changeOperation.deleteMany();
+  await prisma.changeSet.deleteMany();
+  await prisma.eventCausality.deleteMany();
+  await prisma.eventParticipant.deleteMany();
+  await prisma.personaSnapshot.deleteMany();
+  await prisma.event.deleteMany();
+  await prisma.relationship.deleteMany();
+  await prisma.crawler.deleteMany();
+  await prisma.searchDoc.deleteMany();
+  await prisma.entity.deleteMany();
+  await prisma.auditLog.deleteMany();
+  await prisma.membership.deleteMany();
+  await prisma.campaign.deleteMany();
+  await prisma.user.deleteMany();
   await prisma.$disconnect();
 });
 
