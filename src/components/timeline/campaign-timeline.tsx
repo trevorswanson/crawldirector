@@ -155,6 +155,23 @@ function formatDayRange(range: { min: number; max: number }): string {
     : `Day ${range.min} – ${range.max}`;
 }
 
+// Floor-ladder dot color by state: the current floor accents; otherwise it dims
+// the further a floor is from "logged" (has events) → "reached" → unreached.
+function floorDotColor(floor: { current: boolean; logged: boolean; reached: boolean }): string {
+  if (floor.current) return "var(--accent)";
+  if (floor.logged) return "var(--ink-dim)";
+  if (floor.reached) return "var(--ink-faint)";
+  return "var(--line-strong)";
+}
+
+// Floor-ladder label color: the current floor accents, reached floors read
+// normally, unreached floors fade.
+function floorLabelColor(floor: { current: boolean; reached: boolean }): string {
+  if (floor.current) return "var(--accent)";
+  if (floor.reached) return "var(--ink-dim)";
+  return "var(--ink-faint)";
+}
+
 // An effect rendered as a signed stat diff (broadcast HUD: glanceable deltas).
 function effectDiff(effect: EventEffectView): { text: string; color: string } {
   if (typeof effect.delta === "number" && effect.delta !== 0) {
@@ -1339,6 +1356,15 @@ export function CampaignTimeline({
                   {TIMELINE_FILTERS.map((option) => {
                     const on = filter === option;
                     const color = filterColor(option);
+                    let background = "transparent";
+                    let textColor = "var(--ink-dim)";
+                    if (on) {
+                      background =
+                        option === "ALL"
+                          ? "var(--accent)"
+                          : `color-mix(in srgb, ${color} 16%, transparent)`;
+                      textColor = option === "ALL" ? "var(--accent-ink)" : color;
+                    }
                     return (
                       <button
                         key={option}
@@ -1346,16 +1372,8 @@ export function CampaignTimeline({
                         onClick={() => setFilter(option)}
                         className="border px-[9px] py-1 font-mono text-[10px] uppercase tracking-[.08em]"
                         style={{
-                          background: on
-                            ? option === "ALL"
-                              ? "var(--accent)"
-                              : `color-mix(in srgb, ${color} 16%, transparent)`
-                            : "transparent",
-                          color: on
-                            ? option === "ALL"
-                              ? "var(--accent-ink)"
-                              : color
-                            : "var(--ink-dim)",
+                          background,
+                          color: textColor,
                           borderColor: on ? color : "var(--line-strong)",
                         }}
                       >
@@ -1378,13 +1396,7 @@ export function CampaignTimeline({
             />
             {floors.ladder.map((floor) => {
               const accent = floor.current;
-              const dotColor = accent
-                ? "var(--accent)"
-                : floor.logged
-                  ? "var(--ink-dim)"
-                  : floor.reached
-                    ? "var(--ink-faint)"
-                    : "var(--line-strong)";
+              const dotColor = floorDotColor(floor);
               return (
                 <button
                   key={floor.number}
@@ -1411,13 +1423,7 @@ export function CampaignTimeline({
                   <span className="min-w-0">
                     <span
                       className="font-mono text-[11px]"
-                      style={{
-                        color: accent
-                          ? "var(--accent)"
-                          : floor.reached
-                            ? "var(--ink-dim)"
-                            : "var(--ink-faint)",
-                      }}
+                      style={{ color: floorLabelColor(floor) }}
                     >
                       F{String(floor.number).padStart(2, "0")}
                     </span>
@@ -1430,11 +1436,12 @@ export function CampaignTimeline({
                       </span>
                     )}
                   </span>
-                  {floor.logged ? (
+                  {floor.logged && (
                     <span className="font-mono text-[10px] text-[var(--ink-faint)]">
                       {floor.count}
                     </span>
-                  ) : floor.reached ? null : (
+                  )}
+                  {!floor.logged && !floor.reached && (
                     <Lock aria-hidden size={10} className="text-[var(--line-strong)]" />
                   )}
                 </button>
