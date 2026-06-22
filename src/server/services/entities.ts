@@ -325,6 +325,32 @@ export async function createCrawler(
   return entityResult(result.targetIds[0]);
 }
 
+// CANON/PENDING narrow the status facet; everything else (LOCKED, unset) just
+// excludes archived entities.
+function entityStatusWhere(
+  status: EntityStatusFilter | undefined,
+): Prisma.EntityWhereInput["status"] {
+  switch (status) {
+    case "CANON":
+      return CanonStatus.CANON;
+    case "PENDING":
+      return CanonStatus.PENDING;
+    default:
+      return { not: CanonStatus.ARCHIVED };
+  }
+}
+
+// Tags are stored as entered, so match a search term against its common casings
+// (raw, lower, upper, Title) for a case-insensitive tag `hasSome`.
+function tagCasings(term: string): string[] {
+  return [
+    term,
+    term.toLowerCase(),
+    term.toUpperCase(),
+    term.charAt(0).toUpperCase() + term.slice(1).toLowerCase(),
+  ];
+}
+
 export async function listEntitiesForUser(
   userId: string,
   campaignId: string,
@@ -357,13 +383,7 @@ export async function listEntitiesForUser(
 
   const where: Prisma.EntityWhereInput = {
     campaignId,
-    // CANON/PENDING narrow the status; everything else just excludes archived.
-    status:
-      status === "CANON"
-        ? CanonStatus.CANON
-        : status === "PENDING"
-          ? CanonStatus.PENDING
-          : { not: CanonStatus.ARCHIVED },
+    status: entityStatusWhere(status),
     ...(lockedOnly
       ? {
           OR: [
@@ -384,12 +404,7 @@ export async function listEntitiesForUser(
     ...(tag
       ? {
           tags: {
-            hasSome: [
-              tag,
-              tag.toLowerCase(),
-              tag.toUpperCase(),
-              tag.charAt(0).toUpperCase() + tag.slice(1).toLowerCase(),
-            ],
+            hasSome: tagCasings(tag),
           },
         }
       : {}),
@@ -401,12 +416,7 @@ export async function listEntitiesForUser(
             { description: { contains: query, mode: "insensitive" } },
             {
               tags: {
-                hasSome: [
-                  query,
-                  query.toLowerCase(),
-                  query.toUpperCase(),
-                  query.charAt(0).toUpperCase() + query.slice(1).toLowerCase(),
-                ],
+                hasSome: tagCasings(query),
               },
             },
           ],

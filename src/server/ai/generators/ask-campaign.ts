@@ -84,7 +84,7 @@ export function buildAskPrompt(ctx: AskPromptContext): {
     },
   ];
 
-  if (ctx.styleGuide && ctx.styleGuide.trim()) {
+  if (ctx.styleGuide?.trim()) {
     system.push({
       cache: true,
       text: `Campaign style guide (honor this tone when phrasing your answer):\n${ctx.styleGuide.trim()}`,

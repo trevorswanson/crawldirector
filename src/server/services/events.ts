@@ -120,6 +120,24 @@ function readDialShifts(value: unknown): Record<string, number> | null {
   return Object.keys(out).length > 0 ? out : null;
 }
 
+// The stored reviewStatus when it's one of the known states; otherwise infer
+// APPLIED from the legacy `applied` flag (older effects predate reviewStatus),
+// else null.
+function resolveEffectReviewStatus(
+  record: Record<string, unknown>,
+): "PENDING" | "REJECTED" | "SUPERSEDED" | "APPLIED" | null {
+  if (
+    record.reviewStatus === "PENDING" ||
+    record.reviewStatus === "REJECTED" ||
+    record.reviewStatus === "SUPERSEDED" ||
+    record.reviewStatus === "APPLIED"
+  ) {
+    return record.reviewStatus;
+  }
+  if (record.applied === true) return "APPLIED";
+  return null;
+}
+
 // Project the event.effects JSON for display. Players get an empty list.
 function projectEventEffects(value: unknown, isPlayer: boolean): EventEffectView[] {
   if (isPlayer || !Array.isArray(value)) return [];
@@ -156,15 +174,7 @@ function projectEventEffects(value: unknown, isPlayer: boolean): EventEffectView
         typeof record.pendingChangeSetId === "string" ? record.pendingChangeSetId : null,
       pendingOperationId:
         typeof record.pendingOperationId === "string" ? record.pendingOperationId : null,
-      reviewStatus:
-        record.reviewStatus === "PENDING" ||
-        record.reviewStatus === "REJECTED" ||
-        record.reviewStatus === "SUPERSEDED" ||
-        record.reviewStatus === "APPLIED"
-          ? record.reviewStatus
-          : record.applied === true
-            ? "APPLIED"
-            : null,
+      reviewStatus: resolveEffectReviewStatus(record),
     });
   }
   return views;
@@ -396,6 +406,23 @@ function isPlayerVisibleEvent(
   );
 }
 
+// Build the sparse effect patch the review pipeline stores: only the keys an
+// effect actually sets, so absent fields stay absent. Shared by create/update
+// event so the two paths can't drift.
+function toEffectPatch(effect: NonNullable<CreateEventInput["effects"]>[number]) {
+  return {
+    ...(effect.id ? { id: effect.id } : {}),
+    kind: effect.kind,
+    ...(effect.targetEntityId ? { targetEntityId: effect.targetEntityId } : {}),
+    ...(effect.stat ? { stat: effect.stat } : {}),
+    ...(typeof effect.delta === "number" ? { delta: effect.delta } : {}),
+    ...(typeof effect.valueNumber === "number" ? { valueNumber: effect.valueNumber } : {}),
+    ...(typeof effect.value === "boolean" ? { value: effect.value } : {}),
+    ...(effect.dialShifts ? { dialShifts: effect.dialShifts } : {}),
+    ...(effect.note ? { note: effect.note } : {}),
+  };
+}
+
 /**
  * Log an event with participants. Routes through the review pipeline as an
  * auto-approved DM change set so the event carries provenance
@@ -441,17 +468,7 @@ export async function createEvent(
     // Declared unapplied effects; applyCreateEvent validates each target is a
     // crawler. The DM applies them later from the timeline (parity with edit).
     patch.effects = {
-      to: parsed.effects.map((effect) => ({
-        ...(effect.id ? { id: effect.id } : {}),
-        kind: effect.kind,
-        ...(effect.targetEntityId ? { targetEntityId: effect.targetEntityId } : {}),
-        ...(effect.stat ? { stat: effect.stat } : {}),
-        ...(typeof effect.delta === "number" ? { delta: effect.delta } : {}),
-        ...(typeof effect.valueNumber === "number" ? { valueNumber: effect.valueNumber } : {}),
-        ...(typeof effect.value === "boolean" ? { value: effect.value } : {}),
-        ...(effect.dialShifts ? { dialShifts: effect.dialShifts } : {}),
-        ...(effect.note ? { note: effect.note } : {}),
-      })),
+      to: parsed.effects.map(toEffectPatch),
     };
   }
 
@@ -520,17 +537,7 @@ export async function updateEvent(
     // The desired unapplied effect set; the review service preserves any already
     // applied effects and validates these targets are crawlers.
     patch.effects = {
-      to: parsed.effects.map((effect) => ({
-        ...(effect.id ? { id: effect.id } : {}),
-        kind: effect.kind,
-        ...(effect.targetEntityId ? { targetEntityId: effect.targetEntityId } : {}),
-        ...(effect.stat ? { stat: effect.stat } : {}),
-        ...(typeof effect.delta === "number" ? { delta: effect.delta } : {}),
-        ...(typeof effect.valueNumber === "number" ? { valueNumber: effect.valueNumber } : {}),
-        ...(typeof effect.value === "boolean" ? { value: effect.value } : {}),
-        ...(effect.dialShifts ? { dialShifts: effect.dialShifts } : {}),
-        ...(effect.note ? { note: effect.note } : {}),
-      })),
+      to: parsed.effects.map(toEffectPatch),
     };
   }
 
@@ -1108,12 +1115,14 @@ export async function listCampaignFloors(
   const rawCurrentFloorId = campaign?.currentFloorId ?? null;
   // For players, only expose the current-floor id if the referenced FLOOR entity
   // survived the visibility filter — otherwise we'd leak a DM-only entity id.
-  const currentFloorId =
-    isPlayer && rawCurrentFloorId != null
-      ? floorEntities.some((f) => f.id === rawCurrentFloorId)
-        ? rawCurrentFloorId
-        : null
-      : rawCurrentFloorId;
+  let currentFloorId = rawCurrentFloorId;
+  if (
+    isPlayer &&
+    rawCurrentFloorId != null &&
+    !floorEntities.some((f) => f.id === rawCurrentFloorId)
+  ) {
+    currentFloorId = null;
+  }
   const currentFloorNumber =
     currentFloorId != null
       ? floorEntities.find((floor) => floor.id === currentFloorId)?.floorNumber ?? null

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { formatEntityType } from "@/lib/entities";
 import type { ReviewPatch } from "@/server/services/review";
 import type { LLMMessage, LLMSystemBlock } from "../types";
+import { normalizeTags } from "./tags";
 
 // Entity-fleshing generator (M4 — docs/04-ai-integration.md). The first
 // generator: it expands a stub (or thin) entity into a fuller summary +
@@ -157,7 +158,7 @@ export function buildFleshEntityPrompt(ctx: FleshEntityContext): {
     },
   ];
 
-  if (ctx.styleGuide && ctx.styleGuide.trim()) {
+  if (ctx.styleGuide?.trim()) {
     system.push({
       cache: true,
       text: `Campaign style guide (honor this tone and these constraints):\n${ctx.styleGuide.trim()}`,
@@ -168,7 +169,7 @@ export function buildFleshEntityPrompt(ctx: FleshEntityContext): {
   // reads as the System AI's current self. Marked cacheable: it's stable across
   // a run. The no-reveal rule keeps secret agendas out of the produced text;
   // it's a proposal a DM reviews and players only ever read approved canon.
-  if (ctx.personaPrompt && ctx.personaPrompt.trim()) {
+  if (ctx.personaPrompt?.trim()) {
     system.push({
       cache: true,
       text: [
@@ -275,20 +276,6 @@ export function fleshEntityToPatch(
 // True when the patch carries at least one proposed field beyond `_baseVersion`.
 export function patchHasChanges(patch: ReviewPatch): boolean {
   return Object.keys(patch).some((k) => k !== "_baseVersion");
-}
-
-function normalizeTags(tags: string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const raw of tags) {
-    const tag = raw.trim();
-    if (!tag) continue;
-    const key = tag.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(tag);
-  }
-  return out;
 }
 
 function sameTags(a: string[], b: string[]): boolean {
