@@ -95,23 +95,29 @@ async function findActiveCampaignJob(
   return active.find((job) => job.status === JobStatus.RUNNING) ?? active[0] ?? null;
 }
 
-// Enqueue the manual semantic-index rebuild once per active campaign run.
-// Unlike the automatic search-index scheduler, this guards both QUEUED and
-// RUNNING jobs: a repeated button click should point at the active rebuild
-// rather than queue overlapping paid embedding work.
-export async function enqueueBuildSemanticIndexJob(
+type SingletonCampaignJobResult = {
+  id: string;
+  status: ActiveJobStatus;
+  created: boolean;
+};
+
+// Enqueue a once-per-active-run campaign job, pointing a repeated trigger at the
+// in-flight job rather than queuing overlapping passes. Unlike the automatic
+// search-index scheduler, this guards both QUEUED and RUNNING jobs. The
+// per-campaign row lock serializes concurrent enqueue attempts without changing
+// the broader job table constraints; content-change auto-refresh can still queue
+// a follow-up while a worker is RUNNING.
+async function enqueueSingletonCampaignJob(
   userId: string,
   campaignId: string,
-): Promise<{ id: string; status: ActiveJobStatus; created: boolean }> {
+  kind: JobKind,
+): Promise<SingletonCampaignJobResult> {
   await assertCampaignDm(userId, campaignId);
 
   return prisma.$transaction(async (tx) => {
-    // Serialize manual enqueue attempts for one campaign without changing the
-    // broader job table constraints. Content-change auto-refresh can still queue
-    // a follow-up while a worker is RUNNING.
     await tx.$queryRaw`SELECT id FROM "Campaign" WHERE id = ${campaignId} FOR UPDATE`;
 
-    const active = await findActiveCampaignJob(tx, campaignId, JobKind.EMBED_SEARCH_DOCS);
+    const active = await findActiveCampaignJob(tx, campaignId, kind);
     if (active) {
       return {
         id: active.id,
@@ -124,7 +130,7 @@ export async function enqueueBuildSemanticIndexJob(
       data: {
         campaignId,
         createdById: userId,
-        kind: JobKind.EMBED_SEARCH_DOCS,
+        kind,
         status: JobStatus.QUEUED,
         payload: {},
       },
@@ -134,39 +140,24 @@ export async function enqueueBuildSemanticIndexJob(
   });
 }
 
-// Enqueue a campaign data-schema migration once per active campaign run. This
-// mirrors the manual semantic rebuild guard: repeated triggers should point at
-// the in-flight mechanical migration instead of queuing overlapping passes.
+// Enqueue the manual semantic-index rebuild once per active campaign run: a
+// repeated button click should point at the active rebuild rather than queue
+// overlapping paid embedding work.
+export async function enqueueBuildSemanticIndexJob(
+  userId: string,
+  campaignId: string,
+): Promise<SingletonCampaignJobResult> {
+  return enqueueSingletonCampaignJob(userId, campaignId, JobKind.EMBED_SEARCH_DOCS);
+}
+
+// Enqueue a campaign data-schema migration once per active campaign run:
+// repeated triggers should point at the in-flight mechanical migration instead
+// of queuing overlapping passes.
 export async function enqueueMigrateEntityDataJob(
   userId: string,
   campaignId: string,
-): Promise<{ id: string; status: ActiveJobStatus; created: boolean }> {
-  await assertCampaignDm(userId, campaignId);
-
-  return prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT id FROM "Campaign" WHERE id = ${campaignId} FOR UPDATE`;
-
-    const active = await findActiveCampaignJob(tx, campaignId, JobKind.MIGRATE_ENTITY_DATA);
-    if (active) {
-      return {
-        id: active.id,
-        status: active.status as ActiveJobStatus,
-        created: false,
-      };
-    }
-
-    const job = await tx.job.create({
-      data: {
-        campaignId,
-        createdById: userId,
-        kind: JobKind.MIGRATE_ENTITY_DATA,
-        status: JobStatus.QUEUED,
-        payload: {},
-      },
-      select: { id: true },
-    });
-    return { id: job.id, status: JobStatus.QUEUED, created: true };
-  });
+): Promise<SingletonCampaignJobResult> {
+  return enqueueSingletonCampaignJob(userId, campaignId, JobKind.MIGRATE_ENTITY_DATA);
 }
 
 // List the most recent jobs for a campaign (DM/co-DM only). Returns display
@@ -178,11 +169,13 @@ export async function listRecentJobs(
   filters: JobListFilters = {},
 ) {
   await assertCampaignDm(userId, campaignId);
-  const kinds = filters.aiOnly
-    ? filters.kinds?.filter((kind) => AI_JOB_KINDS.includes(kind as (typeof AI_JOB_KINDS)[number])) ?? [
+  let kinds = filters.kinds;
+  if (filters.aiOnly) {
+    kinds =
+      filters.kinds?.filter((kind) => AI_JOB_KINDS.includes(kind as (typeof AI_JOB_KINDS)[number])) ?? [
         ...AI_JOB_KINDS,
-      ]
-    : filters.kinds;
+      ];
+  }
 
   return prisma.job.findMany({
     where: {
