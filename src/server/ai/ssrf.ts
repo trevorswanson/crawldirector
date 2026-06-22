@@ -201,6 +201,14 @@ const guardedAgent = new Agent({
   connect: { lookup: guardedLookup as never },
 });
 
+// Resolve a fetch input (string, URL, or Request) to its URL string for the
+// call-time egress re-check.
+function fetchTargetUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.href;
+  return input.url;
+}
+
 // A `fetch` for the provider SDKs that enforces the egress policy. Returns the
 // global fetch unchanged when private endpoints are allowed; otherwise re-checks
 // the target URL (catching literal private IPs and DNS rebinding at call time)
@@ -211,13 +219,7 @@ export function createSafeFetch(): typeof fetch {
     input: RequestInfo | URL,
     init?: RequestInit,
   ): Promise<Response> => {
-    const target =
-      typeof input === "string"
-        ? input
-        : input instanceof URL
-          ? input.href
-          : input.url;
-    await assertPublicEndpoint(target);
+    await assertPublicEndpoint(fetchTargetUrl(input));
     return fetch(input, { ...(init ?? {}), dispatcher: guardedAgent } as RequestInit);
   };
   return safeFetch as typeof fetch;

@@ -421,6 +421,7 @@ export async function getCampaignCanonIntegrity(
     };
   });
 
+  const byKey = new Map(withRaw.map((item) => [item.key, item]));
   const sumFloor = withRaw.reduce((acc, item) => acc + item.floor, 0);
   const diff = 100 - sumFloor;
 
@@ -428,7 +429,7 @@ export async function getCampaignCanonIntegrity(
   for (let i = 0; i < diff; i++) {
     const target = sorted[i];
     if (target) {
-      const match = withRaw.find((item) => item.key === target.key);
+      const match = byKey.get(target.key);
       if (match) {
         match.floor += 1;
       }
@@ -436,10 +437,10 @@ export async function getCampaignCanonIntegrity(
   }
 
   return {
-    dmPercent: withRaw.find((w) => w.key === "dm")!.floor,
-    aiPercent: withRaw.find((w) => w.key === "ai")!.floor,
-    playerPercent: withRaw.find((w) => w.key === "player")!.floor,
-    lockedPercent: withRaw.find((w) => w.key === "locked")!.floor,
+    dmPercent: byKey.get("dm")!.floor,
+    aiPercent: byKey.get("ai")!.floor,
+    playerPercent: byKey.get("player")!.floor,
+    lockedPercent: byKey.get("locked")!.floor,
     dmCount,
     aiCount,
     playerCount,

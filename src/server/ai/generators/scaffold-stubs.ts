@@ -3,6 +3,7 @@ import { z } from "zod";
 import { formatEntityType } from "@/lib/entities";
 import { entityTypeValues } from "@/lib/validation";
 import type { LLMMessage, LLMSystemBlock } from "../types";
+import { normalizeTags } from "./tags";
 
 // Bulk-stub scaffolding generator (M4 — docs/04-ai-integration.md). From a DM's
 // free-text instruction ("the shops and shopkeepers of the Bone Market") it
@@ -115,7 +116,7 @@ export function buildScaffoldStubsPrompt(ctx: ScaffoldStubsContext): {
     },
   ];
 
-  if (ctx.styleGuide && ctx.styleGuide.trim()) {
+  if (ctx.styleGuide?.trim()) {
     system.push({
       cache: true,
       text: `Campaign style guide (honor this tone and these constraints):\n${ctx.styleGuide.trim()}`,
@@ -179,18 +180,4 @@ export function scaffoldStubsToSpecs(
   }
 
   return specs;
-}
-
-function normalizeTags(tags: string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const raw of tags) {
-    const tag = raw.trim();
-    if (!tag) continue;
-    const key = tag.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(tag);
-  }
-  return out;
 }

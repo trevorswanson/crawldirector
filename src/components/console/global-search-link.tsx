@@ -67,6 +67,51 @@ export function GlobalSearchLink() {
     };
   }, [campaignId, trimmed]);
 
+  function renderResults() {
+    if (loading && results.length === 0) {
+      return (
+        <p className="px-3 py-2 font-mono text-[10px] text-[var(--ink-faint)]">
+          Searching...
+        </p>
+      );
+    }
+    if (error) {
+      return (
+        <p className="px-3 py-2 font-mono text-[10px] text-[var(--no)]">
+          Search unavailable.
+        </p>
+      );
+    }
+    if (results.length === 0) {
+      return (
+        <p className="px-3 py-2 font-mono text-[10px] text-[var(--ink-faint)]">
+          No matching canon.
+        </p>
+      );
+    }
+    return results.map((item) => (
+      <Link
+        key={item.id}
+        href={item.href}
+        className="flex flex-col gap-[2px] px-3 py-[8px] transition-colors hover:bg-[var(--bg-3)]"
+      >
+        <span className="flex items-center justify-between gap-3">
+          <span className="min-w-0 truncate text-[12.5px] text-[var(--ink)]">
+            {item.label}
+          </span>
+          <span className="shrink-0 font-mono text-[9px] uppercase tracking-[.07em] text-[var(--ink-faint)]">
+            {item.meta}
+          </span>
+        </span>
+        {item.excerpt && (
+          <span className="line-clamp-1 text-[11px] text-[var(--ink-dim)]">
+            {item.excerpt}
+          </span>
+        )}
+      </Link>
+    ));
+  }
+
   if (!campaignId) {
     return (
       <span
@@ -118,43 +163,7 @@ export function GlobalSearchLink() {
           id={listId}
           className="absolute left-0 right-0 top-[calc(100%+6px)] z-50 max-h-[360px] overflow-y-auto border border-[var(--line-strong)] bg-[var(--bg)] shadow-[0_16px_35px_rgba(0,0,0,.35)]"
         >
-          <div className="flex flex-col py-1">
-            {loading && results.length === 0 ? (
-              <p className="px-3 py-2 font-mono text-[10px] text-[var(--ink-faint)]">
-                Searching...
-              </p>
-            ) : error ? (
-              <p className="px-3 py-2 font-mono text-[10px] text-[var(--no)]">
-                Search unavailable.
-              </p>
-            ) : results.length === 0 ? (
-              <p className="px-3 py-2 font-mono text-[10px] text-[var(--ink-faint)]">
-                No matching canon.
-              </p>
-            ) : (
-              results.map((item) => (
-                <Link
-                  key={item.id}
-                  href={item.href}
-                  className="flex flex-col gap-[2px] px-3 py-[8px] transition-colors hover:bg-[var(--bg-3)]"
-                >
-                  <span className="flex items-center justify-between gap-3">
-                    <span className="min-w-0 truncate text-[12.5px] text-[var(--ink)]">
-                      {item.label}
-                    </span>
-                    <span className="shrink-0 font-mono text-[9px] uppercase tracking-[.07em] text-[var(--ink-faint)]">
-                      {item.meta}
-                    </span>
-                  </span>
-                  {item.excerpt && (
-                    <span className="line-clamp-1 text-[11px] text-[var(--ink-dim)]">
-                      {item.excerpt}
-                    </span>
-                  )}
-                </Link>
-              ))
-            )}
-          </div>
+          <div className="flex flex-col py-1">{renderResults()}</div>
           <div className="border-t border-[var(--line)] p-1">
             <Link
               href={searchHref}

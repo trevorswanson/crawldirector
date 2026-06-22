@@ -66,14 +66,20 @@ function trimmedOrUndefined(value: string | undefined): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+// A missing/invalid basis is inferred: a floor implies FLOOR_START, otherwise
+// UNSCHEDULED. Keeps the pre-slice-2 "floor + label" forms working and matches
+// the migration backfill.
+function inferBasis(floor: unknown): TimeBasis {
+  return typeof floor === "number" ? "FLOOR_START" : "UNSCHEDULED";
+}
+
 // Normalize a raw input into a canonical `TimeRef`, dropping fields that don't
 // apply to the chosen basis so the stored JSON stays minimal and coherent. When
 // no basis is given it is inferred (a floor implies FLOOR_START, otherwise
 // UNSCHEDULED) — this keeps the pre-slice-2 "floor + label" forms working and
 // matches the migration backfill.
 export function buildTimeRef(input: TimeRefInput): TimeRef {
-  const basis: TimeBasis =
-    input.basis ?? (typeof input.floor === "number" ? "FLOOR_START" : "UNSCHEDULED");
+  const basis: TimeBasis = input.basis ?? inferBasis(input.floor);
   const ref: TimeRef = { basis };
 
   if (typeof input.floor === "number") ref.floor = input.floor;
@@ -103,11 +109,7 @@ export function readTimeRef(value: unknown): TimeRef {
   }
   const record = value as Record<string, unknown>;
   const floor = typeof record.floor === "number" ? record.floor : undefined;
-  const basis: TimeBasis = isTimeBasis(record.basis)
-    ? record.basis
-    : floor != null
-      ? "FLOOR_START"
-      : "UNSCHEDULED";
+  const basis: TimeBasis = isTimeBasis(record.basis) ? record.basis : inferBasis(floor);
 
   const ref: TimeRef = { basis };
   if (floor != null) ref.floor = floor;
