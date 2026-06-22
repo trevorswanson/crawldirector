@@ -106,6 +106,58 @@ describe("Persona Studio page", () => {
     expect(review.getAttribute("href")).toBe("/campaigns/c1/review?reopened=cs1");
   });
 
+  it("compares the selected snapshot with the immediately older timeline entry", async () => {
+    getPersonaStudio.mockResolvedValue({
+      entities: [{ id: "e1", name: "The System" }],
+      selectedEntityId: "e1",
+      snapshots: [
+        snapshot({
+          id: "current",
+          label: "Current",
+          dials: { compliance: 42, resentment: 63 },
+        }),
+        snapshot({
+          id: "court",
+          label: "Court ruling",
+          isActive: false,
+          dials: { compliance: 57, resentment: 43 },
+        }),
+        snapshot({
+          id: "initial",
+          label: "Initial",
+          isActive: false,
+          dials: { compliance: 57, resentment: 20 },
+        }),
+      ],
+      activeSnapshotId: "current",
+    });
+
+    render(await render_({ snapshot: "current" }));
+
+    expect(screen.getByText(/Changed since Court ruling/i)).toBeDefined();
+    expect(screen.getByText("57 → 42")).toBeDefined();
+  });
+
+  it("marks the oldest snapshot as the first and hides comparison UI for new snapshots", async () => {
+    getPersonaStudio.mockResolvedValue({
+      entities: [{ id: "e1", name: "The System" }],
+      selectedEntityId: "e1",
+      snapshots: [
+        snapshot({ id: "current", label: "Current" }),
+        snapshot({ id: "initial", label: "Initial", isActive: false }),
+      ],
+      activeSnapshotId: "current",
+    });
+
+    const view = render(await render_({ snapshot: "initial" }));
+    expect(screen.getByText(/first recorded snapshot/i)).toBeDefined();
+    expect(screen.queryByText("Agendas")).toBeNull();
+
+    view.rerender(await render_({ snapshot: "new" }));
+    expect(screen.queryByText(/Changed since/i)).toBeNull();
+    expect(screen.queryByText(/first recorded snapshot/i)).toBeNull();
+  });
+
   it("surfaces the prompt-locked notice and an unlock control", async () => {
     getPersonaStudio.mockResolvedValue({
       entities: [{ id: "e1", name: "The System" }],
