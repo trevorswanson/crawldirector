@@ -11,7 +11,13 @@ import {
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
 import { archiveEntity, createCrawler } from "@/server/services/entities";
-import { applyEventEffects, archiveEvent, createEvent, updateEvent } from "@/server/services/events";
+import {
+  applyEventEffects,
+  archiveEvent,
+  createEvent,
+  setEventLock,
+  updateEvent,
+} from "@/server/services/events";
 import {
   applyAutoApprovedEntityChangeSet,
   applyAutoApprovedPersonaSnapshotChangeSet,
@@ -83,10 +89,17 @@ async function createAiEffectProposal(
   campaignId: string,
   eventId: string,
   effects: unknown[],
+  metadata: Partial<{
+    providerId: string;
+    model: string;
+    promptId: string;
+    promptVersion: string;
+  }> = {},
 ) {
   const changeSet = await createPendingEventChangeSet(userId, campaignId, {
     source: ChangeSource.AI,
     title: "AI consequence proposal",
+    ...metadata,
     operations: [
       {
         op: "APPLY_EVENT_EFFECTS",
@@ -207,6 +220,100 @@ describe("AI patch-carried event effects", () => {
         },
       }),
     ).resolves.not.toBeNull();
+  });
+
+  it("persists provider metadata for an AI event consequence proposal", async () => {
+    const { owner, campaign, event } = await setup("generated-metadata@test.com");
+    const { changeSet } = await createAiEffectProposal(owner.id, campaign.id, event.id, [], {
+      providerId: "openai-compatible",
+      model: "gpt-5",
+      promptId: "event-consequences",
+      promptVersion: "1",
+    });
+
+    await expect(prisma.changeSet.findUniqueOrThrow({ where: { id: changeSet.id } })).resolves.toMatchObject({
+      source: ChangeSource.AI,
+      providerId: "openai-compatible",
+      model: "gpt-5",
+      promptId: "event-consequences",
+      promptVersion: "1",
+    });
+  });
+
+  it("flags an AI effect proposal blocked when its source event is locked before review", async () => {
+    const { owner, campaign, crawler, event } = await setup("generated-event-lock@test.com");
+    const { changeSet, operation } = await createAiEffectProposal(owner.id, campaign.id, event.id, [
+      {
+        id: "locked-source-event-effect",
+        kind: "ADJUST_STAT",
+        targetEntityId: crawler.id,
+        stat: "gold",
+        delta: 25,
+      },
+    ]);
+    await setEventLock(owner.id, campaign.id, event.id, true);
+    await setChangeOperationDecision(owner.id, campaign.id, changeSet.id, operation.id, {
+      decision: OpDecision.ACCEPTED,
+    });
+
+    await listPendingChangeSetsForUser(owner.id, campaign.id);
+
+    await expect(prisma.changeOperation.findUniqueOrThrow({ where: { id: operation.id } })).resolves.toMatchObject({
+      blockedByLock: true,
+      isStale: false,
+    });
+    await expect(approveChangeSet(owner.id, campaign.id, changeSet.id)).rejects.toMatchObject({
+      code: "OPERATION_BLOCKED",
+    });
+  });
+
+  it("serializes concurrent AI approvals against one source event", async () => {
+    const { owner, campaign, crawler, event } = await setup("generated-concurrent@test.com");
+    const first = await createAiEffectProposal(owner.id, campaign.id, event.id, [
+      {
+        id: "concurrent-effect-one",
+        kind: "ADJUST_STAT",
+        targetEntityId: crawler.id,
+        stat: "gold",
+        delta: 25,
+      },
+    ]);
+    const second = await createAiEffectProposal(owner.id, campaign.id, event.id, [
+      {
+        id: "concurrent-effect-two",
+        kind: "ADJUST_STAT",
+        targetEntityId: crawler.id,
+        stat: "gold",
+        delta: 50,
+      },
+    ]);
+    await Promise.all([
+      setChangeOperationDecision(owner.id, campaign.id, first.changeSet.id, first.operation.id, {
+        decision: OpDecision.ACCEPTED,
+      }),
+      setChangeOperationDecision(owner.id, campaign.id, second.changeSet.id, second.operation.id, {
+        decision: OpDecision.ACCEPTED,
+      }),
+    ]);
+
+    await expect(
+      Promise.all([
+        approveChangeSet(owner.id, campaign.id, first.changeSet.id),
+        approveChangeSet(owner.id, campaign.id, second.changeSet.id),
+      ]),
+    ).resolves.toHaveLength(2);
+
+    await expect(prisma.crawler.findUniqueOrThrow({ where: { id: crawler.id } })).resolves.toMatchObject({
+      gold: 175,
+    });
+    const stored = await prisma.event.findUniqueOrThrow({ where: { id: event.id } });
+    expect(stored.effects).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "concurrent-effect-one", applied: true }),
+        expect.objectContaining({ id: "concurrent-effect-two", applied: true }),
+      ]),
+    );
+    expect(stored.effects).toHaveLength(2);
   });
 
   it("discards a rejected generated effect without writing it to the event or crawler", async () => {

@@ -1046,6 +1046,12 @@ export async function createPendingEventChangeSet(
     title: string;
     summary?: string;
     runId?: string;
+    // AI provenance stays on the ChangeSet until an event/persona write is
+    // approved, where it is copied into durable provenance rows.
+    providerId?: string;
+    model?: string;
+    promptId?: string;
+    promptVersion?: string;
     operations: EventReviewOperationInput[];
   },
 ) {
@@ -1059,6 +1065,10 @@ export async function createPendingEventChangeSet(
         title: input.title,
         summary: input.summary,
         runId: input.runId,
+        providerId: input.providerId,
+        model: input.model,
+        promptId: input.promptId,
+        promptVersion: input.promptVersion,
         actorUserId: userId,
         operations: {
           create: input.operations.map((operation) => ({
@@ -1951,95 +1961,108 @@ export async function approveChangeSet(
   await assertCampaignDm(userId, campaignId);
   await refreshPendingOperationFlags(campaignId, changeSetId);
 
-  return prisma.$transaction(async (tx) => {
-    const changeSet = await tx.changeSet.findFirst({
-      where: { id: changeSetId, campaignId, status: ChangeSetStatus.PENDING },
-      include: { operations: true },
-    });
-    if (!changeSet) throw new ServiceError("Change set not found.");
-    const applicableOperations = changeSet.operations.filter(
-      (operation) =>
-        operation.decision === OpDecision.ACCEPTED ||
-        operation.decision === OpDecision.EDITED,
-    );
-    if (applicableOperations.length === 0) {
-      throw new ServiceError("Accept at least one operation before approval.", {
-        code: "NO_ACCEPTED_OPERATIONS",
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const changeSet = await tx.changeSet.findFirst({
+        where: { id: changeSetId, campaignId, status: ChangeSetStatus.PENDING },
+        include: { operations: true },
       });
-    }
-    if (applicableOperations.some((operation) => operation.blockedByLock)) {
-      throw new ServiceError("One or more operations are blocked by locks.", {
-        code: "OPERATION_BLOCKED",
-      });
-    }
-    if (applicableOperations.some((operation) => operation.isStale)) {
-      throw new ServiceError("One or more operations are stale.", {
-        code: "OPERATION_STALE",
-      });
-    }
-
-    const appliedIds: string[] = [];
-    const applyingChangeSet = { ...changeSet, reviewedById: userId };
-    for (const operation of applicableOperations) {
-      const targetId = await applyReviewOperation(
-        tx,
-        applyingChangeSet,
-        operation,
-        effectiveOperationPatch(operation),
+      if (!changeSet) throw new ServiceError("Change set not found.");
+      const applicableOperations = changeSet.operations.filter(
+        (operation) =>
+          operation.decision === OpDecision.ACCEPTED ||
+          operation.decision === OpDecision.EDITED,
       );
-      appliedIds.push(targetId);
-      await tx.changeOperation.update({
-        where: { id: operation.id },
+      if (applicableOperations.length === 0) {
+        throw new ServiceError("Accept at least one operation before approval.", {
+          code: "NO_ACCEPTED_OPERATIONS",
+        });
+      }
+      if (applicableOperations.some((operation) => operation.blockedByLock)) {
+        throw new ServiceError("One or more operations are blocked by locks.", {
+          code: "OPERATION_BLOCKED",
+        });
+      }
+      if (applicableOperations.some((operation) => operation.isStale)) {
+        throw new ServiceError("One or more operations are stale.", {
+          code: "OPERATION_STALE",
+        });
+      }
+
+      const appliedIds: string[] = [];
+      const applyingChangeSet = { ...changeSet, reviewedById: userId };
+      for (const operation of applicableOperations) {
+        const targetId = await applyReviewOperation(
+          tx,
+          applyingChangeSet,
+          operation,
+          effectiveOperationPatch(operation),
+        );
+        appliedIds.push(targetId);
+        await tx.changeOperation.update({
+          where: { id: operation.id },
+          data: {
+            targetId,
+            decision:
+              operation.decision === OpDecision.EDITED
+                ? OpDecision.EDITED
+                : OpDecision.ACCEPTED,
+          },
+        });
+      }
+
+      const rejectedOperations = changeSet.operations.filter(
+        (operation) => !applicableOperations.some((applied) => applied.id === operation.id),
+      );
+      if (rejectedOperations.length > 0) {
+        await markEventEffectReviewState(
+          tx,
+          changeSet,
+          rejectedOperations,
+          "REJECTED",
+        );
+      }
+
+      const rejectedCount = changeSet.operations.length - applicableOperations.length;
+      const status =
+        applicableOperations.length === 0
+          ? ChangeSetStatus.REJECTED
+          : rejectedCount > 0
+            ? ChangeSetStatus.PARTIALLY_APPLIED
+            : ChangeSetStatus.APPROVED;
+      await tx.changeSet.update({
+        where: { id: changeSet.id },
         data: {
-          targetId,
-          decision:
-            operation.decision === OpDecision.EDITED
-              ? OpDecision.EDITED
-              : OpDecision.ACCEPTED,
+          status,
+          reviewedById: userId,
+          reviewedAt: new Date(),
         },
       });
-    }
+      await tx.auditLog.create({
+        data: {
+          campaignId,
+          actorUserId: userId,
+          action: status === ChangeSetStatus.REJECTED ? "REJECT" : "APPROVE",
+          targetType: "CHANGE_SET",
+          targetId: changeSet.id,
+          detail: { appliedIds, rejectedCount },
+        },
+      });
 
-    const rejectedOperations = changeSet.operations.filter(
-      (operation) => !applicableOperations.some((applied) => applied.id === operation.id),
-    );
-    if (rejectedOperations.length > 0) {
-      await markEventEffectReviewState(
-        tx,
-        changeSet,
-        rejectedOperations,
-        "REJECTED",
-      );
-    }
-
-    const rejectedCount = changeSet.operations.length - applicableOperations.length;
-    const status =
-      applicableOperations.length === 0
-        ? ChangeSetStatus.REJECTED
-        : rejectedCount > 0
-          ? ChangeSetStatus.PARTIALLY_APPLIED
-          : ChangeSetStatus.APPROVED;
-    await tx.changeSet.update({
-      where: { id: changeSet.id },
-      data: {
-        status,
-        reviewedById: userId,
-        reviewedAt: new Date(),
-      },
+      return { id: changeSet.id, targetIds: appliedIds };
     });
-    await tx.auditLog.create({
-      data: {
-        campaignId,
-        actorUserId: userId,
-        action: status === ChangeSetStatus.REJECTED ? "REJECT" : "APPROVE",
-        targetType: "CHANGE_SET",
-        targetId: changeSet.id,
-        detail: { appliedIds, rejectedCount },
-      },
-    });
-
-    return { id: changeSet.id, targetIds: appliedIds };
-  });
+  } catch (error) {
+    // A lock can be acquired after the refresh above but before an apply
+    // transaction obtains its row lock. Re-evaluate after the transaction rolls
+    // back so the Review Queue retains the current held state.
+    if (
+      error instanceof ServiceError &&
+      (error.code === "OPERATION_BLOCKED" || error.code === "OPERATION_STALE")
+    ) {
+      await refreshPendingOperationFlags(campaignId, changeSetId);
+    }
+    throw error;
+  }
 }
 
 async function applyReviewOperation(
@@ -2374,9 +2397,10 @@ async function evaluateApplyEventEffectsOperationFlags(
       campaignId: changeSet.campaignId,
       status: { not: CanonStatus.ARCHIVED },
     },
-    select: { id: true, effects: true },
+    select: { id: true, locked: true, effects: true },
   });
   if (!event) return { blockedByLock: false, isStale: true };
+  if (event.locked) return { blockedByLock: true, isStale: false };
 
   const rawPatchEffects = readTo(patch, "effects");
   const canonicalAiPatchEffects =
@@ -5520,15 +5544,33 @@ async function applyApplyEventEffects(
   eventId: string,
   patch: ReviewPatch,
 ) {
+  // Serialize effects materialization for this source event. Both generated
+  // patch rows and target-state reads happen after this lock, so concurrent
+  // approvals cannot overwrite each other's serialized event history.
+  await tx.$queryRaw`
+    SELECT id
+    FROM "Event"
+    WHERE id = ${eventId} AND "campaignId" = ${changeSet.campaignId}
+    FOR UPDATE
+  `;
   const event = await tx.event.findFirst({
     where: {
       id: eventId,
       campaignId: changeSet.campaignId,
       status: { not: CanonStatus.ARCHIVED },
     },
-    select: { id: true, effects: true, inGameTime: true },
+    select: { id: true, locked: true, effects: true, inGameTime: true },
   });
   if (!event) throw new ServiceError("Event not found.");
+  if (event.locked) {
+    await tx.changeOperation.update({
+      where: { id: operationId },
+      data: { blockedByLock: true },
+    });
+    throw new ServiceError("This event is locked.", {
+      code: "OPERATION_BLOCKED",
+    });
+  }
 
   const effects = uniqueEventEffectsById(parseEventEffects(event.effects as JsonValue));
   const patchCarriesEffects = "effects" in patch;
