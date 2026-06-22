@@ -40,6 +40,15 @@ async function assertCampaignDm(userId: string, campaignId: string) {
   }
 }
 
+// Narrow a stored JSON value to a plain object record (dropping arrays, null,
+// and scalars) for the compiler's optional dials/resources inputs.
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return undefined;
+}
+
 export async function getActiveSystemPersonaPrompt(
   userId: string,
   campaignId: string,
@@ -80,18 +89,10 @@ export async function getActiveSystemPersonaPrompt(
       snapshot.compiledPrompt ??
       compilePersonaPrompt({
         label: snapshot.label,
-        dials:
-          snapshot.dials && typeof snapshot.dials === "object" && !Array.isArray(snapshot.dials)
-            ? (snapshot.dials as Record<string, unknown>)
-            : undefined,
+        dials: asRecord(snapshot.dials),
         values: snapshot.values,
         agendas: snapshot.agendas,
-        resources:
-          snapshot.resources &&
-          typeof snapshot.resources === "object" &&
-          !Array.isArray(snapshot.resources)
-            ? (snapshot.resources as Record<string, unknown>)
-            : undefined,
+        resources: asRecord(snapshot.resources),
         knowledgeScope: snapshot.knowledgeScope,
         voiceGuide: snapshot.voiceGuide,
         constraints: snapshot.constraints,
