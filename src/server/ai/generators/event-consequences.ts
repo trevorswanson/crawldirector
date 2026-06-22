@@ -122,6 +122,8 @@ export type EventConsequencesContext = {
   existingConsequenceEvents: EventConsequenceEvent[];
   /** Existing source-event -> effect-event links to avoid proposing again. */
   existingOutgoingCausalEffectIds: string[];
+  /** The service has verified the source event has a floor and resolvable absolute day. */
+  canCollapseFloor: boolean;
   /** Retrieval-surfaced campaign context; it can inform but never be modified. */
   relatedCanon?: EventConsequenceRelatedCanon[];
 };
@@ -143,7 +145,10 @@ export function buildEventConsequencesPrompt(ctx: EventConsequencesContext): {
         "- Do not invent ids, events, or entities.",
         "- Propose only supported effect kinds: ADJUST_STAT, SET_STAT, SET_ALIVE,",
         "  COLLAPSE_FLOOR, and PERSONA_SHIFT.",
-        "- Use the supplied effect targets only; COLLAPSE_FLOOR needs no target.",
+        "- ADJUST_STAT, SET_STAT, and SET_ALIVE may target only CRAWLER candidates.",
+        "  PERSONA_SHIFT may target only SYSTEM_AI candidates.",
+        "- COLLAPSE_FLOOR needs no target; propose it only when the source-event",
+        "  collapse preflight is true.",
         "- Prefer a small number of specific, high-confidence consequences over filler.",
         "- Everything you produce is a Review Queue proposal, not canon.",
         "- Related canon is read-only context. Do not modify or restate it as a fact.",
@@ -168,6 +173,7 @@ export function buildEventConsequencesPrompt(ctx: EventConsequencesContext): {
     `${source.id} | ${source.title}`,
     `Time: ${source.timePhrase}`,
     `Summary: ${source.summary?.trim() || "(none)"}`,
+    `COLLAPSE_FLOOR allowed: ${ctx.canCollapseFloor ? "yes" : "no"}`,
     "",
     "Effect target candidates (only these entity ids may be targeted):",
   ];
@@ -218,14 +224,16 @@ export function consequenceOutputToEventOperations(
   output: EventConsequencesOutput,
   nextEffectId: () => string,
 ): EventReviewOperationInput[] {
-  const allowedTargetIds = new Set(ctx.effectTargets.map((target) => target.id));
+  const effectTargetsById = new Map(ctx.effectTargets.map((target) => [target.id, target]));
   const effects = output.effects.flatMap((effect) => {
     const targetEntityId = "targetEntityId" in effect ? effect.targetEntityId : undefined;
-    const hasAllowedTarget =
-      effect.kind === "COLLAPSE_FLOOR" && !targetEntityId
-        ? true
-        : Boolean(targetEntityId && allowedTargetIds.has(targetEntityId));
-    if (!hasAllowedTarget) return [];
+    if (effect.kind === "COLLAPSE_FLOOR") {
+      if (!ctx.canCollapseFloor || targetEntityId) return [];
+    } else {
+      const target = targetEntityId ? effectTargetsById.get(targetEntityId) : undefined;
+      const expectedType = effect.kind === "PERSONA_SHIFT" ? "SYSTEM_AI" : "CRAWLER";
+      if (target?.type !== expectedType) return [];
+    }
 
     return [{ ...effect, id: nextEffectId() }];
   });

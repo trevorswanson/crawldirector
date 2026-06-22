@@ -26,6 +26,7 @@ function ctx(overrides: Partial<EventConsequencesContext> = {}): EventConsequenc
       { id: "consequence-2", title: "The hunters arrive" },
     ],
     existingOutgoingCausalEffectIds: ["consequence-2"],
+    canCollapseFloor: true,
     ...overrides,
   };
 }
@@ -54,6 +55,9 @@ describe("buildEventConsequencesPrompt", () => {
     expect(system[0]?.text).toMatch(/Review Queue proposal/i);
     expect(system[0]?.text).toMatch(/do not invent ids, events, or entities/i);
     expect(system[0]?.text).toMatch(/secret agendas/i);
+    expect(system[0]?.text).toMatch(/ADJUST_STAT.*CRAWLER/i);
+    expect(system[0]?.text).toMatch(/PERSONA_SHIFT.*SYSTEM_AI/i);
+    expect(system[0]?.text).toMatch(/COLLAPSE_FLOOR[\s\S]*only when[\s\S]*true/i);
 
     const user = messages[0]?.content ?? "";
     expect(user).toContain("source-event | The Iron Tangle opens");
@@ -64,6 +68,7 @@ describe("buildEventConsequencesPrompt", () => {
     expect(user).toContain("consequence-2 | The hunters arrive");
     expect(user).toContain("The Syndicate");
     expect(user).toContain("read-only");
+    expect(user).toContain("COLLAPSE_FLOOR allowed: yes");
   });
 
   it("adds the campaign style guide as a cacheable system block", () => {
@@ -188,7 +193,7 @@ describe("consequenceOutputToEventOperations", () => {
 
   it("drops unsupported targets while permitting a targetless floor collapse", () => {
     const operations = consequenceOutputToEventOperations(
-      ctx(),
+      ctx({ canCollapseFloor: true }),
       {
         effects: [
           { kind: "ADJUST_STAT", targetEntityId: "not-offered", stat: "gold", delta: 10 },
@@ -206,6 +211,53 @@ describe("consequenceOutputToEventOperations", () => {
         patch: { effects: { to: [{ id: "collapse-id", kind: "COLLAPSE_FLOOR" }] } },
       },
     ]);
+  });
+
+  it("drops effects offered against the wrong candidate type", () => {
+    const operations = consequenceOutputToEventOperations(
+      ctx({
+        effectTargets: [
+          { id: "not-a-crawler", type: "SYSTEM_AI", name: "The System" },
+          { id: "not-a-persona", type: "CRAWLER", name: "Carl" },
+          { id: "carl", type: "CRAWLER", name: "Carl" },
+        ],
+      }),
+      {
+        effects: [
+          { kind: "SET_ALIVE", targetEntityId: "not-a-crawler", value: false },
+          {
+            kind: "PERSONA_SHIFT",
+            targetEntityId: "not-a-persona",
+            dialShifts: { resentment: 10 },
+          },
+          { kind: "SET_ALIVE", targetEntityId: "carl", value: false },
+        ],
+        causalLinks: [],
+      },
+      () => "valid-effect",
+    );
+
+    expect(operations).toEqual([
+      {
+        op: "APPLY_EVENT_EFFECTS",
+        targetId: "source-event",
+        patch: {
+          effects: {
+            to: [{ id: "valid-effect", kind: "SET_ALIVE", targetEntityId: "carl", value: false }],
+          },
+        },
+      },
+    ]);
+  });
+
+  it("drops a floor collapse when the source event cannot resolve its collapse time", () => {
+    expect(
+      consequenceOutputToEventOperations(
+        ctx({ canCollapseFloor: false }),
+        { effects: [{ kind: "COLLAPSE_FLOOR" }], causalLinks: [] },
+        () => "collapse-id",
+      ),
+    ).toEqual([]);
   });
 
   it("filters unknown, self, duplicate, and existing causal links in output order", () => {
