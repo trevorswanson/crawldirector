@@ -45,6 +45,7 @@ const {
   fleshOutEntity,
   fleshOutEntities,
   inferRelationshipsForEntity,
+  proposeEventConsequences,
   scaffoldStubEntities,
   createPersonaSnapshot,
   updatePersonaSnapshot,
@@ -104,6 +105,7 @@ const {
   fleshOutEntity: vi.fn(),
   fleshOutEntities: vi.fn(),
   inferRelationshipsForEntity: vi.fn(),
+  proposeEventConsequences: vi.fn(),
   scaffoldStubEntities: vi.fn(),
   createPersonaSnapshot: vi.fn(),
   updatePersonaSnapshot: vi.fn(),
@@ -179,6 +181,7 @@ vi.mock("@/server/services/generation", () => ({
   fleshOutEntity,
   fleshOutEntities,
   inferRelationshipsForEntity,
+  proposeEventConsequences,
   scaffoldStubEntities,
 }));
 vi.mock("@/server/services/persona", () => ({
@@ -263,6 +266,7 @@ import {
   searchCampaignPreviewAction,
   searchEntityCandidatesAction,
   inferRelationshipsForEntityAction,
+  proposeEventConsequencesAction,
   scaffoldStubsAction,
   createPersonaSnapshotAction,
   updatePersonaSnapshotAction,
@@ -2317,6 +2321,37 @@ describe("inferRelationshipsForEntityAction", () => {
 
     inferRelationshipsForEntity.mockRejectedValueOnce(new Error("boom"));
     expect((await inferRelationshipsForEntityAction("c1", "e1", undefined, form({})))?.error).toBe(
+      "Generation failed. Please try again.",
+    );
+  });
+});
+
+describe("proposeEventConsequencesAction", () => {
+  it("files a proposal and revalidates the review queue and Timeline", async () => {
+    proposeEventConsequences.mockResolvedValue({
+      changeSetId: "cs-consequence",
+      providerId: "anthropic",
+      model: "claude-opus-4-8",
+      operationCount: 2,
+    });
+
+    const result = await proposeEventConsequencesAction("c1", "event-1", undefined, form({}));
+
+    expect(proposeEventConsequences).toHaveBeenCalledWith("u1", "c1", "event-1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+    expect(result).toMatchObject({ changeSetId: "cs-consequence" });
+    expect(result?.success).toContain("2 consequences");
+  });
+
+  it("returns safe ServiceError and generic failures", async () => {
+    proposeEventConsequences.mockRejectedValueOnce(new ServiceError("This event is locked."));
+    expect((await proposeEventConsequencesAction("c1", "event-1", undefined, form({})))?.error).toBe(
+      "This event is locked.",
+    );
+
+    proposeEventConsequences.mockRejectedValueOnce(new Error("boom"));
+    expect((await proposeEventConsequencesAction("c1", "event-1", undefined, form({})))?.error).toBe(
       "Generation failed. Please try again.",
     );
   });
