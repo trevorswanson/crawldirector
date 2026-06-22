@@ -105,6 +105,19 @@ function activeForRosterDay(
  * can't otherwise see, or the roster of a group they can't see. Returns null
  * when the user isn't a member of the campaign or can't see the root group.
  */
+// Map a roster edge's relationship type to its roster-bucket label: LEADS and
+// PART_OF keep their own; every other edge rolls up as a plain MEMBER_OF.
+function rosterEdgeKind(type: RelationshipType): "MEMBER_OF" | "PART_OF" | "LEADS" {
+  switch (type) {
+    case RelationshipType.LEADS:
+      return "LEADS";
+    case RelationshipType.PART_OF:
+      return "PART_OF";
+    default:
+      return "MEMBER_OF";
+  }
+}
+
 export async function getGroupRoster(
   userId: string,
   campaignId: string,
@@ -188,12 +201,7 @@ export async function getGroupRoster(
 
     for (const edge of incoming) {
       const member = edge.sourceEntity;
-      const relationshipType =
-        edge.type === RelationshipType.LEADS
-          ? "LEADS"
-          : edge.type === RelationshipType.PART_OF
-            ? "PART_OF"
-            : "MEMBER_OF";
+      const relationshipType = rosterEdgeKind(edge.type);
 
       if (relationshipType === "LEADS") {
         leaders.push({
