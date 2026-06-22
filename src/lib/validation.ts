@@ -11,6 +11,16 @@ import { optionalInt, optionalText } from "@/lib/zod-field-helpers";
 
 const personaDialKeySet = new Set<string>(PERSONA_DIAL_KEYS);
 
+// Shared FormData preprocessors. `blankToUndefined` normalises empty-string /
+// null / undefined inputs to undefined, so an absent optional field is a miss
+// rather than a parse error; `checkboxToBoolean` maps the truthy encodings a
+// checkbox posts ("on"/"true"/true) to a real boolean.
+const blankToUndefined = (value: unknown): unknown =>
+  value === "" || value === null || value === undefined ? undefined : value;
+
+const checkboxToBoolean = (value: unknown): boolean =>
+  value === true || value === "true" || value === "on";
+
 // Shared Zod schemas. Per docs/02-architecture.md every Server Action validates
 // its input at the boundary with one of these.
 
@@ -284,7 +294,7 @@ export const relationshipTypeValues = [
 
 // disposition: optional signed strength (-100..100). Empty/absent => null.
 const optionalDisposition = z.preprocess(
-  (value) => (value === "" || value === null || value === undefined ? undefined : value),
+  blankToUndefined,
   z.coerce
     .number()
     .int("Disposition must be a whole number.")
@@ -323,7 +333,7 @@ export const createRelationshipSchema = orderedRelationshipBounds(
     ...relationshipBoundsSchema,
     notes: optionalText(500),
     secret: z
-      .preprocess((value) => value === true || value === "true" || value === "on", z.boolean())
+      .preprocess(checkboxToBoolean, z.boolean())
       .default(false),
   }),
 );
@@ -338,7 +348,7 @@ export const updateRelationshipSchema = orderedRelationshipBounds(
     ...relationshipBoundsSchema,
     notes: optionalText(500),
     secret: z
-      .preprocess((value) => value === true || value === "true" || value === "on", z.boolean())
+      .preprocess(checkboxToBoolean, z.boolean())
       .default(false),
   }),
 );
@@ -455,13 +465,11 @@ export const eventEffectSchema = z
     targetEntityId: z.string().trim().min(1).optional(),
     stat: z.enum(eventEffectStatValues).optional(),
     delta: z.preprocess(
-      (value) =>
-        value === "" || value === null || value === undefined ? undefined : value,
+      blankToUndefined,
       z.coerce.number().int("Delta must be a whole number.").optional(),
     ),
     valueNumber: z.preprocess(
-      (value) =>
-        value === "" || value === null || value === undefined ? undefined : value,
+      blankToUndefined,
       z.coerce.number().int("Value must be a whole number.").optional(),
     ),
     // "alive" -> true, "dead" -> false; absent -> undefined (non-alive effects).
@@ -530,7 +538,7 @@ export type EventEffectInput = z.infer<typeof eventEffectSchema>;
 
 // floor: optional in-game floor number. Empty/absent => undefined.
 const optionalFloor = z.preprocess(
-  (value) => (value === "" || value === null || value === undefined ? undefined : value),
+  blankToUndefined,
   z.coerce
     .number()
     .int("Floor must be a whole number.")
@@ -548,18 +556,18 @@ export { timeBasisValues, timeUnitValues };
 export type { TimeBasis as TimeBasisValue, TimeUnit as TimeUnitValue } from "@/lib/time-ref";
 
 const optionalBasis = z.preprocess(
-  (value) => (value === "" || value === null || value === undefined ? undefined : value),
+  blankToUndefined,
   z.enum(timeBasisValues).optional(),
 );
 
 const optionalUnit = z.preprocess(
-  (value) => (value === "" || value === null || value === undefined ? undefined : value),
+  blankToUndefined,
   z.enum(timeUnitValues).optional(),
 );
 
 // Signed offset magnitude (e.g. +3, -12). Empty/absent => undefined.
 const optionalOffset = z.preprocess(
-  (value) => (value === "" || value === null || value === undefined ? undefined : value),
+  blankToUndefined,
   z.coerce
     .number()
     .int("Time offset must be a whole number.")
@@ -569,7 +577,7 @@ const optionalOffset = z.preprocess(
 );
 
 const optionalAnchorEventId = z.preprocess(
-  (value) => (value === "" || value === null || value === undefined ? undefined : value),
+  blankToUndefined,
   z.string().trim().max(60).optional(),
 );
 
@@ -590,7 +598,7 @@ export const createEventSchema = z.object({
   summary: optionalText(2000),
   ...eventTimeFields,
   secret: z
-    .preprocess((value) => value === true || value === "true" || value === "on", z.boolean())
+    .preprocess(checkboxToBoolean, z.boolean())
     .default(false),
   // Participants are optional: campaign-wide timeline notes can be real canon
   // even when no entity directly acted in or witnessed them.
@@ -611,7 +619,7 @@ export const updateEventSchema = z.object({
   summary: optionalText(2000),
   ...eventTimeFields,
   secret: z
-    .preprocess((value) => value === true || value === "true" || value === "on", z.boolean())
+    .preprocess(checkboxToBoolean, z.boolean())
     .default(false),
   participants: z
     .array(eventParticipantSchema)
