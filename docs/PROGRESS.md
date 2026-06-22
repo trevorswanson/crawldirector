@@ -22,11 +22,11 @@ under *Deferred design options*).
 
 **Active: M6 — System AI persona engine**
 ([05-system-ai-persona.md](./05-system-ai-persona.md)).
-Slices 1–3 are complete: the review-backed server foundation, the Persona
-Studio UI + first generator prompt injection, and the `PERSONA_SHIFT`
-event-effect kind (manual persona drift living in the causality graph). **Next
-up: richer snapshot diffing, AI-proposed persona drift through the pending
-review path, and the full persona-aware generator family
+Slices 1–4 are complete: the review-backed server foundation, the Persona
+Studio UI + first generator prompt injection, the `PERSONA_SHIFT` event-effect
+kind (manual persona drift living in the causality graph), and the compact
+selected-snapshot history diff. **Next up: AI-proposed persona drift through the
+pending review path and the full persona-aware generator family
 (encounter/mob/boss/loot/System-message).** Keep the M6 work incremental.
 
 - [x] **Slice 1 — Persona snapshot foundation + compiler.** Added the
@@ -55,10 +55,14 @@ review path, and the full persona-aware generator family
       the apply change set, so "why did the persona change" traces through the
       causality graph. Manual shifts work now; AI-proposed drift through the
       pending path stays a later slice. ✅ 2026-06-20 (dated entry below).
-- [ ] **Later M6 slices.** Richer snapshot diffing, AI-proposed persona drift
-      through the pending review path, full persona-aware generator family
-      (encounter, mob/boss, loot, System-message), and broader actor-profile
-      studio reuse for M11.
+- [x] **Slice 4 — Persona snapshot history diff.** The Persona Studio now
+      compares the selected snapshot to its immediate predecessor, displaying
+      before→after dials, agenda additions/removals, resource/value/profile
+      changes, and an explicit first-snapshot state. The comparator is pure;
+      no schema or canon-write path changed. ✅ 2026-06-22.
+- [ ] **Later M6 slices.** AI-proposed persona drift through the pending review
+      path, full persona-aware generator family (encounter, mob/boss, loot,
+      System-message), and broader actor-profile studio reuse for M11.
 
 ### Scheduled roadmap additions (2026-06-19)
 
@@ -91,6 +95,30 @@ M6 remains the next milestone work. The detailed decisions live in
 
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
+
+## M6 — Persona snapshot history diff (slice 4) ✅ (2026-06-22)
+
+**Goal:** make an evolving System AI readable as an arc without asking the DM
+to manually compare two full persona forms. No schema change: the existing
+DM-only Persona Studio query already returns its selected entity's snapshots
+newest-first.
+
+- [x] **Pure diff model** ([`persona-diff.ts`](../src/lib/persona-diff.ts)):
+      deterministic immediate-predecessor comparison with canonical dial order,
+      before→after values (absence stays `—`, never zero), overt/secret agenda
+      additions/removals, values, resources, and concise profile-field changes.
+- [x] **Persona Studio UI** ([`persona-snapshot-diff.tsx`](../src/components/persona/persona-snapshot-diff.tsx),
+      [`persona/page.tsx`](<../src/app/(dm)/campaigns/[id]/persona/page.tsx>)):
+      a token-backed panel below the studio introduction says “Changed since
+      [previous snapshot]”; the oldest snapshot states that it has no earlier
+      comparison and create mode shows no diff. Dials are `before → after`; the
+      agenda section is deliberately terse so it explains the direction of the
+      shift without inventing AI narrative.
+- [x] **Tests:** pure comparison coverage for ordering, additions/removals,
+      visibility changes, resources, scalar fields, malformed empty text, and
+      no-op snapshots; component and page coverage for diff tokens,
+      immediate-predecessor selection, first-history state, and create-mode
+      suppression.
 
 ## M6 — `PERSONA_SHIFT` event-effect kind (slice 3) ✅ (2026-06-20)
 

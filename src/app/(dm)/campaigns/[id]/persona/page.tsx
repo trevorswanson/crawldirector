@@ -15,8 +15,10 @@ import {
 } from "@/app/(dm)/actions";
 import { ConsoleScreen, ScreenHeader, ScreenRail } from "@/components/console/screen";
 import { PersonaEditor, type PersonaFormValues } from "@/components/persona/persona-editor";
+import { PersonaSnapshotDiffPanel } from "@/components/persona/persona-snapshot-diff";
 import { Button } from "@/components/ui/button";
 import { Panel, PanelHeader } from "@/components/ui/panel";
+import { diffPersonaSnapshots } from "@/lib/persona-diff";
 
 function toFormValues(snapshot: PersonaSnapshotView): PersonaFormValues {
   return {
@@ -94,6 +96,15 @@ export default async function PersonaStudioPage({
     : studio.snapshots.find((s) => s.id === query.snapshot) ??
       studio.snapshots.find((s) => s.isActive) ??
       studio.snapshots[0];
+  const selectedSnapshotIndex = selectedSnapshot
+    ? studio.snapshots.findIndex((snapshot) => snapshot.id === selectedSnapshot.id)
+    : -1;
+  const previousSnapshot =
+    selectedSnapshotIndex >= 0 ? studio.snapshots[selectedSnapshotIndex + 1] ?? null : null;
+  const snapshotDiff =
+    selectedSnapshot && previousSnapshot
+      ? diffPersonaSnapshots(previousSnapshot, selectedSnapshot)
+      : null;
 
   const initial: PersonaFormValues = selectedSnapshot
     ? toFormValues(selectedSnapshot)
@@ -248,6 +259,13 @@ export default async function PersonaStudioPage({
             System messages sound like the System AI does right now. Changes are
             recorded as reviewable canon with full provenance.
           </p>
+
+          {!creating && selectedSnapshot && (
+            <PersonaSnapshotDiffPanel
+              previousLabel={previousSnapshot?.label || (previousSnapshot ? "Untitled snapshot" : null)}
+              diff={snapshotDiff}
+            />
+          )}
 
           {selectedSnapshot?.promptLocked && (
             <p className="border border-[color-mix(in_srgb,var(--sys)_45%,transparent)] bg-[color-mix(in_srgb,var(--sys)_10%,transparent)] px-3 py-2 text-[12px] text-[var(--sys)]">
