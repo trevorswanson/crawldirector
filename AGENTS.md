@@ -14,9 +14,9 @@ pitch and [`docs/`](./docs) for the full plan.
 
 ## Current status
 
-🚧 **M0–M5.5 complete; M6 slices 1–3 complete; next up the later M6 slices
-(richer snapshot diffing, AI-proposed persona drift through the pending review
-path, full persona-aware generator family).** M5.5 (data model hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
+🚧 **M0–M5.5 complete; M6 slices 1–4 complete; next up AI-proposed persona
+drift through the pending review path and the full persona-aware generator
+family.** M5.5 (data model hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
 seam, the `MIGRATE_ENTITY_DATA` job, reference-integrity badge + impact-aware
 archive, orphan report, the greenfield Faction satellite, and the Floor satellite
 (slice 5 — the genuine `data → satellite` migration moving FLOOR's
@@ -115,9 +115,12 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
   applied, materializing as a new active snapshot (the prior preserved as
   history) whose provenance points back at the apply change set — so persona
   drift lives in the causality graph (manual shifts work now; it honors persona
-  locks and clamps dials). Next slices: richer snapshot diffing, AI-proposed
-  persona drift through the pending review path, and the full persona-aware
-  generator family (encounter/mob/boss/loot/System-message).
+  locks and clamps dials). Slice 4 added a compact snapshot-history diff to the
+  Persona Studio: each selected snapshot compares itself with its immediate
+  predecessor using before→after dial values, concise agenda additions/removals,
+  and changed profile fields; the first snapshot has an explicit empty state.
+  Next slices: AI-proposed persona drift through the pending review path and the
+  full persona-aware generator family (encounter/mob/boss/loot/System-message).
 
 For per-slice detail (files, tests, decisions) see
 [`docs/PROGRESS.md`](./docs/PROGRESS.md) — its "Open backlog" section is the

@@ -166,7 +166,7 @@ New: `PersonaSnapshot` (and the `SYSTEM_AI` entity type, plus new relationship
 types like `USED_BY` / `MANIPULATES`). The `PERSONA_SHIFT` event-effect kind and
 `personaAware` generator flag. See [`09-data-schema.md`](./09-data-schema.md).
 
-**Status (M6 slices 1–3, 2026-06-20):** the server foundation, the DM-facing
+**Status (M6 slices 1–4, 2026-06-22):** the server foundation, the DM-facing
 studio, and the `PERSONA_SHIFT` event effect are live. `PersonaSnapshot` has a real table and review operations
 (`CREATE_PERSONA_SNAPSHOT`, `UPDATE_PERSONA_SNAPSHOT`), active snapshots are
 exclusive per entity, prompt-locks block generated `compiledPrompt` edits, and
@@ -186,9 +186,12 @@ active snapshot (the prior preserved as history, the dials clamped to −100…1
 the prompt recompiled), anchored to the event's in-game time and routed through
 the same review/lock/provenance apply path as a studio edit — so the persona arc
 lives in the causality graph (`event → apply change set → new snapshot`). Manual
-shifts work now. Still pending for later M6 slices: richer snapshot diffing,
-AI-proposed persona drift through the pending review path, and the full
-persona-aware generator family.
+shifts work now. The Persona Studio also shows a compact diff from each selected
+snapshot to its immediate predecessor: dials render as before→after values and
+agenda additions/removals provide terse shift context; richer profile changes
+remain in the same DM-only panel, and the earliest snapshot says it has no prior
+comparison. Still pending for later M6 slices: AI-proposed persona drift through
+the pending review path and the full persona-aware generator family.
 
 ## Build sequencing
 
