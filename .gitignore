@@ -2,6 +2,7 @@
 
 /.claude/
 /.antigravitycli/
+/.worktrees/
 
 # dependencies
 /node_modules
@@ -54,4 +55,3 @@ next-env.d.ts
 
 # seed data
 /dungeon-crawler-carl.jsonl
-
