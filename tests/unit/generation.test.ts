@@ -316,6 +316,48 @@ describe("proposeEventConsequences", () => {
     await expect(proposeEventConsequences(dmId, campaignId, source.id)).rejects.toThrow(/No AI provider/i);
   });
 
+  it("rejects a missing source event before resolving a provider", async () => {
+    const { dmId, campaignId } = await seed();
+    await expect(proposeEventConsequences(dmId, campaignId, "missing-event")).rejects.toThrow(
+      /Event not found/i,
+    );
+    expect(resolveCampaignProvider).not.toHaveBeenCalled();
+  });
+
+  it("rejects a source with no eligible target or existing consequence event", async () => {
+    const { dmId, campaignId } = await seed();
+    const source = await makeConsequenceEvent(dmId, campaignId, "Isolated note");
+    const provider = fakeConsequenceProvider({ effects: [], causalLinks: [] });
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    await expect(proposeEventConsequences(dmId, campaignId, source.id)).rejects.toThrow(
+      /eligible crawler.*existing event/i,
+    );
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+  });
+
+  it("does not offer a System AI without an active persona as an effect target", async () => {
+    const { dmId, campaignId } = await seed();
+    const system = await createGenericEntity(dmId, campaignId, {
+      type: "SYSTEM_AI",
+      name: "Dormant System",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const source = await makeConsequenceEvent(dmId, campaignId, "Dormant broadcast", [
+      { entityId: system.id, role: EventParticipantRole.ACTOR },
+    ]);
+    const provider = fakeConsequenceProvider({ effects: [], causalLinks: [] });
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    await expect(proposeEventConsequences(dmId, campaignId, source.id)).rejects.toThrow(
+      /eligible crawler.*existing event/i,
+    );
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+  });
+
   it("surfaces a provider failure safely without a proposal or usage record", async () => {
     const { dmId, campaignId } = await seed();
     const crawler = await makeConsequenceCrawler(dmId, campaignId);
