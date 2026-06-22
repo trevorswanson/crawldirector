@@ -14,6 +14,7 @@ import {
 import {
   applyAutoApprovedEntityChangeSet,
   applyAutoApprovedPersonaSnapshotChangeSet,
+  listPendingChangeSetsForUser,
   type ReviewPatch,
 } from "@/server/services/review";
 
@@ -331,5 +332,52 @@ describe("persona shift effect", () => {
     });
     expect(snapshots).toHaveLength(1);
     expect(snapshots[0].isActive).toBe(true);
+  });
+
+  // A pending (queued, not auto-approved) shift whose precondition breaks before
+  // the DM reviews it must surface through the blocked/stale workflow at refresh
+  // time — not throw inside approveChangeSet's transaction. The flag refresh runs
+  // when the review queue is listed (listPendingChangeSetsForUser).
+  it("flags a pending shift blocked when the active persona is locked before approval", async () => {
+    const { owner, campaign, systemId } = await setup("shift-refresh-lock@test.com");
+    await makeActivePersona(owner.id, campaign.id, systemId); // unlocked
+
+    const event = await shiftEvent(owner.id, campaign.id, systemId, { resentment: 10 });
+    await applyEventEffects(owner.id, campaign.id, event.id); // queues a pending proposal
+
+    // The DM locks the active persona before reviewing the queue.
+    await prisma.personaSnapshot.updateMany({
+      where: { campaignId: campaign.id, entityId: systemId, isActive: true },
+      data: { locked: true },
+    });
+
+    await listPendingChangeSetsForUser(owner.id, campaign.id); // refreshes flags
+
+    const operation = await prisma.changeOperation.findFirstOrThrow({
+      where: { changeSet: { campaignId: campaign.id }, op: "APPLY_EVENT_EFFECTS" },
+    });
+    expect(operation.blockedByLock).toBe(true);
+    expect(operation.isStale).toBe(false);
+  });
+
+  it("flags a pending shift stale when the active persona is gone before approval", async () => {
+    const { owner, campaign, systemId } = await setup("shift-refresh-stale@test.com");
+    await makeActivePersona(owner.id, campaign.id, systemId);
+
+    const event = await shiftEvent(owner.id, campaign.id, systemId, { resentment: 10 });
+    await applyEventEffects(owner.id, campaign.id, event.id);
+
+    // The active persona is deactivated before review — there is nothing to shift.
+    await prisma.personaSnapshot.updateMany({
+      where: { campaignId: campaign.id, entityId: systemId, isActive: true },
+      data: { isActive: false },
+    });
+
+    await listPendingChangeSetsForUser(owner.id, campaign.id);
+
+    const operation = await prisma.changeOperation.findFirstOrThrow({
+      where: { changeSet: { campaignId: campaign.id }, op: "APPLY_EVENT_EFFECTS" },
+    });
+    expect(operation.isStale).toBe(true);
   });
 });

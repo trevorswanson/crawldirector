@@ -2397,14 +2397,39 @@ async function evaluateApplyEventEffectsOperationFlags(
       isStale = true;
       continue;
     }
-    // Only crawler-targeting kinds get the crawler lock/staleness probe.
-    // Subject-derived kinds (COLLAPSE_FLOOR) and PERSONA_SHIFT touch no
-    // hand-picked crawler — their writes (floor anchors / a new persona
-    // snapshot) are lock-checked when the op is actually applied.
-    if (eventEffectKindMeta[reviewed.kind].target !== "CRAWLER") continue;
+    const target = eventEffectKindMeta[reviewed.kind].target;
+    // Subject-derived kinds (COLLAPSE_FLOOR, target NONE) touch no hand-picked
+    // entity — their floor-anchor writes are lock-checked when the op is applied.
+    if (target === "NONE") continue;
     if (!reviewed.targetEntityId) continue;
     try {
       assertValidDeclaredEffect(reviewed);
+      if (target === "PERSONA") {
+        // A PERSONA_SHIFT drifts the target System AI's active persona into a
+        // brand-new active snapshot, deactivating the current one. Surface the
+        // same preconditions the apply (applyPersonaShiftEffect →
+        // applyCreatePersonaSnapshot) enforces so they route through the
+        // blocked/stale review workflow instead of throwing inside the approval
+        // transaction: a missing/archived target or no active snapshot to shift
+        // is stale; a locked active snapshot blocks the op (its activation can't
+        // be flipped — same guard as assertActivePersonaUnlocked).
+        await assertPersonaShiftTarget(tx, changeSet.campaignId, reviewed.targetEntityId);
+        const active = await tx.personaSnapshot.findFirst({
+          where: {
+            campaignId: changeSet.campaignId,
+            entityId: reviewed.targetEntityId,
+            isActive: true,
+            status: { not: CanonStatus.ARCHIVED },
+          },
+          select: { locked: true },
+        });
+        if (!active) {
+          isStale = true;
+          continue;
+        }
+        blockedByLock ||= active.locked;
+        continue;
+      }
       const crawler = await loadEffectTargetCrawler(
         tx,
         changeSet.campaignId,
