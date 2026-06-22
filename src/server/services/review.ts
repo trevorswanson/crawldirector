@@ -2377,7 +2377,9 @@ async function evaluateApplyEventEffectsOperationFlags(
   });
   if (!event) return { blockedByLock: false, isStale: true };
 
-  const reviewedEffects = parseEventEffects(readTo(patch, "effects"));
+  const reviewedEffects = uniqueEventEffectsById(
+    parseEventEffects(readTo(patch, "effects")),
+  );
   if ("effects" in patch && reviewedEffects.length === 0) {
     return { blockedByLock: false, isStale: false };
   }
@@ -2385,25 +2387,34 @@ async function evaluateApplyEventEffectsOperationFlags(
   const storedById = new Map(
     parseEventEffects(event.effects as JsonValue).map((effect) => [effect.id, effect]),
   );
+  const acceptsPatchCarriedEffects = changeSet.source === ChangeSource.AI;
   let blockedByLock = false;
   let isStale = false;
   for (const reviewed of reviewedEffects) {
     const stored = storedById.get(reviewed.id);
-    if (
-      !stored ||
-      stored.applied ||
-      !effectBelongsToOperation(stored, changeSet.id, operation.id)
-    ) {
+    // Effects declared on the event before review must still be owned by this
+    // operation. A patch-only effect is new canon proposed by this operation;
+    // it is deliberately absent from Event.effects until approval, so validate
+    // it against live state instead of treating that absence as staleness.
+    if (stored) {
+      if (stored.applied || !effectBelongsToOperation(stored, changeSet.id, operation.id)) {
+        isStale = true;
+        continue;
+      }
+    } else if (!acceptsPatchCarriedEffects) {
+      // DM-declared effects are written to Event.effects before their apply
+      // operation is created. If one disappears, preserve the legacy stale
+      // protection rather than treating it as a new effect.
       isStale = true;
       continue;
     }
-    const target = eventEffectKindMeta[reviewed.kind].target;
-    // Subject-derived kinds (COLLAPSE_FLOOR, target NONE) touch no hand-picked
-    // entity — their floor-anchor writes are lock-checked when the op is applied.
-    if (target === "NONE") continue;
-    if (!reviewed.targetEntityId) continue;
     try {
       assertValidDeclaredEffect(reviewed);
+      const target = eventEffectKindMeta[reviewed.kind].target;
+      // Subject-derived kinds (COLLAPSE_FLOOR, target NONE) touch no hand-picked
+      // entity — their floor-anchor writes are lock-checked when the op is applied.
+      if (target === "NONE") continue;
+      if (!reviewed.targetEntityId) continue;
       if (target === "PERSONA") {
         // A PERSONA_SHIFT drifts the target System AI's active persona into a
         // brand-new active snapshot, deactivating the current one. Surface the
@@ -4366,6 +4377,18 @@ function parseEventEffects(value: JsonValue | undefined): StoredEventEffect[] {
   return effects;
 }
 
+// Providers mint UUIDs for new effects, but the review service must remain
+// safe if a malformed proposal repeats one. Retain the first row in patch order
+// so one logical effect can never be applied twice in one approval transaction.
+function uniqueEventEffectsById(effects: StoredEventEffect[]) {
+  const seenIds = new Set<string>();
+  return effects.filter((effect) => {
+    if (seenIds.has(effect.id)) return false;
+    seenIds.add(effect.id);
+    return true;
+  });
+}
+
 function assertValidDeclaredEffect(effect: StoredEventEffect) {
   if (effect.kind === "ADJUST_STAT") {
     if (!effect.stat) throw new ServiceError("Effect is missing a stat to adjust.");
@@ -5484,10 +5507,31 @@ async function applyApplyEventEffects(
   if (!event) throw new ServiceError("Event not found.");
 
   const effects = parseEventEffects(event.effects as JsonValue);
-  const reviewedEffects = parseEventEffects(readTo(patch, "effects"));
+  const reviewedEffects = uniqueEventEffectsById(
+    parseEventEffects(readTo(patch, "effects")),
+  );
   const patchCarriesEffects = "effects" in patch;
   if (patchCarriesEffects && reviewedEffects.length === 0) {
     throw new ServiceError("Effect review patch has no valid effects.");
+  }
+  const storedById = new Map(effects.map((effect) => [effect.id, effect]));
+  const patchCarriedEffects = patchCarriesEffects && changeSet.source === ChangeSource.AI
+    ? reviewedEffects.filter((effect) => !storedById.has(effect.id))
+    : [];
+  // New generated effects only become stored canon when this accepted operation
+  // is applied. Validate their exact declared shape and live target before
+  // changing the local serialized effect collection.
+  for (const effect of patchCarriedEffects) {
+    assertValidDeclaredEffect(effect);
+    await assertDeclaredEffectTarget(tx, changeSet.campaignId, effect);
+    effects.push({
+      ...effect,
+      applied: false,
+      appliedChangeSetId: null,
+      pendingChangeSetId: changeSet.id,
+      pendingOperationId: operationId,
+      reviewStatus: "PENDING",
+    });
   }
   const reviewedById = new Map(reviewedEffects.map((effect) => [effect.id, effect]));
   const reviewedIds = new Set(reviewedEffects.map((effect) => effect.id));
