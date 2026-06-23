@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 
 import { CanonStatus, ChangeSource, EntityType, OpKind, Prisma, Role } from "@/generated/prisma/client";
+import { formatEntityType } from "@/lib/entities";
 import { ServiceError } from "@/lib/errors";
 import { phraseTimeRef, readTimeRef } from "@/lib/time-ref";
 import { resolveAbsoluteDay } from "@/lib/time-resolve";
@@ -24,6 +25,13 @@ import {
   type EventConsequenceRelatedCanon,
 } from "@/server/ai/generators/event-consequences";
 import {
+  DUNGEON_CONTENT_GENERATOR,
+  buildDungeonContentPrompt,
+  dungeonContentOutputSchema,
+  dungeonContentToSpec,
+  type DungeonContentType,
+} from "@/server/ai/generators/dungeon-content";
+import {
   FLESH_ENTITY_GENERATOR,
   type FleshableField,
   buildFleshEntityPrompt,
@@ -45,7 +53,7 @@ import {
   scaffoldStubsToSpecs,
   type StubSpec,
 } from "@/server/ai/generators/scaffold-stubs";
-import { buildStubCreatePatch } from "@/server/services/entities";
+import { buildContentCreatePatch, buildStubCreatePatch } from "@/server/services/entities";
 import { getActiveSystemPersonaPrompt } from "@/server/services/persona";
 import { isPersonaVoicedEntityType } from "@/lib/persona";
 import { retrieveRelatedEntityIds } from "@/server/services/retrieval";
@@ -107,6 +115,13 @@ export type ScaffoldStubsResult = {
   stubCount: number;
 };
 
+export type GenerateDungeonContentResult = {
+  changeSetId: string;
+  providerId: string;
+  model: string;
+  entityName: string;
+};
+
 const MAX_SCAFFOLD_INSTRUCTION = 2000;
 const MAX_BULK_FLESH = 20;
 const SCAFFOLD_EXISTING_NAME_PROMPT_LIMIT = 80;
@@ -145,6 +160,11 @@ const EVENT_CONSEQUENCE_RELATED_CANON_LIMIT = 8;
 // not a candidate pool, so a focused, token-cheap set of the most relevant
 // entities serves better than a long list.
 const FLESH_RELATED_LIMIT = 8;
+
+// How many related canon entities the dungeon-content generator carries as
+// read-only consistency context for the new entity it invents. Same rationale
+// (and size) as the flesh-out reference set: focused, token-cheap relevance.
+const DUNGEON_CONTENT_RELATED_LIMIT = 8;
 
 const candidateSelect = {
   id: true,
@@ -985,6 +1005,160 @@ async function proposeEventConsequencesLocked(
     providerId: provider.id,
     model: provider.model,
     operationCount: operations.length,
+  };
+}
+
+// Generate one new dungeon-voiced entity (boss, mob type, loot item, System
+// message, achievement, title) from a DM brief, in the active System AI
+// persona's *current* voice, filed as a PENDING `CREATE_ENTITY` proposal — never
+// canon (invariant #1). This is the create-from-scratch member of M6's
+// persona-aware generator family (docs/05). DM/co-DM only. Throws a ServiceError
+// (safe message) when no provider is configured, the provider call fails, or the
+// model proposes nothing usable.
+export async function generateDungeonContent(
+  userId: string,
+  campaignId: string,
+  input: { type: DungeonContentType; brief: string },
+): Promise<GenerateDungeonContentResult> {
+  await assertCampaignDm(userId, campaignId);
+
+  return withCampaignAiLock(campaignId, () =>
+    generateDungeonContentLocked(userId, campaignId, input),
+  );
+}
+
+async function generateDungeonContentLocked(
+  userId: string,
+  campaignId: string,
+  input: { type: DungeonContentType; brief: string },
+): Promise<GenerateDungeonContentResult> {
+  const campaign = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+    select: { name: true, styleGuide: true },
+  });
+  if (!campaign) throw new ServiceError("Campaign not found.");
+
+  const provider = await resolveCampaignProvider(campaignId);
+  if (!provider) {
+    throw new ServiceError(
+      "No AI provider is configured. Add a provider key in campaign Settings first.",
+    );
+  }
+
+  await assertWithinSpendCap(campaignId);
+
+  // Build consistency context: retrieve the relevant slice of canon for the brief
+  // (so the new entity fits the world) and the existing campaign tags (so it
+  // reuses them rather than minting near-duplicates). `searchCanon` is
+  // visibility-scoped even though this is DM-only, and degrades to full-text when
+  // no embedder is configured. Unlike relationship inference there is no target
+  // entity to anchor on, so the brief is the query (mirrors event-consequences).
+  const [retrieval, tagRows] = await Promise.all([
+    searchCanon(userId, campaignId, input.brief, {
+      limit: DUNGEON_CONTENT_RELATED_LIMIT,
+      targetTypes: [SEARCH_TARGET_ENTITY],
+    }),
+    prisma.entity.findMany({
+      where: { campaignId, status: { not: CanonStatus.ARCHIVED } },
+      select: { tags: true },
+    }),
+  ]);
+  const campaignTags = Array.from(new Set(tagRows.flatMap((r) => r.tags))).sort();
+  const relatedCanon = retrieval.hits.flatMap((hit) =>
+    hit.targetType === SEARCH_TARGET_ENTITY
+      ? [{ type: hit.entity.type, name: hit.entity.name, summary: hit.entity.summary }]
+      : [],
+  );
+
+  // Re-check the cap after retrieval: with an embedding-capable key, searchCanon
+  // spent (and recorded) a paid query-embedding above, which can bring known
+  // spend to the cap. The early check ran before retrieval. (Mirrors flesh-out.)
+  await assertWithinSpendCap(campaignId);
+
+  // M6 persona injection (docs/05): every creatable kind here is persona-voiced,
+  // so always fetch the active System AI persona; `getActiveSystemPersonaPrompt`
+  // is DM-scoped (asserted above) and returns null when none exists, so a
+  // campaign with no persona still generates — just un-flavored.
+  const activePersona = await getActiveSystemPersonaPrompt(userId, campaignId);
+
+  const { system, messages } = buildDungeonContentPrompt({
+    campaignName: campaign.name,
+    styleGuide: campaign.styleGuide,
+    type: input.type,
+    brief: input.brief,
+    campaignTags,
+    relatedCanon,
+    personaPrompt: activePersona?.prompt ?? null,
+  });
+
+  let output;
+  let usage: LLMUsage = emptyUsage();
+  try {
+    const result = await provider.generateStructured({
+      schemaName: "dungeon_content",
+      schema: dungeonContentOutputSchema,
+      system,
+      messages,
+      maxTokens: 2048,
+    });
+    output = result.data;
+    usage = result.usage ?? usage;
+  } catch (error) {
+    // Keep messages safe: never reflect a provider's raw free text (invariant #6).
+    logActionError(`Dungeon-content generation failed (provider=${provider.id})`, error, provider.redactSecrets);
+    const message =
+      error instanceof ProviderError ? error.message : describeProviderError(error);
+    throw new ServiceError(message);
+  }
+
+  // Record usage before the no-op check so a paid run that yields nothing usable
+  // still counts toward spend + the cap.
+  const usageRow = await recordAiUsage({
+    campaignId,
+    userId,
+    providerId: provider.id,
+    model: provider.model,
+    generatorId: DUNGEON_CONTENT_GENERATOR.id,
+    usage,
+  });
+
+  const spec = dungeonContentToSpec(output);
+  if (!spec) {
+    throw new ServiceError("The model did not propose any usable content.");
+  }
+
+  const typeLabel = formatEntityType(input.type);
+  const changeSet = await createPendingEntityChangeSet(userId, campaignId, {
+    source: ChangeSource.AI,
+    title: `Generate ${typeLabel}: ${spec.name}`,
+    summary: `AI-generated ${typeLabel} (${provider.model}) — review before it becomes canon.`,
+    providerId: provider.id,
+    model: provider.model,
+    promptId: DUNGEON_CONTENT_GENERATOR.id,
+    promptVersion: DUNGEON_CONTENT_GENERATOR.version,
+    personaSnapshotId: activePersona?.snapshotId,
+    personaPromptVersion: activePersona?.version,
+    operations: [
+      {
+        op: OpKind.CREATE_ENTITY,
+        patch: buildContentCreatePatch(userId, campaignId, {
+          type: input.type as EntityType,
+          name: spec.name,
+          summary: spec.summary,
+          description: spec.description,
+          tags: spec.tags,
+        }),
+      },
+    ],
+  });
+
+  await linkAiUsageChangeSet(usageRow.id, changeSet.id);
+
+  return {
+    changeSetId: changeSet.id,
+    providerId: provider.id,
+    model: provider.model,
+    entityName: spec.name,
   };
 }
 

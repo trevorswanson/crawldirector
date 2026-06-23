@@ -22,12 +22,15 @@ under *Deferred design options*).
 
 **Active: M6 — System AI persona engine**
 ([05-system-ai-persona.md](./05-system-ai-persona.md)).
-Slices 1–5 are complete: the review-backed server foundation, the Persona
+Slices 1–6 are complete: the review-backed server foundation, the Persona
 Studio UI + first generator prompt injection, the `PERSONA_SHIFT` event-effect
-kind (manual persona drift living in the causality graph), and the compact
-selected-snapshot history diff, and the event-consequence generator. **Next up:
-the full persona-aware generator family (encounter/mob/boss/loot/System-message).**
-Keep the M6 work incremental.
+kind (manual persona drift living in the causality graph), the compact
+selected-snapshot history diff, the event-consequence generator, and the
+persona-aware **dungeon-content generator** (create a new boss/mob/loot/System
+message/achievement/title from a DM brief in the active persona's voice).
+**Next up:** the **encounter** set-piece generator (multi-entity, so it waits on
+M10's generic operation aliases/dependencies) rounds out the named family, plus
+broader actor-profile studio reuse for M11. Keep the M6 work incremental.
 
 - [x] **Slice 1 — Persona snapshot foundation + compiler.** Added the
       `PersonaSnapshot` table (generic to any `Entity`, first used by
@@ -67,8 +70,18 @@ Keep the M6 work incremental.
       DM approves them. Existing target/event locks, cycle guards, usage, and
       provider/model/prompt provenance remain enforced. New downstream Event
       creation stays with M10's operation-alias/dependency work. ✅ 2026-06-22.
-- [ ] **Later M6 slices.** Full persona-aware generator family (encounter, mob/boss, loot,
-      System-message), and broader actor-profile studio reuse for M11.
+- [x] **Slice 6 — Persona-aware dungeon-content generator.** A new generator that
+      creates one fully-fleshed dungeon-voiced entity (BOSS / MOB_TYPE / ITEM /
+      SYSTEM_MESSAGE / ACHIEVEMENT / TITLE) from a DM brief, in the active System
+      AI persona's *current* voice, filed as a PENDING `CREATE_ENTITY` proposal —
+      the create-from-scratch counterpart to the flesh-out generator (which only
+      enriched existing entities). This delivers the monster/boss/loot/System-message
+      members of the design's persona-aware family as one kind-parameterized
+      generator; the multi-entity **encounter** set-piece stays a later slice
+      (it needs M10's operation aliases/dependencies). ✅ 2026-06-22 (dated entry
+      below).
+- [ ] **Later M6 slices.** The **encounter** set-piece generator (multi-entity),
+      and broader actor-profile studio reuse for M11.
 
 ### Scheduled roadmap additions (2026-06-19)
 
@@ -101,6 +114,79 @@ M6 remains the next milestone work. The detailed decisions live in
 
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
+
+## M6 — Persona-aware dungeon-content generator (slice 6) ✅ (2026-06-22)
+
+**Goal:** the roadmap's "full persona-aware generator family" — give the DM a way
+to *create* new dungeon-voiced content (a boss, a mob type, a loot item, a System
+message, an achievement, a title) in the active System AI persona's current
+voice, not just enrich entities that already exist. The flesh-out generator
+(slice 2) already injects the persona when *enriching* a dungeon-voiced entity;
+this adds the create-from-scratch counterpart. No schema change (a new generator
+files an existing `CREATE_ENTITY` proposal).
+
+**Decision (one kind-parameterized generator).** The design lists the
+encounter / monster / boss / loot / System-message generators separately, but the
+entity-creating members share one shape (a fleshed entity: name + summary +
+description + tags) and differ only by kind framing — so they ship as a single
+generator parameterized by kind, whose creatable set is exactly
+`PERSONA_VOICED_ENTITY_TYPES` (BOSS / MOB_TYPE / ITEM / SYSTEM_MESSAGE /
+ACHIEVEMENT / TITLE). The **encounter** set-piece is deliberately excluded: it's
+a multi-entity proposal that needs M10's generic operation aliases/dependencies,
+so it stays a later slice. The generator is persona-aware but degrades gracefully
+— a campaign with no active System AI persona still generates, just un-flavored
+(mirroring flesh-out).
+
+- [x] **Pure generator** ([`dungeon-content.ts`](../src/server/ai/generators/dungeon-content.ts)):
+      `DUNGEON_CONTENT_GENERATOR` (id `dungeon-content`, version `1`),
+      `dungeonContentOutputSchema` (strict name/summary/description/tags),
+      `buildDungeonContentPrompt` (per-kind framing + a cacheable persona voice
+      block with the same no-reveal rule as flesh-out + read-only related-canon
+      reference), and `dungeonContentToSpec` (trims fields, normalizes tags,
+      returns null on a blank name/summary/description so the service refuses a
+      no-op). `dungeonContentTypeValues` re-exports the persona-voiced set.
+- [x] **Create patch** ([`entities.ts`](../src/server/services/entities.ts)):
+      `buildContentCreatePatch` — the fleshed-entity sibling of
+      `buildStubCreatePatch` (carries a description, `isStub: false`), reusing
+      `entityCreatePatch` so a generated entity is byte-identical to a manually
+      created one (visibility `DM_ONLY`).
+- [x] **Service** ([`generation.ts`](../src/server/services/generation.ts)):
+      `generateDungeonContent(userId, campaignId, { type, brief })` — DM-only,
+      campaign-AI-locked; resolves the provider, enforces the spend cap (re-checked
+      after retrieval, which can spend a paid query embedding), builds consistency
+      context from `searchCanon(brief)` + existing campaign tags, fetches the
+      active persona via `getActiveSystemPersonaPrompt`, records usage before the
+      no-op guard, and files a PENDING `CREATE_ENTITY` change set carrying the
+      persona snapshot id + prompt version (copied to provenance on approval) and
+      the `dungeon-content` generator provenance.
+- [x] **Validation + action** ([`validation.ts`](../src/lib/validation.ts),
+      [`actions.ts`](<../src/app/(dm)/actions.ts>)): `dungeonContentInputSchema`
+      (kind ∈ persona-voiced set, bounded brief) and `generateDungeonContentAction`
+      (validates FormData, revalidates queue + world, returns the Review Queue
+      deep-link; safe error messages — invariant #6).
+- [x] **UI** ([`dungeon-content-panel.tsx`](../src/components/entities/dungeon-content-panel.tsx),
+      [`ai-actions-dialog.tsx`](../src/components/entities/ai-actions-dialog.tsx)):
+      a "Generate dungeon content" section in the World Browser AI actions dialog
+      — a kind `<select>` + brief textarea; success links the proposed change set
+      in the Review Queue (nothing becomes canon until approved — invariant #1).
+- [x] **Tests:** pure
+      [`dungeon-content-generator.test.ts`](../tests/unit/dungeon-content-generator.test.ts)
+      (per-kind framing, persona block injected/omitted, related-canon + tag
+      rendering, spec normalization + blank-field rejection, schema strictness);
+      DB-backed `generateDungeonContent` cases in
+      [`generation.test.ts`](../tests/unit/generation.test.ts) (PENDING proposal
+      shape + persona attribution + voice injection; approval creates the AI-sourced
+      entity with description + persona provenance; un-flavored with no active
+      persona; brief/tags in the prompt; usage recorded but no proposal on a blank
+      name; no-provider, ProviderError, and player-denied paths); action coverage in
+      [`dm-actions.test.ts`](../tests/unit/dm-actions.test.ts); component coverage in
+      [`dungeon-content-panel.test.tsx`](../tests/unit/dungeon-content-panel.test.tsx)
+      and the new section asserted in
+      [`ai-actions-dialog.test.tsx`](../tests/unit/ai-actions-dialog.test.tsx).
+- [x] **Verification:** `npm run typecheck`, `npm run lint`, `npm run build`, and
+      the full coverage gate (see below). In-browser verification deferred (the
+      local dev server occupies the only Next dev port — see the preview note in
+      memory).
 
 ## M6 — Persona snapshot history diff (slice 4) ✅ (2026-06-22)
 

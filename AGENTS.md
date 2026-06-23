@@ -14,9 +14,9 @@ pitch and [`docs/`](./docs) for the full plan.
 
 ## Current status
 
-🚧 **M0–M5.5 complete; M6 slices 1–4 complete; next up AI-proposed persona
-drift through the pending review path and the full persona-aware generator
-family.** M5.5 (data model hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
+🚧 **M0–M5.5 complete; M6 slices 1–6 complete; next up the multi-entity
+encounter set-piece generator (waits on M10 operation aliases) and broader
+actor-profile studio reuse for M11.** M5.5 (data model hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
 seam, the `MIGRATE_ENTITY_DATA` job, reference-integrity badge + impact-aware
 archive, orphan report, the greenfield Faction satellite, and the Floor satellite
 (slice 5 — the genuine `data → satellite` migration moving FLOOR's
@@ -119,8 +119,17 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
   Persona Studio: each selected snapshot compares itself with its immediate
   predecessor using before→after dial values, concise agenda additions/removals,
   and changed profile fields; the first snapshot has an explicit empty state.
-  Next slices: AI-proposed persona drift through the pending review path and the
-  full persona-aware generator family (encounter/mob/boss/loot/System-message).
+  Slice 5 added the event-consequence generator (the Timeline asks the BYO model
+  for bounded effects + causal links on an existing event, filed as one PENDING
+  AI change set — including AI-proposed `PERSONA_SHIFT` drift through the pending
+  review path). Slice 6 added the persona-aware **dungeon-content generator**: a
+  DM briefs the active System AI to *create* one new dungeon-voiced entity (BOSS/
+  MOB_TYPE/ITEM/SYSTEM_MESSAGE/ACHIEVEMENT/TITLE) in its current voice, filed as a
+  PENDING `CREATE_ENTITY` proposal (the create-from-scratch counterpart to the
+  flesh-out generator; persona attribution recorded, degrades to un-flavored when
+  no persona is active). Next slices: the multi-entity **encounter** set-piece
+  generator (waits on M10's generic operation aliases/dependencies) and broader
+  actor-profile studio reuse for M11.
 
 For per-slice detail (files, tests, decisions) see
 [`docs/PROGRESS.md`](./docs/PROGRESS.md) — its "Open backlog" section is the

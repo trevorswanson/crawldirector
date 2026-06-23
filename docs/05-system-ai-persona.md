@@ -168,8 +168,9 @@ New: `PersonaSnapshot` (and the `SYSTEM_AI` entity type, plus new relationship
 types like `USED_BY` / `MANIPULATES`). The `PERSONA_SHIFT` event-effect kind and
 `personaAware` generator flag. See [`09-data-schema.md`](./09-data-schema.md).
 
-**Status (M6 slices 1–4, 2026-06-22):** the server foundation, the DM-facing
-studio, and the `PERSONA_SHIFT` event effect are live. `PersonaSnapshot` has a real table and review operations
+**Status (M6 slices 1–6, 2026-06-22):** the server foundation, the DM-facing
+studio, the `PERSONA_SHIFT` event effect, the event-consequence generator, and
+the persona-aware dungeon-content generator are live. `PersonaSnapshot` has a real table and review operations
 (`CREATE_PERSONA_SNAPSHOT`, `UPDATE_PERSONA_SNAPSHOT`), active snapshots are
 exclusive per entity, prompt-locks block generated `compiledPrompt` edits, and
 the deterministic compiler writes a provenance-tracked cached prompt fragment.
@@ -192,8 +193,18 @@ shifts work now. The Persona Studio also shows a compact diff from each selected
 snapshot to its immediate predecessor: dials render as before→after values and
 agenda additions/removals provide terse shift context; richer profile changes
 remain in the same DM-only panel, and the earliest snapshot says it has no prior
-comparison. Still pending for later M6 slices: AI-proposed persona drift through
-the pending review path and the full persona-aware generator family.
+comparison. The **event-consequence generator** (slice 5) lets the Timeline ask
+the BYO model for bounded effects + causal links on an existing event — including
+AI-proposed `PERSONA_SHIFT` drift filed through the *pending* review path. The
+persona-aware **dungeon-content generator** (slice 6) is the create-from-scratch
+counterpart to the flesh-out generator: a DM briefs the active System AI to
+*create* one new dungeon-voiced entity (boss, mob type, loot item, System
+message, achievement, title) in its current voice, filed as a PENDING
+`CREATE_ENTITY` proposal with the driving snapshot id + prompt version recorded
+(secret agendas never leave the DM-only snapshot), degrading to un-flavored when
+no persona is active. Still pending for later M6 slices: the multi-entity
+**encounter** set-piece generator (waits on M10's generic operation
+aliases/dependencies) and broader actor-profile studio reuse for M11.
 
 ## Build sequencing
 

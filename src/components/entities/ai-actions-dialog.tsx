@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Sparkles } from "lucide-react";
 
 import { BulkFleshPanel, type BulkFleshCandidate, type RecentBulkJob } from "@/components/entities/bulk-flesh-panel";
+import { DungeonContentPanel } from "@/components/entities/dungeon-content-panel";
 import { GeneratePanel } from "@/components/entities/generate-panel";
 import { ScaffoldStubsPanel } from "@/components/entities/scaffold-stubs-panel";
 import { Dialog } from "@/components/ui/dialog";
@@ -66,6 +67,9 @@ export function AiActionsDialog(props: AiActionsDialogProps) {
             <>
               <ActionSection title="Scaffold stubs">
                 <ScaffoldStubsPanel campaignId={props.campaignId} embedded />
+              </ActionSection>
+              <ActionSection title="Generate dungeon content">
+                <DungeonContentPanel campaignId={props.campaignId} />
               </ActionSection>
               {props.candidates.length > 0 && (
                 <ActionSection title="Bulk flesh-out">

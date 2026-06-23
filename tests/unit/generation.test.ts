@@ -29,6 +29,7 @@ import { createEvent, setEventLock } from "@/server/services/events";
 import {
   fleshOutEntities,
   fleshOutEntity,
+  generateDungeonContent,
   inferRelationshipsForEntity,
   proposeEventConsequences,
   scaffoldStubEntities,
@@ -1529,6 +1530,236 @@ describe("fleshOutEntities (bulk)", () => {
     await expect(fleshOutEntities(playerId, campaignId, [entityId])).rejects.toBeInstanceOf(
       ServiceError,
     );
+    expect(resolveCampaignProvider).not.toHaveBeenCalled();
+  });
+});
+
+function fakeContentProvider(
+  data: { name: string; summary: string; description: string; tags?: string[] },
+  over: { id?: string; model?: string } = {},
+) {
+  const model = over.model ?? "claude-opus-4-8";
+  return {
+    id: over.id ?? "anthropic",
+    model,
+    generate: vi.fn(),
+    generateStructured: vi.fn().mockResolvedValue({ data, usage: SAMPLE_USAGE, model }),
+  };
+}
+
+describe("generateDungeonContent", () => {
+  async function authorSystemPersona(dmId: string, campaignId: string) {
+    const systemAi = await createGenericEntity(dmId, campaignId, {
+      type: "SYSTEM_AI",
+      name: "The System",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    await createPersonaSnapshot(dmId, campaignId, systemAi.id, {
+      label: "Petty God",
+      dials: { theatricality: 90 },
+      values: [],
+      overtAgendas: ["Make it a show."],
+      secretAgendas: ["Undermine Borant."],
+      resources: [],
+      knowledgeScope: "OMNISCIENT",
+      voiceGuide: "Grandiose and petty.",
+      constraints: "",
+      isActive: true,
+    });
+  }
+
+  const sampleBoss = {
+    name: "The Maitre D'",
+    summary: "A boss who seats you at the wrong table.",
+    description: "## The Maitre D'\nHe collects betrayals like silverware.",
+    tags: ["boss", "betrayal"],
+  };
+
+  it("files a single PENDING CREATE_ENTITY proposal in the active persona's voice, with attribution", async () => {
+    const { dmId, campaignId } = await seed();
+    await authorSystemPersona(dmId, campaignId);
+    const provider = fakeContentProvider(sampleBoss);
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    const result = await generateDungeonContent(dmId, campaignId, {
+      type: "BOSS",
+      brief: "A floor-3 boss themed around betrayal.",
+    });
+
+    expect(result).toMatchObject({
+      providerId: "anthropic",
+      model: "claude-opus-4-8",
+      entityName: "The Maitre D'",
+    });
+
+    // The prompt adopts the active persona's voice and carries the brief; the
+    // secret agenda informs tone on the DM side but never reaches player output.
+    const req = provider.generateStructured.mock.calls[0][0];
+    const systemText = (req.system as Array<{ text: string }>).map((b) => b.text).join("\n");
+    expect(systemText).toContain("System AI persona: Petty God");
+    expect(systemText).toMatch(/System AI's current voice/i);
+    expect(systemText).toContain("Undermine Borant.");
+    expect(req.messages[0].content).toContain("A floor-3 boss themed around betrayal.");
+
+    // Nothing becomes canon (invariant #1): the boss is not a live canon entity.
+    expect(
+      await prisma.entity.count({ where: { campaignId, name: "The Maitre D'", status: "CANON" } }),
+    ).toBe(0);
+
+    const changeSet = await prisma.changeSet.findUniqueOrThrow({
+      where: { id: result.changeSetId },
+      include: { operations: true },
+    });
+    expect(changeSet).toMatchObject({
+      status: "PENDING",
+      source: ChangeSource.AI,
+      providerId: "anthropic",
+      model: "claude-opus-4-8",
+      promptId: "dungeon-content",
+      promptVersion: "1",
+      personaPromptVersion: 1,
+    });
+    expect(changeSet.personaSnapshotId).toBeTruthy();
+    expect(changeSet.operations).toHaveLength(1);
+    expect(changeSet.operations[0].op).toBe("CREATE_ENTITY");
+    const patch = changeSet.operations[0].patch as Record<string, { to: unknown }>;
+    expect(patch.type.to).toBe("BOSS");
+    expect(patch.name.to).toBe("The Maitre D'");
+    expect(patch.description.to).toBe(sampleBoss.description);
+    expect(patch.isStub.to).toBe(false);
+    expect(patch.visibility.to).toBe("DM_ONLY");
+  });
+
+  it("creates the entity as AI-sourced canon with description + persona provenance when approved", async () => {
+    const { dmId, campaignId } = await seed();
+    await authorSystemPersona(dmId, campaignId);
+    resolveCampaignProvider.mockResolvedValue(fakeContentProvider(sampleBoss));
+
+    const { changeSetId } = await generateDungeonContent(dmId, campaignId, {
+      type: "BOSS",
+      brief: "A floor-3 boss themed around betrayal.",
+    });
+    const changeSet = await prisma.changeSet.findUniqueOrThrow({ where: { id: changeSetId } });
+
+    await prisma.changeOperation.updateMany({
+      where: { changeSetId, decision: "PENDING" },
+      data: { decision: "ACCEPTED" },
+    });
+    await approveChangeSet(dmId, campaignId, changeSetId);
+
+    const created = await prisma.entity.findFirstOrThrow({
+      where: { campaignId, name: "The Maitre D'" },
+    });
+    expect(created.type).toBe("BOSS");
+    expect(created.source).toBe("AI");
+    expect(created.isStub).toBe(false);
+    expect(created.description).toBe(sampleBoss.description);
+
+    const provenance = await prisma.provenance.findMany({
+      where: { entityId: created.id, source: "AI" },
+    });
+    expect(provenance.length).toBeGreaterThan(0);
+    expect(provenance.map((p) => p.promptId)).toContain("dungeon-content");
+    // Approval copies the driving persona snapshot onto each field's provenance.
+    expect(provenance.every((p) => p.personaSnapshotId === changeSet.personaSnapshotId)).toBe(true);
+  });
+
+  it("generates un-flavored content with no persona attribution when no System AI persona is active", async () => {
+    const { dmId, campaignId } = await seed();
+    const provider = fakeContentProvider({
+      name: "Mimic Chest",
+      summary: "It bites.",
+      description: "A loot chest that is, regrettably, hungry.",
+      tags: ["loot"],
+    });
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    const result = await generateDungeonContent(dmId, campaignId, {
+      type: "ITEM",
+      brief: "A treasure chest that is secretly a monster.",
+    });
+
+    const systemText = (
+      provider.generateStructured.mock.calls[0][0].system as Array<{ text: string }>
+    )
+      .map((b) => b.text)
+      .join("\n");
+    expect(systemText).not.toContain("System AI persona");
+    expect(systemText).not.toMatch(/current voice/i);
+
+    const changeSet = await prisma.changeSet.findUniqueOrThrow({ where: { id: result.changeSetId } });
+    expect(changeSet.status).toBe("PENDING");
+    expect(changeSet.personaSnapshotId).toBeNull();
+    expect(changeSet.personaPromptVersion).toBeNull();
+  });
+
+  it("passes the brief and existing campaign tags into the prompt", async () => {
+    const { dmId, campaignId } = await seed();
+    const provider = fakeContentProvider({
+      name: "Banner of the Betrayed",
+      summary: "A title.",
+      description: "Held by those who turned on their party.",
+    });
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    await generateDungeonContent(dmId, campaignId, {
+      type: "TITLE",
+      brief: "A title for a crawler who betrayed their party.",
+    });
+
+    const user = provider.generateStructured.mock.calls[0][0].messages[0].content;
+    expect(user).toContain("A title for a crawler who betrayed their party.");
+    // The seeded "Mordecai" carries tag "existing", offered for reuse.
+    expect(user).toContain("Existing campaign tags to prefer: existing");
+  });
+
+  it("records usage but files no proposal when the model returns a blank name", async () => {
+    const { dmId, campaignId } = await seed();
+    resolveCampaignProvider.mockResolvedValue(
+      fakeContentProvider({ name: "   ", summary: "s", description: "d", tags: [] }),
+    );
+
+    await expect(
+      generateDungeonContent(dmId, campaignId, { type: "MOB_TYPE", brief: "A mob." }),
+    ).rejects.toThrow(/usable/i);
+
+    // Paid call still counts toward spend, but nothing was filed.
+    expect(await prisma.aiUsage.count({ where: { campaignId, generatorId: "dungeon-content" } })).toBe(1);
+    expect(await prisma.changeSet.count({ where: { campaignId, source: "AI" } })).toBe(0);
+  });
+
+  it("errors when no provider is configured", async () => {
+    const { dmId, campaignId } = await seed();
+    resolveCampaignProvider.mockResolvedValue(null);
+    await expect(
+      generateDungeonContent(dmId, campaignId, { type: "BOSS", brief: "A boss." }),
+    ).rejects.toThrow(/No AI provider/i);
+  });
+
+  it("surfaces a ProviderError as a safe ServiceError without filing a proposal", async () => {
+    const { dmId, campaignId } = await seed();
+    const provider = fakeContentProvider(sampleBoss);
+    provider.generateStructured.mockRejectedValue(new ProviderError("schema mismatch"));
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    const err = await generateDungeonContent(dmId, campaignId, {
+      type: "BOSS",
+      brief: "A boss.",
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(ServiceError);
+    expect(err.message).toMatch(/schema mismatch/);
+    expect(await prisma.changeSet.count({ where: { campaignId, source: "AI" } })).toBe(0);
+  });
+
+  it("denies a player without calling the provider", async () => {
+    const { playerId, campaignId } = await seed();
+    resolveCampaignProvider.mockResolvedValue(fakeContentProvider(sampleBoss));
+    await expect(
+      generateDungeonContent(playerId, campaignId, { type: "BOSS", brief: "A boss." }),
+    ).rejects.toBeInstanceOf(ServiceError);
     expect(resolveCampaignProvider).not.toHaveBeenCalled();
   });
 });
