@@ -68,6 +68,7 @@ import {
   fleshOutEntities,
   fleshOutEntity,
   inferRelationshipsForEntity,
+  proposeEventConsequences,
   scaffoldStubEntities,
 } from "@/server/services/generation";
 import {
@@ -534,6 +535,32 @@ export async function inferRelationshipsForEntityAction(
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
     logActionError("Infer relationships action failed", error);
+    return { error: "Generation failed. Please try again.", timestamp: Date.now() };
+  }
+}
+
+export async function proposeEventConsequencesAction(
+  campaignId: string,
+  eventId: string,
+  _prev: GenerateActionState,
+  _formData: FormData,
+): Promise<GenerateActionState> {
+  void _prev;
+  void _formData;
+  const user = await requireUser();
+  try {
+    const result = await proposeEventConsequences(user.id, campaignId, eventId);
+    revalidatePath(`/campaigns/${campaignId}/review`);
+    revalidatePath(`/campaigns/${campaignId}/timeline`);
+    const noun = result.operationCount === 1 ? "consequence" : "consequences";
+    return {
+      success: `${result.operationCount} ${noun} proposed (${result.model}). Review them in the queue.`,
+      changeSetId: result.changeSetId,
+      timestamp: Date.now(),
+    };
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    logActionError("Event consequence generation action failed", error);
     return { error: "Generation failed. Please try again.", timestamp: Date.now() };
   }
 }

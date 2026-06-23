@@ -1,5 +1,9 @@
-import { CanonStatus, ChangeSource, OpKind, Prisma, Role } from "@/generated/prisma/client";
+import { randomUUID } from "crypto";
+
+import { CanonStatus, ChangeSource, EntityType, OpKind, Prisma, Role } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
+import { phraseTimeRef, readTimeRef } from "@/lib/time-ref";
+import { resolveAbsoluteDay } from "@/lib/time-resolve";
 import { prisma } from "@/server/db";
 import { describeProviderError, resolveCampaignProvider } from "@/server/ai";
 import { ProviderError, emptyUsage, type LLMUsage } from "@/server/ai/types";
@@ -10,6 +14,15 @@ import {
   recordAiUsage,
 } from "@/server/services/ai-usage";
 import { withCampaignAiLock } from "@/server/services/ai-lock";
+import {
+  EVENT_CONSEQUENCES_GENERATOR,
+  buildEventConsequencesPrompt,
+  consequenceOutputToEventOperations,
+  eventConsequencesOutputSchema,
+  type EventConsequenceEffectTarget,
+  type EventConsequenceEvent,
+  type EventConsequenceRelatedCanon,
+} from "@/server/ai/generators/event-consequences";
 import {
   FLESH_ENTITY_GENERATOR,
   type FleshableField,
@@ -36,7 +49,14 @@ import { buildStubCreatePatch } from "@/server/services/entities";
 import { getActiveSystemPersonaPrompt } from "@/server/services/persona";
 import { isPersonaVoicedEntityType } from "@/lib/persona";
 import { retrieveRelatedEntityIds } from "@/server/services/retrieval";
+import { buildCampaignResolveContext } from "@/server/services/event-resolve-context";
+import { searchCanon } from "@/server/services/search";
 import {
+  SEARCH_TARGET_ENTITY,
+  SEARCH_TARGET_EVENT,
+} from "@/server/services/search-index";
+import {
+  createPendingEventChangeSet,
   createPendingEntityChangeSet,
   createPendingRelationshipChangeSet,
 } from "@/server/services/review";
@@ -67,6 +87,13 @@ export type FleshOutEntityResult = {
 };
 
 export type InferRelationshipsResult = {
+  changeSetId: string;
+  providerId: string;
+  model: string;
+  operationCount: number;
+};
+
+export type ProposeEventConsequencesResult = {
   changeSetId: string;
   providerId: string;
   model: string;
@@ -107,6 +134,11 @@ function dropExistingNameCollisions(
 // edge endpoints. Retrieval picks the most relevant ones; the alphabetical
 // baseline fills any remaining budget (see `inferRelationshipsForEntityLocked`).
 const CANDIDATE_LIMIT = 40;
+
+// Event consequences need enough context to make a useful, bounded proposal,
+// but this remains an event-detail action rather than an unbounded world sweep.
+const EVENT_CONSEQUENCE_CANDIDATE_LIMIT = 40;
+const EVENT_CONSEQUENCE_RELATED_CANON_LIMIT = 8;
 
 // How many related canon entities the flesh-out generator carries as read-only
 // reference context. Smaller than CANDIDATE_LIMIT: this is consistency context,
@@ -670,6 +702,282 @@ async function inferRelationshipsForEntityLocked(
     operations,
   });
 
+  await linkAiUsageChangeSet(usageRow.id, changeSet.id);
+
+  return {
+    changeSetId: changeSet.id,
+    providerId: provider.id,
+    model: provider.model,
+    operationCount: operations.length,
+  };
+}
+
+// Propose compact, review-only consequences for one existing event. This never
+// writes canon directly: both effects and causality links are captured in one
+// PENDING AI change set for the DM to accept, edit, or reject.
+export async function proposeEventConsequences(
+  userId: string,
+  campaignId: string,
+  eventId: string,
+): Promise<ProposeEventConsequencesResult> {
+  await assertCampaignDm(userId, campaignId);
+
+  return withCampaignAiLock(campaignId, () =>
+    proposeEventConsequencesLocked(userId, campaignId, eventId),
+  );
+}
+
+async function proposeEventConsequencesLocked(
+  userId: string,
+  campaignId: string,
+  eventId: string,
+): Promise<ProposeEventConsequencesResult> {
+  const [campaign, sourceEvent] = await Promise.all([
+    prisma.campaign.findUnique({
+      where: { id: campaignId },
+      select: { name: true, styleGuide: true },
+    }),
+    prisma.event.findFirst({
+      where: { id: eventId, campaignId, status: CanonStatus.CANON },
+      select: {
+        id: true,
+        title: true,
+        summary: true,
+        inGameTime: true,
+        locked: true,
+        effects: true,
+        participants: { select: { entityId: true }, orderBy: { entityId: "asc" } },
+        causes: {
+          where: { status: { not: CanonStatus.ARCHIVED } },
+          orderBy: { effectId: "asc" },
+          select: { effectId: true },
+        },
+      },
+    }),
+  ]);
+  if (!campaign) throw new ServiceError("Campaign not found.");
+  if (!sourceEvent) throw new ServiceError("Event not found.");
+  if (sourceEvent.locked) {
+    throw new ServiceError("This event is locked. Unlock it before generating.");
+  }
+
+  const provider = await resolveCampaignProvider(campaignId);
+  if (!provider) {
+    throw new ServiceError(
+      "No AI provider is configured. Add a provider key in campaign Settings first.",
+    );
+  }
+  await assertWithinSpendCap(campaignId);
+
+  // Query retrieval before hydrating candidates. Search is visibility-scoped
+  // even though this action is DM-only, and may add a paid query embedding; the
+  // second spend-cap check below protects the subsequent chat call.
+  const retrievalQuery = [sourceEvent.title, sourceEvent.summary]
+    .filter((part): part is string => Boolean(part?.trim()))
+    .join(" ");
+  const retrieval = await searchCanon(userId, campaignId, retrievalQuery, {
+    limit: EVENT_CONSEQUENCE_CANDIDATE_LIMIT,
+    targetTypes: [SEARCH_TARGET_ENTITY, SEARCH_TARGET_EVENT],
+  });
+
+  await assertWithinSpendCap(campaignId);
+
+  const retrievedEntityIds = retrieval.hits
+    .filter((hit) => hit.targetType === SEARCH_TARGET_ENTITY)
+    .map((hit) => hit.targetId);
+  const retrievedEventIds = retrieval.hits
+    .filter((hit) => hit.targetType === SEARCH_TARGET_EVENT)
+    .map((hit) => hit.targetId);
+  const participantIds = sourceEvent.participants.map((participant) => participant.entityId);
+  const candidateEntityIds = Array.from(new Set([...participantIds, ...retrievedEntityIds])).slice(
+    0,
+    EVENT_CONSEQUENCE_CANDIDATE_LIMIT,
+  );
+
+  // Event retrieval is relevance-first, but unlike effect targets there is no
+  // source-participant fallback. A small canonical baseline ensures an event
+  // can still propose a causal link while a freshly-created search document is
+  // unavailable or shares no lexical terms with the source.
+  const eventFallback = await prisma.event.findMany({
+    where: {
+      campaignId,
+      id: { not: sourceEvent.id },
+      status: CanonStatus.CANON,
+      locked: false,
+    },
+    orderBy: [{ title: "asc" }, { id: "asc" }],
+    take: EVENT_CONSEQUENCE_CANDIDATE_LIMIT,
+    select: { id: true },
+  });
+  const candidateEventIds = Array.from(
+    new Set([...retrievedEventIds.filter((id) => id !== sourceEvent.id), ...eventFallback.map((event) => event.id)]),
+  ).slice(0, EVENT_CONSEQUENCE_CANDIDATE_LIMIT);
+
+  // Retrieval provides relevance order; live canon hydration is authoritative.
+  // An effect target must be a canonical, unlocked CRAWLER, or an unlocked
+  // SYSTEM_AI with an active canonical persona to drift. Participant ids fill
+  // the same ordered candidate pool so the source event remains useful even
+  // when the search index is still catching up.
+  const [candidateEntities, candidateEvents, resolveContext] = await Promise.all([
+    candidateEntityIds.length === 0
+      ? Promise.resolve([])
+      : prisma.entity.findMany({
+          where: {
+            id: { in: candidateEntityIds },
+            campaignId,
+            status: CanonStatus.CANON,
+            locked: false,
+            type: { in: [EntityType.CRAWLER, EntityType.SYSTEM_AI] },
+          },
+          select: {
+            id: true,
+            type: true,
+            name: true,
+            personas: {
+              where: { isActive: true, status: CanonStatus.CANON, locked: false },
+              select: { id: true },
+              take: 1,
+            },
+          },
+        }),
+    candidateEventIds.length === 0
+      ? Promise.resolve([])
+      : prisma.event.findMany({
+          where: {
+            id: { in: candidateEventIds },
+            campaignId,
+            status: CanonStatus.CANON,
+            locked: false,
+          },
+          select: { id: true, title: true },
+        }),
+    buildCampaignResolveContext(prisma, campaignId),
+  ]);
+  const entityById = new Map(candidateEntities.map((entity) => [entity.id, entity] as const));
+  const effectTargets: EventConsequenceEffectTarget[] = candidateEntityIds.flatMap((id) => {
+    const entity = entityById.get(id);
+    if (!entity) return [];
+    if (entity.type === EntityType.SYSTEM_AI && entity.personas.length === 0) return [];
+    return [{ id: entity.id, type: entity.type, name: entity.name }];
+  });
+  const eventById = new Map(candidateEvents.map((event) => [event.id, event] as const));
+  const existingConsequenceEvents: EventConsequenceEvent[] = candidateEventIds.flatMap((id) => {
+    const event = eventById.get(id);
+    return event ? [{ id: event.id, title: event.title }] : [];
+  });
+
+  // A collapsible floor makes a targetless COLLAPSE_FLOOR the only supported
+  // consequence, so it is a usable proposal path alongside effect targets and
+  // linkable events. Resolve it before the preflight guard so a floor-collapse-
+  // only event still reaches the model instead of failing here.
+  const sourceTime = readTimeRef(sourceEvent.inGameTime);
+  const canCollapseFloor =
+    sourceTime.floor != null && resolveAbsoluteDay(sourceTime, resolveContext) != null;
+
+  if (
+    effectTargets.length === 0 &&
+    existingConsequenceEvents.length === 0 &&
+    !canCollapseFloor
+  ) {
+    throw new ServiceError(
+      "Add an eligible crawler, System AI persona, or existing event before proposing consequences.",
+    );
+  }
+
+  const anchorTitle = sourceTime.anchorEventId
+    ? await prisma.event
+        .findFirst({
+          where: {
+            id: sourceTime.anchorEventId,
+            campaignId,
+            status: { not: CanonStatus.ARCHIVED },
+          },
+          select: { title: true },
+        })
+        .then((event) => event?.title)
+    : undefined;
+  const relatedCanon: EventConsequenceRelatedCanon[] = retrieval.hits
+    .slice(0, EVENT_CONSEQUENCE_RELATED_CANON_LIMIT)
+    .flatMap((hit) => {
+      if (hit.targetType === SEARCH_TARGET_ENTITY) {
+        return [
+          {
+            type: hit.entity.type,
+            title: hit.entity.name,
+            content: [hit.entity.summary, hit.entity.tags.join(", ")].filter(Boolean).join("\n"),
+          },
+        ];
+      }
+      if (hit.targetType === SEARCH_TARGET_EVENT) {
+        return [{ type: "EVENT", title: hit.event.title, content: hit.event.summary ?? "" }];
+      }
+      return [];
+    });
+  const context = {
+    campaignName: campaign.name,
+    styleGuide: campaign.styleGuide,
+    sourceEvent: {
+      id: sourceEvent.id,
+      title: sourceEvent.title,
+      summary: sourceEvent.summary,
+      timePhrase: phraseTimeRef(sourceTime, { anchorTitle }) ?? "Unscheduled",
+    },
+    effectTargets,
+    existingConsequenceEvents,
+    existingOutgoingCausalEffectIds: sourceEvent.causes.map((cause) => cause.effectId),
+    canCollapseFloor,
+    relatedCanon,
+  };
+  const { system, messages } = buildEventConsequencesPrompt(context);
+
+  let output;
+  let usage: LLMUsage = emptyUsage();
+  try {
+    const result = await provider.generateStructured({
+      schemaName: "event_consequences",
+      schema: eventConsequencesOutputSchema,
+      system,
+      messages,
+      maxTokens: 2048,
+    });
+    output = result.data;
+    usage = result.usage ?? usage;
+  } catch (error) {
+    logActionError(
+      `Event-consequence generation failed (provider=${provider.id})`,
+      error,
+      provider.redactSecrets,
+    );
+    const message = error instanceof ProviderError ? error.message : describeProviderError(error);
+    throw new ServiceError(message);
+  }
+
+  // A model call can cost money even if its ids are stale or it declines to
+  // make a valid proposal, so account for the run before the mapper's no-op
+  // guard. No usage record is linked until a change set actually exists.
+  const usageRow = await recordAiUsage({
+    campaignId,
+    userId,
+    providerId: provider.id,
+    model: provider.model,
+    generatorId: EVENT_CONSEQUENCES_GENERATOR.id,
+    usage,
+  });
+  const operations = consequenceOutputToEventOperations(context, output, randomUUID);
+  if (operations.length === 0) {
+    throw new ServiceError("The model did not propose any usable consequences.");
+  }
+
+  const changeSet = await createPendingEventChangeSet(userId, campaignId, {
+    source: ChangeSource.AI,
+    title: `Propose consequences for ${sourceEvent.title}`,
+    summary: `AI-proposed event consequences (${provider.model}) — review before they become canon.`,
+    providerId: provider.id,
+    model: provider.model,
+    promptId: EVENT_CONSEQUENCES_GENERATOR.id,
+    promptVersion: EVENT_CONSEQUENCES_GENERATOR.version,
+    operations,
+  });
   await linkAiUsageChangeSet(usageRow.id, changeSet.id);
 
   return {

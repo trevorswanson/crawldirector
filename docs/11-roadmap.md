@@ -163,9 +163,9 @@ drives the generation prompts.
   any actor entity can carry a profile (values/goals/resources/knowledge scope) —
   the foundation the M11 simulation runtime builds on, even though the studio
   ships first focused on the System AI.
-- `PERSONA_SHIFT` event-effect kind so persona drift lives in the causality graph
-  (AI-proposed shifts arrive with M10's consequence generator; manual shifts work
-  now).
+- `PERSONA_SHIFT` event-effect kind so persona drift lives in the causality graph;
+  Timeline consequence generation can now propose reviewable shifts, while larger
+  new-event cascades wait on generic operation aliases/dependencies.
 - **Done when:** a DM can author/evolve the System AI persona, generate
   persona-flavored content that lands as PENDING proposals, and see which persona
   snapshot drove each generation. Persona changes are reviewable + lockable.
@@ -230,7 +230,7 @@ drives the generation prompts.
   affected records, safety preview, and AI spend before deciding whether to run
   a non-clean maintenance repair.
 
-## M10 — Shared canon library & event-consequence AI
+## M10 — Shared canon library & consequence expansion
 **Goal:** leverage and scale.
 - **Admin-controlled shared canon library** ([ADR 0012](./adr/0012-shared-canon-library-and-import.md)):
   the super-admin maintains a singleton library campaign containing reusable DCC
@@ -254,9 +254,9 @@ drives the generation prompts.
   `LORE_SEED` path auto-approves imported entities and is not the product
   onboarding flow once the shared library exists. New campaigns start empty (or
   with DM-authored setup); DMs choose and review library imports instead.
-- Event-consequence generator (propose downstream effects + causal links,
-  including `PERSONA_SHIFT` effects that drift the System AI in reaction to
-  events — M6); consistency-check generator (non-mutating → proposals).
+- Expand consequence generation with new downstream Events once generic
+  operation aliases/dependencies can safely connect same-change-set creates;
+  consistency-check generator (non-mutating → proposals).
 - **Done when:** a super-admin can curate the library and review cross-campaign
   suggestions; a DM can browse it, import entities and their recovered
   relationships through the target campaign's Review Queue, including edges

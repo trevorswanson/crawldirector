@@ -84,12 +84,14 @@ Two paths, both flowing through the review pipeline:
 1. **Authored arc** — the DM hand-writes future snapshots (or edits the dials)
    to plan the descent into sentience. They can lock snapshots they're committed
    to.
-2. **AI-proposed drift** — the event-consequence generator (see roadmap M10) can
+2. **AI-proposed drift** — the event-consequence generator can
    propose a **persona shift** as the effect of an event: e.g. "the System AI's
    ruling was overturned in court" → proposed `PersonaShift { compliance −15,
    resentment +20, note: … }`. This lands as a PENDING proposal; the DM reviews
    the delta and approves/edits/rejects. Approving applies it as a new snapshot
-   (or updates the active one), with provenance.
+  (or updates the active one), with provenance. The Timeline generator files the
+  effect as a `PENDING` AI proposal; the drift materializes only after review
+  approval.
 
 Persona shifts are represented as a structured **event effect**
 (`kind: PERSONA_SHIFT`) so they live in the same causality graph as everything

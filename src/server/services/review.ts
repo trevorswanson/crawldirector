@@ -30,6 +30,7 @@ import {
   eventEffectRequiresTarget,
   type EventEffectKind,
 } from "@/lib/event-effect-kinds";
+import { eventEffectSchema } from "@/lib/validation";
 import {
   clampPersonaDial,
   compilePersonaPrompt,
@@ -594,6 +595,43 @@ async function evaluateRelationshipOperationFlags(
   };
 }
 
+// Lock flags for a pending CREATE_EVENT_CAUSALITY, mirroring how
+// evaluateRelationshipOperationFlags treats CREATE_RELATIONSHIP: AI/import/player
+// proposals are blocked when either endpoint event is locked, while DM-authored
+// links stay ergonomic. Only generated (AI) causality reaches this review path —
+// DM links and every DELETE_EVENT_CAUSALITY auto-approve — and a CREATE carries
+// no base version to stale-check, so this evaluates endpoint locks only. Without
+// it refreshPendingOperationFlags would never evaluate causality ops, and
+// applyCreateEventCausality only asserts canon endpoints, so a generated link
+// could apply over an event locked during the review window.
+async function evaluateCreateEventCausalityFlags(
+  tx: Prisma.TransactionClient,
+  patch: ReviewPatch,
+  campaignId: string,
+  source: ChangeSource,
+) {
+  if (source === ChangeSource.DM) return { blockedByLock: false, isStale: false };
+
+  const causeId = readTo(patch, "causeId");
+  const effectId = readTo(patch, "effectId");
+  if (typeof causeId !== "string" || typeof effectId !== "string") {
+    return { blockedByLock: false, isStale: false };
+  }
+
+  const endpoints = await tx.event.findMany({
+    where: {
+      campaignId,
+      id: { in: [causeId, effectId] },
+      status: CanonStatus.CANON,
+    },
+    select: { locked: true },
+  });
+  return {
+    blockedByLock: endpoints.some((endpoint) => endpoint.locked),
+    isStale: false,
+  };
+}
+
 function isEventReviewOp(op: OpKind): op is EventReviewOperationInput["op"] {
   return (
     op === OpKind.CREATE_EVENT ||
@@ -1045,6 +1083,12 @@ export async function createPendingEventChangeSet(
     title: string;
     summary?: string;
     runId?: string;
+    // AI provenance stays on the ChangeSet until an event/persona write is
+    // approved, where it is copied into durable provenance rows.
+    providerId?: string;
+    model?: string;
+    promptId?: string;
+    promptVersion?: string;
     operations: EventReviewOperationInput[];
   },
 ) {
@@ -1058,6 +1102,10 @@ export async function createPendingEventChangeSet(
         title: input.title,
         summary: input.summary,
         runId: input.runId,
+        providerId: input.providerId,
+        model: input.model,
+        promptId: input.promptId,
+        promptVersion: input.promptVersion,
         actorUserId: userId,
         operations: {
           create: input.operations.map((operation) => ({
@@ -1954,95 +2002,108 @@ export async function approveChangeSet(
   await assertCampaignDm(userId, campaignId);
   await refreshPendingOperationFlags(campaignId, changeSetId);
 
-  return prisma.$transaction(async (tx) => {
-    const changeSet = await tx.changeSet.findFirst({
-      where: { id: changeSetId, campaignId, status: ChangeSetStatus.PENDING },
-      include: { operations: true },
-    });
-    if (!changeSet) throw new ServiceError("Change set not found.");
-    const applicableOperations = changeSet.operations.filter(
-      (operation) =>
-        operation.decision === OpDecision.ACCEPTED ||
-        operation.decision === OpDecision.EDITED,
-    );
-    if (applicableOperations.length === 0) {
-      throw new ServiceError("Accept at least one operation before approval.", {
-        code: "NO_ACCEPTED_OPERATIONS",
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const changeSet = await tx.changeSet.findFirst({
+        where: { id: changeSetId, campaignId, status: ChangeSetStatus.PENDING },
+        include: { operations: true },
       });
-    }
-    if (applicableOperations.some((operation) => operation.blockedByLock)) {
-      throw new ServiceError("One or more operations are blocked by locks.", {
-        code: "OPERATION_BLOCKED",
-      });
-    }
-    if (applicableOperations.some((operation) => operation.isStale)) {
-      throw new ServiceError("One or more operations are stale.", {
-        code: "OPERATION_STALE",
-      });
-    }
-
-    const appliedIds: string[] = [];
-    const applyingChangeSet = { ...changeSet, reviewedById: userId };
-    for (const operation of applicableOperations) {
-      const targetId = await applyReviewOperation(
-        tx,
-        applyingChangeSet,
-        operation,
-        effectiveOperationPatch(operation),
+      if (!changeSet) throw new ServiceError("Change set not found.");
+      const applicableOperations = changeSet.operations.filter(
+        (operation) =>
+          operation.decision === OpDecision.ACCEPTED ||
+          operation.decision === OpDecision.EDITED,
       );
-      appliedIds.push(targetId);
-      await tx.changeOperation.update({
-        where: { id: operation.id },
+      if (applicableOperations.length === 0) {
+        throw new ServiceError("Accept at least one operation before approval.", {
+          code: "NO_ACCEPTED_OPERATIONS",
+        });
+      }
+      if (applicableOperations.some((operation) => operation.blockedByLock)) {
+        throw new ServiceError("One or more operations are blocked by locks.", {
+          code: "OPERATION_BLOCKED",
+        });
+      }
+      if (applicableOperations.some((operation) => operation.isStale)) {
+        throw new ServiceError("One or more operations are stale.", {
+          code: "OPERATION_STALE",
+        });
+      }
+
+      const appliedIds: string[] = [];
+      const applyingChangeSet = { ...changeSet, reviewedById: userId };
+      for (const operation of applicableOperations) {
+        const targetId = await applyReviewOperation(
+          tx,
+          applyingChangeSet,
+          operation,
+          effectiveOperationPatch(operation),
+        );
+        appliedIds.push(targetId);
+        await tx.changeOperation.update({
+          where: { id: operation.id },
+          data: {
+            targetId,
+            decision:
+              operation.decision === OpDecision.EDITED
+                ? OpDecision.EDITED
+                : OpDecision.ACCEPTED,
+          },
+        });
+      }
+
+      const rejectedOperations = changeSet.operations.filter(
+        (operation) => !applicableOperations.some((applied) => applied.id === operation.id),
+      );
+      if (rejectedOperations.length > 0) {
+        await markEventEffectReviewState(
+          tx,
+          changeSet,
+          rejectedOperations,
+          "REJECTED",
+        );
+      }
+
+      const rejectedCount = changeSet.operations.length - applicableOperations.length;
+      let status: ChangeSetStatus = ChangeSetStatus.APPROVED;
+      if (applicableOperations.length === 0) {
+        status = ChangeSetStatus.REJECTED;
+      } else if (rejectedCount > 0) {
+        status = ChangeSetStatus.PARTIALLY_APPLIED;
+      }
+      await tx.changeSet.update({
+        where: { id: changeSet.id },
         data: {
-          targetId,
-          decision:
-            operation.decision === OpDecision.EDITED
-              ? OpDecision.EDITED
-              : OpDecision.ACCEPTED,
+          status,
+          reviewedById: userId,
+          reviewedAt: new Date(),
         },
       });
-    }
+      await tx.auditLog.create({
+        data: {
+          campaignId,
+          actorUserId: userId,
+          action: status === ChangeSetStatus.REJECTED ? "REJECT" : "APPROVE",
+          targetType: "CHANGE_SET",
+          targetId: changeSet.id,
+          detail: { appliedIds, rejectedCount },
+        },
+      });
 
-    const rejectedOperations = changeSet.operations.filter(
-      (operation) => !applicableOperations.some((applied) => applied.id === operation.id),
-    );
-    if (rejectedOperations.length > 0) {
-      await markEventEffectReviewState(
-        tx,
-        changeSet,
-        rejectedOperations,
-        "REJECTED",
-      );
-    }
-
-    const rejectedCount = changeSet.operations.length - applicableOperations.length;
-    let status: ChangeSetStatus = ChangeSetStatus.APPROVED;
-    if (applicableOperations.length === 0) {
-      status = ChangeSetStatus.REJECTED;
-    } else if (rejectedCount > 0) {
-      status = ChangeSetStatus.PARTIALLY_APPLIED;
-    }
-    await tx.changeSet.update({
-      where: { id: changeSet.id },
-      data: {
-        status,
-        reviewedById: userId,
-        reviewedAt: new Date(),
-      },
+      return { id: changeSet.id, targetIds: appliedIds };
     });
-    await tx.auditLog.create({
-      data: {
-        campaignId,
-        actorUserId: userId,
-        action: status === ChangeSetStatus.REJECTED ? "REJECT" : "APPROVE",
-        targetType: "CHANGE_SET",
-        targetId: changeSet.id,
-        detail: { appliedIds, rejectedCount },
-      },
-    });
-
-    return { id: changeSet.id, targetIds: appliedIds };
-  });
+  } catch (error) {
+    // A lock can be acquired after the refresh above but before an apply
+    // transaction obtains its row lock. Re-evaluate after the transaction rolls
+    // back so the Review Queue retains the current held state.
+    if (
+      error instanceof ServiceError &&
+      (error.code === "OPERATION_BLOCKED" || error.code === "OPERATION_STALE")
+    ) {
+      await refreshPendingOperationFlags(campaignId, changeSetId);
+    }
+    throw error;
+  }
 }
 
 async function applyReviewOperation(
@@ -2251,6 +2312,22 @@ async function refreshPendingOperationFlags(
           continue;
         }
         if (
+          operation.targetType === "EVENT_CAUSALITY" &&
+          operation.op === OpKind.CREATE_EVENT_CAUSALITY
+        ) {
+          const flags = await evaluateCreateEventCausalityFlags(
+            tx,
+            effectiveOperationPatch(operation),
+            campaignId,
+            changeSet.source,
+          );
+          await tx.changeOperation.update({
+            where: { id: operation.id },
+            data: flags,
+          });
+          continue;
+        }
+        if (
           operation.targetType === "RELATIONSHIP" &&
           isRelationshipReviewOp(operation.op)
         ) {
@@ -2377,11 +2454,22 @@ async function evaluateApplyEventEffectsOperationFlags(
       campaignId: changeSet.campaignId,
       status: { not: CanonStatus.ARCHIVED },
     },
-    select: { id: true, effects: true },
+    select: { id: true, locked: true, effects: true },
   });
   if (!event) return { blockedByLock: false, isStale: true };
+  if (event.locked) return { blockedByLock: true, isStale: false };
 
-  const reviewedEffects = parseEventEffects(readTo(patch, "effects"));
+  const rawPatchEffects = readTo(patch, "effects");
+  const canonicalAiPatchEffects =
+    changeSet.source === ChangeSource.AI && "effects" in patch
+      ? parseCanonicalAiPatchEffects(rawPatchEffects)
+      : undefined;
+  if (canonicalAiPatchEffects === null) {
+    return { blockedByLock: false, isStale: true };
+  }
+  const reviewedEffects = uniqueEventEffectsById(
+    canonicalAiPatchEffects ?? parseEventEffects(rawPatchEffects),
+  );
   if ("effects" in patch && reviewedEffects.length === 0) {
     return { blockedByLock: false, isStale: false };
   }
@@ -2389,25 +2477,34 @@ async function evaluateApplyEventEffectsOperationFlags(
   const storedById = new Map(
     parseEventEffects(event.effects as JsonValue).map((effect) => [effect.id, effect]),
   );
+  const acceptsPatchCarriedEffects = changeSet.source === ChangeSource.AI;
   let blockedByLock = false;
   let isStale = false;
   for (const reviewed of reviewedEffects) {
     const stored = storedById.get(reviewed.id);
-    if (
-      !stored ||
-      stored.applied ||
-      !effectBelongsToOperation(stored, changeSet.id, operation.id)
-    ) {
+    // Effects declared on the event before review must still be owned by this
+    // operation. A patch-only effect is new canon proposed by this operation;
+    // it is deliberately absent from Event.effects until approval, so validate
+    // it against live state instead of treating that absence as staleness.
+    if (stored) {
+      if (stored.applied || !effectBelongsToOperation(stored, changeSet.id, operation.id)) {
+        isStale = true;
+        continue;
+      }
+    } else if (!acceptsPatchCarriedEffects) {
+      // DM-declared effects are written to Event.effects before their apply
+      // operation is created. If one disappears, preserve the legacy stale
+      // protection rather than treating it as a new effect.
       isStale = true;
       continue;
     }
-    const target = eventEffectKindMeta[reviewed.kind].target;
-    // Subject-derived kinds (COLLAPSE_FLOOR, target NONE) touch no hand-picked
-    // entity — their floor-anchor writes are lock-checked when the op is applied.
-    if (target === "NONE") continue;
-    if (!reviewed.targetEntityId) continue;
     try {
       assertValidDeclaredEffect(reviewed);
+      const target = eventEffectKindMeta[reviewed.kind].target;
+      // Subject-derived kinds (COLLAPSE_FLOOR, target NONE) touch no hand-picked
+      // entity — their floor-anchor writes are lock-checked when the op is applied.
+      if (target === "NONE") continue;
+      if (!reviewed.targetEntityId) continue;
       if (target === "PERSONA") {
         // A PERSONA_SHIFT drifts the target System AI's active persona into a
         // brand-new active snapshot, deactivating the current one. Surface the
@@ -4369,6 +4466,33 @@ function parseEventEffects(value: JsonValue | undefined): StoredEventEffect[] {
   return effects;
 }
 
+// Providers mint UUIDs for new effects, but the review service must remain
+// safe if a malformed proposal repeats one. Retain the first row in patch order
+// so one logical effect can never be applied twice in one approval transaction.
+function uniqueEventEffectsById(effects: StoredEventEffect[]) {
+  const seenIds = new Set<string>();
+  return effects.filter((effect) => {
+    if (seenIds.has(effect.id)) return false;
+    seenIds.add(effect.id);
+    return true;
+  });
+}
+
+// Generator output is persisted as a review patch rather than a validated event
+// form submission. Run every raw AI row through the public effect schema before
+// normalization, so fractional stats and unknown persona dial keys cannot be
+// stripped or deferred into an approval-time database error.
+function parseCanonicalAiPatchEffects(value: JsonValue | undefined) {
+  if (!Array.isArray(value)) return null;
+  const normalized: JsonValue[] = [];
+  for (const rawEffect of value) {
+    const parsed = eventEffectSchema.safeParse(rawEffect);
+    if (!parsed.success) return null;
+    normalized.push(parsed.data as unknown as JsonValue);
+  }
+  return parseEventEffects(normalized);
+}
+
 function assertValidDeclaredEffect(effect: StoredEventEffect) {
   if (effect.kind === "ADJUST_STAT") {
     if (!effect.stat) throw new ServiceError("Effect is missing a stat to adjust.");
@@ -5476,21 +5600,68 @@ async function applyApplyEventEffects(
   eventId: string,
   patch: ReviewPatch,
 ) {
+  // Serialize effects materialization for this source event. Both generated
+  // patch rows and target-state reads happen after this lock, so concurrent
+  // approvals cannot overwrite each other's serialized event history.
+  await tx.$queryRaw`
+    SELECT id
+    FROM "Event"
+    WHERE id = ${eventId} AND "campaignId" = ${changeSet.campaignId}
+    FOR UPDATE
+  `;
   const event = await tx.event.findFirst({
     where: {
       id: eventId,
       campaignId: changeSet.campaignId,
       status: { not: CanonStatus.ARCHIVED },
     },
-    select: { id: true, effects: true, inGameTime: true },
+    select: { id: true, locked: true, effects: true, inGameTime: true },
   });
   if (!event) throw new ServiceError("Event not found.");
+  if (event.locked) {
+    await tx.changeOperation.update({
+      where: { id: operationId },
+      data: { blockedByLock: true },
+    });
+    throw new ServiceError("This event is locked.", {
+      code: "OPERATION_BLOCKED",
+    });
+  }
 
-  const effects = parseEventEffects(event.effects as JsonValue);
-  const reviewedEffects = parseEventEffects(readTo(patch, "effects"));
+  const effects = uniqueEventEffectsById(parseEventEffects(event.effects as JsonValue));
   const patchCarriesEffects = "effects" in patch;
+  const rawPatchEffects = readTo(patch, "effects");
+  const canonicalAiPatchEffects =
+    changeSet.source === ChangeSource.AI && patchCarriesEffects
+      ? parseCanonicalAiPatchEffects(rawPatchEffects)
+      : undefined;
+  if (canonicalAiPatchEffects === null) {
+    throw new ServiceError("Effect review patch is invalid.");
+  }
+  const reviewedEffects = uniqueEventEffectsById(
+    canonicalAiPatchEffects ?? parseEventEffects(rawPatchEffects),
+  );
   if (patchCarriesEffects && reviewedEffects.length === 0) {
     throw new ServiceError("Effect review patch has no valid effects.");
+  }
+  const storedById = new Map(effects.map((effect) => [effect.id, effect]));
+  const patchCarriedEffects = patchCarriesEffects && changeSet.source === ChangeSource.AI
+    ? reviewedEffects.filter((effect) => !storedById.has(effect.id))
+    : [];
+  // New generated effects only become stored canon when this accepted operation
+  // is applied. Validate their exact declared shape and live target before
+  // changing the local serialized effect collection.
+  for (const effect of patchCarriedEffects) {
+    assertValidDeclaredEffect(effect);
+    await assertDeclaredEffectTarget(tx, changeSet.campaignId, effect);
+    effects.push({
+      ...effect,
+      applied: false,
+      appliedChangeSetId: null,
+      pendingChangeSetId: changeSet.id,
+      pendingOperationId: operationId,
+      reviewStatus: "PENDING",
+    });
   }
   const reviewedById = new Map(reviewedEffects.map((effect) => [effect.id, effect]));
   const reviewedIds = new Set(reviewedEffects.map((effect) => effect.id));
@@ -5508,19 +5679,23 @@ async function applyApplyEventEffects(
       effect.reviewStatus = "REJECTED";
     }
   }
+  const pendingIds = new Set<string>();
   const pending = effects.filter((effect) => {
     if (effect.applied) return false;
+    if (pendingIds.has(effect.id)) return false;
     if (reviewedIds.size > 0) {
-      return (
+      const belongsToReviewedOperation =
         reviewedIds.has(effect.id) &&
-        effectBelongsToOperation(effect, changeSet.id, operationId)
-      );
+        effectBelongsToOperation(effect, changeSet.id, operationId);
+      if (belongsToReviewedOperation) pendingIds.add(effect.id);
+      return belongsToReviewedOperation;
     }
-    return (
+    const belongsToPendingOperation =
       effect.pendingOperationId === operationId ||
       effect.pendingChangeSetId === changeSet.id ||
-      (!effect.pendingOperationId && !effect.pendingChangeSetId)
-    );
+      (!effect.pendingOperationId && !effect.pendingChangeSetId);
+    if (belongsToPendingOperation) pendingIds.add(effect.id);
+    return belongsToPendingOperation;
   });
   if (pending.length === 0) {
     throw new ServiceError("This event has no effects left to apply.");

@@ -5,6 +5,7 @@ import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
 import { listEntitiesForUser } from "@/server/services/entities";
 import { listCampaignFloors, listCampaignTimeline } from "@/server/services/events";
+import { listAiKeys } from "@/server/services/ai-keys";
 
 // Each "window" unit adds 200 events; min window=1 (200 events), max window=50 (10 000 events).
 const WINDOW_UNIT = 200;
@@ -31,10 +32,11 @@ export default async function CampaignTimelinePage({
   );
   const limit = windowCount * WINDOW_UNIT;
 
-  const [timelineResult, floors, candidates] = await Promise.all([
+  const [timelineResult, floors, candidates, aiKeys] = await Promise.all([
     listCampaignTimeline(user.id, id, { limit }),
     listCampaignFloors(user.id, id),
     listEntitiesForUser(user.id, id),
+    listAiKeys(user.id, id),
   ]);
 
   let { events, truncated, totalEvents } = timelineResult;
@@ -63,6 +65,7 @@ export default async function CampaignTimelinePage({
       events={events}
       floors={floors}
       canEdit={canEdit}
+      aiConfigured={aiKeys.length > 0}
       initialEventId={initialEventId}
       truncated={truncated}
       loadOlderHref={loadOlderHref}

@@ -22,12 +22,12 @@ under *Deferred design options*).
 
 **Active: M6 — System AI persona engine**
 ([05-system-ai-persona.md](./05-system-ai-persona.md)).
-Slices 1–4 are complete: the review-backed server foundation, the Persona
+Slices 1–5 are complete: the review-backed server foundation, the Persona
 Studio UI + first generator prompt injection, the `PERSONA_SHIFT` event-effect
 kind (manual persona drift living in the causality graph), and the compact
-selected-snapshot history diff. **Next up: AI-proposed persona drift through the
-pending review path and the full persona-aware generator family
-(encounter/mob/boss/loot/System-message).** Keep the M6 work incremental.
+selected-snapshot history diff, and the event-consequence generator. **Next up:
+the full persona-aware generator family (encounter/mob/boss/loot/System-message).**
+Keep the M6 work incremental.
 
 - [x] **Slice 1 — Persona snapshot foundation + compiler.** Added the
       `PersonaSnapshot` table (generic to any `Entity`, first used by
@@ -60,8 +60,14 @@ pending review path and the full persona-aware generator family
       before→after dials, agenda additions/removals, resource/value/profile
       changes, and an explicit first-snapshot state. The comparator is pure;
       no schema or canon-write path changed. ✅ 2026-06-22.
-- [ ] **Later M6 slices.** AI-proposed persona drift through the pending review
-      path, full persona-aware generator family (encounter, mob/boss, loot,
+- [x] **Slice 5 — Event-consequence generator.** The campaign Timeline can ask
+      the BYO model for bounded effects and causal links for an existing unlocked
+      event. Output is structured and files one AI `PENDING` change set; effects
+      (including `PERSONA_SHIFT`) stay out of Event history and canon until the
+      DM approves them. Existing target/event locks, cycle guards, usage, and
+      provider/model/prompt provenance remain enforced. New downstream Event
+      creation stays with M10's operation-alias/dependency work. ✅ 2026-06-22.
+- [ ] **Later M6 slices.** Full persona-aware generator family (encounter, mob/boss, loot,
       System-message), and broader actor-profile studio reuse for M11.
 
 ### Scheduled roadmap additions (2026-06-19)
