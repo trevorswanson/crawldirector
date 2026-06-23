@@ -358,6 +358,37 @@ describe("proposeEventConsequences", () => {
     expect(provider.generateStructured).not.toHaveBeenCalled();
   });
 
+  it("reaches the model for a collapsible-floor source with no other candidates", async () => {
+    const { dmId, campaignId } = await seed();
+    const source = await createEvent(dmId, campaignId, {
+      title: "The floor buckles",
+      summary: "The Dungeon makes its move.",
+      basis: "ABSOLUTE_DAY",
+      offset: 5,
+      floor: 3,
+      secret: false,
+      participants: [],
+    });
+    const provider = fakeConsequenceProvider({
+      effects: [{ kind: "COLLAPSE_FLOOR", note: "The floor falls." }],
+      causalLinks: [],
+    });
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    const result = await proposeEventConsequences(dmId, campaignId, source.id);
+
+    expect(result).toMatchObject({ operationCount: 1 });
+    const prompt = provider.generateStructured.mock.calls[0]![0].messages[0].content as string;
+    expect(prompt).toContain("COLLAPSE_FLOOR allowed: yes");
+    const proposal = await prisma.changeSet.findUniqueOrThrow({
+      where: { id: result.changeSetId },
+      include: { operations: true },
+    });
+    expect(proposal.operations.map((operation) => operation.op)).toEqual(["APPLY_EVENT_EFFECTS"]);
+    const patch = proposal.operations[0]!.patch as { effects: { to: Array<{ kind: string }> } };
+    expect(patch.effects.to[0]!.kind).toBe("COLLAPSE_FLOOR");
+  });
+
   it("surfaces a provider failure safely without a proposal or usage record", async () => {
     const { dmId, campaignId } = await seed();
     const crawler = await makeConsequenceCrawler(dmId, campaignId);

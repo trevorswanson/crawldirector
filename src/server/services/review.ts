@@ -595,6 +595,43 @@ async function evaluateRelationshipOperationFlags(
   };
 }
 
+// Lock flags for a pending CREATE_EVENT_CAUSALITY, mirroring how
+// evaluateRelationshipOperationFlags treats CREATE_RELATIONSHIP: AI/import/player
+// proposals are blocked when either endpoint event is locked, while DM-authored
+// links stay ergonomic. Only generated (AI) causality reaches this review path —
+// DM links and every DELETE_EVENT_CAUSALITY auto-approve — and a CREATE carries
+// no base version to stale-check, so this evaluates endpoint locks only. Without
+// it refreshPendingOperationFlags would never evaluate causality ops, and
+// applyCreateEventCausality only asserts canon endpoints, so a generated link
+// could apply over an event locked during the review window.
+async function evaluateCreateEventCausalityFlags(
+  tx: Prisma.TransactionClient,
+  patch: ReviewPatch,
+  campaignId: string,
+  source: ChangeSource,
+) {
+  if (source === ChangeSource.DM) return { blockedByLock: false, isStale: false };
+
+  const causeId = readTo(patch, "causeId");
+  const effectId = readTo(patch, "effectId");
+  if (typeof causeId !== "string" || typeof effectId !== "string") {
+    return { blockedByLock: false, isStale: false };
+  }
+
+  const endpoints = await tx.event.findMany({
+    where: {
+      campaignId,
+      id: { in: [causeId, effectId] },
+      status: CanonStatus.CANON,
+    },
+    select: { locked: true },
+  });
+  return {
+    blockedByLock: endpoints.some((endpoint) => endpoint.locked),
+    isStale: false,
+  };
+}
+
 function isEventReviewOp(op: OpKind): op is EventReviewOperationInput["op"] {
   return (
     op === OpKind.CREATE_EVENT ||
@@ -2267,6 +2304,22 @@ async function refreshPendingOperationFlags(
             operationInput,
             campaignId,
             baseVersions,
+          );
+          await tx.changeOperation.update({
+            where: { id: operation.id },
+            data: flags,
+          });
+          continue;
+        }
+        if (
+          operation.targetType === "EVENT_CAUSALITY" &&
+          operation.op === OpKind.CREATE_EVENT_CAUSALITY
+        ) {
+          const flags = await evaluateCreateEventCausalityFlags(
+            tx,
+            effectiveOperationPatch(operation),
+            campaignId,
+            changeSet.source,
           );
           await tx.changeOperation.update({
             where: { id: operation.id },

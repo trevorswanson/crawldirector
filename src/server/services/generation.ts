@@ -866,13 +866,24 @@ async function proposeEventConsequencesLocked(
     return event ? [{ id: event.id, title: event.title }] : [];
   });
 
-  if (effectTargets.length === 0 && existingConsequenceEvents.length === 0) {
+  // A collapsible floor makes a targetless COLLAPSE_FLOOR the only supported
+  // consequence, so it is a usable proposal path alongside effect targets and
+  // linkable events. Resolve it before the preflight guard so a floor-collapse-
+  // only event still reaches the model instead of failing here.
+  const sourceTime = readTimeRef(sourceEvent.inGameTime);
+  const canCollapseFloor =
+    sourceTime.floor != null && resolveAbsoluteDay(sourceTime, resolveContext) != null;
+
+  if (
+    effectTargets.length === 0 &&
+    existingConsequenceEvents.length === 0 &&
+    !canCollapseFloor
+  ) {
     throw new ServiceError(
       "Add an eligible crawler, System AI persona, or existing event before proposing consequences.",
     );
   }
 
-  const sourceTime = readTimeRef(sourceEvent.inGameTime);
   const anchorTitle = sourceTime.anchorEventId
     ? await prisma.event
         .findFirst({
@@ -885,8 +896,6 @@ async function proposeEventConsequencesLocked(
         })
         .then((event) => event?.title)
     : undefined;
-  const canCollapseFloor =
-    sourceTime.floor != null && resolveAbsoluteDay(sourceTime, resolveContext) != null;
   const relatedCanon: EventConsequenceRelatedCanon[] = retrieval.hits
     .slice(0, EVENT_CONSEQUENCE_RELATED_CANON_LIMIT)
     .flatMap((hit) => {

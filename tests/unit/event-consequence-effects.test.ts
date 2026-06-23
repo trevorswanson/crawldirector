@@ -285,6 +285,77 @@ describe("AI patch-carried event effects", () => {
     });
   });
 
+  it("flags a generated causal link blocked when an endpoint event is locked before review", async () => {
+    const { owner, campaign, event } = await setup("generated-causality-lock@test.com");
+    const effectEvent = await createEvent(owner.id, campaign.id, {
+      title: "The aftermath unfolds",
+      summary: "Carl pays for it.",
+      floor: 4,
+      secret: false,
+      participants: [],
+    });
+    const changeSet = await createPendingEventChangeSet(owner.id, campaign.id, {
+      source: ChangeSource.AI,
+      title: "AI causality proposal",
+      operations: [
+        {
+          op: "CREATE_EVENT_CAUSALITY",
+          patch: { causeId: { to: event.id }, effectId: { to: effectEvent.id } },
+        },
+      ],
+    });
+    const operation = changeSet.operations[0];
+    if (!operation) throw new Error("Expected a causality review operation.");
+
+    await setEventLock(owner.id, campaign.id, effectEvent.id, true);
+    await setChangeOperationDecision(owner.id, campaign.id, changeSet.id, operation.id, {
+      decision: OpDecision.ACCEPTED,
+    });
+
+    await listPendingChangeSetsForUser(owner.id, campaign.id);
+
+    await expect(
+      prisma.changeOperation.findUniqueOrThrow({ where: { id: operation.id } }),
+    ).resolves.toMatchObject({ blockedByLock: true, isStale: false });
+    await expect(approveChangeSet(owner.id, campaign.id, changeSet.id)).rejects.toMatchObject({
+      code: "OPERATION_BLOCKED",
+    });
+    expect(
+      await prisma.eventCausality.count({
+        where: { campaignId: campaign.id, causeId: event.id, effectId: effectEvent.id },
+      }),
+    ).toBe(0);
+  });
+
+  it("keeps a DM causal link ergonomic when an endpoint event is locked", async () => {
+    const { owner, campaign, event } = await setup("dm-causality-lock@test.com");
+    const effectEvent = await createEvent(owner.id, campaign.id, {
+      title: "The aftermath unfolds",
+      summary: "Carl pays for it.",
+      floor: 4,
+      secret: false,
+      participants: [],
+    });
+    const changeSet = await createPendingEventChangeSet(owner.id, campaign.id, {
+      title: "DM causality proposal",
+      operations: [
+        {
+          op: "CREATE_EVENT_CAUSALITY",
+          patch: { causeId: { to: event.id }, effectId: { to: effectEvent.id } },
+        },
+      ],
+    });
+    const operation = changeSet.operations[0];
+    if (!operation) throw new Error("Expected a causality review operation.");
+
+    await setEventLock(owner.id, campaign.id, effectEvent.id, true);
+    await listPendingChangeSetsForUser(owner.id, campaign.id);
+
+    await expect(
+      prisma.changeOperation.findUniqueOrThrow({ where: { id: operation.id } }),
+    ).resolves.toMatchObject({ blockedByLock: false, isStale: false });
+  });
+
   it("serializes concurrent AI approvals against one source event", async () => {
     const { owner, campaign, crawler, event } = await setup("generated-concurrent@test.com");
     const first = await createAiEffectProposal(owner.id, campaign.id, event.id, [
