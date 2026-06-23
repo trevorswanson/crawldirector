@@ -55,6 +55,18 @@ describe("DungeonContentPanel", () => {
     expect(link.getAttribute("href")).toBe("/campaigns/c1/review?selected=cs9");
   });
 
+  it("links the bare Review Queue when a success carries no change set id", () => {
+    mockUseActionState.mockReturnValue([
+      { success: "Proposed “The Maitre D'” (claude-opus-4-8). Review it in the queue." },
+      vi.fn(),
+      false,
+    ]);
+    render(<DungeonContentPanel campaignId="c1" />);
+
+    const link = screen.getByRole("link", { name: /Open Review Queue/i }) as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe("/campaigns/c1/review");
+  });
+
   it("surfaces an error message", () => {
     mockUseActionState.mockReturnValue([
       { error: "No AI provider is configured." },
