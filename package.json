@@ -20,7 +20,7 @@
     "worker": "tsx scripts/worker.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.104.0",
+    "@anthropic-ai/sdk": "^0.106.0",
     "@auth/prisma-adapter": "^2.11.2",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
