@@ -595,6 +595,37 @@ describe("entity service", () => {
     ).resolves.toMatchObject({ status: "APPROVED", reviewedById: owner.id });
   });
 
+  it("sanitizes an unsafe imageUrl to null when a proposal is approved", async () => {
+    const owner = await makeUser("unsafe-image@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    // The Review Queue per-field editor can set imageUrl to a raw string that
+    // never passed entityCoreSchema; the apply path must re-validate so an
+    // unsafe scheme never reaches the persisted column / an <img src>.
+    const proposal = await createPendingEntityChangeSet(owner.id, campaign.id, {
+      title: "Create NPC with unsafe image",
+      operations: [
+        {
+          op: "CREATE_ENTITY",
+          patch: {
+            type: { to: "NPC" },
+            name: { to: "Sketchy NPC" },
+            summary: { to: "" },
+            description: { to: null },
+            imageUrl: { to: "javascript:alert(1)" },
+            visibility: { to: "DM_ONLY" },
+            tags: { to: [] },
+          },
+        },
+      ],
+    });
+
+    const result = await approveAcceptedChangeSet(owner.id, campaign.id, proposal.id);
+    await expect(
+      prisma.entity.findUniqueOrThrow({ where: { id: result.targetIds[0] } }),
+    ).resolves.toMatchObject({ name: "Sketchy NPC", imageUrl: null });
+  });
+
   it("partially applies accepted operations and skips rejected operations", async () => {
     const owner = await makeUser("partial-review@test.com");
     const campaign = await createCampaign(owner.id, { name: "Dungeon" });

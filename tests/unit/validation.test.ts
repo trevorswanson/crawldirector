@@ -7,6 +7,7 @@ import {
   createGenericEntitySchema,
   createRelationshipSchema,
   lockFieldSchema,
+  sanitizeImageUrl,
   signInSchema,
   signUpSchema,
   updateEntitySchema,
@@ -256,6 +257,26 @@ describe("lockFieldSchema", () => {
 
   it("rejects an unknown field", () => {
     expect(lockFieldSchema.safeParse("bogus").success).toBe(false);
+  });
+});
+
+describe("sanitizeImageUrl", () => {
+  it("keeps a valid http(s) URL (trimmed)", () => {
+    expect(sanitizeImageUrl("  https://example.com/a.png  ")).toBe(
+      "https://example.com/a.png",
+    );
+  });
+
+  it("nulls an unsafe scheme, blank, and non-string input", () => {
+    expect(sanitizeImageUrl("javascript:alert(1)")).toBeNull();
+    expect(sanitizeImageUrl("data:image/png;base64,AAAA")).toBeNull();
+    expect(sanitizeImageUrl("")).toBeNull();
+    expect(sanitizeImageUrl(null)).toBeNull();
+    expect(sanitizeImageUrl(42)).toBeNull();
+  });
+
+  it("nulls an overlong URL", () => {
+    expect(sanitizeImageUrl(`https://example.com/${"a".repeat(2050)}`)).toBeNull();
   });
 });
 

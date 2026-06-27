@@ -163,6 +163,20 @@ const imageUrlSchema = z.preprocess(
     .or(z.literal("")),
 );
 
+// Server-side guard for the review apply path. The form path validates imageUrl
+// via entityCoreSchema, but the Review Queue per-field editor lets a DM edit the
+// field to a raw string (and an AI/import patch could carry one) that never
+// passed that schema. The apply path runs every persisted value through this so
+// the stored column only ever holds a safe linkable http(s) URL — an invalid,
+// overlong, or blank value normalizes to null rather than reaching an `<img src>`.
+export function sanitizeImageUrl(value: unknown): string | null {
+  const parsed = imageUrlSchema.safeParse(value);
+  if (!parsed.success) return null;
+  return typeof parsed.data === "string" && parsed.data.length > 0
+    ? parsed.data
+    : null;
+}
+
 const entityCoreSchema = z.object({
   name: z.string().trim().min(1, "Entity name is required").max(160),
   summary: optionalText(500),

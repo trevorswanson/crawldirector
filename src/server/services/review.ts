@@ -30,7 +30,7 @@ import {
   eventEffectRequiresTarget,
   type EventEffectKind,
 } from "@/lib/event-effect-kinds";
-import { eventEffectSchema } from "@/lib/validation";
+import { eventEffectSchema, sanitizeImageUrl } from "@/lib/validation";
 import {
   clampPersonaDial,
   compilePersonaPrompt,
@@ -3080,7 +3080,7 @@ async function applyCreateEntity(
       name: String(readTo(patch, "name") ?? ""),
       summary: nullableString(readTo(patch, "summary")),
       description: nullableString(readTo(patch, "description")),
-      imageUrl: nullableString(readTo(patch, "imageUrl")),
+      imageUrl: sanitizeImageUrl(readTo(patch, "imageUrl")),
       visibility: (readTo(patch, "visibility") as Visibility) ?? Visibility.DM_ONLY,
       source: changeSet.source,
       tags: stringArray(readTo(patch, "tags")),
@@ -3440,7 +3440,7 @@ function entityUpdateData(
   if ("description" in patch) {
     data.description = nullableString(readTo(patch, "description"));
   }
-  if ("imageUrl" in patch) data.imageUrl = nullableString(readTo(patch, "imageUrl"));
+  if ("imageUrl" in patch) data.imageUrl = sanitizeImageUrl(readTo(patch, "imageUrl"));
   if ("visibility" in patch) {
     data.visibility = (readTo(patch, "visibility") as Visibility) ?? Visibility.DM_ONLY;
   }
