@@ -310,7 +310,7 @@ calendar dates, and keep the sort key derived (the DM never types it).
 
 The model separates three concerns — **order** (mechanical sort key, never
 user-facing), **anchor** (a structured `timeRef`: a `basis` of `COLLAPSE` /
-`FLOOR_START` / `FLOOR_COLLAPSE` / `EVENT` / `ABSOLUTE_DAY` / `UNSCHEDULED`, plus
+`FLOOR_START` / `FLOOR_COLLAPSE` / `EVENT` / `UNSCHEDULED`, plus
 an optional `offset`, `unit`, and `anchorEventId`), and **label** (narrative
 phrasing, generated from the anchor with an optional human override). Floor is the
 macro-clock; an intra-floor `rank` (fractional index) gives real within-floor

@@ -115,6 +115,50 @@ M6 remains the next milestone work. The detailed decisions live in
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
 
+## Cleanup — Merge `COLLAPSE` + `ABSOLUTE_DAY` time bases ✅ (2026-06-27)
+
+**Goal:** a backlog time-model simplification. `COLLAPSE` and `ABSOLUTE_DAY`
+resolved **identically** — `resolveAbsoluteDay` returns the raw `offset` for both
+(collapse = day-0 epoch) — and differed only in the generated phrase ("Day N since
+the collapse" vs. the bare "Day N"). Carrying both as separately-selectable bases
+was pure redundancy, so `ABSOLUTE_DAY` is retired.
+
+**Decision (lazy read-upgrade, no DB migration).** `ABSOLUTE_DAY` is removed from
+`timeBasisValues` (the single source of truth) rather than just hidden from the
+picker, so no zombie enum value lingers. Existing `Event.inGameTime` rows that
+still carry the old basis are normalized **on read** — `readTimeRef` maps a stored
+`ABSOLUTE_DAY` to `COLLAPSE`, keeping the `offset`. This is the same lazy-upgrade
+pattern as `readKindData` (ADR 0011): nothing queries on the basis at the DB level
+(resolution is all in-memory), so a lazy seam is sufficient and avoids a raw
+canon write that would bypass the review pipeline (invariant #1). The terse
+"Day N" wording the old basis produced lives on via the existing `label` override
+(legacy rows that carried one keep it through the upgrade).
+
+- [x] **Lib** ([`time-ref.ts`](../src/lib/time-ref.ts),
+      [`time-resolve.ts`](../src/lib/time-resolve.ts)): dropped `ABSOLUTE_DAY` from
+      `timeBasisValues` (narrowing `TimeBasis` everywhere it's consumed); added a
+      `normalizeBasis` legacy mapper used by `readTimeRef`; removed the now-dead
+      `ABSOLUTE_DAY` branches in `phraseTimeRef` and `resolveAbsoluteDay` (the
+      `COLLAPSE` branch already handled them identically).
+- [x] **UI pickers** ([`event-time-fields.tsx`](../src/components/entities/event-time-fields.tsx),
+      [`operation-diff-editor.tsx`](../src/components/review/operation-diff-editor.tsx)):
+      removed the "Absolute day" option from both basis pickers (compiler-enforced
+      via `Record<TimeBasisValue, string>`). `validation.ts` re-exports
+      `timeBasisValues`, so its `z.enum` rejects new `ABSOLUTE_DAY` writes too.
+- [x] **Tests:** new `readTimeRef` legacy-upgrade case (offset preserved, label
+      survives) in [`time-ref.test.ts`](../tests/unit/time-ref.test.ts); removed the
+      retired-basis phrase/resolve cases; migrated `ABSOLUTE_DAY` literals to
+      `COLLAPSE` in `time-resolve`, `persona-shift-effect`, `generation`,
+      `floor-collapse-effect`, and `campaign-timeline` tests (same offsets → same
+      resolved days, so every numeric expectation held).
+- [x] **Docs:** updated the live model docs (01-domain-model, 09-data-schema,
+      10-ui-ux) and added a "retired, merged into COLLAPSE" note to ADR 0004's
+      `TimeBasis` listing.
+- [x] **Verification:** `npm run typecheck` clean; touched unit tests green (pure
+      `time-ref`/`time-resolve` + DB-backed `persona-shift-effect`/`generation`/
+      `floor-collapse-effect` + `campaign-timeline`). Full lint/build/coverage gate
+      below.
+
 ## Backlog — Entity image support (URL linking) ✅ (2026-06-27)
 
 **Goal:** the M1 follow-up — give every entity an optional main image, rendered
@@ -523,18 +567,16 @@ prompt. Branch: `codex/m6-persona-foundation`. Schema change.
 - [ ] **M8/M14 broadcast HUD chrome.** Add a live broadcast ticker with session
       events/reveals in M8, and at-a-glance audience-rating tickers with M14
       broadcast & fan-economy modeling.
-- [ ] **Merge `COLLAPSE` + `ABSOLUTE_DAY` time bases (time-model simplification).**
-      The two bases resolve **identically** — `resolveAbsoluteDay`
-      ([`time-resolve.ts`](../src/lib/time-resolve.ts)) returns the raw `offset` for
-      both (collapse = day-0 epoch); only the generated phrase differs ("Day N since
-      the collapse" vs "Day N" — [`time-ref.ts`](../src/lib/time-ref.ts)), yet both
-      are separately selectable in
-      [`event-time-fields.tsx`](../src/components/entities/event-time-fields.tsx).
-      Retire `ABSOLUTE_DAY` as a picker, keep one day-since-collapse basis, preserve
-      the bare "Day N" wording via the existing `label` override (or a phrasing
-      toggle), and migrate `Event.inGameTime` rows `ABSOLUTE_DAY → COLLAPSE`. Touches
-      `timeBasisValues`/`phraseTimeRef`, the form, and
-      `tests/unit/{time-resolve,time-ref}.test.ts`.
+- [x] **Merge `COLLAPSE` + `ABSOLUTE_DAY` time bases (time-model simplification).**
+      ✅ 2026-06-27 (dated entry below). Retired `ABSOLUTE_DAY` from
+      `timeBasisValues` (the single source of truth in
+      [`time-ref.ts`](../src/lib/time-ref.ts), re-exported by `validation.ts`), so
+      it disappears from both basis pickers and the Zod enum. Legacy
+      `Event.inGameTime` rows are upgraded **lazily on read** (`readTimeRef` maps a
+      stored `ABSOLUTE_DAY` → `COLLAPSE`, offset preserved) — no DB migration and no
+      canon write (mirrors the `readKindData` lazy-upgrade seam; honors invariant
+      #1). A DM who wants the terse "Day N" phrasing uses the existing `label`
+      override.
 - [ ] **Roster ↔ connections dedup + roster editor (groups).** For PARTY/GUILD/
       FACTION/ORGANIZATION the main-pane roster (`getGroupRoster`,
       [`groups.ts`](../src/server/services/groups.ts)) and the side connections pane

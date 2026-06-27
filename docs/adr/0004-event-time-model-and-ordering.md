@@ -104,7 +104,9 @@ type TimeBasis =
   | "FLOOR_START"     // time after a floor opened
   | "FLOOR_COLLAPSE"  // time until a floor collapses (counts down)
   | "EVENT"           // before/after another event
-  | "ABSOLUTE_DAY"    // an explicit absolute day index, when known
+  | "ABSOLUTE_DAY"    // [retired 2026-06-27] merged into COLLAPSE — both are
+                      //   bare days-since-collapse (collapse = day 0), so they
+                      //   were redundant; legacy rows read as COLLAPSE.
   | "UNSCHEDULED";    // no usable timestamp (label-only / manual order)
 
 type TimeRef = {

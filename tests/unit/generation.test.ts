@@ -142,7 +142,7 @@ async function makeConsequenceEvent(
   return createEvent(userId, campaignId, {
     title,
     summary: "The Dungeon makes its move.",
-    basis: "ABSOLUTE_DAY",
+    basis: "COLLAPSE",
     offset: 5,
     secret: false,
     participants,
@@ -364,7 +364,7 @@ describe("proposeEventConsequences", () => {
     const source = await createEvent(dmId, campaignId, {
       title: "The floor buckles",
       summary: "The Dungeon makes its move.",
-      basis: "ABSOLUTE_DAY",
+      basis: "COLLAPSE",
       offset: 5,
       floor: 3,
       secret: false,

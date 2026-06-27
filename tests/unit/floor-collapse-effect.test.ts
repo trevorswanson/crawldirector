@@ -126,7 +126,7 @@ describe("floor collapse effect", () => {
   it("auto-creates the current and next floor, opening the next the same day, and advances current floor", async () => {
     const { owner, campaign, carl } = await setup("collapse-autocreate@test.com");
     const event = await collapseEvent(owner.id, campaign.id, carl.id, {
-      basis: "ABSOLUTE_DAY",
+      basis: "COLLAPSE",
       floor: 1,
       offset: 10,
     });
@@ -151,7 +151,7 @@ describe("floor collapse effect", () => {
     const floor2 = await makeFloor(owner.id, campaign.id, 2);
 
     const event = await collapseEvent(owner.id, campaign.id, carl.id, {
-      basis: "ABSOLUTE_DAY",
+      basis: "COLLAPSE",
       floor: 1,
       offset: 12,
     });
