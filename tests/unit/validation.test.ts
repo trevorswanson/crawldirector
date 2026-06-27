@@ -7,6 +7,7 @@ import {
   createGenericEntitySchema,
   createRelationshipSchema,
   lockFieldSchema,
+  sanitizeImageUrl,
   signInSchema,
   signUpSchema,
   updateEntitySchema,
@@ -179,6 +180,45 @@ describe("entity schemas", () => {
     expect(r.success).toBe(false);
   });
 
+  it("accepts and trims an http(s) image URL", () => {
+    const parsed = createGenericEntitySchema.parse({
+      type: "NPC",
+      name: "Donut",
+      summary: "",
+      description: "",
+      imageUrl: "  https://example.com/donut.png  ",
+      visibility: "DM_ONLY",
+      tags: "",
+    });
+    expect(parsed.imageUrl).toBe("https://example.com/donut.png");
+  });
+
+  it("treats a blank image URL as empty (optional)", () => {
+    const parsed = createGenericEntitySchema.parse({
+      type: "NPC",
+      name: "Donut",
+      summary: "",
+      description: "",
+      imageUrl: "",
+      visibility: "DM_ONLY",
+      tags: "",
+    });
+    expect(parsed.imageUrl).toBe("");
+  });
+
+  it("rejects a non-http(s) image URL scheme", () => {
+    const r = createGenericEntitySchema.safeParse({
+      type: "NPC",
+      name: "Donut",
+      summary: "",
+      description: "",
+      imageUrl: "javascript:alert(1)",
+      visibility: "DM_ONLY",
+      tags: "",
+    });
+    expect(r.success).toBe(false);
+  });
+
   it("keeps update type immutable by requiring the submitted type", () => {
     expect(
       updateEntitySchema.safeParse({
@@ -211,8 +251,32 @@ describe("lockFieldSchema", () => {
     expect(lockFieldSchema.safeParse("crawler.level").success).toBe(true);
   });
 
+  it("accepts the imageUrl core lockable field", () => {
+    expect(lockFieldSchema.safeParse("imageUrl").success).toBe(true);
+  });
+
   it("rejects an unknown field", () => {
     expect(lockFieldSchema.safeParse("bogus").success).toBe(false);
+  });
+});
+
+describe("sanitizeImageUrl", () => {
+  it("keeps a valid http(s) URL (trimmed)", () => {
+    expect(sanitizeImageUrl("  https://example.com/a.png  ")).toBe(
+      "https://example.com/a.png",
+    );
+  });
+
+  it("nulls an unsafe scheme, blank, and non-string input", () => {
+    expect(sanitizeImageUrl("javascript:alert(1)")).toBeNull();
+    expect(sanitizeImageUrl("data:image/png;base64,AAAA")).toBeNull();
+    expect(sanitizeImageUrl("")).toBeNull();
+    expect(sanitizeImageUrl(null)).toBeNull();
+    expect(sanitizeImageUrl(42)).toBeNull();
+  });
+
+  it("nulls an overlong URL", () => {
+    expect(sanitizeImageUrl(`https://example.com/${"a".repeat(2050)}`)).toBeNull();
   });
 });
 

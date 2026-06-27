@@ -448,6 +448,91 @@ describe("entity service", () => {
     ).resolves.toMatchObject({ name: "Locked NPC", version: 1 });
   });
 
+  it("persists imageUrl on create, edits it, and records provenance", async () => {
+    const owner = await makeUser("image-url@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Mordecai",
+      summary: "",
+      description: "",
+      imageUrl: "https://example.com/mordecai.png",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    const created = await getEntityForUser(owner.id, campaign.id, entity.id);
+    expect(created?.imageUrl).toBe("https://example.com/mordecai.png");
+
+    await updateEntity(owner.id, campaign.id, entity.id, {
+      type: "NPC",
+      name: "Mordecai",
+      summary: "",
+      description: "",
+      imageUrl: "https://example.com/mordecai-v2.png",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const updated = await getEntityForUser(owner.id, campaign.id, entity.id);
+    expect(updated?.imageUrl).toBe("https://example.com/mordecai-v2.png");
+
+    const provenance = await prisma.provenance.findFirst({
+      where: { entityId: entity.id, field: "imageUrl" },
+    });
+    expect(provenance).not.toBeNull();
+
+    // Clearing the URL nulls the column.
+    await updateEntity(owner.id, campaign.id, entity.id, {
+      type: "NPC",
+      name: "Mordecai",
+      summary: "",
+      description: "",
+      imageUrl: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const cleared = await getEntityForUser(owner.id, campaign.id, entity.id);
+    expect(cleared?.imageUrl).toBeNull();
+  });
+
+  it("blocks overwrites to a locked imageUrl field", async () => {
+    const owner = await makeUser("locked-image@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Locked Image NPC",
+      summary: "",
+      description: "",
+      imageUrl: "https://example.com/original.png",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    await prisma.entity.update({
+      where: { id: entity.id },
+      data: { lockedFields: ["imageUrl"] },
+    });
+
+    await expect(
+      updateEntity(owner.id, campaign.id, entity.id, {
+        type: "NPC",
+        name: "Locked Image NPC",
+        summary: "",
+        description: "",
+        imageUrl: "https://example.com/changed.png",
+        visibility: "DM_ONLY",
+        tags: [],
+      }),
+    ).rejects.toThrow("locked");
+
+    await expect(
+      prisma.entity.findUniqueOrThrow({ where: { id: entity.id } }),
+    ).resolves.toMatchObject({
+      imageUrl: "https://example.com/original.png",
+      version: 1,
+    });
+  });
+
   it("blocks archiving a locked entity", async () => {
     const owner = await makeUser("locked-archive@test.com");
     const campaign = await createCampaign(owner.id, { name: "Dungeon" });
@@ -508,6 +593,37 @@ describe("entity service", () => {
     await expect(
       prisma.changeSet.findUniqueOrThrow({ where: { id: proposal.id } }),
     ).resolves.toMatchObject({ status: "APPROVED", reviewedById: owner.id });
+  });
+
+  it("sanitizes an unsafe imageUrl to null when a proposal is approved", async () => {
+    const owner = await makeUser("unsafe-image@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    // The Review Queue per-field editor can set imageUrl to a raw string that
+    // never passed entityCoreSchema; the apply path must re-validate so an
+    // unsafe scheme never reaches the persisted column / an <img src>.
+    const proposal = await createPendingEntityChangeSet(owner.id, campaign.id, {
+      title: "Create NPC with unsafe image",
+      operations: [
+        {
+          op: "CREATE_ENTITY",
+          patch: {
+            type: { to: "NPC" },
+            name: { to: "Sketchy NPC" },
+            summary: { to: "" },
+            description: { to: null },
+            imageUrl: { to: "javascript:alert(1)" },
+            visibility: { to: "DM_ONLY" },
+            tags: { to: [] },
+          },
+        },
+      ],
+    });
+
+    const result = await approveAcceptedChangeSet(owner.id, campaign.id, proposal.id);
+    await expect(
+      prisma.entity.findUniqueOrThrow({ where: { id: result.targetIds[0] } }),
+    ).resolves.toMatchObject({ name: "Sketchy NPC", imageUrl: null });
   });
 
   it("partially applies accepted operations and skips rejected operations", async () => {

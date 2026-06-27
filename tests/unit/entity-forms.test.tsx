@@ -81,6 +81,7 @@ const crawlerEntity: EntityDetail = {
   name: "Carl",
   summary: "No shoes",
   description: "Crawler notes",
+  imageUrl: null,
   status: "CANON",
   visibility: "PLAYER_VISIBLE",
   source: "DM",
@@ -163,6 +164,27 @@ describe("entity forms", () => {
     expect(screen.getByDisplayValue("Crawler notes")).toBeDefined();
     expect(screen.getByDisplayValue("500")).toBeDefined();
     expect(screen.getByText("Saved.")).toBeDefined();
+  });
+
+  it("renders the image URL field and marks it read-only when locked", () => {
+    useActionState.mockReturnValue([undefined, noopAction]);
+    const withImage: EntityDetail = {
+      ...genericEntity,
+      imageUrl: "https://example.com/zev.png",
+      lockedFields: ["imageUrl"],
+    };
+    render(
+      <EditFormProvider>
+        <EditEntityForm campaignId="c1" entity={withImage} />
+      </EditFormProvider>,
+    );
+
+    const imageInput = screen.getByLabelText("Image URL");
+    expect(imageInput).toBeDefined();
+    expect((imageInput as HTMLInputElement).value).toBe(
+      "https://example.com/zev.png",
+    );
+    expect(imageInput.getAttribute("readonly")).not.toBeNull();
   });
 
   it("marks fields as read-only/disabled when locked", () => {
@@ -375,6 +397,7 @@ describe("entity forms", () => {
     name: "Gourd of Doom",
     summary: "A heavy gourd",
     description: "It is scary",
+    imageUrl: null,
     status: "CANON",
     visibility: "PLAYER_VISIBLE",
     source: "DM",
