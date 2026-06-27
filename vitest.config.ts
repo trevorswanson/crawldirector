@@ -38,14 +38,17 @@ export default defineConfig({
       // coverage rises; never lower them to make a red build pass (add the
       // missing tests instead).
       //
-      // Current gate after the design-language pass. FxToggle and DmNav now have
-      // render/interaction coverage; branch coverage remains the metric to
-      // ratchet upward toward 90% once aggregate coverage supports it.
+      // Branch coverage is the metric we keep ratcheting toward 90%. As of
+      // 2026-06-27 aggregate is ~88.9% branches / 95.4% stmts / 96.8% funcs /
+      // 97.0% lines, so the branch floor steps 85→88 (and funcs/lines 95→96)
+      // to lock in the SSRF/search/persona test additions. Statements stays at
+      // 95 (only ~0.4 margin). Keep stepping branches up as the big remaining
+      // gaps (review.ts, actions.ts) get covered.
       thresholds: {
         statements: 95,
-        branches: 85,
-        functions: 95,
-        lines: 95,
+        branches: 88,
+        functions: 96,
+        lines: 96,
       },
     },
   },

@@ -444,6 +444,7 @@ export function ConnectionsPanel({
   sourceName = "This entity",
   connections,
   candidates,
+  excludeTypes,
 }: {
   campaignId: string;
   entityId: string;
@@ -452,6 +453,12 @@ export function ConnectionsPanel({
   sourceName?: string;
   connections: EntityConnection[];
   candidates: ConnectionCandidate[];
+  /** Relationship types whose *incoming* edges are rendered by a roster panel
+   *  elsewhere on the page (group entities roll up their members). Hidden here
+   *  to avoid listing membership twice; a note points to the roster so nothing
+   *  is silently dropped. Outgoing edges of these types (e.g. this party is
+   *  PART_OF a guild) are NOT in the roster, so they stay visible. */
+  excludeTypes?: readonly RelationshipTypeValue[];
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -459,9 +466,19 @@ export function ConnectionsPanel({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
   const [removedConnection, setRemovedConnection] = useState<string | null>(null);
-  const visibleConnections = removedConnection
-    ? connections.filter((connection) => connection.id !== removedConnection)
-    : connections;
+  const rosterTypes = useMemo(
+    () => new Set<RelationshipTypeValue>(excludeTypes ?? []),
+    [excludeTypes],
+  );
+  // An incoming membership edge whose type the roster rolls up is shown in that
+  // roster, not here.
+  const isInRoster = (connection: EntityConnection) =>
+    connection.direction === "in" && rosterTypes.has(connection.type);
+  const rosterMembershipCount = connections.filter(isInRoster).length;
+  const visibleConnections = connections.filter(
+    (connection) =>
+      connection.id !== removedConnection && !isInRoster(connection),
+  );
 
   const handleSubmit = async (formData: FormData) => {
     setError(null);
@@ -519,7 +536,14 @@ export function ConnectionsPanel({
         </div>
       )}
 
-      {visibleConnections.length === 0 && (
+      {rosterMembershipCount > 0 && (
+        <p className="mb-3 font-mono text-[10px] leading-[1.5] text-[var(--ink-faint)]">
+          {rosterMembershipCount} membership{" "}
+          {rosterMembershipCount === 1 ? "edge" : "edges"} shown in the roster above.
+        </p>
+      )}
+
+      {visibleConnections.length === 0 && rosterMembershipCount === 0 && (
         <p className="text-xs text-[var(--ink-faint)]">No relationships yet.</p>
       )}
 

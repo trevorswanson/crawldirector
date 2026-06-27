@@ -35,6 +35,8 @@ describe("isBlockedAddress", () => {
       "::ffff:127.0.0.1", // IPv4-mapped loopback (dotted)
       "::ffff:a9fe:a9fe", // IPv4-mapped 169.254.169.254 in hex (WHATWG URL form)
       "::ffff:c0a8:0101", // IPv4-mapped 192.168.1.1 in hex
+      "ff02::1", // IPv6 multicast
+      "::ffff:1:2:3", // unparseable IPv4-mapped form (≠2 hex groups) — fails closed
     ]) {
       expect(isBlockedAddress(ip), ip).toBe(true);
     }
@@ -91,6 +93,14 @@ describe("assertPublicEndpoint", () => {
     await expect(assertPublicEndpoint("https://1.1.1.1/v1")).resolves.toBeUndefined();
   });
 
+  it("rejects when the host cannot be resolved", async () => {
+    vi.stubEnv("AI_ALLOW_PRIVATE_ENDPOINTS", "");
+    vi.spyOn(dns.promises, "lookup").mockRejectedValue(new Error("ENOTFOUND"));
+    await expect(
+      assertPublicEndpoint("https://does-not-resolve.example.test/v1"),
+    ).rejects.toThrow(/resolve the endpoint host/i);
+  });
+
   it("short-circuits to allow any http(s) endpoint when private endpoints are on", async () => {
     vi.stubEnv("AI_ALLOW_PRIVATE_ENDPOINTS", "1");
     await expect(assertPublicEndpoint("http://localhost:11434/v1")).resolves.toBeUndefined();
@@ -117,6 +127,23 @@ describe("guardedLookup", () => {
     expect(err).toBeNull();
     expect(JSON.stringify(address)).toContain("8.8.8.8");
   });
+
+  it("propagates a DNS resolution error untouched", async () => {
+    const lookupErr: NodeJS.ErrnoException = new Error("getaddrinfo ENOTFOUND");
+    lookupErr.code = "ENOTFOUND";
+    vi.spyOn(dns, "lookup").mockImplementation(((
+      _host: string,
+      _opts: unknown,
+      cb: (e: unknown, a: unknown, f: unknown) => void,
+    ) => {
+      cb(lookupErr, "", undefined);
+    }) as never);
+    const err = await new Promise<NodeJS.ErrnoException | null>((resolve) => {
+      guardedLookup("nope.example.test", { all: true }, (e) => resolve(e));
+    });
+    // The original resolver error surfaces unchanged (not rewritten to EAI_BLOCKED).
+    expect(err?.code).toBe("ENOTFOUND");
+  });
 });
 
 describe("createSafeFetch", () => {
@@ -132,6 +159,39 @@ describe("createSafeFetch", () => {
     await expect(safeFetch("http://169.254.169.254/latest/meta-data")).rejects.toBeInstanceOf(
       ServiceError,
     );
+  });
+
+  it("re-checks the target for URL and Request inputs, not just strings", async () => {
+    vi.stubEnv("AI_ALLOW_PRIVATE_ENDPOINTS", "");
+    const safeFetch = createSafeFetch();
+    // A URL instance — fetchTargetUrl reads .href.
+    await expect(
+      safeFetch(new URL("http://169.254.169.254/latest/meta-data")),
+    ).rejects.toBeInstanceOf(ServiceError);
+    // A Request instance — fetchTargetUrl reads .url.
+    await expect(
+      safeFetch(new Request("http://127.0.0.1/v1")),
+    ).rejects.toBeInstanceOf(ServiceError);
+  });
+
+  it("routes a public target through the guarded dispatcher, with and without init", async () => {
+    vi.stubEnv("AI_ALLOW_PRIVATE_ENDPOINTS", "");
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("ok"));
+    const safeFetch = createSafeFetch();
+
+    // No init: the wrapper synthesizes `{}` before attaching the dispatcher.
+    await safeFetch("https://1.1.1.1/v1");
+    // With init: existing options are spread through and the dispatcher added.
+    await safeFetch("https://1.1.1.1/v1", { method: "POST" });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const [, firstInit] = fetchSpy.mock.calls[0];
+    const [, secondInit] = fetchSpy.mock.calls[1];
+    expect((firstInit as { dispatcher?: unknown }).dispatcher).toBeDefined();
+    expect((secondInit as { dispatcher?: unknown; method?: string }).method).toBe("POST");
+    expect((secondInit as { dispatcher?: unknown }).dispatcher).toBeDefined();
   });
 });
 

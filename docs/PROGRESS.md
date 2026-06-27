@@ -216,6 +216,77 @@ rather than the entity-kind registry.
       editing the Image URL and saving round-trips through the action → review
       apply → re-rendered header, no console errors.
 
+## Backlog — Roster ↔ connections dedup (groups) ✅ (2026-06-27)
+
+**Goal:** the dedup half of the "Roster ↔ connections dedup + roster editor"
+backlog item. On a group entity's detail page (PARTY/GUILD/FACTION/ORGANIZATION)
+the rolled-up **roster** panel and the **connections** pane rendered the *same*
+membership edges, because [`listConnectionsForEntity`](../src/server/services/relationships.ts)
+returns every edge touching the entity while the roster
+([`getGroupRoster`](../src/server/services/groups.ts)) already rolls up the
+group's incoming MEMBER_OF/PART_OF/LEADS edges. The roster **editor** half (making
+the roster pane editable) stays open.
+
+**Decision (hide incoming only, never silent).** The roster rolls up a group's
+*incoming* membership (member/leader → group). A group's *outgoing* membership —
+e.g. a party that is `PART_OF` a guild — appears in the *parent's* roster, not its
+own, so hiding it here would drop information shown nowhere else on the page.
+The dedup therefore filters only **incoming** edges whose type the roster rolls
+up, and surfaces a "N membership edge(s) shown in the roster above" note so the
+omission is explicit (no silent hide). Non-group pages have no roster, so they
+pass no `excludeTypes` and keep listing membership as before.
+
+- [x] **Service** ([`groups.ts`](../src/server/services/groups.ts)): exported
+      `ROSTER_ROLLUP_RELATIONSHIP_TYPES` (`["MEMBER_OF", "PART_OF", "LEADS"]`,
+      plain string literals — no Prisma import — so the client component can
+      consume it across the server boundary), the single source of truth for
+      which types the roster owns.
+- [x] **UI** ([`connections-panel.tsx`](../src/components/entities/connections-panel.tsx)):
+      new optional `excludeTypes` prop; the panel hides edges that are both
+      `direction === "in"` and of an excluded type, counts them, and renders the
+      roster note. The empty state ("No relationships yet.") is suppressed when the
+      only edges are roster-membership ones (the note explains the list instead).
+- [x] **Page** ([`entities/[entityId]/page.tsx`](<../src/app/(dm)/campaigns/[id]/entities/[entityId]/page.tsx>)):
+      passes `excludeTypes={isGroup ? ROSTER_ROLLUP_RELATIONSHIP_TYPES : undefined}`.
+- [x] **Tests:** dedup hides incoming membership while keeping an outgoing
+      `PART_OF` + a non-membership `ALLY_OF` edge, asserts the deduped count and
+      the plural/singular roster note, and the suppressed empty state in
+      [`connections-panel.test.tsx`](../tests/unit/connections-panel.test.tsx);
+      the page passing `excludeTypes` for a PARTY and *not* for a non-group entity
+      in [`entity-page.test.tsx`](../tests/unit/entity-page.test.tsx).
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors;
+      pre-existing settings-action warnings only), `npm run build`
+      (compiles, routes unchanged), and the full coverage gate green (126 files /
+      1724 tests; statements 95.07%, branches 88.53%, functions 96.65%, lines
+      96.72%). In-browser verification deferred (the local dev server occupies the
+      only Next dev port — see the preview note in memory).
+
+## Testing — Branch-coverage ratchet (85→88) ✅ (2026-06-27)
+
+**Goal:** push aggregate branch coverage up and raise the CI floor, since the
+gate had been parked at 85% branches while aggregate sat ~88.5%. Targeted the
+files with the most *reachable* uncovered branches (the V8 report's defensive
+fail-closed guards behind `net.isIP` validation in `ssrf.ts` are deliberately
+left — they're unreachable through the public API).
+
+- [x] **`ssrf.ts`** ([`ai-ssrf.test.ts`](../tests/unit/ai-ssrf.test.ts), 80.5%→
+      ~98% branches): multicast IPv6 (`ff02::1`) + unparseable IPv4-mapped form
+      (`::ffff:1:2:3`, ≠2 hex groups → fails closed); `guardedLookup`'s DNS-error
+      passthrough; `assertPublicEndpoint`'s unresolvable-host `catch`;
+      `createSafeFetch` with URL and Request inputs (not just strings) and the
+      `init ?? {}` fork (mocked global fetch, with/without `init`).
+- [x] **`searchEntityCandidates`** ([`search.test.ts`](../tests/unit/search.test.ts),
+      previously untested → covered): blank query short-circuit, id/name/type
+      candidate shape, `types` filter, `excludeIds` drop, and the `limit` clamp.
+- [x] **`getActiveSystemPersonaPrompt`** ([`persona-review.test.ts`](../tests/unit/persona-review.test.ts)):
+      the recompile-on-read fallback when a snapshot's cached `compiledPrompt` is
+      absent (also exercises `asRecord`'s non-object branch via nulled dials).
+- [x] **Floor raised** ([`vitest.config.ts`](../vitest.config.ts)): branches
+      **85→88**, functions/lines **95→96**; statements stays 95 (~0.4 margin).
+- [x] **Verification:** full coverage gate green at the new floors (126 files /
+      **1732 tests**; statements 95.4%, branches 88.91%, functions 96.75%, lines
+      97.03%). +31 branches covered (7199→7230).
+
 ## M6 — Persona-aware dungeon-content generator (slice 6) ✅ (2026-06-22)
 
 **Goal:** the roadmap's "full persona-aware generator family" — give the DM a way
@@ -583,10 +654,14 @@ prompt. Branch: `codex/m6-persona-foundation`. Schema change.
       show the *same* MEMBER_OF/LEADS/PART_OF edges, because
       `listConnectionsForEntity` ([`relationships.ts`](../src/server/services/relationships.ts))
       returns all edges unfiltered.
-      - **Dedup:** add an `excludeTypes` prop to
-        [`connections-panel.tsx`](../src/components/entities/connections-panel.tsx)
-        and pass `{MEMBER_OF, LEADS, PART_OF}` for group types from the entity
-        detail page, with a "membership shown in roster above" note (no silent hide).
+      - [x] **Dedup.** ✅ 2026-06-27 (dated entry below). Added an `excludeTypes`
+        prop to [`connections-panel.tsx`](../src/components/entities/connections-panel.tsx);
+        the entity detail page passes `ROSTER_ROLLUP_RELATIONSHIP_TYPES`
+        (`{MEMBER_OF, PART_OF, LEADS}`) for group types. Only **incoming** edges of
+        those types are hidden (the roster rolls up incoming membership; a group's
+        *outgoing* membership — e.g. a party PART_OF a guild — is not in its own
+        roster, so it stays visible). A "N membership edge(s) shown in the roster
+        above" note keeps it from being a silent hide.
       - **Editor:** make the roster pane editable (add/remove member, set/clear
         leader, edit day-bounds) reusing existing actions
         ([`actions.ts`](<../src/app/(dm)/actions.ts>)): `createRelationshipAction`
@@ -617,10 +692,14 @@ prompt. Branch: `codex/m6-persona-foundation`. Schema change.
       uncertainty, sub-floor "current zone," and per-crawler spatial history
       beyond the event log remain intentionally out of scope unless a campaign
       needs them.
-- [ ] **Coverage ratchet.** `FxToggle` and `DmNav` render/interaction tests now
-      exist. The current gate is 95% statements / 85% branches / 95% functions /
-      95% lines; raise the branch floor toward 90% when aggregate branch coverage
-      supports it.
+- [ ] **Coverage ratchet.** The gate is now **95% statements / 88% branches /
+      96% functions / 96% lines** (branches 85→88, funcs/lines 95→96 on
+      2026-06-27, after adding `ssrf.ts` / `searchEntityCandidates` /
+      persona recompile-fallback tests pushed aggregate to ~88.9% branches /
+      96.8% funcs / 97.0% lines — dated entry below). Keep raising the branch
+      floor toward 90%; the largest remaining uncovered-branch files are
+      `review.ts` (~239 uncovered) and `actions.ts` (~83), so meaningful further
+      gains live there.
 - [ ] **Campaign settings page redesign & expansion (M9).** Redesign the settings
       page `/campaigns/[id]/settings` to use the three-pane layout. The middle
       pane will act as a sub-nav with options:

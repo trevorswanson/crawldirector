@@ -202,6 +202,33 @@ describe("review service — persona snapshots", () => {
     });
   });
 
+  it("recompiles the prompt on the fly when the stored compiledPrompt is absent", async () => {
+    const { dmId, campaignId, systemId } = await seed();
+    const result = await applyAutoApprovedPersonaSnapshotChangeSet(dmId, campaignId, {
+      title: "Author System persona",
+      operations: [
+        {
+          op: "CREATE_PERSONA_SNAPSHOT",
+          patch: personaCreatePatch(systemId, "Uncached Voice"),
+        },
+      ],
+    });
+    // Drop the cached prompt and the structured dials/resources so the read seam
+    // must recompile from scratch and `asRecord` sees a non-object (falls back to
+    // undefined) instead of a stored record.
+    await prisma.personaSnapshot.update({
+      where: { id: result.targetIds[0] },
+      data: { compiledPrompt: null, dials: "not-an-object", resources: [] },
+    });
+
+    await expect(
+      getActiveSystemPersonaPrompt(dmId, campaignId),
+    ).resolves.toMatchObject({
+      snapshotId: result.targetIds[0],
+      prompt: expect.stringContaining("System AI persona: Uncached Voice"),
+    });
+  });
+
   it("returns null without an active System AI persona and rejects players", async () => {
     const { dmId, campaignId } = await seed();
     await expect(getActiveSystemPersonaPrompt(dmId, campaignId)).resolves.toBeNull();

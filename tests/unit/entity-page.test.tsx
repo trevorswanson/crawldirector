@@ -51,7 +51,11 @@ vi.mock("@/server/services/entities", () => ({
 }));
 vi.mock("@/server/services/relationships", () => ({ listConnectionsForEntity }));
 vi.mock("@/server/services/events", () => ({ listEventsForEntity, resolveFloorEntity }));
-vi.mock("@/server/services/groups", () => ({ getGroupRoster, isGroupEntityType }));
+vi.mock("@/server/services/groups", () => ({
+  getGroupRoster,
+  isGroupEntityType,
+  ROSTER_ROLLUP_RELATIONSHIP_TYPES: ["MEMBER_OF", "PART_OF", "LEADS"],
+}));
 vi.mock("@/server/services/review", () => ({ getEntityProvenance }));
 vi.mock("@/server/services/ai-keys", () => ({ listAiKeys }));
 vi.mock("@/server/services/references", () => ({
@@ -98,12 +102,15 @@ vi.mock("@/components/entities/connections-panel", () => ({
   ConnectionsPanel: ({
     connections,
     candidates,
+    excludeTypes,
   }: {
     connections: unknown[];
     candidates: unknown[];
+    excludeTypes?: readonly string[];
   }) => (
     <div>
       Connections panel ({connections.length}/{candidates.length})
+      {excludeTypes ? ` exclude ${excludeTypes.join(",")}` : ""}
     </div>
   ),
 }));
@@ -500,6 +507,20 @@ describe("EntityPage", () => {
       asOfDay: 52,
     });
     expect(screen.getByText("Roster panel (3) as of day 52")).toBeDefined();
+    // Group membership is rolled up in the roster, so its incoming edges are
+    // excluded from the connections pane (dedup).
+    expect(
+      screen.getByText(/Connections panel .* exclude MEMBER_OF,PART_OF,LEADS/),
+    ).toBeDefined();
+  });
+
+  it("does not exclude membership from connections for non-group entities", async () => {
+    getEntityForUser.mockResolvedValue(crawler());
+
+    await renderPage();
+
+    const panel = screen.getByText(/Connections panel/);
+    expect(panel.textContent).not.toContain("exclude");
   });
 
   it("offers lock toggles for summary and description in the read view", async () => {
