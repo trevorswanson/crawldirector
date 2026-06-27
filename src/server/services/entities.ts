@@ -256,6 +256,33 @@ export function buildStubCreatePatch(
   });
 }
 
+// Build a CREATE_ENTITY patch for a fully-fleshed generated entity (name +
+// summary + description + tags), the create-patch shape used by the dungeon-
+// content generator (M6). Unlike a scaffolded stub this carries a description
+// and is not a stub, so the proposal lands as finished canon detail for review.
+// Reuses `entityCreatePatch`, so a generated entity is byte-identical to a
+// manually created one (visibility DM_ONLY).
+export function buildContentCreatePatch(
+  userId: string,
+  campaignId: string,
+  spec: {
+    type: EntityType;
+    name: string;
+    summary: string;
+    description: string;
+    tags: string[];
+  },
+): ReviewPatch {
+  return entityCreatePatch(userId, campaignId, spec.type, {
+    name: spec.name,
+    summary: spec.summary,
+    description: spec.description,
+    visibility: Visibility.DM_ONLY,
+    tags: spec.tags,
+    isStub: false,
+  });
+}
+
 async function entityResult(entityId: string) {
   const entity = await prisma.entity.findUnique({
     where: { id: entityId },

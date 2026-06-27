@@ -6,7 +6,7 @@ import {
   eventEffectRequiresTarget,
   eventEffectStatValues,
 } from "@/lib/event-effect-kinds";
-import { PERSONA_DIAL_KEYS } from "@/lib/persona";
+import { PERSONA_DIAL_KEYS, PERSONA_VOICED_ENTITY_TYPES } from "@/lib/persona";
 import { optionalInt, optionalText } from "@/lib/zod-field-helpers";
 
 const personaDialKeySet = new Set<string>(PERSONA_DIAL_KEYS);
@@ -708,3 +708,13 @@ export const personaSnapshotInputSchema = z.object({
 });
 
 export type PersonaSnapshotInput = z.infer<typeof personaSnapshotInputSchema>;
+
+// Dungeon-content generator input (M6): the DM picks a persona-voiced kind and
+// briefs the System AI on what to create. The brief is bounded like the scaffold
+// instruction so a runaway request can't blow the token budget.
+export const dungeonContentInputSchema = z.object({
+  type: z.enum(PERSONA_VOICED_ENTITY_TYPES),
+  brief: z.string().trim().min(1, "Describe what to create.").max(2000),
+});
+
+export type DungeonContentInput = z.infer<typeof dungeonContentInputSchema>;

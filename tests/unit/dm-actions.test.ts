@@ -47,6 +47,7 @@ const {
   inferRelationshipsForEntity,
   proposeEventConsequences,
   scaffoldStubEntities,
+  generateDungeonContent,
   createPersonaSnapshot,
   updatePersonaSnapshot,
   setPersonaPromptLock,
@@ -107,6 +108,7 @@ const {
   inferRelationshipsForEntity: vi.fn(),
   proposeEventConsequences: vi.fn(),
   scaffoldStubEntities: vi.fn(),
+  generateDungeonContent: vi.fn(),
   createPersonaSnapshot: vi.fn(),
   updatePersonaSnapshot: vi.fn(),
   setPersonaPromptLock: vi.fn(),
@@ -183,6 +185,7 @@ vi.mock("@/server/services/generation", () => ({
   inferRelationshipsForEntity,
   proposeEventConsequences,
   scaffoldStubEntities,
+  generateDungeonContent,
 }));
 vi.mock("@/server/services/persona", () => ({
   createPersonaSnapshot,
@@ -268,6 +271,7 @@ import {
   inferRelationshipsForEntityAction,
   proposeEventConsequencesAction,
   scaffoldStubsAction,
+  generateDungeonContentAction,
   createPersonaSnapshotAction,
   updatePersonaSnapshotAction,
   togglePersonaPromptLockAction,
@@ -2399,6 +2403,63 @@ describe("scaffoldStubsAction", () => {
     expect((await scaffoldStubsAction("c1", undefined, form({ instruction: "x" })))?.error).toBe(
       "Generation failed. Please try again.",
     );
+  });
+});
+
+describe("generateDungeonContentAction", () => {
+  it("generates content and returns a success message + link, revalidating queue + world", async () => {
+    generateDungeonContent.mockResolvedValue({
+      changeSetId: "cs9",
+      providerId: "anthropic",
+      model: "claude-opus-4-8",
+      entityName: "The Maitre D'",
+    });
+
+    const result = await generateDungeonContentAction(
+      "c1",
+      undefined,
+      form({ type: "BOSS", brief: "A floor-3 boss." }),
+    );
+
+    expect(generateDungeonContent).toHaveBeenCalledWith("u1", "c1", {
+      type: "BOSS",
+      brief: "A floor-3 boss.",
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/review");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1");
+    expect(result?.success).toContain("The Maitre D'");
+    expect(result?.success).toContain("claude-opus-4-8");
+    expect(result?.changeSetId).toBe("cs9");
+    expect(result?.error).toBeUndefined();
+  });
+
+  it("rejects an invalid kind or blank brief without calling the service", async () => {
+    const badKind = await generateDungeonContentAction(
+      "c1",
+      undefined,
+      form({ type: "CRAWLER", brief: "A crawler." }),
+    );
+    expect(badKind?.error).toMatch(/pick a kind/i);
+
+    const blankBrief = await generateDungeonContentAction(
+      "c1",
+      undefined,
+      form({ type: "BOSS", brief: "   " }),
+    );
+    expect(blankBrief?.error).toMatch(/pick a kind/i);
+    expect(generateDungeonContent).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a ServiceError message and a generic fallback", async () => {
+    generateDungeonContent.mockRejectedValueOnce(new ServiceError("No AI provider is configured."));
+    expect(
+      (await generateDungeonContentAction("c1", undefined, form({ type: "BOSS", brief: "x" })))?.error,
+    ).toBe("No AI provider is configured.");
+
+    generateDungeonContent.mockRejectedValueOnce(new Error("boom"));
+    expect(
+      (await generateDungeonContentAction("c1", undefined, form({ type: "BOSS", brief: "x" })))?.error,
+    ).toBe("Generation failed. Please try again.");
   });
 });
 

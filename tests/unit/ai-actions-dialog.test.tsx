@@ -6,6 +6,7 @@ const {
   fleshOutEntityAction,
   inferRelationshipsForEntityAction,
   scaffoldStubsAction,
+  generateDungeonContentAction,
   fleshOutEntitiesAction,
   enqueueBulkFleshAction,
   mockUseActionState,
@@ -13,6 +14,7 @@ const {
   fleshOutEntityAction: vi.fn(),
   inferRelationshipsForEntityAction: vi.fn(),
   scaffoldStubsAction: vi.fn(),
+  generateDungeonContentAction: vi.fn(),
   fleshOutEntitiesAction: vi.fn(),
   enqueueBulkFleshAction: vi.fn(),
   mockUseActionState: vi.fn(),
@@ -22,6 +24,7 @@ vi.mock("@/app/(dm)/actions", () => ({
   fleshOutEntityAction,
   inferRelationshipsForEntityAction,
   scaffoldStubsAction,
+  generateDungeonContentAction,
   fleshOutEntitiesAction,
   enqueueBulkFleshAction,
 }));
@@ -67,6 +70,8 @@ describe("AiActionsDialog", () => {
 
     expect(screen.getAllByText("Scaffold stubs")).toHaveLength(2);
     expect(screen.getByPlaceholderText(/what should i scaffold/i)).toBeTruthy();
+    expect(screen.getByText("Generate dungeon content")).toBeTruthy();
+    expect(screen.getByPlaceholderText(/what should the system ai create/i)).toBeTruthy();
     expect(screen.getByText("Bulk flesh-out")).toBeTruthy();
     expect(screen.getByText("Mordecai")).toBeTruthy();
   });

@@ -67,6 +67,7 @@ import {
 import {
   fleshOutEntities,
   fleshOutEntity,
+  generateDungeonContent,
   inferRelationshipsForEntity,
   proposeEventConsequences,
   scaffoldStubEntities,
@@ -77,7 +78,7 @@ import {
   setPersonaPromptLock,
   updatePersonaSnapshot,
 } from "@/server/services/persona";
-import { personaSnapshotInputSchema } from "@/lib/validation";
+import { dungeonContentInputSchema, personaSnapshotInputSchema } from "@/lib/validation";
 import { askCampaign, type AskSource } from "@/server/services/ask";
 import {
   searchEntityCandidates,
@@ -590,6 +591,41 @@ export async function scaffoldStubsAction(
   } catch (error) {
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
     logActionError("Scaffold stubs action failed", error);
+    return { error: "Generation failed. Please try again.", timestamp: Date.now() };
+  }
+}
+
+// Generate one new dungeon-voiced entity (boss/mob/loot/System message/…) from a
+// DM brief, in the active System AI persona's voice. The result lands as a single
+// PENDING CREATE_ENTITY change set in the Review Queue (never canon — invariant
+// #1); we return a link to it. DM/co-DM only (the service enforces the role).
+// Errors are safe messages (invariant #6).
+export async function generateDungeonContentAction(
+  campaignId: string,
+  _prev: GenerateActionState,
+  formData: FormData,
+): Promise<GenerateActionState> {
+  void _prev;
+  const user = await requireUser();
+  const parsed = dungeonContentInputSchema.safeParse({
+    type: formData.get("type"),
+    brief: formData.get("brief"),
+  });
+  if (!parsed.success) {
+    return { error: "Pick a kind and describe what to create.", timestamp: Date.now() };
+  }
+  try {
+    const result = await generateDungeonContent(user.id, campaignId, parsed.data);
+    revalidatePath(`/campaigns/${campaignId}/review`);
+    revalidatePath(`/campaigns/${campaignId}`);
+    return {
+      success: `Proposed “${result.entityName}” (${result.model}). Review it in the queue.`,
+      changeSetId: result.changeSetId,
+      timestamp: Date.now(),
+    };
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    logActionError("Dungeon content generation action failed", error);
     return { error: "Generation failed. Please try again.", timestamp: Date.now() };
   }
 }
