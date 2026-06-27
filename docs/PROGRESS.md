@@ -133,7 +133,11 @@ rather than the entity-kind registry.
       `entityCoreSchema` — optional, trimmed, ≤2048 chars, **http(s)-only** (a
       `javascript:`/`data:` scheme is rejected at the boundary since the value is
       rendered in an `<img src>`); added to `lockableEntityFields` (so
-      `lockableFields`/`lockFieldSchema` accept it automatically).
+      `lockableFields`/`lockFieldSchema` accept it automatically). A shared
+      `sanitizeImageUrl` also re-validates at the review **apply** path
+      (`applyCreateEntity`/`buildEntityUpdateData`), so a review-edited or
+      AI/import-carried patch value can't bypass the form rule — invalid →
+      null, valid http(s) untouched.
 - [x] **Service** ([`entities.ts`](../src/server/services/entities.ts),
       [`review.ts`](../src/server/services/review.ts)): threaded through
       `entityCoreData`/`entityCreatePatch`/`updateEntity` + the detail/edit
