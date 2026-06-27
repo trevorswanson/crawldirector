@@ -185,6 +185,18 @@ function CoreFields({
         ) : null;
       })()}
       <div className="grid gap-2">
+        <Label htmlFor="imageUrl">Image URL</Label>
+        <Input
+          id="imageUrl"
+          name="imageUrl"
+          type="url"
+          inputMode="url"
+          defaultValue={getVal("imageUrl", entity?.imageUrl ?? "")}
+          readOnly={isLocked("imageUrl")}
+          placeholder="https://example.com/portrait.png"
+        />
+      </div>
+      <div className="grid gap-2">
         <Label htmlFor="description">Description</Label>
         <Textarea
           id="description"

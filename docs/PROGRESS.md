@@ -115,6 +115,59 @@ M6 remains the next milestone work. The detailed decisions live in
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
 
+## Backlog — Entity image support (URL linking) ✅ (2026-06-27)
+
+**Goal:** the M1 follow-up — give every entity an optional main image, rendered
+in the detail header (an avatar for characters, an illustration card for
+places/things). Scoped to **linking by URL**; actual file upload (blob storage)
+stays a later slice. `imageUrl` was already sketched in
+[`09-data-schema.md`](./09-data-schema.md) and [`01-domain-model.md`](./01-domain-model.md);
+this realizes it. The field is a genuinely-shared **core** entity column (like
+`summary`/`description`), so it rides the existing review/lock/provenance plumbing
+rather than the entity-kind registry.
+
+- [x] **Schema** ([`schema.prisma`](../prisma/schema.prisma), migration
+      `20260627200601_m1_entity_image_url`): additive `Entity.imageUrl String?`
+      (drift gate clean).
+- [x] **Validation** ([`validation.ts`](../src/lib/validation.ts)): `imageUrl` in
+      `entityCoreSchema` — optional, trimmed, ≤2048 chars, **http(s)-only** (a
+      `javascript:`/`data:` scheme is rejected at the boundary since the value is
+      rendered in an `<img src>`); added to `lockableEntityFields` (so
+      `lockableFields`/`lockFieldSchema` accept it automatically).
+- [x] **Service** ([`entities.ts`](../src/server/services/entities.ts),
+      [`review.ts`](../src/server/services/review.ts)): threaded through
+      `entityCoreData`/`entityCreatePatch`/`updateEntity` + the detail/edit
+      selects, and the apply paths (`applyCreateEntity`, `buildEntityUpdateData`,
+      `currentEntityValue`). Provenance is generic (per patch field), so the
+      `imageUrl` change records provenance with no extra wiring.
+- [x] **Actions** ([`actions.ts`](<../src/app/(dm)/actions.ts>)): `imageUrl`
+      added to create-generic / create-crawler / update-entity FormData parsing
+      and the update value-preservation map.
+- [x] **UI** ([`entity-forms.tsx`](../src/components/entities/entity-forms.tsx),
+      [`entities/[entityId]/page.tsx`](<../src/app/(dm)/campaigns/[id]/entities/[entityId]/page.tsx>)):
+      an Image URL input in `CoreFields` (lock-aware, value-preserving) and a
+      read-view `EntityImageBlock` — a round avatar for character kinds
+      (CRAWLER/NPC/SYSTEM_AI/BOSS/MOB_TYPE/DEITY), an illustration card for the
+      rest, with a `FieldLockToggle` and a "No image (locked)" empty state.
+      Plain `<img>` (no `next/image` server-side proxy of arbitrary external URLs).
+- [x] **Tests:** validation (accept/trim http(s), blank-as-empty, reject non-http
+      scheme, `imageUrl` lockable) in
+      [`validation.test.ts`](../tests/unit/validation.test.ts); DB-backed
+      create/edit/clear + provenance + locked-field block in
+      [`entities.test.ts`](../tests/unit/entities.test.ts); the form input +
+      read-only-when-locked in
+      [`entity-forms.test.tsx`](../tests/unit/entity-forms.test.tsx); avatar vs.
+      illustration vs. locked-empty vs. absent rendering in
+      [`entity-page.test.tsx`](../tests/unit/entity-page.test.tsx).
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors;
+      pre-existing settings-action warnings only), `npm run build`, and the full
+      coverage gate green (1716 tests; statements 95.06%, branches 88.5%,
+      functions 96.64%, lines 96.72%). **In-browser** (reseeded `dcc`, authed as
+      `dm@example.com`): a CRAWLER renders an 80×80 rounded-full avatar and a
+      LOCATION a 440×280 rounded illustration card (both external images loaded);
+      editing the Image URL and saving round-trips through the action → review
+      apply → re-rendered header, no console errors.
+
 ## M6 — Persona-aware dungeon-content generator (slice 6) ✅ (2026-06-22)
 
 **Goal:** the roadmap's "full persona-aware generator family" — give the DM a way
@@ -435,10 +488,15 @@ prompt. Branch: `codex/m6-persona-foundation`. Schema change.
 
 ### Follow-ups captured from delivered slices
 
-- [ ] **Entity image support (M1 follow-up).** Support uploading or linking a main image (`imageUrl`) for any entity:
-      - Add `imageUrl String?` to the `Entity` database model and validate on writes.
-      - Add image upload/input to `EntityForm` (fully reviewable, lockable, and provenance-tracked).
-      - Render the image/avatar in the entity detail header (avatar size for characters, card/illustration style for items/locations/floors).
+- [x] **Entity image support — URL linking (M1 follow-up).** ✅ 2026-06-27
+      (dated entry below). `imageUrl String?` on `Entity`, validated as an
+      optional http(s) URL, reviewable/lockable/provenance-tracked like any core
+      field; an Image URL input in the entity form; avatar (characters) vs.
+      illustration-card (places/things) rendering in the detail header.
+      **Deferred:** actual file *upload* (needs blob storage) — linking by URL
+      ships now; upload stays a later slice. The doc-09/doc-01 `imageUrl`/
+      `attachments[]` sketches predate this; `attachments[]` (multi-image) is
+      still unbuilt.
 - [ ] **Knowledge / reveal grants.** Extend beyond ENTITY→ENTITY to
       field/relationship/event/FACT targets and MEMBERSHIP recipients; wire the
       M7 player "known world" projection and M11 agent fog-of-war context; add a

@@ -153,6 +153,7 @@ export default async function EntityPage({
   const summaryLocked = entity.locked || entity.lockedFields.includes("summary");
   const descriptionLocked =
     entity.locked || entity.lockedFields.includes("description");
+  const imageLocked = entity.locked || entity.lockedFields.includes("imageUrl");
 
   // Bespoke per-type read-view display comes from the entity-kind registry
   // (ADR 0009) instead of inline `type === "ITEM"` branches. The panel is a
@@ -197,6 +198,14 @@ export default async function EntityPage({
             <StatusPill status={entity.status} />
             {entity.isStub && <HudTag>Stub</HudTag>}
           </div>
+          {!editing && (
+            <EntityImageBlock
+              campaignId={id}
+              entityId={entityId}
+              entity={entity}
+              imageLocked={imageLocked}
+            />
+          )}
           <div className="flex items-start justify-between gap-4">
             <h1 className="min-w-0 font-display text-[30px] font-bold leading-[1.05] tracking-[.01em]">
               {entity.name}
@@ -604,6 +613,66 @@ export default async function EntityPage({
       </aside>
     </div>
     </EditFormProvider>
+  );
+}
+
+// Character-ish kinds read best as a round avatar; places/things/honors as a
+// wider illustration card. Mirrors the world-role grouping in entityTypeColor.
+const AVATAR_IMAGE_TYPES = new Set([
+  "CRAWLER",
+  "NPC",
+  "SYSTEM_AI",
+  "BOSS",
+  "MOB_TYPE",
+  "DEITY",
+]);
+
+// The entity's main image (M1 follow-up): an avatar for characters, an
+// illustration card for everything else. Read-view only — the edit form owns the
+// imageUrl input. Linked by URL and rendered with a plain <img> (no server-side
+// next/image proxy of arbitrary external URLs). The lock toggle sits beside it,
+// matching the summary/description read-view affordances, and an empty-but-locked
+// field still shows the toggle so a DM can unlock it.
+function EntityImageBlock({
+  campaignId,
+  entityId,
+  entity,
+  imageLocked,
+}: {
+  campaignId: string;
+  entityId: string;
+  entity: EntityDetail;
+  imageLocked: boolean;
+}) {
+  if (!entity.imageUrl && !imageLocked) return null;
+  const avatar = AVATAR_IMAGE_TYPES.has(entity.type);
+  return (
+    <div className="mt-[14px] flex items-start gap-3">
+      {entity.imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={entity.imageUrl}
+          alt={`${entity.name}`}
+          className={cn(
+            "border border-[var(--line)] bg-[var(--bg-2)] object-cover",
+            avatar
+              ? "h-20 w-20 rounded-full"
+              : "max-h-[280px] w-full max-w-[440px] rounded-md",
+          )}
+        />
+      ) : (
+        <span className="italic text-[13px] text-[var(--ink-faint)]">
+          No image (locked)
+        </span>
+      )}
+      <FieldLockToggle
+        campaignId={campaignId}
+        entityId={entityId}
+        field="imageUrl"
+        fieldLocked={imageLocked}
+        entityLocked={entity.locked}
+      />
+    </div>
   );
 }
 

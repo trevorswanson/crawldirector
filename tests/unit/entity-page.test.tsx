@@ -211,6 +211,7 @@ function crawler(overrides = {}) {
     name: "Carl",
     summary: "No shoes",
     description: "Canon text",
+    imageUrl: null,
     status: "CANON",
     visibility: "PLAYER_VISIBLE",
     source: "DM",
@@ -351,6 +352,58 @@ describe("EntityPage", () => {
     expect(screen.getByText("Connections panel (0/1)")).toBeDefined();
     expect(screen.getByText("Timeline panel (0/1)")).toBeDefined();
     expect(screen.queryAllByText(/Planned · M3/).length).toBe(0);
+  });
+
+  it("renders a round avatar image for a character entity", async () => {
+    getEntityForUser.mockResolvedValue(
+      crawler({ imageUrl: "https://example.com/carl.png" }),
+    );
+
+    await renderPage();
+
+    const img = screen.getByRole("img", { name: "Carl" }) as HTMLImageElement;
+    expect(img.getAttribute("src")).toBe("https://example.com/carl.png");
+    expect(img.className).toContain("rounded-full");
+  });
+
+  it("renders an illustration card image for a non-character entity", async () => {
+    getEntityForUser.mockResolvedValue(
+      crawler({
+        id: "loc1",
+        type: "LOCATION",
+        name: "The Brothel",
+        crawler: null,
+        imageUrl: "https://example.com/brothel.png",
+      }),
+    );
+
+    await renderPage("loc1");
+
+    const img = screen.getByRole("img", {
+      name: "The Brothel",
+    }) as HTMLImageElement;
+    expect(img.getAttribute("src")).toBe("https://example.com/brothel.png");
+    expect(img.className).not.toContain("rounded-full");
+  });
+
+  it("shows a locked empty-state when imageUrl is locked with no value", async () => {
+    getEntityForUser.mockResolvedValue(
+      crawler({ imageUrl: null, lockedFields: ["imageUrl"] }),
+    );
+
+    await renderPage();
+
+    expect(screen.getByText("No image (locked)")).toBeDefined();
+    expect(screen.queryByRole("img", { name: "Carl" })).toBeNull();
+  });
+
+  it("renders no image block when imageUrl is empty and unlocked", async () => {
+    getEntityForUser.mockResolvedValue(crawler({ imageUrl: null }));
+
+    await renderPage();
+
+    expect(screen.queryByRole("img", { name: "Carl" })).toBeNull();
+    expect(screen.queryByText("No image (locked)")).toBeNull();
   });
 
   it("links a crawler's current floor to its FLOOR entity (ADR 0008 §1)", async () => {

@@ -301,6 +301,7 @@ model Entity {
   name         String
   summary      String?
   description  String?
+  imageUrl     String?
   status       CanonStatus  @default(CANON)
   visibility   Visibility   @default(DM_ONLY)
   source       ChangeSource @default(DM)

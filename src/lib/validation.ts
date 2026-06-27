@@ -145,10 +145,29 @@ const tagsSchema = z
 // fields (FLOOR, ITEM, …) live in their entity-kind descriptors and are spread
 // into the create/update *write* schemas via allKindDataShape() — not into the
 // core schema, so this validates only fields every entity has.
+// A main image for the entity, linked by URL (avatar/illustration in the detail
+// header). Optional; empty normalizes away. We accept only http(s) URLs — the
+// value is rendered in an <img src> on the client, so a `javascript:`/`data:`
+// scheme is rejected here rather than relied on the browser to ignore.
+const imageUrlSchema = z.preprocess(
+  (value) => (value === null ? undefined : value),
+  z
+    .string()
+    .trim()
+    .max(2048, "Image URL is too long.")
+    .refine(
+      (value) => value === "" || /^https?:\/\/\S+$/i.test(value),
+      "Image URL must start with http:// or https://",
+    )
+    .optional()
+    .or(z.literal("")),
+);
+
 const entityCoreSchema = z.object({
   name: z.string().trim().min(1, "Entity name is required").max(160),
   summary: optionalText(500),
   description: optionalText(10000),
+  imageUrl: imageUrlSchema,
   visibility: z.enum(visibilityValues).default("DM_ONLY"),
   tags: tagsSchema,
   isStub: z.boolean().optional(),
@@ -213,6 +232,7 @@ export const lockableEntityFields = [
   "name",
   "summary",
   "description",
+  "imageUrl",
   "visibility",
   "tags",
 ] as const;

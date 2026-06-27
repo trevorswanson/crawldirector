@@ -448,6 +448,91 @@ describe("entity service", () => {
     ).resolves.toMatchObject({ name: "Locked NPC", version: 1 });
   });
 
+  it("persists imageUrl on create, edits it, and records provenance", async () => {
+    const owner = await makeUser("image-url@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Mordecai",
+      summary: "",
+      description: "",
+      imageUrl: "https://example.com/mordecai.png",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    const created = await getEntityForUser(owner.id, campaign.id, entity.id);
+    expect(created?.imageUrl).toBe("https://example.com/mordecai.png");
+
+    await updateEntity(owner.id, campaign.id, entity.id, {
+      type: "NPC",
+      name: "Mordecai",
+      summary: "",
+      description: "",
+      imageUrl: "https://example.com/mordecai-v2.png",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const updated = await getEntityForUser(owner.id, campaign.id, entity.id);
+    expect(updated?.imageUrl).toBe("https://example.com/mordecai-v2.png");
+
+    const provenance = await prisma.provenance.findFirst({
+      where: { entityId: entity.id, field: "imageUrl" },
+    });
+    expect(provenance).not.toBeNull();
+
+    // Clearing the URL nulls the column.
+    await updateEntity(owner.id, campaign.id, entity.id, {
+      type: "NPC",
+      name: "Mordecai",
+      summary: "",
+      description: "",
+      imageUrl: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    const cleared = await getEntityForUser(owner.id, campaign.id, entity.id);
+    expect(cleared?.imageUrl).toBeNull();
+  });
+
+  it("blocks overwrites to a locked imageUrl field", async () => {
+    const owner = await makeUser("locked-image@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Locked Image NPC",
+      summary: "",
+      description: "",
+      imageUrl: "https://example.com/original.png",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    await prisma.entity.update({
+      where: { id: entity.id },
+      data: { lockedFields: ["imageUrl"] },
+    });
+
+    await expect(
+      updateEntity(owner.id, campaign.id, entity.id, {
+        type: "NPC",
+        name: "Locked Image NPC",
+        summary: "",
+        description: "",
+        imageUrl: "https://example.com/changed.png",
+        visibility: "DM_ONLY",
+        tags: [],
+      }),
+    ).rejects.toThrow("locked");
+
+    await expect(
+      prisma.entity.findUniqueOrThrow({ where: { id: entity.id } }),
+    ).resolves.toMatchObject({
+      imageUrl: "https://example.com/original.png",
+      version: 1,
+    });
+  });
+
   it("blocks archiving a locked entity", async () => {
     const owner = await makeUser("locked-archive@test.com");
     const campaign = await createCampaign(owner.id, { name: "Dungeon" });

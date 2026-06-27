@@ -60,6 +60,7 @@ const entityDetailSelect = {
   name: true,
   summary: true,
   description: true,
+  imageUrl: true,
   status: true,
   visibility: true,
   source: true,
@@ -145,7 +146,7 @@ function entityCoreData(
   campaignId: string,
   input: Pick<
     CreateGenericEntityInput,
-    "name" | "summary" | "description" | "visibility" | "tags"
+    "name" | "summary" | "description" | "imageUrl" | "visibility" | "tags"
   >,
 ) {
   return {
@@ -154,6 +155,7 @@ function entityCoreData(
     name: input.name,
     summary: nullIfEmpty(input.summary),
     description: nullIfEmpty(input.description),
+    imageUrl: nullIfEmpty(input.imageUrl),
     visibility: input.visibility as Visibility,
     tags: input.tags,
     status: CanonStatus.CANON,
@@ -197,7 +199,7 @@ function entityCreatePatch(
   type: EntityType,
   input: Pick<
     CreateGenericEntityInput,
-    "name" | "summary" | "description" | "visibility" | "tags" | "isStub"
+    "name" | "summary" | "description" | "imageUrl" | "visibility" | "tags" | "isStub"
   > &
     Record<string, unknown>,
 ) {
@@ -209,6 +211,7 @@ function entityCreatePatch(
     name: { to: core.name },
     summary: { to: core.summary },
     description: { to: core.description },
+    imageUrl: { to: core.imageUrl },
     visibility: { to: core.visibility },
     tags: { to: core.tags },
     status: { to: core.status },
@@ -596,6 +599,7 @@ export async function updateEntity(
       name: true,
       summary: true,
       description: true,
+      imageUrl: true,
       visibility: true,
       tags: true,
       version: true,
@@ -655,6 +659,7 @@ export async function updateEntity(
     existing.description,
     nullIfEmpty(parsed.description),
   );
+  addPatch(patch, "imageUrl", existing.imageUrl, nullIfEmpty(parsed.imageUrl));
   addPatch(patch, "visibility", existing.visibility, parsed.visibility as Visibility);
   addPatch(patch, "tags", existing.tags, parsed.tags);
 
