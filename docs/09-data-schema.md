@@ -264,9 +264,10 @@ model Event {
   description String?
   // Typed timeRef (ADR 0004 slice 2, src/lib/time-ref.ts):
   //   { basis, floor?, offset?, unit?, anchorEventId?, label? }
-  // basis ∈ COLLAPSE|FLOOR_START|FLOOR_COLLAPSE|EVENT|ABSOLUTE_DAY|UNSCHEDULED.
+  // basis ∈ COLLAPSE|FLOOR_START|FLOOR_COLLAPSE|EVENT|UNSCHEDULED.
   // The display phrase is generated from the structure; label is an optional
-  // one-off override.
+  // one-off override. (A legacy ABSOLUTE_DAY basis is read as COLLAPSE — both
+  // are bare days-since-collapse, collapse = day 0; see src/lib/time-ref.ts.)
   inGameTime  Json     @default("{}")
   // Order is mechanical and derived, never authored (ADR 0004): orderKey is the
   // floor (coarse macro-clock), rank is a fractional index (lexicographically

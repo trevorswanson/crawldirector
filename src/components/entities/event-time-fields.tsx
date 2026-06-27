@@ -16,7 +16,6 @@ const basisLabels: Record<TimeBasisValue, string> = {
   FLOOR_START: "After floor opened",
   FLOOR_COLLAPSE: "Before floor falls",
   COLLAPSE: "Since collapse",
-  ABSOLUTE_DAY: "Absolute day",
   EVENT: "Before/after an event",
 };
 

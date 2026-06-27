@@ -736,7 +736,7 @@ describe("CampaignTimeline", () => {
         {
           ...events[0],
           id: "ev-day",
-          time: timeInfo({ basis: "ABSOLUTE_DAY", offset: 52, phrase: "Day 52" }),
+          time: timeInfo({ basis: "COLLAPSE", offset: 52, phrase: "Day 52" }),
           participants: [
             { id: "party1", name: "Desperado Club", type: "PARTY", role: "ACTOR" },
           ],
@@ -920,7 +920,7 @@ describe("CampaignTimeline", () => {
     // to show only "Day 0"; now it spans Day 0–2.
     const a: CampaignTimelineEvent = {
       ...makeEvent("ev-a", "The Crawl Begins", 1, "a1"),
-      time: timeInfo({ basis: "ABSOLUTE_DAY", offset: 0, phrase: "Day 0" }),
+      time: timeInfo({ basis: "COLLAPSE", offset: 0, phrase: "Day 0" }),
     };
     const b: CampaignTimelineEvent = {
       ...makeEvent("ev-b", "Two days later", 1, "a0"),

@@ -44,8 +44,8 @@ describe("buildTimeRef", () => {
   });
 
   it("trims and preserves a label override", () => {
-    expect(buildTimeRef({ basis: "ABSOLUTE_DAY", offset: 47, label: "  d47  " })).toEqual(
-      { basis: "ABSOLUTE_DAY", offset: 47, unit: "DAY", label: "d47" },
+    expect(buildTimeRef({ basis: "COLLAPSE", offset: 47, label: "  d47  " })).toEqual(
+      { basis: "COLLAPSE", offset: 47, unit: "DAY", label: "d47" },
     );
   });
 });
@@ -70,6 +70,24 @@ describe("readTimeRef", () => {
     expect(readTimeRef([])).toEqual({ basis: "UNSCHEDULED" });
     expect(readTimeRef({})).toEqual({ basis: "UNSCHEDULED" });
   });
+
+  it("upgrades a legacy ABSOLUTE_DAY row to COLLAPSE, keeping the offset", () => {
+    // ABSOLUTE_DAY was merged into COLLAPSE (collapse = day 0), so stored rows
+    // are normalized on read — no data migration needed, offset preserved.
+    expect(readTimeRef({ basis: "ABSOLUTE_DAY", offset: 52, unit: "DAY" })).toEqual({
+      basis: "COLLAPSE",
+      offset: 52,
+      unit: "DAY",
+    });
+    // A label override on a legacy row survives the upgrade (the terse "Day N"
+    // wording the old basis produced lives on as a label).
+    expect(readTimeRef({ basis: "ABSOLUTE_DAY", offset: 52, label: "Day 52" })).toEqual({
+      basis: "COLLAPSE",
+      offset: 52,
+      unit: "DAY",
+      label: "Day 52",
+    });
+  });
 });
 
 describe("phraseTimeRef", () => {
@@ -89,11 +107,10 @@ describe("phraseTimeRef", () => {
     ).toBe("12 hours before Floor 9 falls");
   });
 
-  it("phrases collapse / absolute anchors", () => {
+  it("phrases collapse anchors", () => {
     expect(phraseTimeRef({ basis: "COLLAPSE", offset: 47, unit: "DAY" })).toBe(
       "Day 47 since the collapse",
     );
-    expect(phraseTimeRef({ basis: "ABSOLUTE_DAY", offset: 47, unit: "DAY" })).toBe("Day 47");
   });
 
   it("phrases EVENT anchors with direction and the resolved title", () => {
@@ -123,11 +140,9 @@ describe("phraseTimeRef", () => {
       "Floor 9 · before collapse",
     );
     expect(phraseTimeRef({ basis: "FLOOR_COLLAPSE" })).toBeNull();
-    // COLLAPSE / ABSOLUTE_DAY with only a floor for context, and with nothing.
+    // COLLAPSE with only a floor for context, and with nothing.
     expect(phraseTimeRef({ basis: "COLLAPSE", floor: 2 })).toBe("Floor 2");
     expect(phraseTimeRef({ basis: "COLLAPSE" })).toBeNull();
-    expect(phraseTimeRef({ basis: "ABSOLUTE_DAY", floor: 2 })).toBe("Floor 2");
-    expect(phraseTimeRef({ basis: "ABSOLUTE_DAY" })).toBeNull();
     // COLLAPSE in a non-day unit.
     expect(phraseTimeRef({ basis: "COLLAPSE", offset: 6, unit: "HOUR" })).toBe(
       "6 hours since the collapse",

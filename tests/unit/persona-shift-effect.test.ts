@@ -114,7 +114,7 @@ async function shiftEvent(
     title: "Court overturns the ruling",
     summary: "",
     secret: false,
-    basis: "ABSOLUTE_DAY",
+    basis: "COLLAPSE",
     offset: 5,
     participants: [{ entityId: systemId, role: "ACTOR" }],
     effects: [{ kind: "PERSONA_SHIFT", targetEntityId: systemId, dialShifts, note }],
@@ -241,7 +241,7 @@ describe("persona shift effect", () => {
       title: "The reckoning",
       summary: "",
       secret: false,
-      basis: "ABSOLUTE_DAY",
+      basis: "COLLAPSE",
       offset: 7,
       participants: [{ entityId: systemId, role: "ACTOR" }],
     } as CreateEventInput);

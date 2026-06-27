@@ -18,7 +18,6 @@ export const timeBasisValues = [
   "FLOOR_START", // time after a floor opened
   "FLOOR_COLLAPSE", // time until a floor collapses (counts down)
   "EVENT", // before/after another event
-  "ABSOLUTE_DAY", // an explicit absolute day index, when known
   "UNSCHEDULED", // no usable timestamp (label-only / manual order)
 ] as const;
 export type TimeBasis = (typeof timeBasisValues)[number];
@@ -54,10 +53,23 @@ function isTimeUnit(value: unknown): value is TimeUnit {
 }
 
 // Bases that carry an offset magnitude. `UNSCHEDULED` never does; everything
-// else can (COLLAPSE/ABSOLUTE_DAY count from a global zero, the floor bases from
-// the floor's open/collapse, EVENT from the anchor event).
+// else can (COLLAPSE counts from a global zero, the floor bases from the floor's
+// open/collapse, EVENT from the anchor event).
 function basisUsesOffset(basis: TimeBasis): boolean {
   return basis !== "UNSCHEDULED";
+}
+
+// Legacy basis normalization. `ABSOLUTE_DAY` was merged into `COLLAPSE`: both
+// resolve to a bare "days since the collapse" axis (collapse = day 0), so they
+// were redundant. Stored `Event.inGameTime` rows that still carry the old basis
+// are upgraded on read here — a lazy seam (mirroring `readKindData`) that keeps
+// the offset and resolution intact, so no data migration is needed. A DM who
+// wants the terse "Day N" phrasing the old basis produced uses the `label`
+// override. Returns a known basis, or undefined when the value is unrecognized
+// (so the caller can fall back to inference).
+function normalizeBasis(raw: unknown): TimeBasis | undefined {
+  if (raw === "ABSOLUTE_DAY") return "COLLAPSE";
+  return isTimeBasis(raw) ? raw : undefined;
 }
 
 function trimmedOrUndefined(value: string | undefined): string | undefined {
@@ -109,7 +121,7 @@ export function readTimeRef(value: unknown): TimeRef {
   }
   const record = value as Record<string, unknown>;
   const floor = typeof record.floor === "number" ? record.floor : undefined;
-  const basis: TimeBasis = isTimeBasis(record.basis) ? record.basis : inferBasis(floor);
+  const basis: TimeBasis = normalizeBasis(record.basis) ?? inferBasis(floor);
 
   const ref: TimeRef = { basis };
   if (floor != null) ref.floor = floor;
@@ -169,9 +181,6 @@ export function phraseTimeRef(
           : `${offset} ${word} since the collapse`;
       }
       return floor != null ? `Floor ${floor}` : null;
-    case "ABSOLUTE_DAY":
-      if (hasOffset) return `Day ${offset}`;
-      return floor != null ? `Floor ${floor}` : null;
     case "EVENT": {
       const anchor = options.anchorTitle?.trim() || "another event";
       if (hasOffset && offset !== 0) {
@@ -193,7 +202,7 @@ export function phraseTimeRef(
 // (and the timeline shows later-in-fiction first). FLOOR_START counts up from
 // the floor opening; FLOOR_COLLAPSE counts down to collapse, so a larger
 // "time remaining" is *earlier* and gets a smaller position. Every other basis
-// returns null here and is ordered another way: COLLAPSE / ABSOLUTE_DAY / EVENT
+// returns null here and is ordered another way: COLLAPSE / EVENT
 // times that resolve to a concrete day are placed on the absolute-day axis
 // (src/lib/time-resolve.ts, ADR 0008), causally-linked events fall back to "order
 // from causality" (slice 3), and UNSCHEDULED is manual. This same-basis offset

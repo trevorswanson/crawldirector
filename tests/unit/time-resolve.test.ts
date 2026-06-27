@@ -24,14 +24,14 @@ function ctxFrom(
 }
 
 describe("resolveAbsoluteDay", () => {
-  it("reads ABSOLUTE_DAY and COLLAPSE offsets directly", () => {
-    expect(resolveAbsoluteDay({ basis: "ABSOLUTE_DAY", offset: 0 }, noContext)).toBe(0);
+  it("reads COLLAPSE offsets directly", () => {
+    expect(resolveAbsoluteDay({ basis: "COLLAPSE", offset: 0 }, noContext)).toBe(0);
     expect(resolveAbsoluteDay({ basis: "COLLAPSE", offset: 47 }, noContext)).toBe(47);
   });
 
-  it("returns null for UNSCHEDULED and for offsetless absolute bases", () => {
+  it("returns null for UNSCHEDULED and for an offsetless COLLAPSE", () => {
     expect(resolveAbsoluteDay({ basis: "UNSCHEDULED" }, noContext)).toBeNull();
-    expect(resolveAbsoluteDay({ basis: "ABSOLUTE_DAY" }, noContext)).toBeNull();
+    expect(resolveAbsoluteDay({ basis: "COLLAPSE" }, noContext)).toBeNull();
   });
 
   it("resolves FLOOR_START against the floor's open day", () => {
@@ -61,7 +61,7 @@ describe("resolveAbsoluteDay", () => {
 
   it("resolves an EVENT anchor recursively", () => {
     const ctx = ctxFrom(
-      { a: { basis: "ABSOLUTE_DAY", offset: 0 } },
+      { a: { basis: "COLLAPSE", offset: 0 } },
       {},
     );
     // "2 days after event A" → 0 + 2 (the DM's reported scenario).
@@ -106,7 +106,7 @@ describe("computeFloorDayRanges", () => {
     // The DM's case: A on day 0, B "2 days after A", both on floor 1.
     const ranges = computeFloorDayRanges(
       [
-        { id: "a", floor: 1, time: { basis: "ABSOLUTE_DAY", offset: 0 } },
+        { id: "a", floor: 1, time: { basis: "COLLAPSE", offset: 0 } },
         { id: "b", floor: 1, time: { basis: "EVENT", anchorEventId: "a", offset: 2 } },
       ],
       new Map(),
@@ -120,7 +120,7 @@ describe("computeFloorDayRanges", () => {
       [2, { startDay: 5, collapseDay: null }],
     ]);
     const ranges = computeFloorDayRanges(
-      [{ id: "a", floor: 1, time: { basis: "ABSOLUTE_DAY", offset: 1 } }],
+      [{ id: "a", floor: 1, time: { basis: "COLLAPSE", offset: 1 } }],
       anchors,
     );
     // Floor 1 opens day 0, has an event on day 1, and runs until floor 2 opens

@@ -58,7 +58,7 @@ Two distinct surfaces share one app and one data layer but feel different:
   and effects rendered as signed stat diffs (`+9 / −6`) with an Apply control.
   Floor names/themes come from FLOOR entities; the current floor is a campaign
   setting (ADR 0005). Band headers also show an inferred `Day min – max` range for
-  floors whose events carry absolute (`COLLAPSE` / `ABSOLUTE_DAY`) coordinates —
+  floors whose events carry absolute (`COLLAPSE`) coordinates —
   the timeline assembles a unified dated view as the DM dates more of the crawl.
   The timeline has full event-management parity with the entity viewer: lock/
   unlock, archive, and causality editing (add/remove cause↔effect links) live on

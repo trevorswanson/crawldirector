@@ -10,7 +10,7 @@
 // order, and an event that can't be placed keeps its manual rank.
 //
 // Resolution walks the basis graph:
-//   ABSOLUTE_DAY / COLLAPSE  → the offset is the day directly
+//   COLLAPSE                 → the offset is the day directly
 //   EVENT                    → resolve(anchor event) + offset   (recursive)
 //   FLOOR_START              → floor.startDay   + offset         (needs anchor)
 //   FLOOR_COLLAPSE           → floor.collapseDay − offset        (needs anchor)
@@ -57,7 +57,6 @@ function resolve(
   visited: ReadonlySet<string>,
 ): number | null {
   switch (time.basis) {
-    case "ABSOLUTE_DAY":
     case "COLLAPSE":
       return typeof time.offset === "number" ? time.offset : null;
     case "FLOOR_START": {
