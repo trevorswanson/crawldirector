@@ -227,39 +227,39 @@ returns every edge touching the entity while the roster
 group's incoming MEMBER_OF/PART_OF/LEADS edges. The roster **editor** half (making
 the roster pane editable) stays open.
 
-**Decision (hide incoming only, never silent).** The roster rolls up a group's
-*incoming* membership (member/leader → group). A group's *outgoing* membership —
+**Decision (hide exact roster edges only, never silent).** The roster rolls up a
+group's *incoming* membership (member/leader → group), filtered to the selected
+`rosterDay` (or current membership by default). A group's *outgoing* membership —
 e.g. a party that is `PART_OF` a guild — appears in the *parent's* roster, not its
-own, so hiding it here would drop information shown nowhere else on the page.
-The dedup therefore filters only **incoming** edges whose type the roster rolls
-up, and surfaces a "N membership edge(s) shown in the roster above" note so the
-omission is explicit (no silent hide). Non-group pages have no roster, so they
-pass no `excludeTypes` and keep listing membership as before.
+own. Former/future incoming memberships are also absent from the selected roster
+snapshot and must remain editable in Connections. The dedup therefore filters by
+the exact relationship IDs returned by `getGroupRoster`, and surfaces a "N
+membership edge(s) shown in the roster above" note so the omission is explicit.
+Non-group pages have no roster IDs and keep listing membership as before.
 
-- [x] **Service** ([`groups.ts`](../src/server/services/groups.ts)): exported
-      `ROSTER_ROLLUP_RELATIONSHIP_TYPES` (`["MEMBER_OF", "PART_OF", "LEADS"]`,
-      plain string literals — no Prisma import — so the client component can
-      consume it across the server boundary), the single source of truth for
-      which types the roster owns.
 - [x] **UI** ([`connections-panel.tsx`](../src/components/entities/connections-panel.tsx)):
-      new optional `excludeTypes` prop; the panel hides edges that are both
-      `direction === "in"` and of an excluded type, counts them, and renders the
-      roster note. The empty state ("No relationships yet.") is suppressed when the
-      only edges are roster-membership ones (the note explains the list instead).
+      new optional `rosterRelationshipIds` prop; the panel hides only those exact
+      edges, counts them, and renders the roster note. The empty state ("No
+      relationships yet.") is suppressed when the only edges are roster entries
+      (the note explains the list instead).
 - [x] **Page** ([`entities/[entityId]/page.tsx`](<../src/app/(dm)/campaigns/[id]/entities/[entityId]/page.tsx>)):
-      passes `excludeTypes={isGroup ? ROSTER_ROLLUP_RELATIONSHIP_TYPES : undefined}`.
-- [x] **Tests:** dedup hides incoming membership while keeping an outgoing
-      `PART_OF` + a non-membership `ALLY_OF` edge, asserts the deduped count and
-      the plural/singular roster note, and the suppressed empty state in
+      passes the top-level leader/member relationship IDs from the actual roster
+      snapshot; nested roster edges do not touch the viewed root group and cannot
+      appear in its Connections list.
+- [x] **Tests:** dedup hides current roster membership while keeping a former
+      incoming membership, an outgoing `PART_OF`, and a non-membership `ALLY_OF`;
+      asserts the deduped count, plural/singular roster note, and empty state in
       [`connections-panel.test.tsx`](../tests/unit/connections-panel.test.tsx);
-      the page passing `excludeTypes` for a PARTY and *not* for a non-group entity
-      in [`entity-page.test.tsx`](../tests/unit/entity-page.test.tsx).
-- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors;
-      pre-existing settings-action warnings only), `npm run build`
-      (compiles, routes unchanged), and the full coverage gate green (126 files /
-      1724 tests; statements 95.07%, branches 88.53%, functions 96.65%, lines
-      96.72%). In-browser verification deferred (the local dev server occupies the
-      only Next dev port — see the preview note in memory).
+      the page passes only the day-filtered roster's relationship IDs for a PARTY
+      and none for a non-group entity in [`entity-page.test.tsx`](../tests/unit/entity-page.test.tsx).
+- [x] **Verification:** `npm run typecheck`, `npm run lint`, and `npm run build`
+      pass; the full coverage gate is green (126 files / 1,732 tests; statements
+      95.42%, branches 88.95%, functions 96.75%, lines 97.04%). Rendered QA used
+      a fabricated historical Carl → Team Princess Donut membership (`Day 1 →
+      10`): the current roster omitted Carl while Connections kept the edge and
+      its edit controls; `?rosterDay=5` moved Carl into the roster and removed
+      only that edge from Connections. No new console errors appeared during
+      either verified page load.
 
 ## Testing — Branch-coverage ratchet (85→88) ✅ (2026-06-27)
 
@@ -654,14 +654,14 @@ prompt. Branch: `codex/m6-persona-foundation`. Schema change.
       show the *same* MEMBER_OF/LEADS/PART_OF edges, because
       `listConnectionsForEntity` ([`relationships.ts`](../src/server/services/relationships.ts))
       returns all edges unfiltered.
-      - [x] **Dedup.** ✅ 2026-06-27 (dated entry below). Added an `excludeTypes`
-        prop to [`connections-panel.tsx`](../src/components/entities/connections-panel.tsx);
-        the entity detail page passes `ROSTER_ROLLUP_RELATIONSHIP_TYPES`
-        (`{MEMBER_OF, PART_OF, LEADS}`) for group types. Only **incoming** edges of
-        those types are hidden (the roster rolls up incoming membership; a group's
-        *outgoing* membership — e.g. a party PART_OF a guild — is not in its own
-        roster, so it stays visible). A "N membership edge(s) shown in the roster
-        above" note keeps it from being a silent hide.
+      - [x] **Dedup.** ✅ 2026-06-27 (dated entry below). Added a
+        `rosterRelationshipIds` prop to
+        [`connections-panel.tsx`](../src/components/entities/connections-panel.tsx);
+        the entity detail page passes the exact top-level relationship IDs from
+        `getGroupRoster`. Only edges rendered by the selected/current roster
+        snapshot are hidden. Outgoing membership and former/future incoming
+        membership stay visible and actionable. A "N membership edge(s) shown in
+        the roster above" note keeps the hide explicit.
       - **Editor:** make the roster pane editable (add/remove member, set/clear
         leader, edit day-bounds) reusing existing actions
         ([`actions.ts`](<../src/app/(dm)/actions.ts>)): `createRelationshipAction`
@@ -675,9 +675,10 @@ prompt. Branch: `codex/m6-persona-foundation`. Schema change.
       `sourceTypes` exclude `PARTY` so the create-UI won't suggest it there. Decide:
       broaden PART_OF's registry metadata, or split a distinct parties-in-guild
       membership type.
-- [ ] **Connections pane should honor `rosterDay`/`asOfDay` (minor).** The roster
-      filters time-bounded membership by day; the connections pane always shows
-      current edges. Thread the day param into the pane, or document the difference.
+- [x] **Connections dedup honors `rosterDay`/`asOfDay`.** ✅ 2026-06-27. The
+      page passes the actual day-filtered roster relationship IDs into Connections,
+      so only edges visible in that snapshot are deduplicated; non-current edges
+      remain available for edit/archive.
 
 ### Deferred design options, not current blockers
 

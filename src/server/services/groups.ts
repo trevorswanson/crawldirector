@@ -22,19 +22,6 @@ export function isGroupEntityType(type: string): boolean {
   return (GROUP_ENTITY_TYPES as string[]).includes(type);
 }
 
-// The membership/leadership relationship types the roster panel rolls up
-// (incoming edges, member/leader → group). The entity detail page passes these
-// to ConnectionsPanel as `excludeTypes` so a group's incoming membership isn't
-// listed twice — once in the roster, once in the connections pane. Outgoing
-// membership (e.g. this party is PART_OF a guild) is NOT in this group's roster,
-// so the connections pane keeps it. Plain string literals (no Prisma import) so
-// the client component can consume them across the server boundary.
-export const ROSTER_ROLLUP_RELATIONSHIP_TYPES = [
-  "MEMBER_OF",
-  "PART_OF",
-  "LEADS",
-] as const;
-
 // Don't recurse forever on a malformed graph. The membership graph is small and
 // shallow in practice (crawler → party → guild), so a generous cap is plenty.
 const MAX_DEPTH = 6;

@@ -597,7 +597,7 @@ describe("ConnectionsPanel", () => {
     expect(screen.getByText("DM-only (secret)")).toBeDefined();
   });
 
-  it("hides incoming roster-membership edges and notes the roster, keeping outgoing membership", () => {
+  it("hides only roster-rendered membership edges and keeps non-current membership visible", () => {
     render(
       <ConnectionsPanel
         campaignId="c1"
@@ -618,6 +618,15 @@ describe("ConnectionsPanel", () => {
             direction: "in",
             other: { id: "e3", name: "Carl", type: "CRAWLER" },
           }),
+          // Incoming but not in this roster snapshot (for example, a former
+          // member whose untilDay is before the selected rosterDay).
+          connection({
+            id: "m-former",
+            type: "MEMBER_OF",
+            direction: "in",
+            untilDay: 12,
+            other: { id: "e5", name: "Former Member", type: "CRAWLER" },
+          }),
           // Outgoing: this party is PART_OF a guild — NOT in this party's roster.
           connection({
             id: "m3",
@@ -634,14 +643,15 @@ describe("ConnectionsPanel", () => {
           }),
         ]}
         candidates={candidates}
-        excludeTypes={["MEMBER_OF", "PART_OF", "LEADS"]}
+        rosterRelationshipIds={["m1", "m2"]}
       />,
     );
 
-    // Only the two non-roster edges remain in the list.
-    expect(screen.getByText("Connections · 2")).toBeDefined();
+    // Only relationship IDs present in this roster snapshot are suppressed.
+    expect(screen.getByText("Connections · 3")).toBeDefined();
     expect(screen.queryByText("Donut")).toBeNull();
     expect(screen.queryByText("Carl")).toBeNull();
+    expect(screen.getByText("Former Member")).toBeDefined();
     expect(screen.getByText("Iron Guild")).toBeDefined();
     expect(screen.getByText("Mordecai")).toBeDefined();
     // The hidden membership isn't silently dropped — a note points to the roster.
@@ -663,7 +673,7 @@ describe("ConnectionsPanel", () => {
           }),
         ]}
         candidates={candidates}
-        excludeTypes={["MEMBER_OF", "PART_OF", "LEADS"]}
+        rosterRelationshipIds={["m1"]}
       />,
     );
 

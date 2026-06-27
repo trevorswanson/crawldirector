@@ -54,7 +54,6 @@ vi.mock("@/server/services/events", () => ({ listEventsForEntity, resolveFloorEn
 vi.mock("@/server/services/groups", () => ({
   getGroupRoster,
   isGroupEntityType,
-  ROSTER_ROLLUP_RELATIONSHIP_TYPES: ["MEMBER_OF", "PART_OF", "LEADS"],
 }));
 vi.mock("@/server/services/review", () => ({ getEntityProvenance }));
 vi.mock("@/server/services/ai-keys", () => ({ listAiKeys }));
@@ -102,15 +101,17 @@ vi.mock("@/components/entities/connections-panel", () => ({
   ConnectionsPanel: ({
     connections,
     candidates,
-    excludeTypes,
+    rosterRelationshipIds,
   }: {
     connections: unknown[];
     candidates: unknown[];
-    excludeTypes?: readonly string[];
+    rosterRelationshipIds?: readonly string[];
   }) => (
     <div>
       Connections panel ({connections.length}/{candidates.length})
-      {excludeTypes ? ` exclude ${excludeTypes.join(",")}` : ""}
+      {rosterRelationshipIds
+        ? ` roster ${rosterRelationshipIds.join(",")}`
+        : ""}
     </div>
   ),
 }));
@@ -496,8 +497,30 @@ describe("EntityPage", () => {
     );
     getGroupRoster.mockResolvedValue({
       group: { id: "party1", name: "Desperado Club", type: "PARTY" },
-      leaders: [],
-      members: [],
+      leaders: [
+        {
+          relationshipId: "current-leader",
+          relationshipType: "LEADS",
+          sinceDay: null,
+          untilDay: null,
+          locked: false,
+          secret: false,
+          entity: { id: "leader1", name: "Carl", type: "CRAWLER" },
+          subRoster: null,
+        },
+      ],
+      members: [
+        {
+          relationshipId: "current-member",
+          relationshipType: "MEMBER_OF",
+          sinceDay: 40,
+          untilDay: null,
+          locked: false,
+          secret: false,
+          entity: { id: "member1", name: "Donut", type: "CRAWLER" },
+          subRoster: null,
+        },
+      ],
       rolledUpMemberCount: 3,
     });
 
@@ -507,20 +530,22 @@ describe("EntityPage", () => {
       asOfDay: 52,
     });
     expect(screen.getByText("Roster panel (3) as of day 52")).toBeDefined();
-    // Group membership is rolled up in the roster, so its incoming edges are
-    // excluded from the connections pane (dedup).
+    // Only membership relationships present in this day-specific roster are
+    // excluded from the connections pane.
     expect(
-      screen.getByText(/Connections panel .* exclude MEMBER_OF,PART_OF,LEADS/),
+      screen.getByText(
+        /Connections panel .* roster current-leader,current-member/,
+      ),
     ).toBeDefined();
   });
 
-  it("does not exclude membership from connections for non-group entities", async () => {
+  it("does not pass roster relationship IDs for non-group entities", async () => {
     getEntityForUser.mockResolvedValue(crawler());
 
     await renderPage();
 
     const panel = screen.getByText(/Connections panel/);
-    expect(panel.textContent).not.toContain("exclude");
+    expect(panel.textContent).not.toContain("roster");
   });
 
   it("offers lock toggles for summary and description in the read view", async () => {

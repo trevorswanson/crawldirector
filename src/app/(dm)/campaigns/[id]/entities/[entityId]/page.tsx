@@ -45,11 +45,7 @@ import {
 } from "@/server/services/entities";
 import { listConnectionsForEntity } from "@/server/services/relationships";
 import { listEventsForEntity, resolveFloorEntity } from "@/server/services/events";
-import {
-  getGroupRoster,
-  isGroupEntityType,
-  ROSTER_ROLLUP_RELATIONSHIP_TYPES,
-} from "@/server/services/groups";
+import { getGroupRoster, isGroupEntityType } from "@/server/services/groups";
 import {
   listKnowledgeHeldByEntity,
   listKnowledgeOfEntity,
@@ -138,6 +134,9 @@ export default async function EntityPage({
       type: candidate.type,
     }));
   const timelineCandidates: TimelineCandidate[] = candidates;
+  const rosterRelationshipIds = roster
+    ? [...roster.leaders, ...roster.members].map((entry) => entry.relationshipId)
+    : undefined;
   // Knowledge grants are a DM curation surface; players reaching a player-visible
   // entity page never see the reveal panel (and the reads return [] for them).
   const isDm = candidateList.role !== "PLAYER";
@@ -539,9 +538,7 @@ export default async function EntityPage({
             sourceName={entity.name}
             connections={connections}
             candidates={candidates}
-            // Group entities roll up their incoming membership into the roster
-            // panel above; don't list those edges twice.
-            excludeTypes={isGroup ? ROSTER_ROLLUP_RELATIONSHIP_TYPES : undefined}
+            rosterRelationshipIds={rosterRelationshipIds}
           />
         </div>
 
