@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
+import { ChangeSource } from "@/generated/prisma/client";
 import { eventEffectSchema } from "@/lib/validation";
 import { prisma } from "@/server/db";
 import type { CreateEventInput } from "@/lib/validation";
@@ -11,6 +12,12 @@ import {
   listEventsForEntity,
   updateEvent,
 } from "@/server/services/events";
+import {
+  approveChangeSet,
+  createPendingEventChangeSet,
+  listPendingChangeSetsForUser,
+  setChangeOperationDecision,
+} from "@/server/services/review";
 
 function makeUser(email: string) {
   return prisma.user.create({ data: { email } });
@@ -244,5 +251,127 @@ describe("grant achievement effect", () => {
     await expect(
       grantEvent(owner.id, campaign.id, npc.id, achievementId),
     ).rejects.toThrow(/crawler/i);
+  });
+});
+
+describe("grant achievement effect — locked endpoints (invariant #2)", () => {
+  async function setup(email: string) {
+    const owner = await makeUser(email);
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const crawlerId = await makeCrawler(owner.id, campaign.id, "Carl");
+    const achievementId = await makeAchievement(owner.id, campaign.id, "Goblin Slayer");
+    return { owner, campaign, crawlerId, achievementId };
+  }
+
+  // File an AI-sourced APPLY_EVENT_EFFECTS proposal carrying one grant effect,
+  // logging a plain host event first (the grant is new canon proposed by the op).
+  async function fileAiGrant(
+    userId: string,
+    campaignId: string,
+    crawlerId: string,
+    achievementId: string,
+  ) {
+    const event = await createEvent(userId, campaignId, {
+      title: "AI-proposed triumph",
+      summary: "",
+      secret: false,
+      basis: "COLLAPSE",
+      offset: 4,
+      participants: [{ entityId: crawlerId, role: "ACTOR" }],
+    } as CreateEventInput);
+    const changeSet = await createPendingEventChangeSet(userId, campaignId, {
+      source: ChangeSource.AI,
+      title: "AI grant proposal",
+      operations: [
+        {
+          op: "APPLY_EVENT_EFFECTS",
+          targetId: event.id,
+          patch: {
+            effects: {
+              to: [
+                {
+                  id: "ai-grant",
+                  kind: "GRANT_ACHIEVEMENT",
+                  targetEntityId: crawlerId,
+                  achievementEntityId: achievementId,
+                },
+              ],
+            },
+          },
+        },
+      ],
+    });
+    return { event, changeSet, operationId: changeSet.operations[0]!.id };
+  }
+
+  function hasGrantEdge(campaignId: string, crawlerId: string, achievementId: string) {
+    return prisma.relationship.findFirst({
+      where: {
+        campaignId,
+        type: "EARNED_ACHIEVEMENT",
+        sourceId: crawlerId,
+        targetId: achievementId,
+        status: { not: "ARCHIVED" },
+      },
+    });
+  }
+
+  it("blocks an AI grant when the recipient crawler is locked, applying no edge", async () => {
+    const { owner, campaign, crawlerId, achievementId } = await setup("grant-locked-crawler@test.com");
+    await prisma.entity.update({ where: { id: crawlerId }, data: { locked: true } });
+
+    const { changeSet, operationId } = await fileAiGrant(
+      owner.id,
+      campaign.id,
+      crawlerId,
+      achievementId,
+    );
+    await setChangeOperationDecision(owner.id, campaign.id, changeSet.id, operationId, {
+      decision: "ACCEPTED",
+    });
+
+    await expect(approveChangeSet(owner.id, campaign.id, changeSet.id)).rejects.toThrow(/locked/i);
+    expect(await hasGrantEdge(campaign.id, crawlerId, achievementId)).toBeNull();
+  });
+
+  it("blocks an AI grant when the granted achievement is locked", async () => {
+    const { owner, campaign, crawlerId, achievementId } = await setup("grant-locked-ach@test.com");
+    await prisma.entity.update({ where: { id: achievementId }, data: { locked: true } });
+
+    const { changeSet, operationId } = await fileAiGrant(
+      owner.id,
+      campaign.id,
+      crawlerId,
+      achievementId,
+    );
+    await setChangeOperationDecision(owner.id, campaign.id, changeSet.id, operationId, {
+      decision: "ACCEPTED",
+    });
+
+    await expect(approveChangeSet(owner.id, campaign.id, changeSet.id)).rejects.toThrow(/locked/i);
+    expect(await hasGrantEdge(campaign.id, crawlerId, achievementId)).toBeNull();
+  });
+
+  it("flags a pending AI grant blockedByLock when an endpoint is locked at refresh", async () => {
+    const { owner, campaign, crawlerId, achievementId } = await setup("grant-flag-lock@test.com");
+    const { operationId } = await fileAiGrant(owner.id, campaign.id, crawlerId, achievementId);
+
+    // The DM locks the recipient crawler before reviewing the queue.
+    await prisma.entity.update({ where: { id: crawlerId }, data: { locked: true } });
+    await listPendingChangeSetsForUser(owner.id, campaign.id); // refreshes flags
+
+    const operation = await prisma.changeOperation.findUniqueOrThrow({ where: { id: operationId } });
+    expect(operation.blockedByLock).toBe(true);
+    expect(operation.isStale).toBe(false);
+  });
+
+  it("still applies a DM grant to a locked crawler (ergonomic, CREATE_RELATIONSHIP parity)", async () => {
+    const { owner, campaign, crawlerId, achievementId } = await setup("grant-dm-locked@test.com");
+    await prisma.entity.update({ where: { id: crawlerId }, data: { locked: true } });
+
+    const event = await grantEvent(owner.id, campaign.id, crawlerId, achievementId);
+    await applyEventEffects(owner.id, campaign.id, event.id, { autoApprove: true });
+
+    expect(await hasGrantEdge(campaign.id, crawlerId, achievementId)).not.toBeNull();
   });
 });

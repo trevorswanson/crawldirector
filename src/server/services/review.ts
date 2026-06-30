@@ -2533,6 +2533,29 @@ async function evaluateApplyEventEffectsOperationFlags(
         blockedByLock ||= active.locked;
         continue;
       }
+      if (reviewed.kind === "GRANT_ACHIEVEMENT") {
+        // A grant creates an EARNED_ACHIEVEMENT edge. Validate both endpoints (a
+        // missing crawler/achievement is stale) and, for non-DM proposals, block
+        // when either endpoint is locked — parity with the apply guard and with
+        // evaluateRelationshipOperationFlags. DM grants stay ergonomic.
+        await loadEffectTargetCrawler(tx, changeSet.campaignId, reviewed.targetEntityId);
+        if (!reviewed.achievementEntityId) {
+          isStale = true;
+          continue;
+        }
+        await assertAchievementEntity(tx, changeSet.campaignId, reviewed.achievementEntityId);
+        if (changeSet.source !== ChangeSource.DM) {
+          const endpoints = await tx.entity.findMany({
+            where: {
+              id: { in: [reviewed.targetEntityId, reviewed.achievementEntityId] },
+              campaignId: changeSet.campaignId,
+            },
+            select: { locked: true },
+          });
+          blockedByLock ||= endpoints.some((endpoint) => endpoint.locked);
+        }
+        continue;
+      }
       const crawler = await loadEffectTargetCrawler(
         tx,
         changeSet.campaignId,
@@ -5664,6 +5687,32 @@ async function applyGrantAchievementEffect(
     select: { id: true },
   });
   if (existing) return;
+
+  // Honor invariant #2 (AI/import/player writes never silently touch locked
+  // canon): granting the achievement creates an EARNED_ACHIEVEMENT edge, so a
+  // non-DM proposal whose crawler or achievement endpoint is locked blocks the
+  // op for the DM to resolve — the same rule a normal CREATE_RELATIONSHIP
+  // proposal follows (evaluateRelationshipOperationFlags). DM grants stay
+  // ergonomic.
+  if (changeSet.source !== ChangeSource.DM) {
+    const endpoints = await tx.entity.findMany({
+      where: {
+        id: { in: [crawlerEntityId, achievementEntityId] },
+        campaignId: changeSet.campaignId,
+      },
+      select: { locked: true },
+    });
+    if (endpoints.some((endpoint) => endpoint.locked)) {
+      await tx.changeOperation.update({
+        where: { id: operationId },
+        data: { blockedByLock: true },
+      });
+      throw new ServiceError(
+        "Cannot grant the achievement because the crawler or achievement is locked.",
+        { code: "OPERATION_BLOCKED" },
+      );
+    }
+  }
 
   const patch: ReviewPatch = {
     type: { to: RelationshipType.EARNED_ACHIEVEMENT },
