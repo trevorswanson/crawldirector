@@ -46,6 +46,7 @@ enum EntityType {
   TITLE
   SYSTEM_MESSAGE
   DEITY
+  BOX
 }
 
 enum CanonStatus {
@@ -143,6 +144,7 @@ enum RelationshipType {
   OWNS_ITEM
   KNOWS_SKILL
   EARNED_ACHIEVEMENT
+  GRANTS_BOX
   HOLDS_TITLE
   APPEARS_ON
   KNOWS_ABOUT

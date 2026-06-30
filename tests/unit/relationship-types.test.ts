@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   defaultRelationshipType,
   isDiscouragedRelationship,
+  isSuggestedRelationship,
+  relationshipEdgeLabel,
   relationshipPickerOptions,
 } from "@/lib/relationship-types";
 
@@ -65,5 +67,31 @@ describe("relationship-types — discouraged crawler→FLOOR LOCATED_ON (ADR 000
     expect(
       edit.categories.flatMap((category) => category.types),
     ).toContain("LOCATED_ON");
+  });
+});
+
+// M7 game-progression: an ACHIEVEMENT grants a BOX (GRANTS_BOX), and a BOX
+// contains ITEMs (CONTAINS). The reward graph is modeled with edges, not bespoke
+// `data` — proving the generic entity-kind path serves a brand-new EntityType.
+describe("relationship-types — BOX reward/content edges (M7)", () => {
+  it("suggests and defaults GRANTS_BOX for an ACHIEVEMENT→BOX pairing", () => {
+    expect(isSuggestedRelationship("GRANTS_BOX", "ACHIEVEMENT", "BOX")).toBe(true);
+    expect(defaultRelationshipType("ACHIEVEMENT", "BOX")).toBe("GRANTS_BOX");
+
+    const options = relationshipPickerOptions("ACHIEVEMENT", "BOX");
+    expect(options.suggested).toContain("GRANTS_BOX");
+  });
+
+  it("labels GRANTS_BOX directionally (grants box / granted by)", () => {
+    expect(relationshipEdgeLabel("GRANTS_BOX", "out")).toBe("grants box");
+    expect(relationshipEdgeLabel("GRANTS_BOX", "in")).toBe("granted by");
+  });
+
+  it("suggests and defaults CONTAINS for a BOX→ITEM pairing", () => {
+    expect(isSuggestedRelationship("CONTAINS", "BOX", "ITEM")).toBe(true);
+    expect(defaultRelationshipType("BOX", "ITEM")).toBe("CONTAINS");
+
+    const options = relationshipPickerOptions("BOX", "ITEM");
+    expect(options.suggested).toContain("CONTAINS");
   });
 });

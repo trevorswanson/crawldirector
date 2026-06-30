@@ -68,6 +68,7 @@ export const entityTypeValues = [
   "TITLE",
   "SYSTEM_MESSAGE",
   "DEITY",
+  "BOX",
 ] as const;
 
 export const genericEntityTypeValues = [
@@ -94,6 +95,7 @@ export const genericEntityTypeValues = [
   "TITLE",
   "SYSTEM_MESSAGE",
   "DEITY",
+  "BOX",
 ] as const;
 
 export const visibilityValues = ["DM_ONLY", "PLAYER_VISIBLE"] as const;
@@ -318,6 +320,7 @@ export const relationshipTypeValues = [
   "OWNS_ITEM",
   "KNOWS_SKILL",
   "EARNED_ACHIEVEMENT",
+  "GRANTS_BOX",
   "HOLDS_TITLE",
   "APPEARS_ON",
   "KNOWS_ABOUT",

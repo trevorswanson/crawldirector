@@ -227,7 +227,7 @@ export const relationshipTypeMeta: Record<
     group: "SPATIAL",
     forward: "contains",
     inverse: "contained in",
-    sourceTypes: ["FLOOR", "NEIGHBORHOOD", "LOCATION"],
+    sourceTypes: ["FLOOR", "NEIGHBORHOOD", "LOCATION", "BOX"],
     targetTypes: ["LOCATION", "NEIGHBORHOOD", "ITEM"],
   },
   BOSS_OF: {
@@ -280,6 +280,13 @@ export const relationshipTypeMeta: Record<
     inverse: "earned by",
     sourceTypes: ["CRAWLER", "NPC"],
     targetTypes: ["ACHIEVEMENT"],
+  },
+  GRANTS_BOX: {
+    group: "GAME",
+    forward: "grants box",
+    inverse: "granted by",
+    sourceTypes: ["ACHIEVEMENT"],
+    targetTypes: ["BOX"],
   },
   HOLDS_TITLE: {
     group: "GAME",

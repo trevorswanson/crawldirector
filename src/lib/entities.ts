@@ -107,6 +107,7 @@ export function entityTypeColor(type: string): string {
       return "var(--sys)";
     case "ITEM":
     case "ITEM_TYPE":
+    case "BOX":
     case "SKILL":
     case "SPELL":
       return "var(--import)";
