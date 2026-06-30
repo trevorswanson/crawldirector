@@ -20,6 +20,7 @@ export const eventEffectKindValues = [
   "SET_ALIVE",
   "COLLAPSE_FLOOR",
   "PERSONA_SHIFT",
+  "GRANT_ACHIEVEMENT",
 ] as const;
 export type EventEffectKind = (typeof eventEffectKindValues)[number];
 
@@ -36,10 +37,11 @@ export const eventEffectStatValues = [
 export type EventEffectStat = (typeof eventEffectStatValues)[number];
 
 // What an effect points at. CRAWLER kinds carry a hand-picked crawler
-// `targetEntityId` and mutate `crawler.*`. NONE kinds derive their subject from
-// the event (e.g. COLLAPSE_FLOOR acts on the event's own floor) and need no
-// target. PERSONA kinds carry a hand-picked SYSTEM_AI `targetEntityId` and drift
-// its active persona snapshot's dials (PERSONA_SHIFT). Future non-crawler entity
+// `targetEntityId` and mutate `crawler.*` (or, for GRANT_ACHIEVEMENT, grant the
+// crawler an achievement edge). NONE kinds derive their subject from the event
+// (e.g. COLLAPSE_FLOOR acts on the event's own floor) and need no target.
+// PERSONA kinds carry a hand-picked SYSTEM_AI `targetEntityId` and drift its
+// active persona snapshot's dials (PERSONA_SHIFT). Future non-crawler entity
 // targets would add their EntityType here.
 export type EffectTargetKind = "CRAWLER" | "NONE" | "PERSONA";
 
@@ -53,14 +55,18 @@ export type EventEffectKindMeta = {
   usesAlive: boolean;
   // Shows the per-dial delta inputs (PERSONA_SHIFT).
   usesDials: boolean;
+  // Shows the achievement-entity typeahead (GRANT_ACHIEVEMENT): a second
+  // hand-picked entity (the ACHIEVEMENT) granted to the crawler `target`.
+  usesAchievement: boolean;
 };
 
 export const eventEffectKindMeta: Record<EventEffectKind, EventEffectKindMeta> = {
-  ADJUST_STAT: { label: "Adjust stat", target: "CRAWLER", usesStat: true, usesAlive: false, usesDials: false },
-  SET_STAT: { label: "Set stat", target: "CRAWLER", usesStat: true, usesAlive: false, usesDials: false },
-  SET_ALIVE: { label: "Set alive/dead", target: "CRAWLER", usesStat: false, usesAlive: true, usesDials: false },
-  COLLAPSE_FLOOR: { label: "Collapse floor", target: "NONE", usesStat: false, usesAlive: false, usesDials: false },
-  PERSONA_SHIFT: { label: "Persona shift", target: "PERSONA", usesStat: false, usesAlive: false, usesDials: true },
+  ADJUST_STAT: { label: "Adjust stat", target: "CRAWLER", usesStat: true, usesAlive: false, usesDials: false, usesAchievement: false },
+  SET_STAT: { label: "Set stat", target: "CRAWLER", usesStat: true, usesAlive: false, usesDials: false, usesAchievement: false },
+  SET_ALIVE: { label: "Set alive/dead", target: "CRAWLER", usesStat: false, usesAlive: true, usesDials: false, usesAchievement: false },
+  COLLAPSE_FLOOR: { label: "Collapse floor", target: "NONE", usesStat: false, usesAlive: false, usesDials: false, usesAchievement: false },
+  PERSONA_SHIFT: { label: "Persona shift", target: "PERSONA", usesStat: false, usesAlive: false, usesDials: true, usesAchievement: false },
+  GRANT_ACHIEVEMENT: { label: "Grant achievement", target: "CRAWLER", usesStat: false, usesAlive: false, usesDials: false, usesAchievement: true },
 };
 
 // Whether a kind needs a hand-picked target entity (vs deriving it from the event).

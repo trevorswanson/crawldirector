@@ -174,7 +174,11 @@ function floorLabelColor(floor: { current: boolean; reached: boolean }): string 
 }
 
 // An effect rendered as a signed stat diff (broadcast HUD: glanceable deltas).
-function effectDiff(effect: EventEffectView): { text: string; color: string } {
+// `resolveName` lets GRANT_ACHIEVEMENT name its granted achievement inline.
+function effectDiff(
+  effect: EventEffectView,
+  resolveName?: (entityId: string) => string,
+): { text: string; color: string } {
   if (typeof effect.delta === "number" && effect.delta !== 0) {
     const sign = effect.delta > 0 ? "+" : "";
     const value =
@@ -185,7 +189,7 @@ function effectDiff(effect: EventEffectView): { text: string; color: string } {
     };
   }
   if (effect.note) return { text: effect.note, color: "var(--ink-dim)" };
-  return { text: describeEffect(effect), color: "var(--ink-dim)" };
+  return { text: describeEffect(effect, resolveName), color: "var(--ink-dim)" };
 }
 
 function effectStatusLabel(effect: EventEffectView) {
@@ -201,20 +205,24 @@ function NewEventForm({
   candidates,
   crawlerCandidates,
   personaCandidates,
+  achievementCandidates,
   anchorCandidates,
   searchParticipants,
   searchCrawlers,
   searchPersona,
+  searchAchievement,
   onClose,
 }: {
   campaignId: string;
   candidates: EntityCandidate[];
   crawlerCandidates: EntityCandidate[];
   personaCandidates: EntityCandidate[];
+  achievementCandidates: EntityCandidate[];
   anchorCandidates: { id: string; title: string }[];
   searchParticipants?: (query: string) => Promise<EntityCandidate[]>;
   searchCrawlers?: (query: string) => Promise<EntityCandidate[]>;
   searchPersona?: (query: string) => Promise<EntityCandidate[]>;
+  searchAchievement?: (query: string) => Promise<EntityCandidate[]>;
   onClose: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -369,8 +377,10 @@ function NewEventForm({
       <EffectRows
         candidates={crawlerCandidates}
         personaCandidates={personaCandidates}
+        achievementCandidates={achievementCandidates}
         searchCandidates={searchCrawlers}
         searchPersonaCandidates={searchPersona}
+        searchAchievementCandidates={searchAchievement}
       />
 
       {error && (
@@ -405,12 +415,14 @@ function EditEventForm({
   candidates,
   crawlerCandidates,
   personaCandidates,
+  achievementCandidates,
   anchorCandidates,
   resolveName,
   causeCandidates,
   searchParticipants,
   searchCrawlers,
   searchPersona,
+  searchAchievement,
   onFocusEvent,
   onRemoveCausality,
   onClose,
@@ -420,12 +432,14 @@ function EditEventForm({
   candidates: EntityCandidate[];
   crawlerCandidates: EntityCandidate[];
   personaCandidates: EntityCandidate[];
+  achievementCandidates: EntityCandidate[];
   anchorCandidates: { id: string; title: string }[];
   resolveName: (targetId: string) => string;
   causeCandidates: { id: string; title: string }[];
   searchParticipants?: (query: string) => Promise<EntityCandidate[]>;
   searchCrawlers?: (query: string) => Promise<EntityCandidate[]>;
   searchPersona?: (query: string) => Promise<EntityCandidate[]>;
+  searchAchievement?: (query: string) => Promise<EntityCandidate[]>;
   onFocusEvent: (eventId: string) => void;
   onRemoveCausality: (linkId: string) => void;
   onClose: () => void;
@@ -444,7 +458,12 @@ function EditEventForm({
   const initialEffects: EffectRowValue[] = event.effects
     .filter((effect) => !effect.applied)
     .map((effect) =>
-      effectViewToRow(effect, { crawlerCandidates, personaCandidates, resolveName }),
+      effectViewToRow(effect, {
+        crawlerCandidates,
+        personaCandidates,
+        achievementCandidates,
+        resolveName,
+      }),
     );
 
   const [pending, startTransition] = useTransition();
@@ -508,9 +527,11 @@ function EditEventForm({
         <EffectRows
           candidates={crawlerCandidates}
           personaCandidates={personaCandidates}
+          achievementCandidates={achievementCandidates}
           initial={initialEffects}
           searchCandidates={searchCrawlers}
           searchPersonaCandidates={searchPersona}
+          searchAchievementCandidates={searchAchievement}
         />
       </form>
 
@@ -620,7 +641,7 @@ function TimelineEffects({
       </div>
       <div className="flex flex-wrap items-center gap-[7px]">
         {effects.map((effect) => {
-          const diff = effectDiff(effect);
+          const diff = effectDiff(effect, resolveName);
           const status = effectStatusLabel(effect);
           const statusClassName = "text-[8.5px] uppercase tracking-[.06em]";
           const statusStyle = {
@@ -901,6 +922,10 @@ export function CampaignTimeline({
   const personaCandidates = candidates.filter(
     (candidate) => candidate.type === "SYSTEM_AI",
   );
+  // GRANT_ACHIEVEMENT effects grant the campaign's ACHIEVEMENT entities.
+  const achievementCandidates = candidates.filter(
+    (candidate) => candidate.type === "ACHIEVEMENT",
+  );
   const searchParticipants = (query: string) =>
     searchEntityCandidatesAction(campaignId, query);
   const searchCrawlers = (query: string) =>
@@ -910,6 +935,10 @@ export function CampaignTimeline({
   const searchPersona = (query: string) =>
     searchEntityCandidatesAction(campaignId, query, {
       types: ["SYSTEM_AI"],
+    });
+  const searchAchievement = (query: string) =>
+    searchEntityCandidatesAction(campaignId, query, {
+      types: ["ACHIEVEMENT"],
     });
   const nameById = new Map(
     candidates.map((candidate) => [candidate.id, candidate.name] as const),
@@ -1239,12 +1268,14 @@ export function CampaignTimeline({
               candidates={candidates}
               crawlerCandidates={crawlerCandidates}
               personaCandidates={personaCandidates}
+              achievementCandidates={achievementCandidates}
               anchorCandidates={anchorCandidates}
               resolveName={resolveName}
               causeCandidates={causeCandidates}
               searchParticipants={searchParticipants}
               searchCrawlers={searchCrawlers}
               searchPersona={searchPersona}
+              searchAchievement={searchAchievement}
               onFocusEvent={focusEvent}
               onRemoveCausality={setRemovedCausalityId}
               onClose={() => setEditingId(null)}
@@ -1556,10 +1587,12 @@ export function CampaignTimeline({
                   candidates={candidates}
                   crawlerCandidates={crawlerCandidates}
                   personaCandidates={personaCandidates}
+                  achievementCandidates={achievementCandidates}
                   anchorCandidates={anchorCandidates}
                   searchParticipants={searchParticipants}
                   searchCrawlers={searchCrawlers}
                   searchPersona={searchPersona}
+                  searchAchievement={searchAchievement}
                   onClose={() => setOpen(false)}
                 />
               </div>

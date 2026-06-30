@@ -522,6 +522,9 @@ export const eventEffectSchema = z
         value && typeof value === "object" && !Array.isArray(value) ? value : undefined,
       z.record(z.string(), z.coerce.number().int("Dial shift must be a whole number.")).optional(),
     ),
+    // GRANT_ACHIEVEMENT: the ACHIEVEMENT entity granted to the crawler
+    // `targetEntityId`. Materializes as an EARNED_ACHIEVEMENT edge on apply.
+    achievementEntityId: z.string().trim().min(1).optional(),
     note: optionalText(200),
   })
   .superRefine((effect, ctx) => {
@@ -566,6 +569,13 @@ export const eventEffectSchema = z
           path: ["dialShifts"],
         });
       }
+    }
+    if (effect.kind === "GRANT_ACHIEVEMENT" && !effect.achievementEntityId) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Choose an achievement to grant.",
+        path: ["achievementEntityId"],
+      });
     }
   });
 export type EventEffectInput = z.infer<typeof eventEffectSchema>;

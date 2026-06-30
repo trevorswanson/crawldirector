@@ -285,8 +285,9 @@ model Event {
   participants EventParticipant[]
   causedBy    EventCausality[] @relation("Effect")
   causes      EventCausality[] @relation("Cause")
-  // Structured effect rows (M3): ADJUST_STAT, SET_STAT, SET_ALIVE today.
-  // PERSONA_SHIFT lands with the M6 persona model but uses the same reviewable
+  // Structured effect rows (M3): ADJUST_STAT, SET_STAT, SET_ALIVE.
+  // PERSONA_SHIFT (M6) nudges System AI dials; GRANT_ACHIEVEMENT (M7) grants a
+  // crawler an EARNED_ACHIEVEMENT edge. All use the same reviewable
   // APPLY_EVENT_EFFECTS path.
   effects     Json     @default("[]")
   provenance  Provenance[]

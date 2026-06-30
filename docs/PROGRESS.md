@@ -83,6 +83,17 @@ broader actor-profile studio reuse for M11. Keep the M6 work incremental.
 - [ ] **Later M6 slices.** The **encounter** set-piece generator (multi-entity),
       and broader actor-profile studio reuse for M11.
 
+**Now also active: M7 — Player crawler interface + sharing**
+([11-roadmap.md](./11-roadmap.md)). M6's "done when" bar is met and its remaining
+slices are *blocked* (encounter waits on M10, actor-profile reuse is M11), so the
+lowest unblocked milestone work is M7. Started with the **game-progression**
+sub-thread (no player-UI surface required yet): the `GRANT_ACHIEVEMENT` event
+effect (✅ 2026-06-29, dated entry below). **Next up:** the rest of
+game-progression — `BOX` as a new `EntityType` (the brand-new-`EntityType`
+"proof") with achievement→box rewards and box→item `CONTAINS` contents — then the
+visibility-projection-enforced player crawler interface (crawler sheet, inventory,
+System-message feed, scoped Ask, player suggestions).
+
 ### Scheduled roadmap additions (2026-06-19)
 
 These are accepted as roadmap/backlog design, not active implementation work;
@@ -114,6 +125,78 @@ M6 remains the next milestone work. The detailed decisions live in
 
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
+
+## M7 — `GRANT_ACHIEVEMENT` event-effect kind ✅ (2026-06-29)
+
+**Goal:** the first M7 *game-progression* slice — let an event grant a crawler an
+achievement, as the structured effect the domain model already names
+([`01-domain-model.md`](./01-domain-model.md): "Crawler Y granted Achievement A
+via structured `GRANT_ACHIEVEMENT`"). M6's "done when" bar is met and its
+remaining slices are blocked on M10/M11, so M7 is the lowest unblocked milestone;
+this slice needs no player-UI surface. No schema/migration (effects are JSON on
+`Event`; the apply materializes the already-existing `EARNED_ACHIEVEMENT`
+relationship type between the already-existing `ACHIEVEMENT` entity kind and the
+crawler).
+
+**Decision (reuse the CRAWLER target + a second picked entity; idempotent edge).**
+`GRANT_ACHIEVEMENT` keeps the existing **CRAWLER** target machinery (the recipient
+becomes an `AFFECTED` participant, validated by `loadEffectTargetCrawler`) and adds
+one kind-specific field — `achievementEntityId`, the granted `ACHIEVEMENT` entity —
+mirroring how `PERSONA_SHIFT` added `dialShifts`. On apply it routes through the
+existing `applyCreateRelationship` path (so the grant carries provenance and is
+indexed/audited like any edge) and is **idempotent**: a crawler who already holds a
+live `EARNED_ACHIEVEMENT` edge to that achievement is left untouched, so
+re-applying the event never duplicates the grant.
+
+- [x] **Registry + validation** ([`event-effect-kinds.ts`](../src/lib/event-effect-kinds.ts),
+      [`validation.ts`](../src/lib/validation.ts)): added `GRANT_ACHIEVEMENT` to
+      `eventEffectKindValues` + a meta entry (target `CRAWLER`, new `usesAchievement`
+      flag); `eventEffectSchema` carries `achievementEntityId` and `superRefine`
+      requires it for the kind.
+- [x] **Phrasing** ([`event-effects.ts`](../src/lib/event-effects.ts)):
+      `describeEffect` gained an optional `resolveName` so a `GRANT_ACHIEVEMENT`
+      can name its granted achievement inline ("Earns achievement: Goblin Slayer"),
+      degrading to "Earns achievement" when no resolver is supplied.
+- [x] **Service** ([`review.ts`](../src/server/services/review.ts),
+      [`events.ts`](../src/server/services/events.ts)):
+      `StoredEventEffect.achievementEntityId` parse/serialize; `assertValidDeclaredEffect`
+      requires it; `assertDeclaredEffectTarget` validates the recipient crawler **and**
+      `assertAchievementEntity` (live canon `ACHIEVEMENT`); the apply dispatch gains a
+      `GRANT_ACHIEVEMENT` branch → `applyGrantAchievementEffect` (idempotent
+      `EARNED_ACHIEVEMENT` edge via `applyCreateRelationship`). `EventEffectView`/projection
+      + the create/update patch builders carry `achievementEntityId` (and effect-target
+      revalidation now covers the granted achievement's page).
+- [x] **UI** ([`effect-rows.tsx`](../src/components/entities/effect-rows.tsx),
+      [`actions.ts`](<../src/app/(dm)/actions.ts>),
+      [`timeline-panel.tsx`](../src/components/entities/timeline-panel.tsx),
+      [`campaign-timeline.tsx`](../src/components/timeline/campaign-timeline.tsx),
+      [`effect-operation-editor.tsx`](../src/components/review/effect-operation-editor.tsx),
+      [`review/page.tsx`](<../src/app/(dm)/campaigns/[id]/review/page.tsx>)): the
+      effect-row editor renders a second **achievement** typeahead (`effectAchievement_<i>`)
+      for `GRANT_ACHIEVEMENT`; both timelines and the Review Queue effect editor thread
+      an `ACHIEVEMENT` candidate pool + a `searchAchievement` action; `parseEffectRows`
+      collects the field; the read-only badge/summary names the granted achievement.
+- [x] **Tests:** new DB-backed
+      [`grant-achievement-effect.test.ts`](../tests/unit/grant-achievement-effect.test.ts)
+      (schema validation; declared-effect projection; apply creates the edge with
+      provenance + `AFFECTED` participant; idempotent re-apply; declare-via-edit;
+      non-achievement and non-crawler targets rejected). UI/pure cases added in
+      [`effect-rows.test.tsx`](../tests/unit/effect-rows.test.tsx),
+      [`effect-operation-editor.test.tsx`](../tests/unit/effect-operation-editor.test.tsx),
+      [`event-effects-section.test.tsx`](../tests/unit/event-effects-section.test.tsx)
+      (`describeEffect`),
+      [`dm-actions.test.ts`](../tests/unit/dm-actions.test.ts) (form parsing), and
+      [`campaign-timeline.test.tsx`](../tests/unit/campaign-timeline.test.tsx)
+      (achievement typeahead → search action). Existing effect literals gained the
+      new required field.
+- [x] **Docs:** the domain model already named `GRANT_ACHIEVEMENT` (this realizes
+      it); [`09-data-schema.md`](./09-data-schema.md)'s `Event.effects` comment now
+      lists it.
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors; pre-existing
+      settings-action warnings only), `npm run build` (routes unchanged), and the
+      full coverage gate green (statements 95.35%, branches 88.95%, functions 96.61%,
+      lines 96.99%). In-browser verification deferred (the local dev server occupies
+      the only Next dev port — see the preview note in memory).
 
 ## Cleanup — Merge `COLLAPSE` + `ABSOLUTE_DAY` time bases ✅ (2026-06-27)
 
@@ -774,7 +857,7 @@ prompt. Branch: `codex/m6-persona-foundation`. Schema change.
       - **Crawlers**: Inviting other users to the campaign and managing user memberships/roles.
       - **AI Providers**: BYO API keys configuration.
 - [ ] **Game-progression modeling (M7).** Implement:
-      - **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect.
+      - [x] **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect. ✅ 2026-06-29 (dated entry below).
       - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
       - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
 

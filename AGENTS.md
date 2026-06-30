@@ -14,9 +14,11 @@ pitch and [`docs/`](./docs) for the full plan.
 
 ## Current status
 
-🚧 **M0–M5.5 complete; M6 slices 1–6 complete; next up the multi-entity
-encounter set-piece generator (waits on M10 operation aliases) and broader
-actor-profile studio reuse for M11.** M5.5 (data model hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
+🚧 **M0–M5.5 complete; M6 slices 1–6 complete (its "done when" bar met; remaining
+slices blocked on M10/M11); M7 started with the `GRANT_ACHIEVEMENT` event effect.**
+The next M7 work is the rest of game-progression (`BOX` as a new `EntityType` with
+achievement→box rewards + box→item contents) then the player crawler interface.
+M5.5 (data model hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
 seam, the `MIGRATE_ENTITY_DATA` job, reference-integrity badge + impact-aware
 archive, orphan report, the greenfield Faction satellite, and the Floor satellite
 (slice 5 — the genuine `data → satellite` migration moving FLOOR's
@@ -127,9 +129,19 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
   MOB_TYPE/ITEM/SYSTEM_MESSAGE/ACHIEVEMENT/TITLE) in its current voice, filed as a
   PENDING `CREATE_ENTITY` proposal (the create-from-scratch counterpart to the
   flesh-out generator; persona attribution recorded, degrades to un-flavored when
-  no persona is active). Next slices: the multi-entity **encounter** set-piece
-  generator (waits on M10's generic operation aliases/dependencies) and broader
-  actor-profile studio reuse for M11.
+  no persona is active). The remaining M6 slices — the multi-entity **encounter**
+  set-piece generator (waits on M10's generic operation aliases/dependencies) and
+  broader actor-profile studio reuse for M11 — are blocked, so M6's "done when" bar
+  is met and work has moved to M7.
+- **M7 — Player crawler interface + sharing 🚧.** Started with the
+  **game-progression** sub-thread (no player-UI surface yet). Slice 1: the
+  `GRANT_ACHIEVEMENT` event-effect kind — an event grants a crawler an
+  `EARNED_ACHIEVEMENT` edge to an `ACHIEVEMENT` entity through the same reviewable
+  `APPLY_EVENT_EFFECTS` path as the other effects (idempotent; recipient becomes an
+  `AFFECTED` participant). Next: `BOX` as a new `EntityType` with achievement→box
+  rewards and box→item `CONTAINS` contents, then the visibility-projection-enforced
+  player crawler interface (crawler sheet, inventory, System-message feed, scoped
+  Ask, player suggestions).
 
 For per-slice detail (files, tests, decisions) see
 [`docs/PROGRESS.md`](./docs/PROGRESS.md) — its "Open backlog" section is the

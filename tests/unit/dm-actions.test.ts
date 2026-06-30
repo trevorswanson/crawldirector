@@ -986,6 +986,53 @@ describe("review queue actions", () => {
     );
   });
 
+  it("parses a GRANT_ACHIEVEMENT crawler target + achievement into a patch", async () => {
+    const fd = new FormData();
+    fd.set("effectCount", "1");
+    fd.set("effectId_0", "fx-grant");
+    fd.set("effectKind_0", "GRANT_ACHIEVEMENT");
+    fd.set("effectTarget_0", "crawler-1");
+    fd.set("effectAchievement_0", "achievement-1");
+    fd.set("effectNote_0", "for slaying goblins");
+
+    await editEventEffectsOperationAction("c1", "cs1", "op1", fd);
+
+    expect(setChangeOperationDecision).toHaveBeenCalledWith(
+      "u1",
+      "c1",
+      "cs1",
+      "op1",
+      {
+        decision: "EDITED",
+        editedPatch: {
+          effects: {
+            to: [
+              {
+                id: "fx-grant",
+                kind: "GRANT_ACHIEVEMENT",
+                targetEntityId: "crawler-1",
+                achievementEntityId: "achievement-1",
+                note: "for slaying goblins",
+              },
+            ],
+          },
+        },
+      },
+    );
+  });
+
+  it("rejects a GRANT_ACHIEVEMENT with no achievement picked", async () => {
+    const fd = new FormData();
+    fd.set("effectCount", "1");
+    fd.set("effectId_0", "fx-grant");
+    fd.set("effectKind_0", "GRANT_ACHIEVEMENT");
+    fd.set("effectTarget_0", "crawler-1");
+
+    await editEventEffectsOperationAction("c1", "cs1", "op1", fd);
+
+    expect(setChangeOperationDecision).not.toHaveBeenCalled();
+  });
+
   it("rejects a PERSONA_SHIFT with no non-zero dial deltas", async () => {
     const fd = new FormData();
     fd.set("effectCount", "1");

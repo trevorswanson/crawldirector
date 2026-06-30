@@ -2533,6 +2533,29 @@ async function evaluateApplyEventEffectsOperationFlags(
         blockedByLock ||= active.locked;
         continue;
       }
+      if (reviewed.kind === "GRANT_ACHIEVEMENT") {
+        // A grant creates an EARNED_ACHIEVEMENT edge. Validate both endpoints (a
+        // missing crawler/achievement is stale) and, for non-DM proposals, block
+        // when either endpoint is locked — parity with the apply guard and with
+        // evaluateRelationshipOperationFlags. DM grants stay ergonomic.
+        await loadEffectTargetCrawler(tx, changeSet.campaignId, reviewed.targetEntityId);
+        if (!reviewed.achievementEntityId) {
+          isStale = true;
+          continue;
+        }
+        await assertAchievementEntity(tx, changeSet.campaignId, reviewed.achievementEntityId);
+        if (changeSet.source !== ChangeSource.DM) {
+          const endpoints = await tx.entity.findMany({
+            where: {
+              id: { in: [reviewed.targetEntityId, reviewed.achievementEntityId] },
+              campaignId: changeSet.campaignId,
+            },
+            select: { locked: true },
+          });
+          blockedByLock ||= endpoints.some((endpoint) => endpoint.locked);
+        }
+        continue;
+      }
       const crawler = await loadEffectTargetCrawler(
         tx,
         changeSet.campaignId,
@@ -4380,6 +4403,8 @@ type StoredEventEffect = {
   // PERSONA_SHIFT: per-dial integer deltas applied to the target's active
   // persona snapshot.
   dialShifts?: Record<string, number>;
+  // GRANT_ACHIEVEMENT: the ACHIEVEMENT entity granted to the crawler target.
+  achievementEntityId?: string;
   note: string | null;
   applied: boolean;
   appliedChangeSetId: string | null;
@@ -4449,6 +4474,10 @@ function parseEventEffects(value: JsonValue | undefined): StoredEventEffect[] {
         typeof record.valueNumber === "number" ? record.valueNumber : undefined,
       value: typeof record.value === "boolean" ? record.value : undefined,
       dialShifts: parseStoredDialShifts(record.dialShifts),
+      achievementEntityId:
+        typeof record.achievementEntityId === "string" && record.achievementEntityId.length > 0
+          ? record.achievementEntityId
+          : undefined,
       note:
         typeof record.note === "string" && record.note.length > 0 ? record.note : null,
       applied: record.applied === true,
@@ -4521,6 +4550,9 @@ function assertValidDeclaredEffect(effect: StoredEventEffect) {
       throw new ServiceError("Persona shift needs at least one non-zero dial delta.");
     }
   }
+  if (effect.kind === "GRANT_ACHIEVEMENT" && !effect.achievementEntityId) {
+    throw new ServiceError("Achievement grant needs an achievement to grant.");
+  }
 }
 
 function serializeEventEffects(
@@ -4535,6 +4567,9 @@ function serializeEventEffects(
     ...(typeof effect.valueNumber === "number" ? { valueNumber: effect.valueNumber } : {}),
     ...(typeof effect.value === "boolean" ? { value: effect.value } : {}),
     ...(effect.dialShifts ? { dialShifts: effect.dialShifts } : {}),
+    ...(effect.achievementEntityId
+      ? { achievementEntityId: effect.achievementEntityId }
+      : {}),
     ...(effect.note ? { note: effect.note } : {}),
     applied: effect.applied,
     ...(effect.appliedChangeSetId
@@ -4618,9 +4653,34 @@ async function assertPersonaShiftTarget(
   }
 }
 
+// A GRANT_ACHIEVEMENT effect grants the crawler `targetEntityId` the ACHIEVEMENT
+// entity `achievementEntityId`. Validate the granted entity is live canon of
+// that type at declaration time (parity with the crawler/persona target checks),
+// returning its id for the apply step.
+async function assertAchievementEntity(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  entityId: string,
+) {
+  const entity = await tx.entity.findFirst({
+    where: {
+      id: entityId,
+      campaignId,
+      status: CanonStatus.CANON,
+      type: EntityType.ACHIEVEMENT,
+    },
+    select: { id: true },
+  });
+  if (!entity) {
+    throw new ServiceError("Granted achievement must be an achievement entity.");
+  }
+  return entity.id;
+}
+
 // Validate a declared effect's hand-picked target by kind (crawler kinds resolve
 // a crawler; PERSONA_SHIFT resolves a SYSTEM_AI). Subject-derived kinds
-// (COLLAPSE_FLOOR) carry no target and are skipped.
+// (COLLAPSE_FLOOR) carry no target and are skipped. GRANT_ACHIEVEMENT also
+// validates its second hand-picked entity (the granted achievement).
 async function assertDeclaredEffectTarget(
   tx: Prisma.TransactionClient,
   campaignId: string,
@@ -4631,6 +4691,12 @@ async function assertDeclaredEffectTarget(
     await assertPersonaShiftTarget(tx, campaignId, effect.targetEntityId);
   } else {
     await loadEffectTargetCrawler(tx, campaignId, effect.targetEntityId);
+    if (effect.kind === "GRANT_ACHIEVEMENT") {
+      if (!effect.achievementEntityId) {
+        throw new ServiceError("Achievement grant needs an achievement to grant.");
+      }
+      await assertAchievementEntity(tx, campaignId, effect.achievementEntityId);
+    }
   }
 }
 
@@ -5592,6 +5658,71 @@ async function applyPersonaShiftEffect(
   await applyCreatePersonaSnapshot(tx, changeSet, operationId, patch);
 }
 
+// Materialize a GRANT_ACHIEVEMENT effect: grant the target crawler the picked
+// ACHIEVEMENT entity by creating an EARNED_ACHIEVEMENT edge (crawler → achievement)
+// through the same `applyCreateRelationship` path a manual edge uses — so the
+// grant carries provenance and is indexed/audited like any other canon edge.
+// Idempotent: a crawler who already holds a live edge to that achievement is left
+// untouched, so re-applying the event never duplicates the grant.
+async function applyGrantAchievementEffect(
+  tx: Prisma.TransactionClient,
+  changeSet: Prisma.ChangeSetGetPayload<{ include: { operations: true } }>,
+  operationId: string,
+  crawlerEntityId: string,
+  achievementEntityId: string,
+  note: string | null,
+) {
+  // Validate both endpoints are live canon of the expected types.
+  await loadEffectTargetCrawler(tx, changeSet.campaignId, crawlerEntityId);
+  await assertAchievementEntity(tx, changeSet.campaignId, achievementEntityId);
+
+  const existing = await tx.relationship.findFirst({
+    where: {
+      campaignId: changeSet.campaignId,
+      type: RelationshipType.EARNED_ACHIEVEMENT,
+      sourceId: crawlerEntityId,
+      targetId: achievementEntityId,
+      status: { not: CanonStatus.ARCHIVED },
+    },
+    select: { id: true },
+  });
+  if (existing) return;
+
+  // Honor invariant #2 (AI/import/player writes never silently touch locked
+  // canon): granting the achievement creates an EARNED_ACHIEVEMENT edge, so a
+  // non-DM proposal whose crawler or achievement endpoint is locked blocks the
+  // op for the DM to resolve — the same rule a normal CREATE_RELATIONSHIP
+  // proposal follows (evaluateRelationshipOperationFlags). DM grants stay
+  // ergonomic.
+  if (changeSet.source !== ChangeSource.DM) {
+    const endpoints = await tx.entity.findMany({
+      where: {
+        id: { in: [crawlerEntityId, achievementEntityId] },
+        campaignId: changeSet.campaignId,
+      },
+      select: { locked: true },
+    });
+    if (endpoints.some((endpoint) => endpoint.locked)) {
+      await tx.changeOperation.update({
+        where: { id: operationId },
+        data: { blockedByLock: true },
+      });
+      throw new ServiceError(
+        "Cannot grant the achievement because the crawler or achievement is locked.",
+        { code: "OPERATION_BLOCKED" },
+      );
+    }
+  }
+
+  const patch: ReviewPatch = {
+    type: { to: RelationshipType.EARNED_ACHIEVEMENT },
+    sourceId: { to: crawlerEntityId },
+    targetId: { to: achievementEntityId },
+    ...(note ? { notes: { to: note } } : {}),
+  };
+  await applyCreateRelationship(tx, changeSet, operationId, patch);
+}
+
 // Apply an event's unapplied effects to entity state. Each effect's entity write
 // goes through `applyUpdateEntity`, so it is lock-aware (a locked target / field
 // blocks the whole operation), version-bumped, and provenance-tracked. Marks the
@@ -5717,6 +5848,7 @@ async function applyApplyEventEffects(
       effect.valueNumber = reviewed.valueNumber;
       effect.value = reviewed.value;
       effect.dialShifts = reviewed.dialShifts;
+      effect.achievementEntityId = reviewed.achievementEntityId;
       effect.note = reviewed.note;
     }
     assertValidDeclaredEffect(effect);
@@ -5740,6 +5872,21 @@ async function applyApplyEventEffects(
         effect.dialShifts ?? {},
         effect.note,
         event.inGameTime as JsonValue,
+      );
+      affectedParticipantIds.add(targetEntityId);
+    } else if (effect.kind === "GRANT_ACHIEVEMENT") {
+      // Grant the target crawler the picked achievement as an EARNED_ACHIEVEMENT
+      // edge (crawler → achievement). Idempotent: a crawler who already holds the
+      // achievement is left untouched so re-applying never duplicates the edge.
+      const targetEntityId = effect.targetEntityId;
+      if (!targetEntityId) throw new ServiceError("Achievement grant needs a target.");
+      await applyGrantAchievementEffect(
+        tx,
+        changeSet,
+        operationId,
+        targetEntityId,
+        effect.achievementEntityId ?? "",
+        effect.note,
       );
       affectedParticipantIds.add(targetEntityId);
     } else {

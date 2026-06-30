@@ -1399,6 +1399,12 @@ function parseEffectRows(formData: FormData) {
       }
       if (Object.keys(dialShifts).length > 0) effect.dialShifts = dialShifts;
     }
+    // GRANT_ACHIEVEMENT: the picked ACHIEVEMENT entity (a second target).
+    const achievementEntityId = formData
+      .get(`effectAchievement_${index}`)
+      ?.toString()
+      .trim();
+    if (achievementEntityId) effect.achievementEntityId = achievementEntityId;
     effects.push(effect);
   }
   return effects;

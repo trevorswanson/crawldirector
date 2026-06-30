@@ -30,6 +30,7 @@ const baseEffect: EventEffectView = {
   valueNumber: null,
   value: null,
   dialShifts: null,
+  achievementId: null,
   note: "Loot",
   applied: false,
   appliedChangeSetId: null,
@@ -69,10 +70,27 @@ describe("describeEffect", () => {
         stat: null,
         delta: null,
         dialShifts: { resentment: 20, compliance: -15 },
+        achievementId: null,
       }),
     ).toBe("Persona shift: Compliance −15, Resentment +20");
     expect(describeEffect({ ...baseEffect, kind: "COLLAPSE_FLOOR", targetId: null, stat: null }))
       .toBe("Floor collapses → next floor opens");
+  });
+
+  it("names the granted achievement when a resolver is supplied, degrading otherwise", () => {
+    const grant: EventEffectView = {
+      ...baseEffect,
+      kind: "GRANT_ACHIEVEMENT",
+      stat: null,
+      delta: null,
+      note: null,
+      achievementId: "ach1",
+    };
+    expect(describeEffect(grant, (id) => (id === "ach1" ? "Goblin Slayer" : id))).toBe(
+      "Earns achievement: Goblin Slayer",
+    );
+    expect(describeEffect(grant)).toBe("Earns achievement");
+    expect(describeEffect({ ...grant, achievementId: null })).toBe("Earns achievement");
   });
 
   it("describeDialShifts falls back to 'no change' with no meaningful deltas", () => {

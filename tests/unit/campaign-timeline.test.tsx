@@ -529,6 +529,52 @@ describe("CampaignTimeline", () => {
     expect(submitted.get("effectDial_0_resentment")).toBe("20");
   });
 
+  it("logs a new event with a GRANT_ACHIEVEMENT effect via the achievement typeahead", async () => {
+    createCampaignEventAction.mockResolvedValue(undefined);
+    searchEntityCandidatesAction.mockResolvedValue([]);
+    // Carl + the achievement are in the initial candidate pools, so the
+    // typeaheads filter them locally (mirrors the ADJUST_STAT test above).
+    renderTimeline({
+      events: [],
+      candidates: [...candidates, { id: "ach1", name: "Goblin Slayer", type: "ACHIEVEMENT" }],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Log event" }));
+    fireEvent.change(screen.getByPlaceholderText("What happened?"), {
+      target: { value: "Defeats the goblin king" },
+    });
+    // Drop the default participant row so only the effect target typeahead lists Carl.
+    fireEvent.click(screen.getByTitle("Remove participant row"));
+
+    fireEvent.click(screen.getByRole("button", { name: /add effect/i }));
+    fireEvent.change(screen.getByLabelText("Effect kind"), {
+      target: { value: "GRANT_ACHIEVEMENT" },
+    });
+    // The crawler recipient uses the existing target typeahead.
+    fireEvent.change(screen.getByPlaceholderText("Search crawler..."), {
+      target: { value: "Carl" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Carl/ }));
+    // The achievement typeahead invokes the achievement search action on input.
+    fireEvent.change(screen.getByPlaceholderText("Search achievement..."), {
+      target: { value: "Goblin" },
+    });
+    await waitFor(() =>
+      expect(searchEntityCandidatesAction).toHaveBeenCalledWith("c1", "Goblin", {
+        types: ["ACHIEVEMENT"],
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Goblin Slayer/ }));
+
+    fireEvent.click(screen.getByRole("button", { name: /Log event/ }));
+
+    await waitFor(() => expect(createCampaignEventAction).toHaveBeenCalledTimes(1));
+    const [, , submitted] = createCampaignEventAction.mock.calls[0];
+    expect(submitted.get("effectKind_0")).toBe("GRANT_ACHIEVEMENT");
+    expect(submitted.get("effectTarget_0")).toBe("e1");
+    expect(submitted.get("effectAchievement_0")).toBe("ach1");
+  });
+
   it("surfaces action errors and lets the DM cancel", async () => {
     createCampaignEventAction.mockResolvedValue({ error: "Could not log the event." });
     renderTimeline({ events: [] });
@@ -674,6 +720,7 @@ describe("CampaignTimeline", () => {
               valueNumber: null,
               value: null,
               dialShifts: null,
+              achievementId: null,
               note: null,
               applied: false,
               appliedChangeSetId: null,
@@ -712,6 +759,7 @@ describe("CampaignTimeline", () => {
               valueNumber: null,
               value: null,
               dialShifts: null,
+              achievementId: null,
               note: null,
               applied: false,
               appliedChangeSetId: null,
@@ -765,6 +813,7 @@ describe("CampaignTimeline", () => {
               valueNumber: 1,
               value: null,
               dialShifts: null,
+              achievementId: null,
               note: "Entered the crawl",
               applied: false,
               appliedChangeSetId: null,
@@ -1252,6 +1301,7 @@ describe("CampaignTimeline", () => {
           valueNumber: null,
           value: null,
           dialShifts: null,
+          achievementId: null,
           note: "Bonus chest",
           applied: false,
           appliedChangeSetId: null,
@@ -1268,6 +1318,7 @@ describe("CampaignTimeline", () => {
           valueNumber: null,
           value: null,
           dialShifts: null,
+          achievementId: null,
           note: null,
           applied: false,
           appliedChangeSetId: null,
@@ -1284,6 +1335,7 @@ describe("CampaignTimeline", () => {
           valueNumber: 100,
           value: null,
           dialShifts: null,
+          achievementId: null,
           note: null,
           applied: false,
           appliedChangeSetId: null,

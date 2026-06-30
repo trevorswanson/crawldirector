@@ -163,6 +163,9 @@ export default async function ReviewQueuePage({
   const personaCandidates = entityCandidates.filter(
     (entity) => entity.type === "SYSTEM_AI",
   );
+  const achievementCandidates = entityCandidates.filter(
+    (entity) => entity.type === "ACHIEVEMENT",
+  );
   const activeSource = sourceFilter(query.source);
   const filteredChangeSets = changeSets.filter((changeSet) =>
     sourceMatches(changeSet.source, activeSource),
@@ -348,6 +351,7 @@ export default async function ReviewQueuePage({
             changeSet={selected}
             crawlerCandidates={crawlerCandidates}
             personaCandidates={personaCandidates}
+            achievementCandidates={achievementCandidates}
             entityCandidates={entityCandidates}
             run={selected.runId ? runGroups.find((run) => run.runId === selected.runId) : undefined}
             readOnly={showClosed || Boolean(reopenedChangeSet)}
@@ -435,6 +439,7 @@ function ReviewDetail({
   changeSet,
   crawlerCandidates,
   personaCandidates,
+  achievementCandidates,
   entityCandidates,
   run,
   readOnly = false,
@@ -444,6 +449,7 @@ function ReviewDetail({
   changeSet: ReviewQueueItem;
   crawlerCandidates: EntityCandidate[];
   personaCandidates: EntityCandidate[];
+  achievementCandidates: EntityCandidate[];
   entityCandidates: EntityCandidate[];
   run?: PendingRunGroup;
   readOnly?: boolean;
@@ -576,6 +582,7 @@ function ReviewDetail({
             changeSetId={changeSet.id}
             crawlerCandidates={crawlerCandidates}
             personaCandidates={personaCandidates}
+            achievementCandidates={achievementCandidates}
             entityCandidates={entityCandidates}
             operation={operation}
             readOnly={readOnly}
@@ -591,6 +598,7 @@ function OperationBlock({
   changeSetId,
   crawlerCandidates,
   personaCandidates,
+  achievementCandidates,
   entityCandidates,
   operation,
   readOnly,
@@ -599,6 +607,7 @@ function OperationBlock({
   changeSetId: string;
   crawlerCandidates: EntityCandidate[];
   personaCandidates: EntityCandidate[];
+  achievementCandidates: EntityCandidate[];
   entityCandidates: EntityCandidate[];
   operation: ReviewQueueOperation;
   readOnly: boolean;
@@ -694,6 +703,7 @@ function OperationBlock({
           )}
           candidates={crawlerCandidates}
           personaCandidates={personaCandidates}
+          achievementCandidates={achievementCandidates}
           effects={readEffectSeeds(
             operation.patch as ReviewPatch,
             operation.editedPatch as ReviewPatch | null,
@@ -983,6 +993,10 @@ function readEffectSeeds(
         typeof record.valueNumber === "number" ? record.valueNumber : null,
       value: typeof record.value === "boolean" ? record.value : null,
       dialShifts: readSeedDialShifts(record.dialShifts),
+      achievementEntityId:
+        typeof record.achievementEntityId === "string"
+          ? record.achievementEntityId
+          : null,
       note: typeof record.note === "string" ? record.note : null,
       before: preview?.before,
       after: preview?.after,

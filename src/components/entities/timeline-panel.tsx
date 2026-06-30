@@ -147,6 +147,7 @@ function EditEventForm({
   candidates,
   crawlerCandidates,
   personaCandidates,
+  achievementCandidates,
   anchorCandidates,
   resolveName,
   onSubmit,
@@ -160,12 +161,14 @@ function EditEventForm({
   searchParticipants,
   searchCrawlers,
   searchPersona,
+  searchAchievement,
 }: {
   event: EntityEvent;
   self: EntityCandidate;
   candidates: EntityCandidate[];
   crawlerCandidates: EntityCandidate[];
   personaCandidates: EntityCandidate[];
+  achievementCandidates: EntityCandidate[];
   anchorCandidates: { id: string; title: string }[];
   resolveName: (targetId: string) => string;
   onSubmit: (formData: FormData) => Promise<void>;
@@ -179,6 +182,7 @@ function EditEventForm({
   searchParticipants?: (query: string) => Promise<EntityCandidate[]>;
   searchCrawlers?: (query: string) => Promise<EntityCandidate[]>;
   searchPersona?: (query: string) => Promise<EntityCandidate[]>;
+  searchAchievement?: (query: string) => Promise<EntityCandidate[]>;
 }) {
   // Prefill the participant editor with the full current set: a row for every
   // role the viewed entity holds (it can have more than one) followed by the
@@ -195,7 +199,12 @@ function EditEventForm({
   const initialEffects: EffectRowValue[] = event.effects
     .filter((effect) => !effect.applied)
     .map((effect) =>
-      effectViewToRow(effect, { crawlerCandidates, personaCandidates, resolveName }),
+      effectViewToRow(effect, {
+        crawlerCandidates,
+        personaCandidates,
+        achievementCandidates,
+        resolveName,
+      }),
     );
   const [pending, startTransition] = useTransition();
 
@@ -239,9 +248,11 @@ function EditEventForm({
         <EffectRows
           candidates={crawlerCandidates}
           personaCandidates={personaCandidates}
+          achievementCandidates={achievementCandidates}
           initial={initialEffects}
           searchCandidates={searchCrawlers}
           searchPersonaCandidates={searchPersona}
+          searchAchievementCandidates={searchAchievement}
         />
         <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
           <input type="checkbox" name="secret" value="true" defaultChecked={event.secret} />
@@ -398,6 +409,10 @@ export function TimelinePanel({
   const personaCandidates = [self, ...candidates].filter(
     (candidate) => candidate.type === "SYSTEM_AI",
   );
+  // GRANT_ACHIEVEMENT effects grant the campaign's ACHIEVEMENT entities.
+  const achievementCandidates = [self, ...candidates].filter(
+    (candidate) => candidate.type === "ACHIEVEMENT",
+  );
   // Floors are set via the time picker, not as participants (ADR 0008 §3).
   const participantCandidates = withoutFloorCandidates(candidates);
   const nameById = new Map(
@@ -465,6 +480,10 @@ export function TimelinePanel({
   const searchPersona = (query: string) =>
     searchEntityCandidatesAction(campaignId, query, {
       types: ["SYSTEM_AI"],
+    });
+  const searchAchievement = (query: string) =>
+    searchEntityCandidatesAction(campaignId, query, {
+      types: ["ACHIEVEMENT"],
     });
 
   const handleSubmit = async (formData: FormData) => {
@@ -701,6 +720,7 @@ export function TimelinePanel({
                           candidates={candidates}
                           crawlerCandidates={crawlerCandidates}
                           personaCandidates={personaCandidates}
+                          achievementCandidates={achievementCandidates}
                           anchorCandidates={anchorCandidates}
                           resolveName={resolveName}
                           onSubmit={handleEdit(e.id)}
@@ -717,6 +737,7 @@ export function TimelinePanel({
                           searchParticipants={searchParticipants}
                           searchCrawlers={searchCrawlers}
                           searchPersona={searchPersona}
+                          searchAchievement={searchAchievement}
                         />
                       ) : null}
                       <div className="flex flex-wrap gap-[6px]">
@@ -864,8 +885,10 @@ export function TimelinePanel({
           <EffectRows
             candidates={crawlerCandidates}
             personaCandidates={personaCandidates}
+            achievementCandidates={achievementCandidates}
             searchCandidates={searchCrawlers}
             searchPersonaCandidates={searchPersona}
+            searchAchievementCandidates={searchAchievement}
           />
           <label className="flex items-center gap-2 text-[11.5px] text-[var(--ink-dim)]">
             <input

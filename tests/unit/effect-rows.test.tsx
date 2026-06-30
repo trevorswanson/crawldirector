@@ -14,6 +14,8 @@ const crawlers = [
 
 const personas = [{ id: "sys1", name: "The System", type: "SYSTEM_AI" }];
 
+const achievements = [{ id: "ach1", name: "Goblin Slayer", type: "ACHIEVEMENT" }];
+
 afterEach(cleanup);
 
 function field(container: HTMLElement, name: string) {
@@ -82,6 +84,7 @@ describe("EffectRows", () => {
         valueNumber: "",
         alive: "dead",
         dialShifts: {},
+        achievement: null,
         note: "Loot",
       },
     ];
@@ -129,6 +132,7 @@ describe("EffectRows", () => {
         valueNumber: "",
         alive: "dead",
         dialShifts: {},
+        achievement: null,
         note: "",
       },
     ];
@@ -194,6 +198,7 @@ describe("EffectRows", () => {
         valueNumber: "",
         alive: "dead",
         dialShifts: { resentment: "30" },
+        achievement: null,
         note: "Court ruling",
       },
     ];
@@ -205,6 +210,51 @@ describe("EffectRows", () => {
     expect(field(container, "effectDial_0_resentment").value).toBe("30");
     expect(field(container, "effectNote_0").value).toBe("Court ruling");
     expect(screen.getByText("The System")).toBeDefined();
+  });
+
+  it("shows the achievement pool plus a crawler target for a GRANT_ACHIEVEMENT row", () => {
+    const { container } = render(
+      <form>
+        <EffectRows candidates={crawlers} achievementCandidates={achievements} />
+      </form>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Add effect/ }));
+    fireEvent.change(screen.getByLabelText("Effect kind"), {
+      target: { value: "GRANT_ACHIEVEMENT" },
+    });
+    // No stat/alive/dial controls — just a crawler target and the achievement pool.
+    expect(screen.queryByLabelText("Stat to adjust")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Carl/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Goblin Slayer/ }));
+
+    expect(field(container, "effectKind_0").value).toBe("GRANT_ACHIEVEMENT");
+    expect(field(container, "effectTarget_0").value).toBe("e1");
+    expect(field(container, "effectAchievement_0").value).toBe("ach1");
+  });
+
+  it("prefills a GRANT_ACHIEVEMENT row's crawler target and achievement", () => {
+    const initial: EffectRowValue[] = [
+      {
+        id: "fx-grant",
+        kind: "GRANT_ACHIEVEMENT",
+        target: crawlers[0],
+        stat: "gold",
+        delta: "",
+        valueNumber: "",
+        alive: "dead",
+        dialShifts: {},
+        achievement: achievements[0],
+        note: "",
+      },
+    ];
+    const { container } = render(
+      <form>
+        <EffectRows candidates={crawlers} achievementCandidates={achievements} initial={initial} />
+      </form>,
+    );
+    expect(field(container, "effectTarget_0").value).toBe("e1");
+    expect(field(container, "effectAchievement_0").value).toBe("ach1");
+    expect(screen.getByText("Goblin Slayer")).toBeDefined();
   });
 
   it("hides the crawler target + stat inputs for a floor-collapse effect row", () => {
