@@ -2,6 +2,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 
+// RosterPanel statically imports RosterEditor, which pulls the server-action
+// module (next-auth → next/server) — stub it so the read-only path imports.
+vi.mock("@/app/(dm)/actions", () => ({
+  createRelationshipAction: vi.fn(),
+  updateRelationshipAction: vi.fn(),
+  archiveRelationshipAction: vi.fn(),
+  restoreRelationshipAction: vi.fn(),
+  toggleRelationshipLockAction: vi.fn(),
+  searchEntityCandidatesAction: vi.fn(),
+}));
 vi.mock("next/link", () => ({
   default: ({ href, children }: { href: string; children: React.ReactNode }) => (
     <a href={href}>{children}</a>
@@ -17,6 +27,8 @@ function entry(overrides: Partial<RosterEntry> = {}): RosterEntry {
     relationshipType: "MEMBER_OF",
     sinceDay: null,
     untilDay: null,
+    disposition: null,
+    notes: null,
     locked: false,
     secret: false,
     entity: { id: "e1", name: "Carl", type: "NPC" },

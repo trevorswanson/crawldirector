@@ -394,7 +394,13 @@ export default async function EntityPage({
               {/* roster — rolled-up membership for group-type entities */}
               {isGroup && roster && (
                 <div className="mt-[26px]">
-                  <RosterPanel campaignId={id} roster={roster} asOfDay={rosterDay} />
+                  <RosterPanel
+                    campaignId={id}
+                    roster={roster}
+                    asOfDay={rosterDay}
+                    editable={isDm}
+                    candidates={candidates}
+                  />
                 </div>
               )}
 

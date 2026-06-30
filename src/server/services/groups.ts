@@ -32,6 +32,11 @@ export type RosterEntry = {
   relationshipType: "MEMBER_OF" | "PART_OF" | "LEADS";
   sinceDay: number | null;
   untilDay: number | null;
+  /** Carried so the roster editor can round-trip an edge edit losslessly —
+   *  `updateRelationship` rewrites every mutable field, nulling any it isn't
+   *  given, so an edit form that only touches day-bounds must preserve these. */
+  disposition: number | null;
+  notes: string | null;
   locked: boolean;
   secret: boolean;
   entity: { id: string; name: string; type: string };
@@ -62,6 +67,8 @@ type MembershipEdge = {
   type: RelationshipType;
   sinceDay: number | null;
   untilDay: number | null;
+  disposition: number | null;
+  notes: string | null;
   locked: boolean;
   secret: boolean;
   sourceEntity: EdgeEndpoint;
@@ -159,6 +166,8 @@ export async function getGroupRoster(
       type: true,
       sinceDay: true,
       untilDay: true,
+      disposition: true,
+      notes: true,
       locked: true,
       secret: true,
       sourceEntity: { select: endpointSelect },
@@ -209,6 +218,8 @@ export async function getGroupRoster(
           relationshipType,
           sinceDay: edge.sinceDay,
           untilDay: edge.untilDay,
+          disposition: edge.disposition,
+          notes: edge.notes,
           locked: edge.locked,
           secret: edge.secret,
           entity: { id: member.id, name: member.name, type: member.type },
@@ -233,6 +244,8 @@ export async function getGroupRoster(
         relationshipType,
         sinceDay: edge.sinceDay,
         untilDay: edge.untilDay,
+        disposition: edge.disposition,
+        notes: edge.notes,
         locked: edge.locked,
         secret: edge.secret,
         entity: { id: member.id, name: member.name, type: member.type },

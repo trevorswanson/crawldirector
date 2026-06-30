@@ -1,109 +1,35 @@
-import Link from "next/link";
-import { Crown, Lock, Users } from "lucide-react";
+import { Users } from "lucide-react";
 
+import { EntityRow, MembersTree } from "@/components/entities/roster-tree";
+import {
+  RosterEditor,
+  type RosterEditorCandidate,
+} from "@/components/entities/roster-editor";
 import { Kicker } from "@/components/ui/kicker";
-import { TypeDot } from "@/components/ui/type-dot";
-import { formatEntityType } from "@/lib/entities";
-import type { GroupRoster, RosterEntry } from "@/server/services/groups";
-
-function EntityRow({
-  campaignId,
-  entry,
-  leader,
-}: {
-  campaignId: string;
-  entry: RosterEntry;
-  leader?: boolean;
-}) {
-  return (
-    <div className="flex items-center gap-[7px] border border-[var(--line)] px-[10px] py-[8px]">
-      {leader ? (
-        <Crown aria-hidden size={11} style={{ color: "var(--accent)" }} />
-      ) : (
-        <TypeDot type={entry.entity.type} size={7} />
-      )}
-      <Link
-        href={`/campaigns/${campaignId}/entities/${entry.entity.id}`}
-        className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-[var(--ink)] hover:text-[var(--accent)]"
-      >
-        {entry.entity.name}
-      </Link>
-      <span className="font-mono text-[9px] uppercase tracking-[.04em] text-[var(--ink-faint)]">
-        {formatEntityType(entry.entity.type)}
-      </span>
-      {entry.secret && (
-        <span className="font-mono text-[9px] uppercase tracking-[.04em] text-[var(--hot)]">
-          secret
-        </span>
-      )}
-      {entry.locked && (
-        <Lock aria-hidden size={11} style={{ color: "var(--sys)" }} />
-      )}
-    </div>
-  );
-}
-
-// Recursive members tree: each group member nests its own roster beneath it.
-function MembersTree({
-  campaignId,
-  entries,
-}: {
-  campaignId: string;
-  entries: RosterEntry[];
-}) {
-  return (
-    <div className="flex flex-col gap-[6px]">
-      {entries.map((entry) => (
-        <div key={entry.relationshipId}>
-          <EntityRow campaignId={campaignId} entry={entry} />
-          {entry.subRoster && (
-            <div className="mt-[6px] ml-[10px] flex flex-col gap-[6px] border-l border-[var(--line)] pl-[10px]">
-              {entry.subRoster.leaders.length > 0 && (
-                <div className="flex flex-col gap-[6px]">
-                  {entry.subRoster.leaders.map((leader) => (
-                    <EntityRow
-                      key={leader.relationshipId}
-                      campaignId={campaignId}
-                      entry={leader}
-                      leader
-                    />
-                  ))}
-                </div>
-              )}
-              {entry.subRoster.members.length > 0 ? (
-                <MembersTree
-                  campaignId={campaignId}
-                  entries={entry.subRoster.members}
-                />
-              ) : (
-                entry.subRoster.leaders.length === 0 && (
-                  <p className="font-mono text-[10px] text-[var(--ink-faint)]">
-                    No members yet.
-                  </p>
-                )
-              )}
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
+import type { GroupRoster } from "@/server/services/groups";
 
 /**
- * Read-only rollup of a group's membership hierarchy: leaders, direct members,
- * and (for sub-groups like a guild's parties) their members nested beneath.
- * Membership edges are added/removed from the Connections panel — this view
- * just rolls them up (docs/11-roadmap.md M3 group hierarchies).
+ * Rollup of a group's membership hierarchy: leaders, direct members, and (for
+ * sub-groups like a guild's parties) their members nested beneath. For DMs the
+ * group's *direct* leaders/members are editable (add/remove/promote/day-bounds)
+ * via the `RosterEditor`; players and nested sub-rosters stay read-only.
+ * Membership edges are the same any-to-any relationships shown in Connections —
+ * this view just rolls them up (docs/11-roadmap.md M3 group hierarchies).
  */
 export function RosterPanel({
   campaignId,
   roster,
   asOfDay,
+  editable = false,
+  candidates = [],
 }: {
   campaignId: string;
   roster: GroupRoster;
   asOfDay?: number;
+  /** DM-only: render the direct roster as an editable surface. */
+  editable?: boolean;
+  /** Candidate entities for the "add to roster" typeahead (DM only). */
+  candidates?: RosterEditorCandidate[];
 }) {
   const { leaders, members, rolledUpMemberCount } = roster;
   const empty = leaders.length === 0 && members.length === 0;
@@ -119,7 +45,15 @@ export function RosterPanel({
         </Kicker>
       </div>
 
-      {empty ? (
+      {editable ? (
+        <RosterEditor
+          campaignId={campaignId}
+          group={roster.group}
+          leaders={leaders}
+          members={members}
+          candidates={candidates}
+        />
+      ) : empty ? (
         <p className="text-xs text-[var(--ink-faint)]">
           No members yet. Add{" "}
           <span className="font-mono text-[var(--accent)]">MEMBER OF</span> /{" "}
