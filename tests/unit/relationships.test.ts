@@ -95,6 +95,63 @@ describe("relationship service", () => {
     expect(fromTarget[0].other.name).toBe("Carl");
   });
 
+  // M7 game-progression: BOX is a brand-new EntityType served by the generic
+  // entity path (no bespoke `data` descriptor). Its reward graph is modeled with
+  // edges — ACHIEVEMENT --GRANTS_BOX--> BOX --CONTAINS--> ITEM — each a canon
+  // write through the review pipeline.
+  it("models the achievement→box→item reward graph through the pipeline", async () => {
+    const owner = await makeUser("owner-box@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+
+    const make = (type: "ACHIEVEMENT" | "BOX" | "ITEM", name: string) =>
+      createGenericEntity(owner.id, campaign.id, {
+        type,
+        name,
+        summary: "",
+        description: "",
+        visibility: "DM_ONLY",
+        tags: [],
+      });
+
+    const achievement = await make("ACHIEVEMENT", "Goblin Slayer");
+    const box = await make("BOX", "Bronze Loot Box");
+    const item = await make("ITEM", "Rusty Dagger");
+
+    // A brand-new EntityType persists as canon via the generic path.
+    const boxRow = await prisma.entity.findUnique({ where: { id: box.id } });
+    expect(boxRow?.type).toBe("BOX");
+    expect(boxRow?.status).toBe(CanonStatus.CANON);
+
+    const grant = await createRelationship(owner.id, campaign.id, achievement.id, {
+      type: "GRANTS_BOX",
+      targetId: box.id,
+      secret: false,
+    });
+    const contains = await createRelationship(owner.id, campaign.id, box.id, {
+      type: "CONTAINS",
+      targetId: item.id,
+      secret: false,
+    });
+
+    const grantRow = await prisma.relationship.findUnique({ where: { id: grant.id } });
+    expect(grantRow?.type).toBe("GRANTS_BOX");
+    expect(grantRow?.status).toBe(CanonStatus.CANON);
+    const containsRow = await prisma.relationship.findUnique({
+      where: { id: contains.id },
+    });
+    expect(containsRow?.type).toBe("CONTAINS");
+
+    // The box sits between the achievement (incoming reward) and the item
+    // (outgoing content).
+    const boxConnections = await listConnectionsForEntity(owner.id, campaign.id, box.id);
+    const reward = boxConnections.find((c) => c.type === "GRANTS_BOX");
+    const content = boxConnections.find((c) => c.type === "CONTAINS");
+    expect(reward?.direction).toBe("in");
+    expect(reward?.other.name).toBe("Goblin Slayer");
+    expect(content?.direction).toBe("out");
+    expect(content?.other.name).toBe("Rusty Dagger");
+  });
+
   it("persists optional membership day bounds through create and edit", async () => {
     const owner = await makeUser("owner-membership-bounds@test.com");
     const campaign = await createCampaign(owner.id, { name: "Dungeon" });

@@ -15,9 +15,10 @@ pitch and [`docs/`](./docs) for the full plan.
 ## Current status
 
 🚧 **M0–M5.5 complete; M6 slices 1–6 complete (its "done when" bar met; remaining
-slices blocked on M10/M11); M7 started with the `GRANT_ACHIEVEMENT` event effect.**
-The next M7 work is the rest of game-progression (`BOX` as a new `EntityType` with
-achievement→box rewards + box→item contents) then the player crawler interface.
+slices blocked on M10/M11); M7 game-progression complete (`GRANT_ACHIEVEMENT`
+event effect + the `BOX` `EntityType` with achievement→box `GRANTS_BOX` rewards and
+box→item `CONTAINS` contents).** The next M7 work is the
+visibility-projection-enforced player crawler interface.
 M5.5 (data model hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
 seam, the `MIGRATE_ENTITY_DATA` job, reference-integrity badge + impact-aware
 archive, orphan report, the greenfield Faction satellite, and the Floor satellite
@@ -133,15 +134,18 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
   set-piece generator (waits on M10's generic operation aliases/dependencies) and
   broader actor-profile studio reuse for M11 — are blocked, so M6's "done when" bar
   is met and work has moved to M7.
-- **M7 — Player crawler interface + sharing 🚧.** Started with the
-  **game-progression** sub-thread (no player-UI surface yet). Slice 1: the
-  `GRANT_ACHIEVEMENT` event-effect kind — an event grants a crawler an
-  `EARNED_ACHIEVEMENT` edge to an `ACHIEVEMENT` entity through the same reviewable
-  `APPLY_EVENT_EFFECTS` path as the other effects (idempotent; recipient becomes an
-  `AFFECTED` participant). Next: `BOX` as a new `EntityType` with achievement→box
-  rewards and box→item `CONTAINS` contents, then the visibility-projection-enforced
-  player crawler interface (crawler sheet, inventory, System-message feed, scoped
-  Ask, player suggestions).
+- **M7 — Player crawler interface + sharing 🚧.** The **game-progression**
+  sub-thread (no player-UI surface) is complete. Slice 1: the `GRANT_ACHIEVEMENT`
+  event-effect kind — an event grants a crawler an `EARNED_ACHIEVEMENT` edge to an
+  `ACHIEVEMENT` entity through the same reviewable `APPLY_EVENT_EFFECTS` path as the
+  other effects (idempotent; recipient becomes an `AFFECTED` participant). Slice 2:
+  `BOX` as a new `EntityType` — a creatable generic type with **no bespoke `data`
+  descriptor** (the ADR 0009 brand-new-`EntityType` proof) — plus the reward graph
+  modeled with edges: an `ACHIEVEMENT` grants a `BOX` (`GRANTS_BOX`), and a `BOX`
+  contains `ITEM`s (`CONTAINS`, extended to suggest `BOX → ITEM`), both routed
+  through the existing reviewable relationship pipeline (no new write path). Next:
+  the visibility-projection-enforced player crawler interface (crawler sheet,
+  inventory, System-message feed, scoped Ask, player suggestions).
 
 For per-slice detail (files, tests, decisions) see
 [`docs/PROGRESS.md`](./docs/PROGRESS.md) — its "Open backlog" section is the

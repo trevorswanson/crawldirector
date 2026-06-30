@@ -16,9 +16,11 @@ keyword-scanning every doc.
 All milestones through **M5.5 - Data model hardening** are complete; per-slice detail
 lives in the dated sections below (and older milestones in
 [`PROGRESS-archive.md`](./PROGRESS-archive.md)). The cross-cutting **ADR 0009
-entity-kind registry** is also fully delivered — only the brand-new-`EntityType`
-"proof" remains, and it rides along with M7's `BOX` (see the game-progression item
-under *Deferred design options*).
+entity-kind registry** is fully delivered, including the brand-new-`EntityType`
+"proof": M7's `BOX` (✅ 2026-06-30) is a creatable type carrying no bespoke
+`data.*` fields, so it ships through the generic core path with only enum +
+registry-metadata additions and **no kind descriptor** — exactly as the registry
+intended.
 
 **Active: M6 — System AI persona engine**
 ([05-system-ai-persona.md](./05-system-ai-persona.md)).
@@ -86,13 +88,13 @@ broader actor-profile studio reuse for M11. Keep the M6 work incremental.
 **Now also active: M7 — Player crawler interface + sharing**
 ([11-roadmap.md](./11-roadmap.md)). M6's "done when" bar is met and its remaining
 slices are *blocked* (encounter waits on M10, actor-profile reuse is M11), so the
-lowest unblocked milestone work is M7. Started with the **game-progression**
-sub-thread (no player-UI surface required yet): the `GRANT_ACHIEVEMENT` event
-effect (✅ 2026-06-29, dated entry below). **Next up:** the rest of
-game-progression — `BOX` as a new `EntityType` (the brand-new-`EntityType`
-"proof") with achievement→box rewards and box→item `CONTAINS` contents — then the
-visibility-projection-enforced player crawler interface (crawler sheet, inventory,
-System-message feed, scoped Ask, player suggestions).
+lowest unblocked milestone work is M7. The **game-progression** sub-thread (no
+player-UI surface required yet) is now complete: the `GRANT_ACHIEVEMENT` event
+effect (✅ 2026-06-29) plus `BOX` as a new `EntityType` with achievement→box
+`GRANTS_BOX` rewards and box→item `CONTAINS` contents (✅ 2026-06-30) — both dated
+entries below. **Next up:** the visibility-projection-enforced **player crawler
+interface** (crawler sheet, inventory, System-message feed, scoped Ask, player
+suggestions) — the first M7 player-UI surface.
 
 ### Scheduled roadmap additions (2026-06-19)
 
@@ -125,6 +127,71 @@ M6 remains the next milestone work. The detailed decisions live in
 
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
+
+## M7 — `BOX` entity type + reward/content graph ✅ (2026-06-30)
+
+**Goal:** the rest of the M7 *game-progression* sub-thread — model **loot boxes**
+as a first-class `BOX` `EntityType` and the reward graph the domain model already
+names ([`01-domain-model.md`](./01-domain-model.md): "loot boxes … represented by
+the first-class `BOX` entity type containing items"): an `ACHIEVEMENT` grants a
+`BOX` (`GRANTS_BOX`), and a `BOX` contains `ITEM`s (`CONTAINS`). This is also the
+long-deferred **brand-new-`EntityType` "proof"** for the ADR 0009 entity-kind
+registry: `BOX` carries no bespoke `data.*` fields, so it needs **no kind
+descriptor** — it rides the generic core create/read/visibility path with only
+enum + registry-metadata additions, exactly as the registry intended. The reward
+graph needs **no new service write path**: both edges route through the existing
+reviewable relationship pipeline.
+
+**Decision (model with edges, not bespoke data).** A box's meaning is its place in
+the graph — what grants it (incoming `GRANTS_BOX` from an achievement) and what it
+holds (outgoing `CONTAINS` to items). So `BOX` ships as a generic type and the two
+relationships carry the semantics; `CONTAINS` already existed (FLOOR/LOCATION →
+ITEM) and simply gains `BOX` as a suggested source. A box **tier/rarity** bespoke
+field (Bronze/Silver/Gold/…) is a plausible future `data.*` follow-up but is
+deliberately out of scope here to keep the EntityType proof minimal.
+
+- [x] **Enums + migration** ([`schema.prisma`](../prisma/schema.prisma), migration
+      `20260630183827_m7_box_entity_type`): additive `EntityType.BOX` +
+      `RelationshipType.GRANTS_BOX` (`ALTER TYPE … ADD VALUE`; drift gate clean).
+- [x] **Validation** ([`validation.ts`](../src/lib/validation.ts)): `BOX` added to
+      `entityTypeValues` **and** `genericEntityTypeValues` (so it's a creatable
+      generic type, not a satellite kind like CRAWLER); `GRANTS_BOX` added to
+      `relationshipTypeValues`.
+- [x] **Relationship registry** ([`relationship-types.ts`](../src/lib/relationship-types.ts)):
+      a `GRANTS_BOX` descriptor in the GAME group (`ACHIEVEMENT → BOX`, "grants
+      box" / "granted by"); `CONTAINS` gains `BOX` in `sourceTypes` so `BOX → ITEM`
+      is a suggested edge. The exhaustive `Record<RelationshipTypeValue, …>` makes
+      the new descriptor compiler-required.
+- [x] **Presentation** ([`entities.ts`](../src/lib/entities.ts)): `BOX` joins the
+      loot/gear `var(--import)` type-dot color (alongside ITEM); the label derives
+      to "Box" via the existing title-caser (no map to touch).
+- [x] **Lore seeding** ([`seeding.ts`](../src/server/services/seeding.ts)): the
+      DCC classifier now maps box signals to `BOX` instead of `ITEM`, so BYO-lore
+      campaigns import loot boxes as the new type — a `" Box"` title ending, an
+      `"is a box"`/`"is a loot box"` body, and a **word-boundary** `\bbox\b` title
+      keyword (so `Boombox`/`icebox` stay `ITEM`). DCC's loot boxes are tier-named
+      (`Gold Box`, `Silver Box`, …), so these high-signal cases are reliably boxes.
+- [x] **Tests:** pure picker/label coverage (GRANTS_BOX suggested + defaulted +
+      directional labels for ACHIEVEMENT→BOX; CONTAINS suggested + defaulted for
+      BOX→ITEM) in
+      [`relationship-types.test.ts`](../tests/unit/relationship-types.test.ts); a
+      DB-backed end-to-end reward-graph case (a `BOX` persists as CANON via the
+      generic path; `ACHIEVEMENT --GRANTS_BOX--> BOX --CONTAINS--> ITEM` route
+      through the pipeline; the box's incoming reward + outgoing content surface in
+      `listConnectionsForEntity`) in
+      [`relationships.test.ts`](../tests/unit/relationships.test.ts).
+- [x] **Docs:** the domain model + data schema already named `BOX`/`GRANTS_BOX`
+      (this realizes them); fixed a duplicate `CONTAINS` in
+      [`09-data-schema.md`](./09-data-schema.md)'s `RelationshipType` enum listing
+      and folded `GRANTS_BOX` into the game-edges line to match the real enum order.
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors; pre-existing
+      settings-action warnings only), `npm run build` (routes unchanged), and the
+      full coverage gate green (128 files / **1769 tests**; statements 95.29%,
+      branches 88.94%, functions 96.56%, lines 96.92%). **In-browser** (reseeded
+      `dcc`, authed as `dm@example.com`): the World Browser quick-create dropdown
+      offers "Box" (25 types); creating "Bronze Loot Box" as a BOX persisted as
+      `type=BOX / status=CANON` (DB-confirmed) and rendered as a CANON card with the
+      loot-colored type dot, no console errors.
 
 ## M7 — `GRANT_ACHIEVEMENT` event-effect kind ✅ (2026-06-29)
 
@@ -858,8 +925,8 @@ prompt. Branch: `codex/m6-persona-foundation`. Schema change.
       - **AI Providers**: BYO API keys configuration.
 - [ ] **Game-progression modeling (M7).** Implement:
       - [x] **Event achievement grants**: Allow events to grant achievements to crawlers via a structured `GRANT_ACHIEVEMENT` event effect. ✅ 2026-06-29 (dated entry below).
-      - **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (e.g. via `GRANTS_BOX` relationships).
-      - **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities).
+      - [x] **Achievement box rewards**: Model `BOX` as a new `EntityType`. Allow achievements to grant boxes (via `GRANTS_BOX` relationships). ✅ 2026-06-30 (dated entry below).
+      - [x] **Box contents**: Support boxes containing items (using `CONTAINS` relationships from box entities to item entities). ✅ 2026-06-30 (dated entry below).
 
 ---
 
