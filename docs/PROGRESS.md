@@ -261,6 +261,70 @@ Non-group pages have no roster IDs and keep listing membership as before.
       only that edge from Connections. No new console errors appeared during
       either verified page load.
 
+## Backlog — Roster editor (groups) ✅ (2026-06-29)
+
+**Goal:** the editor half of the "Roster ↔ connections dedup + roster editor"
+backlog item. The dedup (2026-06-27) made a group's main-pane roster and the
+Connections pane stop double-rendering the same membership edges; this makes the
+roster pane itself **editable** for DMs — add/remove members and leaders,
+promote/demote, and edit day-bounds — reusing the existing relationship actions
+(no service-layer write path added). Only a group's **direct** roster is
+editable; nested sub-group rosters stay read-only (they're edited on their own
+group's page, matching how the dedup only hid top-level edges).
+
+**Decision (co-leaders allowed; lossless edits).** A group may have multiple
+`LEADS` edges — "set leader" is adding a `LEADS` edge (or promoting a member),
+"clear leader" is removing it (or demoting). No leader-uniqueness is enforced (it
+matches the any-to-any model and prior behavior). Because `updateRelationship`
+rewrites *every* mutable field (nulling any it isn't given), a day-bounds edit or
+a promote/demote would silently wipe an edge's `disposition`/`notes`/`secret`; so
+those are now carried on `RosterEntry` and round-tripped as preserved hidden
+fields (secret as a checkbox on edit, a `value="true"` hidden input on
+promote/demote). Verified in-browser: promoting a member to leader kept its
+`sinceDay`/`disposition`/`notes` intact.
+
+- [x] **Service** ([`groups.ts`](../src/server/services/groups.ts)): additive
+      `disposition`/`notes` on `RosterEntry` + the roster edge select, so the
+      editor can round-trip a membership edit losslessly. No new write path —
+      every roster mutation routes through the existing
+      `createRelationship`/`updateRelationship`/`archiveRelationship`/
+      `setRelationshipLock` (auto-approved DM change sets, invariant #1).
+- [x] **Shared tree** ([`roster-tree.tsx`](../src/components/entities/roster-tree.tsx)):
+      extracted the read-only `EntityRow`/`MembersTree` + a new `SubRosterBlock`
+      out of `roster-panel.tsx` so both the read-only panel and the client editor
+      render nested sub-rosters with identical markup and no circular import.
+- [x] **Editor** ([`roster-editor.tsx`](../src/components/entities/roster-editor.tsx)):
+      DM-only client component — direct leader/member rows with promote/demote
+      (LEADS↔MEMBER_OF; suppressed for `PART_OF` sub-group edges), an inline
+      day-bounds edit form (secret toggle, role + disposition/notes preserved),
+      remove-with-undo, a lock toggle, and an "Add to roster" form (entity
+      typeahead + Member/Leader role + day-bounds + secret) filed as an incoming
+      `MEMBER_OF`/`LEADS` edge. Locked edges are read-only (unlock only). The add
+      picker excludes the group itself and current direct roster entities.
+- [x] **Panel + page** ([`roster-panel.tsx`](../src/components/entities/roster-panel.tsx),
+      [`entities/[entityId]/page.tsx`](<../src/app/(dm)/campaigns/[id]/entities/[entityId]/page.tsx>)):
+      `RosterPanel` gained `editable`/`candidates`; the entity page passes
+      `editable={isDm}` + the campaign candidate list. Players keep the read-only
+      roll-up.
+- [x] **Tests:** new
+      [`roster-editor.test.tsx`](../tests/unit/roster-editor.test.tsx) (render,
+      remove+undo, promote preserves fields, demote, lossless day-bounds edit,
+      update-error keeps the form open, add member/leader FormData shape, locked
+      read-only, no promote/demote on `PART_OF`, nested sub-roster read-only); a
+      `getGroupRoster` field round-trip case in
+      [`groups.test.ts`](../tests/unit/groups.test.ts); `roster-panel.test.tsx`
+      stubs the actions module (the read-only path now statically imports the
+      editor).
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors;
+      pre-existing settings-action warnings only), `npm run build`, and the full
+      coverage gate green (127 files / **1745 tests**; statements 95.36%, branches
+      88.99%, functions 96.64%, lines 97%). **In-browser** (reseeded `dcc`, authed
+      as `dm@example.com`, a seeded PARTY with two members + a leader): the editor
+      renders Leaders/Members with controls; promoting Donut V → leader kept
+      `sinceDay:2`/`disposition:30`/`notes:"eager"` (DB-confirmed) and produced
+      co-leaders; adding "Outsider V" filed the edge and re-rolled the roster; the
+      Connections dedup note tracked the new edge count; no console errors.
+
 ## Testing — Branch-coverage ratchet (85→88) ✅ (2026-06-27)
 
 **Goal:** push aggregate branch coverage up and raise the CI floor, since the
@@ -648,8 +712,9 @@ prompt. Branch: `codex/m6-persona-foundation`. Schema change.
       canon write (mirrors the `readKindData` lazy-upgrade seam; honors invariant
       #1). A DM who wants the terse "Day N" phrasing uses the existing `label`
       override.
-- [ ] **Roster ↔ connections dedup + roster editor (groups).** For PARTY/GUILD/
-      FACTION/ORGANIZATION the main-pane roster (`getGroupRoster`,
+- [x] **Roster ↔ connections dedup + roster editor (groups).** ✅ Both halves
+      shipped (dedup 2026-06-27, editor 2026-06-29 — dated entries above). For
+      PARTY/GUILD/FACTION/ORGANIZATION the main-pane roster (`getGroupRoster`,
       [`groups.ts`](../src/server/services/groups.ts)) and the side connections pane
       show the *same* MEMBER_OF/LEADS/PART_OF edges, because
       `listConnectionsForEntity` ([`relationships.ts`](../src/server/services/relationships.ts))
@@ -662,13 +727,14 @@ prompt. Branch: `codex/m6-persona-foundation`. Schema change.
         snapshot are hidden. Outgoing membership and former/future incoming
         membership stay visible and actionable. A "N membership edge(s) shown in
         the roster above" note keeps the hide explicit.
-      - **Editor:** make the roster pane editable (add/remove member, set/clear
-        leader, edit day-bounds) reusing existing actions
-        ([`actions.ts`](<../src/app/(dm)/actions.ts>)): `createRelationshipAction`
-        (with the `direction="in"` toggle), `updateRelationshipAction`,
-        `archiveRelationshipAction`, `toggleRelationshipLockAction` — no
-        service-layer change. **Open question:** enforce a single leader, or allow
-        co-leaders? (no uniqueness today).
+      - [x] **Editor.** ✅ 2026-06-29 (dated entry above). The direct roster pane
+        is editable for DMs — add/remove member or leader, promote/demote, edit
+        day-bounds — reusing `createRelationshipAction` (`direction="in"`),
+        `updateRelationshipAction`, `archiveRelationshipAction`/
+        `restoreRelationshipAction`, and `toggleRelationshipLockAction`. The only
+        service touch was additive (`disposition`/`notes` on `RosterEntry`) so an
+        edit round-trips losslessly. **Open question resolved:** co-leaders are
+        allowed (no leader-uniqueness enforced — matches the any-to-any model).
 - [ ] **Reconcile `PART_OF` overload (minor).** It's registered SPATIAL
       (location→floor) in [`relationship-types.ts`](../src/lib/relationship-types.ts)
       but `getGroupRoster` also uses it for party-in-guild roll-up, and its

@@ -262,6 +262,29 @@ describe("getGroupRoster", () => {
     expect(day12?.rolledUpMemberCount).toBe(2);
   });
 
+  it("carries the edge's disposition and notes onto roster entries", async () => {
+    const dm = await makeUser("dm-roster-fields@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    const party = await makeEntity(dm.id, campaign.id, "PARTY", "Party");
+    const carl = await makeEntity(dm.id, campaign.id, "NPC", "Carl");
+
+    // The roster editor round-trips these on an edit, so getGroupRoster must
+    // expose them (a bare day-bounds edit would otherwise null them out).
+    await createRelationship(dm.id, campaign.id, carl.id, {
+      type: "MEMBER_OF",
+      targetId: party.id,
+      disposition: 42,
+      notes: "trusted lieutenant",
+      sinceDay: 3,
+    });
+
+    const roster = await getGroupRoster(dm.id, campaign.id, party.id);
+    const carlEntry = roster?.members.find((m) => m.entity.name === "Carl");
+    expect(carlEntry?.disposition).toBe(42);
+    expect(carlEntry?.notes).toBe("trusted lieutenant");
+    expect(carlEntry?.sinceDay).toBe(3);
+  });
+
   it("treats bounded historical memberships as inactive in the current roster", async () => {
     const dm = await makeUser("dm-current-bounds@test.com");
     const campaign = await createCampaign(dm.id, { name: "Crawl" });
