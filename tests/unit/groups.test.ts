@@ -273,6 +273,7 @@ describe("getGroupRoster", () => {
     await createRelationship(dm.id, campaign.id, carl.id, {
       type: "MEMBER_OF",
       targetId: party.id,
+      secret: false,
       disposition: 42,
       notes: "trusted lieutenant",
       sinceDay: 3,
