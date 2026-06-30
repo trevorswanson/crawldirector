@@ -165,6 +165,12 @@ deliberately out of scope here to keep the EntityType proof minimal.
 - [x] **Presentation** ([`entities.ts`](../src/lib/entities.ts)): `BOX` joins the
       loot/gear `var(--import)` type-dot color (alongside ITEM); the label derives
       to "Box" via the existing title-caser (no map to touch).
+- [x] **Lore seeding** ([`seeding.ts`](../src/server/services/seeding.ts)): the
+      DCC classifier now maps box signals to `BOX` instead of `ITEM`, so BYO-lore
+      campaigns import loot boxes as the new type — a `" Box"` title ending, an
+      `"is a box"`/`"is a loot box"` body, and a **word-boundary** `\bbox\b` title
+      keyword (so `Boombox`/`icebox` stay `ITEM`). DCC's loot boxes are tier-named
+      (`Gold Box`, `Silver Box`, …), so these high-signal cases are reliably boxes.
 - [x] **Tests:** pure picker/label coverage (GRANTS_BOX suggested + defaulted +
       directional labels for ACHIEVEMENT→BOX; CONTAINS suggested + defaulted for
       BOX→ITEM) in

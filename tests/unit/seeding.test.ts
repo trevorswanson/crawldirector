@@ -59,7 +59,13 @@ describe("seeding heuristics", () => {
     expect(classifyEntity("Sergeant-at-Arms Class", "")).toBe("CLASS");
     expect(classifyEntity("Scroll of Meat Hooks", "")).toBe("ITEM");
     expect(classifyEntity("Borant Potion", "")).toBe("ITEM");
-    expect(classifyEntity("Golden Box", "")).toBe("ITEM");
+    // DCC loot boxes are a first-class BOX type (not generic ITEMs): a " Box"
+    // title ending, an "is a box" body, and a word-boundary "box" keyword all
+    // classify as BOX, while box-as-substring (e.g. "Boombox") stays ITEM.
+    expect(classifyEntity("Golden Box", "")).toBe("BOX");
+    expect(classifyEntity("Mystery", "is a box of legendary loot")).toBe("BOX");
+    expect(classifyEntity("Cursed Box of Holding", "")).toBe("BOX");
+    expect(classifyEntity("Borant Boombox", "")).toBe("ITEM");
     expect(classifyEntity("Silver Ring", "")).toBe("ITEM");
     expect(classifyEntity("Shrink Wand", "")).toBe("ITEM");
     expect(classifyEntity("Shango Deity", "")).toBe("DEITY");

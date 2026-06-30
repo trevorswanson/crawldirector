@@ -48,7 +48,11 @@ export function classifyEntity(title: string, bodyText: string): EntityType {
   if (title.endsWith(" Spell") || titleLower.includes("spell")) return EntityType.SPELL;
   if (title.endsWith(" Floor") || titleLower.includes("floor")) return EntityType.FLOOR;
   if (title.endsWith(" Class") || titleLower.includes("class")) return EntityType.CLASS;
-  if (title.endsWith(" Potion") || title.startsWith("Scroll of ") || title.endsWith(" Box") || title.endsWith(" Ring") || title.endsWith(" Wand")) return EntityType.ITEM;
+  // DCC loot boxes are tier-named ("Gold Box", "Silver Box", …) and are now a
+  // first-class BOX type (achievement→box→item reward graph), so a title ending
+  // in " Box" classifies as BOX rather than a generic ITEM.
+  if (title.endsWith(" Box")) return EntityType.BOX;
+  if (title.endsWith(" Potion") || title.startsWith("Scroll of ") || title.endsWith(" Ring") || title.endsWith(" Wand")) return EntityType.ITEM;
   if (title.endsWith(" Deity") || title.endsWith(" God") || ["shango", "emberus", "ogun", "legba", "oshun", "asojano", "inle", "yemaya"].includes(titleLower)) return EntityType.DEITY;
   if (["carl", "donut", "katia grim", "bautista", "prepotente", "lucia", "hekla"].includes(titleLower)) return EntityType.CRAWLER;
   if (["the system", "system ai"].includes(titleLower)) return EntityType.SYSTEM_AI;
@@ -77,7 +81,8 @@ export function classifyEntity(title: string, bodyText: string): EntityType {
   if (firstLines.includes("is a corporation") || firstLines.includes("is a company") || firstLines.includes("syndicate")) return EntityType.ORGANIZATION;
   if (firstLines.includes("is a sponsor")) return EntityType.SPONSOR;
   if (firstLines.includes("is a show") || firstLines.includes("talk-show") || firstLines.includes("broadcast")) return EntityType.SHOW;
-  if (firstLines.includes("is a card") || firstLines.includes("is a potion") || firstLines.includes("is a scroll") || firstLines.includes("is an item") || firstLines.includes("is a weapon") || firstLines.includes("is a shield") || firstLines.includes("is a ring") || firstLines.includes("is a box") || firstLines.includes("is a wand") || firstLines.includes("is a brick") || firstLines.includes("is a case") || firstLines.includes("toothpaste")) return EntityType.ITEM;
+  if (firstLines.includes("is a box") || firstLines.includes("is a loot box")) return EntityType.BOX;
+  if (firstLines.includes("is a card") || firstLines.includes("is a potion") || firstLines.includes("is a scroll") || firstLines.includes("is an item") || firstLines.includes("is a weapon") || firstLines.includes("is a shield") || firstLines.includes("is a ring") || firstLines.includes("is a wand") || firstLines.includes("is a brick") || firstLines.includes("is a case") || firstLines.includes("toothpaste")) return EntityType.ITEM;
 
   // Title keyword matching fallback
   if (/\bsponsor\b/i.test(title)) return EntityType.SPONSOR;
@@ -90,7 +95,8 @@ export function classifyEntity(title: string, bodyText: string): EntityType {
   if (/\bspecies\b/i.test(title) || /\brace\b/i.test(title)) return EntityType.SPECIES;
   if (/\bneighborhood\b/i.test(title) || /\btown\b/i.test(title) || /\bvillage\b/i.test(title)) return EntityType.NEIGHBORHOOD;
   if (/\blocation\b/i.test(title) || /\bcastle\b/i.test(title) || /\bhouse\b/i.test(title) || /\broom\b/i.test(title) || /\bpalace\b/i.test(title) || /\btemple\b/i.test(title) || /\bbridge\b/i.test(title) || /\bclub\b/i.test(title)) return EntityType.LOCATION;
-  if (titleLower.includes("potion") || titleLower.includes("scroll") || titleLower.includes("toothpaste") || titleLower.includes("box") || titleLower.includes("wand") || titleLower.includes("ring") || titleLower.includes("crown") || titleLower.includes("armor") || titleLower.includes("weapon") || titleLower.includes("shield") || titleLower.includes("hat") || titleLower.includes("boot") || titleLower.includes("cloak") || titleLower.includes("glove") || titleLower.includes("amulet") || titleLower.includes("key") || titleLower.includes("card") || titleLower.includes("book") || titleLower.includes("bracers") || titleLower.includes("blade") || titleLower.includes("sword") || titleLower.includes("bow") || titleLower.includes("case") || titleLower.includes("bricks") || titleLower.includes("toothpaste") || titleLower.includes("bomb") || titleLower.includes("music") || titleLower.includes("tome") || titleLower.includes("manual")) return EntityType.ITEM;
+  if (/\bbox\b/i.test(title)) return EntityType.BOX;
+  if (titleLower.includes("potion") || titleLower.includes("scroll") || titleLower.includes("toothpaste") || titleLower.includes("wand") || titleLower.includes("ring") || titleLower.includes("crown") || titleLower.includes("armor") || titleLower.includes("weapon") || titleLower.includes("shield") || titleLower.includes("hat") || titleLower.includes("boot") || titleLower.includes("cloak") || titleLower.includes("glove") || titleLower.includes("amulet") || titleLower.includes("key") || titleLower.includes("card") || titleLower.includes("book") || titleLower.includes("bracers") || titleLower.includes("blade") || titleLower.includes("sword") || titleLower.includes("bow") || titleLower.includes("case") || titleLower.includes("bricks") || titleLower.includes("toothpaste") || titleLower.includes("bomb") || titleLower.includes("music") || titleLower.includes("tome") || titleLower.includes("manual")) return EntityType.ITEM;
 
   // Broader body-text catchalls
   if (textLower.includes("quest") || textLower.includes("achievement")) return EntityType.ACHIEVEMENT;
