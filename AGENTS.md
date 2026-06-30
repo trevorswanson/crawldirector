@@ -279,10 +279,11 @@ Every change ships with the tests that cover it; the bar rises as the product
 grows.
 
 - **High coverage floors**, enforced in CI. The exact per-metric floors live in
-  `vitest.config.ts`. Current gate: **95% statements / 85% branches / 95%
-  functions / 95% lines**. `FxToggle` and `DmNav` render/interaction tests now
-  exist; the remaining ratchet is branch coverage, which should move toward 90%
-  once aggregate coverage supports it. The `build-and-test` job runs
+  `vitest.config.ts`. Current gate: **95% statements / 88% branches / 96%
+  functions / 96% lines** (branches + funcs/lines ratcheted up 2026-06-27 as
+  aggregate reached ~88.9% / 96.8% / 97.0%). Branch coverage is still the metric
+  to keep ratcheting toward 90% — the big remaining gaps are `review.ts` and
+  `actions.ts`. The `build-and-test` job runs
   `npm run test:coverage`, and those
   thresholds make Vitest exit non-zero (failing the merge) if aggregate coverage
   drops below a floor. Treat them as a **floor, not a target** — ratchet them

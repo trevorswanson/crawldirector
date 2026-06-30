@@ -216,6 +216,77 @@ rather than the entity-kind registry.
       editing the Image URL and saving round-trips through the action → review
       apply → re-rendered header, no console errors.
 
+## Backlog — Roster ↔ connections dedup (groups) ✅ (2026-06-27)
+
+**Goal:** the dedup half of the "Roster ↔ connections dedup + roster editor"
+backlog item. On a group entity's detail page (PARTY/GUILD/FACTION/ORGANIZATION)
+the rolled-up **roster** panel and the **connections** pane rendered the *same*
+membership edges, because [`listConnectionsForEntity`](../src/server/services/relationships.ts)
+returns every edge touching the entity while the roster
+([`getGroupRoster`](../src/server/services/groups.ts)) already rolls up the
+group's incoming MEMBER_OF/PART_OF/LEADS edges. The roster **editor** half (making
+the roster pane editable) stays open.
+
+**Decision (hide exact roster edges only, never silent).** The roster rolls up a
+group's *incoming* membership (member/leader → group), filtered to the selected
+`rosterDay` (or current membership by default). A group's *outgoing* membership —
+e.g. a party that is `PART_OF` a guild — appears in the *parent's* roster, not its
+own. Former/future incoming memberships are also absent from the selected roster
+snapshot and must remain editable in Connections. The dedup therefore filters by
+the exact relationship IDs returned by `getGroupRoster`, and surfaces a "N
+membership edge(s) shown in the roster above" note so the omission is explicit.
+Non-group pages have no roster IDs and keep listing membership as before.
+
+- [x] **UI** ([`connections-panel.tsx`](../src/components/entities/connections-panel.tsx)):
+      new optional `rosterRelationshipIds` prop; the panel hides only those exact
+      edges, counts them, and renders the roster note. The empty state ("No
+      relationships yet.") is suppressed when the only edges are roster entries
+      (the note explains the list instead).
+- [x] **Page** ([`entities/[entityId]/page.tsx`](<../src/app/(dm)/campaigns/[id]/entities/[entityId]/page.tsx>)):
+      passes the top-level leader/member relationship IDs from the actual roster
+      snapshot; nested roster edges do not touch the viewed root group and cannot
+      appear in its Connections list.
+- [x] **Tests:** dedup hides current roster membership while keeping a former
+      incoming membership, an outgoing `PART_OF`, and a non-membership `ALLY_OF`;
+      asserts the deduped count, plural/singular roster note, and empty state in
+      [`connections-panel.test.tsx`](../tests/unit/connections-panel.test.tsx);
+      the page passes only the day-filtered roster's relationship IDs for a PARTY
+      and none for a non-group entity in [`entity-page.test.tsx`](../tests/unit/entity-page.test.tsx).
+- [x] **Verification:** `npm run typecheck`, `npm run lint`, and `npm run build`
+      pass; the full coverage gate is green (126 files / 1,732 tests; statements
+      95.42%, branches 88.95%, functions 96.75%, lines 97.04%). Rendered QA used
+      a fabricated historical Carl → Team Princess Donut membership (`Day 1 →
+      10`): the current roster omitted Carl while Connections kept the edge and
+      its edit controls; `?rosterDay=5` moved Carl into the roster and removed
+      only that edge from Connections. No new console errors appeared during
+      either verified page load.
+
+## Testing — Branch-coverage ratchet (85→88) ✅ (2026-06-27)
+
+**Goal:** push aggregate branch coverage up and raise the CI floor, since the
+gate had been parked at 85% branches while aggregate sat ~88.5%. Targeted the
+files with the most *reachable* uncovered branches (the V8 report's defensive
+fail-closed guards behind `net.isIP` validation in `ssrf.ts` are deliberately
+left — they're unreachable through the public API).
+
+- [x] **`ssrf.ts`** ([`ai-ssrf.test.ts`](../tests/unit/ai-ssrf.test.ts), 80.5%→
+      ~98% branches): multicast IPv6 (`ff02::1`) + unparseable IPv4-mapped form
+      (`::ffff:1:2:3`, ≠2 hex groups → fails closed); `guardedLookup`'s DNS-error
+      passthrough; `assertPublicEndpoint`'s unresolvable-host `catch`;
+      `createSafeFetch` with URL and Request inputs (not just strings) and the
+      `init ?? {}` fork (mocked global fetch, with/without `init`).
+- [x] **`searchEntityCandidates`** ([`search.test.ts`](../tests/unit/search.test.ts),
+      previously untested → covered): blank query short-circuit, id/name/type
+      candidate shape, `types` filter, `excludeIds` drop, and the `limit` clamp.
+- [x] **`getActiveSystemPersonaPrompt`** ([`persona-review.test.ts`](../tests/unit/persona-review.test.ts)):
+      the recompile-on-read fallback when a snapshot's cached `compiledPrompt` is
+      absent (also exercises `asRecord`'s non-object branch via nulled dials).
+- [x] **Floor raised** ([`vitest.config.ts`](../vitest.config.ts)): branches
+      **85→88**, functions/lines **95→96**; statements stays 95 (~0.4 margin).
+- [x] **Verification:** full coverage gate green at the new floors (126 files /
+      **1732 tests**; statements 95.4%, branches 88.91%, functions 96.75%, lines
+      97.03%). +31 branches covered (7199→7230).
+
 ## M6 — Persona-aware dungeon-content generator (slice 6) ✅ (2026-06-22)
 
 **Goal:** the roadmap's "full persona-aware generator family" — give the DM a way
@@ -583,10 +654,14 @@ prompt. Branch: `codex/m6-persona-foundation`. Schema change.
       show the *same* MEMBER_OF/LEADS/PART_OF edges, because
       `listConnectionsForEntity` ([`relationships.ts`](../src/server/services/relationships.ts))
       returns all edges unfiltered.
-      - **Dedup:** add an `excludeTypes` prop to
-        [`connections-panel.tsx`](../src/components/entities/connections-panel.tsx)
-        and pass `{MEMBER_OF, LEADS, PART_OF}` for group types from the entity
-        detail page, with a "membership shown in roster above" note (no silent hide).
+      - [x] **Dedup.** ✅ 2026-06-27 (dated entry below). Added a
+        `rosterRelationshipIds` prop to
+        [`connections-panel.tsx`](../src/components/entities/connections-panel.tsx);
+        the entity detail page passes the exact top-level relationship IDs from
+        `getGroupRoster`. Only edges rendered by the selected/current roster
+        snapshot are hidden. Outgoing membership and former/future incoming
+        membership stay visible and actionable. A "N membership edge(s) shown in
+        the roster above" note keeps the hide explicit.
       - **Editor:** make the roster pane editable (add/remove member, set/clear
         leader, edit day-bounds) reusing existing actions
         ([`actions.ts`](<../src/app/(dm)/actions.ts>)): `createRelationshipAction`
@@ -600,9 +675,10 @@ prompt. Branch: `codex/m6-persona-foundation`. Schema change.
       `sourceTypes` exclude `PARTY` so the create-UI won't suggest it there. Decide:
       broaden PART_OF's registry metadata, or split a distinct parties-in-guild
       membership type.
-- [ ] **Connections pane should honor `rosterDay`/`asOfDay` (minor).** The roster
-      filters time-bounded membership by day; the connections pane always shows
-      current edges. Thread the day param into the pane, or document the difference.
+- [x] **Connections dedup honors `rosterDay`/`asOfDay`.** ✅ 2026-06-27. The
+      page passes the actual day-filtered roster relationship IDs into Connections,
+      so only edges visible in that snapshot are deduplicated; non-current edges
+      remain available for edit/archive.
 
 ### Deferred design options, not current blockers
 
@@ -617,10 +693,14 @@ prompt. Branch: `codex/m6-persona-foundation`. Schema change.
       uncertainty, sub-floor "current zone," and per-crawler spatial history
       beyond the event log remain intentionally out of scope unless a campaign
       needs them.
-- [ ] **Coverage ratchet.** `FxToggle` and `DmNav` render/interaction tests now
-      exist. The current gate is 95% statements / 85% branches / 95% functions /
-      95% lines; raise the branch floor toward 90% when aggregate branch coverage
-      supports it.
+- [ ] **Coverage ratchet.** The gate is now **95% statements / 88% branches /
+      96% functions / 96% lines** (branches 85→88, funcs/lines 95→96 on
+      2026-06-27, after adding `ssrf.ts` / `searchEntityCandidates` /
+      persona recompile-fallback tests pushed aggregate to ~88.9% branches /
+      96.8% funcs / 97.0% lines — dated entry below). Keep raising the branch
+      floor toward 90%; the largest remaining uncovered-branch files are
+      `review.ts` (~239 uncovered) and `actions.ts` (~83), so meaningful further
+      gains live there.
 - [ ] **Campaign settings page redesign & expansion (M9).** Redesign the settings
       page `/campaigns/[id]/settings` to use the three-pane layout. The middle
       pane will act as a sub-nav with options:

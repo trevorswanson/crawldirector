@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
-import { JobKind, JobStatus, Role } from "@/generated/prisma/client";
+import { EntityType, JobKind, JobStatus, Role } from "@/generated/prisma/client";
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
 import {
@@ -24,7 +24,11 @@ import {
   buildRelationshipContent,
   reindexCampaign,
 } from "@/server/services/search-index";
-import { buildSearchDocSearchSql, searchCanon } from "@/server/services/search";
+import {
+  buildSearchDocSearchSql,
+  searchCanon,
+  searchEntityCandidates,
+} from "@/server/services/search";
 
 function makeUser(email: string) {
   return prisma.user.create({ data: { email } });
@@ -951,5 +955,63 @@ describe("reindexCampaign", () => {
     expect(
       await prisma.searchDoc.count({ where: { campaignId: campaign.id } }),
     ).toBe(0);
+  });
+});
+
+describe("searchEntityCandidates", () => {
+  it("returns an empty list for a blank query without touching the index", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Dungeon" });
+    await makeEntity(dm.id, campaign.id, { name: "Goblin Scout" });
+
+    expect(await searchEntityCandidates(dm.id, campaign.id, "   ")).toEqual([]);
+  });
+
+  it("returns id/name/type candidates matching the query", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Dungeon" });
+    const goblin = await makeEntity(dm.id, campaign.id, {
+      name: "Goblin Scout",
+      summary: "a wary raider",
+    });
+
+    const candidates = await searchEntityCandidates(dm.id, campaign.id, "goblin");
+    expect(candidates).toContainEqual({
+      id: goblin.id,
+      name: "Goblin Scout",
+      type: EntityType.NPC,
+    });
+  });
+
+  it("filters by entity type, drops excluded ids, and honors the limit", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Dungeon" });
+    const raider = await makeEntity(dm.id, campaign.id, {
+      name: "Crimson Raider",
+      type: "NPC",
+    });
+    const hall = await makeEntity(dm.id, campaign.id, {
+      name: "Crimson Hall",
+      type: "LOCATION",
+    });
+
+    // Type filter: only LOCATION hits survive.
+    const onlyPlaces = await searchEntityCandidates(dm.id, campaign.id, "crimson", {
+      types: [EntityType.LOCATION],
+    });
+    expect(onlyPlaces.map((c) => c.id)).toEqual([hall.id]);
+
+    // excludeIds removes the NPC but keeps the location.
+    const excluded = await searchEntityCandidates(dm.id, campaign.id, "crimson", {
+      excludeIds: [raider.id],
+    });
+    expect(excluded.map((c) => c.id)).not.toContain(raider.id);
+    expect(excluded.map((c) => c.id)).toContain(hall.id);
+
+    // The limit clamps how many candidates come back even when more match.
+    const limited = await searchEntityCandidates(dm.id, campaign.id, "crimson", {
+      limit: 1,
+    });
+    expect(limited).toHaveLength(1);
   });
 });

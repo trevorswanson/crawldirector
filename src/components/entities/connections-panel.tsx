@@ -444,6 +444,7 @@ export function ConnectionsPanel({
   sourceName = "This entity",
   connections,
   candidates,
+  rosterRelationshipIds,
 }: {
   campaignId: string;
   entityId: string;
@@ -452,6 +453,10 @@ export function ConnectionsPanel({
   sourceName?: string;
   connections: EntityConnection[];
   candidates: ConnectionCandidate[];
+  /** Relationship IDs rendered by the roster snapshot elsewhere on the page.
+   *  Only those exact edges are hidden here, so former/future memberships that
+   *  fall outside the selected roster day remain visible and actionable. */
+  rosterRelationshipIds?: readonly string[];
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -459,9 +464,17 @@ export function ConnectionsPanel({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
   const [removedConnection, setRemovedConnection] = useState<string | null>(null);
-  const visibleConnections = removedConnection
-    ? connections.filter((connection) => connection.id !== removedConnection)
-    : connections;
+  const rosterRelationships = useMemo(
+    () => new Set(rosterRelationshipIds ?? []),
+    [rosterRelationshipIds],
+  );
+  const isInRoster = (connection: EntityConnection) =>
+    rosterRelationships.has(connection.id);
+  const rosterMembershipCount = connections.filter(isInRoster).length;
+  const visibleConnections = connections.filter(
+    (connection) =>
+      connection.id !== removedConnection && !isInRoster(connection),
+  );
 
   const handleSubmit = async (formData: FormData) => {
     setError(null);
@@ -519,7 +532,14 @@ export function ConnectionsPanel({
         </div>
       )}
 
-      {visibleConnections.length === 0 && (
+      {rosterMembershipCount > 0 && (
+        <p className="mb-3 font-mono text-[10px] leading-[1.5] text-[var(--ink-faint)]">
+          {rosterMembershipCount} membership{" "}
+          {rosterMembershipCount === 1 ? "edge" : "edges"} shown in the roster above.
+        </p>
+      )}
+
+      {visibleConnections.length === 0 && rosterMembershipCount === 0 && (
         <p className="text-xs text-[var(--ink-faint)]">No relationships yet.</p>
       )}
 

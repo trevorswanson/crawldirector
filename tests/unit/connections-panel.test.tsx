@@ -597,6 +597,92 @@ describe("ConnectionsPanel", () => {
     expect(screen.getByText("DM-only (secret)")).toBeDefined();
   });
 
+  it("hides only roster-rendered membership edges and keeps non-current membership visible", () => {
+    render(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="party1"
+        sourceType="PARTY"
+        connections={[
+          // Incoming: a crawler is MEMBER_OF this party — shown in the roster above.
+          connection({
+            id: "m1",
+            type: "MEMBER_OF",
+            direction: "in",
+            other: { id: "e2", name: "Donut", type: "CRAWLER" },
+          }),
+          // Incoming LEADS — also rolled up in the roster.
+          connection({
+            id: "m2",
+            type: "LEADS",
+            direction: "in",
+            other: { id: "e3", name: "Carl", type: "CRAWLER" },
+          }),
+          // Incoming but not in this roster snapshot (for example, a former
+          // member whose untilDay is before the selected rosterDay).
+          connection({
+            id: "m-former",
+            type: "MEMBER_OF",
+            direction: "in",
+            untilDay: 12,
+            other: { id: "e5", name: "Former Member", type: "CRAWLER" },
+          }),
+          // Outgoing: this party is PART_OF a guild — NOT in this party's roster.
+          connection({
+            id: "m3",
+            type: "PART_OF",
+            direction: "out",
+            other: { id: "g1", name: "Iron Guild", type: "GUILD" },
+          }),
+          // A non-membership edge stays regardless of direction.
+          connection({
+            id: "a1",
+            type: "ALLY_OF",
+            direction: "out",
+            other: { id: "e4", name: "Mordecai", type: "NPC" },
+          }),
+        ]}
+        candidates={candidates}
+        rosterRelationshipIds={["m1", "m2"]}
+      />,
+    );
+
+    // Only relationship IDs present in this roster snapshot are suppressed.
+    expect(screen.getByText("Connections · 3")).toBeDefined();
+    expect(screen.queryByText("Donut")).toBeNull();
+    expect(screen.queryByText("Carl")).toBeNull();
+    expect(screen.getByText("Former Member")).toBeDefined();
+    expect(screen.getByText("Iron Guild")).toBeDefined();
+    expect(screen.getByText("Mordecai")).toBeDefined();
+    // The hidden membership isn't silently dropped — a note points to the roster.
+    expect(screen.getByText("2 membership edges shown in the roster above.")).toBeDefined();
+  });
+
+  it("shows the singular roster note and suppresses the empty state when all edges are in the roster", () => {
+    render(
+      <ConnectionsPanel
+        campaignId="c1"
+        entityId="party1"
+        sourceType="PARTY"
+        connections={[
+          connection({
+            id: "m1",
+            type: "MEMBER_OF",
+            direction: "in",
+            other: { id: "e2", name: "Donut", type: "CRAWLER" },
+          }),
+        ]}
+        candidates={candidates}
+        rosterRelationshipIds={["m1"]}
+      />,
+    );
+
+    expect(screen.getByText("Connections · 0")).toBeDefined();
+    expect(screen.getByText("1 membership edge shown in the roster above.")).toBeDefined();
+    // The "No relationships yet." empty state would be misleading here.
+    expect(screen.queryByText("No relationships yet.")).toBeNull();
+  });
+
   it("prompts to create more entities when there are no candidates", () => {
     render(
       <ConnectionsPanel
