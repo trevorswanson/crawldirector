@@ -70,4 +70,31 @@ describe("DashboardPage", () => {
       "/campaigns/c2",
     );
   });
+
+  it("routes player memberships to the crawler interface, DM ones to the console", async () => {
+    listCampaignsForUser.mockResolvedValue([
+      {
+        id: "dm1",
+        name: "I run this",
+        summary: "",
+        createdAt: new Date(),
+        members: [{ role: "OWNER" }],
+      },
+      {
+        id: "play1",
+        name: "I play here",
+        summary: "",
+        createdAt: new Date(),
+        members: [{ role: "PLAYER" }],
+      },
+    ]);
+    render(await DashboardPage());
+
+    expect(
+      screen.getByRole("link", { name: /I run this/ }).getAttribute("href"),
+    ).toBe("/campaigns/dm1");
+    expect(
+      screen.getByRole("link", { name: /I play here/ }).getAttribute("href"),
+    ).toBe("/play/campaigns/play1");
+  });
 });
