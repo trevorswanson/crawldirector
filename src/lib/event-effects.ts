@@ -23,13 +23,23 @@ export function describeDialShifts(dialShifts: Record<string, number> | null | u
 }
 
 // Compact, target-agnostic description of an effect's update, e.g. "Gold +500",
-// "Floor = 1", or "Marked dead". The target name is rendered separately by the caller.
-export function describeEffect(effect: EventEffectView): string {
+// "Floor = 1", or "Marked dead". The crawler/persona target name is rendered
+// separately by the caller; an optional `resolveName` lets GRANT_ACHIEVEMENT
+// name the granted achievement (a *second* entity) inline, degrading gracefully
+// when no resolver is supplied.
+export function describeEffect(
+  effect: EventEffectView,
+  resolveName?: (entityId: string) => string,
+): string {
   if (effect.kind === "COLLAPSE_FLOOR") {
     return "Floor collapses → next floor opens";
   }
   if (effect.kind === "PERSONA_SHIFT") {
     return `Persona shift: ${describeDialShifts(effect.dialShifts)}`;
+  }
+  if (effect.kind === "GRANT_ACHIEVEMENT") {
+    const name = effect.achievementId ? resolveName?.(effect.achievementId) : null;
+    return name ? `Earns achievement: ${name}` : "Earns achievement";
   }
   if (effect.kind === "SET_ALIVE") {
     return effect.value ? "Revived (alive)" : "Marked dead";

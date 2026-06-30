@@ -29,6 +29,8 @@ export type EffectRowValue = {
   alive: "alive" | "dead";
   // PERSONA_SHIFT: per-dial delta strings keyed by dial name (empty = no change).
   dialShifts: Record<string, string>;
+  // GRANT_ACHIEVEMENT: the ACHIEVEMENT entity granted to the crawler `target`.
+  achievement: EntityCandidate | null;
   note: string;
 };
 
@@ -46,7 +48,8 @@ export function dialShiftsToStrings(
 
 // Seed an editor row from a projected event effect, resolving the target name
 // from the right candidate pool for the effect's kind (crawler vs. SYSTEM_AI
-// persona). Shared by the entity + campaign timeline edit forms.
+// persona), plus the granted achievement for GRANT_ACHIEVEMENT. Shared by the
+// entity + campaign timeline edit forms.
 export function effectViewToRow(
   effect: {
     id: string;
@@ -57,16 +60,19 @@ export function effectViewToRow(
     valueNumber: number | null;
     value: boolean | null;
     dialShifts: Record<string, number> | null;
+    achievementId: string | null;
     note: string | null;
   },
   options: {
     crawlerCandidates: EntityCandidate[];
     personaCandidates: EntityCandidate[];
+    achievementCandidates?: EntityCandidate[];
     resolveName: (targetId: string) => string;
   },
 ): EffectRowValue {
   const isPersona = eventEffectKindMeta[effect.kind].target === "PERSONA";
   const pool = isPersona ? options.personaCandidates : options.crawlerCandidates;
+  const achievementPool = options.achievementCandidates ?? [];
   return {
     id: effect.id,
     kind: effect.kind,
@@ -82,6 +88,13 @@ export function effectViewToRow(
     valueNumber: effect.valueNumber != null ? String(effect.valueNumber) : "",
     alive: effect.value ? "alive" : "dead",
     dialShifts: dialShiftsToStrings(effect.dialShifts),
+    achievement: effect.achievementId
+      ? achievementPool.find((candidate) => candidate.id === effect.achievementId) ?? {
+          id: effect.achievementId,
+          name: options.resolveName(effect.achievementId),
+          type: "ACHIEVEMENT",
+        }
+      : null,
     note: effect.note ?? "",
   };
 }
@@ -95,6 +108,7 @@ function emptyRow(): EffectRowValue {
     valueNumber: "",
     alive: "dead",
     dialShifts: {},
+    achievement: null,
     note: "",
   };
 }
@@ -103,25 +117,31 @@ function emptyRow(): EffectRowValue {
  * Editor for an event's structured effects (deltas applied to a crawler — or a
  * SYSTEM_AI persona — on approval). Emits indexed `effectKind_N` /
  * `effectTarget_N` / `effectStat_N` / `effectDelta_N` / `effectValueNumber_N` /
- * `effectValue_N` / `effectDial_N_<dial>` / `effectNote_N` / `effectId_N` fields
- * counted by a hidden `effectCount`, parsed by `parseEffectRows`. `candidates`
- * are the campaign's crawler entities (the valid targets for stat/alive effects);
- * `personaCandidates` are the SYSTEM_AI entities a PERSONA_SHIFT can drift.
+ * `effectValue_N` / `effectDial_N_<dial>` / `effectAchievement_N` /
+ * `effectNote_N` / `effectId_N` fields counted by a hidden `effectCount`, parsed
+ * by `parseEffectRows`. `candidates` are the campaign's crawler entities (the
+ * valid targets for stat/alive/grant effects); `personaCandidates` are the
+ * SYSTEM_AI entities a PERSONA_SHIFT can drift; `achievementCandidates` are the
+ * ACHIEVEMENT entities a GRANT_ACHIEVEMENT can grant.
  */
 export function EffectRows({
   candidates,
   personaCandidates = [],
+  achievementCandidates = [],
   initial,
   allowAdd = true,
   searchCandidates,
   searchPersonaCandidates,
+  searchAchievementCandidates,
 }: {
   candidates: EntityCandidate[];
   personaCandidates?: EntityCandidate[];
+  achievementCandidates?: EntityCandidate[];
   initial?: EffectRowValue[];
   allowAdd?: boolean;
   searchCandidates?: (query: string) => Promise<EntityCandidate[]>;
   searchPersonaCandidates?: (query: string) => Promise<EntityCandidate[]>;
+  searchAchievementCandidates?: (query: string) => Promise<EntityCandidate[]>;
 }) {
   const [rows, setRows] = useState(
     (initial ?? []).map((row, index) => ({ key: index, ...row })),
@@ -302,6 +322,15 @@ export function EffectRows({
                 </label>
               ))}
             </div>
+          ) : eventEffectKindMeta[row.kind].usesAchievement ? (
+            <EntityTypeahead
+              name={`effectAchievement_${index}`}
+              candidates={achievementCandidates}
+              searchCandidates={searchAchievementCandidates}
+              value={row.achievement}
+              onChange={(achievement) => patchRow(row.key, { achievement })}
+              placeholder="Search achievement..."
+            />
           ) : null}
           <input
             name={`effectNote_${index}`}

@@ -14,6 +14,8 @@ const candidates = [
 
 const personaCandidates = [{ id: "sys-1", name: "The System", type: "SYSTEM_AI" }];
 
+const achievementCandidates = [{ id: "ach-1", name: "Goblin Slayer", type: "ACHIEVEMENT" }];
+
 const noop = () => {};
 
 afterEach(cleanup);
@@ -30,6 +32,7 @@ describe("EffectOperationEditor", () => {
         valueNumber: null,
         value: null,
         dialShifts: null,
+        achievementEntityId: null,
         note: "Loot",
         before: 500,
         after: 1000,
@@ -43,6 +46,7 @@ describe("EffectOperationEditor", () => {
         valueNumber: null,
         value: false,
         dialShifts: null,
+        achievementEntityId: null,
         note: null,
         before: true,
         after: false,
@@ -92,6 +96,7 @@ describe("EffectOperationEditor", () => {
         valueNumber: null,
         value: null,
         dialShifts: { resentment: 20, compliance: -15 },
+        achievementEntityId: null,
         note: "Court ruling",
       },
     ];
@@ -123,6 +128,47 @@ describe("EffectOperationEditor", () => {
     ).toBe("sys-1");
   });
 
+  it("summarizes an achievement grant and seeds its crawler target + achievement on Edit", () => {
+    const effects: ReviewEffectSeed[] = [
+      {
+        id: "fx-grant",
+        kind: "GRANT_ACHIEVEMENT",
+        targetEntityId: "crawler-1",
+        stat: null,
+        delta: null,
+        valueNumber: null,
+        value: null,
+        dialShifts: null,
+        achievementEntityId: "ach-1",
+        note: null,
+      },
+    ];
+
+    const { container } = render(
+      <EffectOperationEditor
+        action={noop}
+        candidates={candidates}
+        personaCandidates={personaCandidates}
+        achievementCandidates={achievementCandidates}
+        effects={effects}
+        rejected={false}
+      />,
+    );
+
+    // The summary resolves the crawler recipient + names the granted achievement.
+    expect(screen.getByText("Carl")).toBeDefined();
+    expect(screen.getByText("Earns achievement: Goblin Slayer")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit effect 1" }));
+
+    expect(
+      container.querySelector<HTMLInputElement>('input[name="effectTarget_0"]')?.value,
+    ).toBe("crawler-1");
+    expect(
+      container.querySelector<HTMLInputElement>('input[name="effectAchievement_0"]')?.value,
+    ).toBe("ach-1");
+  });
+
   it("falls back to the raw id when the target is not a known crawler", () => {
     const effects: ReviewEffectSeed[] = [
       {
@@ -134,6 +180,7 @@ describe("EffectOperationEditor", () => {
         valueNumber: 40,
         value: null,
         dialShifts: null,
+        achievementEntityId: null,
         note: null,
         before: 120,
         after: 40,
@@ -209,6 +256,7 @@ describe("EffectOperationEditor", () => {
             valueNumber: null,
             value: null,
             dialShifts: null,
+            achievementEntityId: null,
             note: null,
             before: 100,
             after: 150,
@@ -238,6 +286,7 @@ describe("EffectOperationEditor", () => {
             valueNumber: null,
             value: null,
             dialShifts: null,
+            achievementEntityId: null,
             note: null,
           },
           {
@@ -249,6 +298,7 @@ describe("EffectOperationEditor", () => {
             valueNumber: 40,
             value: null,
             dialShifts: null,
+            achievementEntityId: null,
             note: null,
           },
           {
@@ -260,6 +310,7 @@ describe("EffectOperationEditor", () => {
             valueNumber: null,
             value: true,
             dialShifts: null,
+            achievementEntityId: null,
             note: null,
           },
         ]}
@@ -287,6 +338,7 @@ describe("EffectOperationEditor", () => {
             valueNumber: 40,
             value: null,
             dialShifts: null,
+            achievementEntityId: null,
             note: null,
             before: null,
             after: 40,
@@ -314,6 +366,7 @@ describe("EffectOperationEditor", () => {
             valueNumber: null,
             value: null,
             dialShifts: null,
+            achievementEntityId: null,
             note: null,
           },
         ]}

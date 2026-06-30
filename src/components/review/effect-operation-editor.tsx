@@ -26,6 +26,8 @@ export type ReviewEffectSeed = {
   value: boolean | null;
   // PERSONA_SHIFT: per-dial integer deltas. Null for non-persona kinds.
   dialShifts: Record<string, number> | null;
+  // GRANT_ACHIEVEMENT: the ACHIEVEMENT entity granted. Null for non-grant kinds.
+  achievementEntityId: string | null;
   note: string | null;
   before?: number | boolean | null;
   after?: number | boolean | null;
@@ -40,12 +42,19 @@ export type ReviewEffectSeed = {
  */
 // Compact, target-prefixed description of one effect for the read-only summary,
 // e.g. "Gold +500", "HP = 40", "Marked dead".
-function describeSeed(seed: ReviewEffectSeed): string {
+function describeSeed(
+  seed: ReviewEffectSeed,
+  resolveName?: (entityId: string) => string,
+): string {
   if (seed.kind === "COLLAPSE_FLOOR") {
     return "Floor collapses — closes the current floor and opens the next the same day";
   }
   if (seed.kind === "PERSONA_SHIFT") {
     return `Persona shift: ${describeDialShifts(seed.dialShifts)}`;
+  }
+  if (seed.kind === "GRANT_ACHIEVEMENT") {
+    const name = seed.achievementEntityId ? resolveName?.(seed.achievementEntityId) : null;
+    return name ? `Earns achievement: ${name}` : "Earns achievement";
   }
   if (seed.before !== undefined && seed.after !== undefined) {
     const label =
@@ -76,6 +85,7 @@ export function EffectOperationEditor({
   action,
   candidates,
   personaCandidates = [],
+  achievementCandidates = [],
   effects,
   rejected,
   readOnly = false,
@@ -83,14 +93,19 @@ export function EffectOperationEditor({
   action: (formData: FormData) => void | Promise<void>;
   candidates: EntityCandidate[];
   personaCandidates?: EntityCandidate[];
+  achievementCandidates?: EntityCandidate[];
   effects: ReviewEffectSeed[];
   rejected: boolean;
   readOnly?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const candidatesById = new Map(
-    [...candidates, ...personaCandidates].map((candidate) => [candidate.id, candidate]),
+    [...candidates, ...personaCandidates, ...achievementCandidates].map(
+      (candidate) => [candidate.id, candidate],
+    ),
   );
+  const resolveName = (entityId: string) =>
+    candidatesById.get(entityId)?.name ?? entityId;
 
   if (!editing) {
     return (
@@ -113,7 +128,7 @@ export function EffectOperationEditor({
                     </span>
                   )}
                   <span className={`text-[var(--add)]${seed.targetEntityId ? " mx-[7px]" : ""}`}>
-                    {describeSeed(seed)}
+                    {describeSeed(seed, resolveName)}
                   </span>
                   {seed.note && (
                     <span className="text-[var(--ink-faint)]">— {seed.note}</span>
@@ -141,10 +156,11 @@ export function EffectOperationEditor({
 
   const initial = effects.map((seed) =>
     effectViewToRow(
-      { ...seed, targetId: seed.targetEntityId },
+      { ...seed, targetId: seed.targetEntityId, achievementId: seed.achievementEntityId },
       {
         crawlerCandidates: candidates,
         personaCandidates,
+        achievementCandidates,
         // Unresolved targets (e.g. an archived entity) fall back to a bare id so
         // the typeahead still submits the original target rather than dropping it.
         resolveName: (id) => id,
@@ -157,6 +173,7 @@ export function EffectOperationEditor({
         <EffectRows
           candidates={candidates}
           personaCandidates={personaCandidates}
+          achievementCandidates={achievementCandidates}
           initial={initial}
           allowAdd={false}
         />

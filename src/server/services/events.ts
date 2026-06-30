@@ -99,6 +99,9 @@ export type EventEffectView = {
   // PERSONA_SHIFT: per-dial integer deltas applied to the target's active
   // persona snapshot. Null for non-persona kinds.
   dialShifts: Record<string, number> | null;
+  // GRANT_ACHIEVEMENT: the ACHIEVEMENT entity granted to the crawler `targetId`.
+  // Null for non-grant kinds. The name is resolved client-side from candidates.
+  achievementId: string | null;
   note: string | null;
   applied: boolean;
   appliedChangeSetId: string | null;
@@ -166,6 +169,8 @@ function projectEventEffects(value: unknown, isPlayer: boolean): EventEffectView
         typeof record.valueNumber === "number" ? record.valueNumber : null,
       value: typeof record.value === "boolean" ? record.value : null,
       dialShifts: readDialShifts(record.dialShifts),
+      achievementId:
+        typeof record.achievementEntityId === "string" ? record.achievementEntityId : null,
       note: typeof record.note === "string" ? record.note : null,
       applied: record.applied === true,
       appliedChangeSetId:
@@ -419,6 +424,9 @@ function toEffectPatch(effect: NonNullable<CreateEventInput["effects"]>[number])
     ...(typeof effect.valueNumber === "number" ? { valueNumber: effect.valueNumber } : {}),
     ...(typeof effect.value === "boolean" ? { value: effect.value } : {}),
     ...(effect.dialShifts ? { dialShifts: effect.dialShifts } : {}),
+    ...(effect.achievementEntityId
+      ? { achievementEntityId: effect.achievementEntityId }
+      : {}),
     ...(effect.note ? { note: effect.note } : {}),
   };
 }
@@ -561,7 +569,7 @@ export async function updateEvent(
     : oldIds;
   const effectTargetIds =
     parsed.effects
-      ?.map((effect) => effect.targetEntityId)
+      ?.flatMap((effect) => [effect.targetEntityId, effect.achievementEntityId])
       .filter((id): id is string => typeof id === "string") ?? [];
   return {
     id: eventId,
