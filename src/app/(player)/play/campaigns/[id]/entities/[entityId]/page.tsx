@@ -9,20 +9,9 @@ import { listConnectionsForEntity } from "@/server/services/relationships";
 import { Kicker } from "@/components/ui/kicker";
 import { Markdown } from "@/components/ui/markdown";
 import { TypeDot } from "@/components/ui/type-dot";
-import { formatEntityType } from "@/lib/entities";
+import { formatEntityType, isAvatarImageType } from "@/lib/entities";
 import { relationshipEdgeLabel } from "@/lib/relationship-types";
 import { cn } from "@/lib/utils";
-
-// Character-ish kinds render a round avatar; everything else an illustration
-// card — same split as the DM detail view's EntityImageBlock.
-const AVATAR_TYPES = new Set([
-  "CRAWLER",
-  "NPC",
-  "SYSTEM_AI",
-  "BOSS",
-  "MOB_TYPE",
-  "DEITY",
-]);
 
 export default async function PlayerEntityPage({
   params,
@@ -43,7 +32,7 @@ export default async function PlayerEntityPage({
   // listConnectionsForEntity re-applies the visibility projection per endpoint,
   // so a player only ever sees edges to other PLAYER_VISIBLE entities.
   const connections = await listConnectionsForEntity(user.id, id, entityId);
-  const avatar = AVATAR_TYPES.has(entity.type);
+  const avatar = isAvatarImageType(entity.type);
 
   return (
     <div className="h-full overflow-y-auto bg-[var(--bg)]">
