@@ -1,15 +1,19 @@
+import Link from "next/link";
 import { Sparkles, SlidersHorizontal, Users, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
 // The settings sub-navigation (the middle pane of the planned three-pane layout,
-// docs/11-roadmap.md M9). Only "AI Provider" is built today; the rest are shown
-// disabled with the milestone that delivers them, so the nav doubles as a
-// roadmap without faking pages — mirroring the DM console nav.
+// docs/11-roadmap.md M9). "AI Provider" (M4) and "Crawlers" (M7 player↔crawler
+// link) are built; "General" is shown disabled with the milestone that delivers
+// it, so the nav doubles as a roadmap without faking pages — mirroring the DM
+// console nav.
 type SettingsSection = {
   id: string;
   label: string;
   icon: LucideIcon;
+  /** Query-param suffix for this section (the default section has none). */
+  section?: string;
   /** Unbuilt: shown disabled with a milestone tooltip. */
   planned?: string;
 };
@@ -26,11 +30,18 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
     id: "crawlers",
     label: "Crawlers",
     icon: Users,
-    planned: "M9 — invite users & manage memberships/roles",
+    section: "crawlers",
   },
 ];
 
-export function SettingsNav({ activeId }: { activeId: string }) {
+export function SettingsNav({
+  activeId,
+  campaignId,
+}: {
+  activeId: string;
+  campaignId: string;
+}) {
+  const base = `/campaigns/${campaignId}/settings`;
   return (
     <nav className="flex flex-col gap-[2px]" aria-label="Settings sections">
       {SETTINGS_SECTIONS.map((section) => {
@@ -54,15 +65,17 @@ export function SettingsNav({ activeId }: { activeId: string }) {
         }
 
         const active = section.id === activeId;
+        const href = section.section ? `${base}?section=${section.section}` : base;
         return (
-          <div
+          <Link
             key={section.id}
+            href={href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "flex items-center gap-3 border-l-2 px-3 py-[9px]",
+              "flex items-center gap-3 border-l-2 px-3 py-[9px] transition-colors",
               active
                 ? "border-[var(--accent)] bg-[var(--bg-3)] text-[var(--ink)]"
-                : "border-transparent text-[var(--ink-dim)]",
+                : "border-transparent text-[var(--ink-dim)] hover:text-[var(--ink)]",
             )}
           >
             <Icon
@@ -81,7 +94,7 @@ export function SettingsNav({ activeId }: { activeId: string }) {
             >
               {section.label}
             </span>
-          </div>
+          </Link>
         );
       })}
     </nav>

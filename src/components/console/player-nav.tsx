@@ -43,7 +43,9 @@ const NAV: PlayerNavItem[] = [
   {
     label: "Crawler Sheet",
     icon: MonitorSmartphone,
-    planned: "M7 — crawler sheet + inventory",
+    href: (campaignId) =>
+      campaignId ? `/play/campaigns/${campaignId}/sheet` : "/dashboard",
+    match: (p) => /^\/play\/campaigns\/[^/]+\/sheet$/.test(p),
   },
   { label: "System Feed", icon: Radio, planned: "M7 — System-message feed" },
   {

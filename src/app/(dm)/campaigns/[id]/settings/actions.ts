@@ -5,9 +5,14 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/server/auth/session";
 import { logActionError } from "@/server/log";
 import { ServiceError } from "@/lib/errors";
-import { setAiKeySchema, setSpendCapSchema } from "@/lib/validation";
+import {
+  setAiKeySchema,
+  setPlayerCrawlerSchema,
+  setSpendCapSchema,
+} from "@/lib/validation";
 import { deleteAiKey, setAiKey } from "@/server/services/ai-keys";
 import { setCampaignSpendCap } from "@/server/services/ai-usage";
+import { setPlayerCrawler } from "@/server/services/crawlers";
 import { testAiConnection } from "@/server/ai";
 
 export type SettingsActionState =
@@ -105,6 +110,42 @@ export async function setSpendCapAction(
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
     logActionError("Set spend cap action failed", error);
     return { error: "Could not save the spend cap. Please try again.", timestamp: Date.now() };
+  }
+}
+
+// Link (or clear) the crawler a player controls (M7). DM/co-DM only (the
+// service enforces the role). Returns a success/error message.
+export async function setPlayerCrawlerAction(
+  campaignId: string,
+  _prev: SettingsActionState,
+  formData: FormData,
+): Promise<SettingsActionState> {
+  const user = await requireUser();
+
+  const parsed = setPlayerCrawlerSchema.safeParse({
+    membershipId: formData.get("membershipId"),
+    crawlerEntityId: formData.get("crawlerEntityId") ?? "",
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input.", timestamp: Date.now() };
+  }
+
+  try {
+    await setPlayerCrawler(
+      user.id,
+      campaignId,
+      parsed.data.membershipId,
+      parsed.data.crawlerEntityId,
+    );
+    revalidatePath(`/campaigns/${campaignId}/settings`);
+    return {
+      success: parsed.data.crawlerEntityId ? "Crawler linked." : "Crawler unlinked.",
+      timestamp: Date.now(),
+    };
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    logActionError("Set player crawler action failed", error);
+    return { error: "Could not update the link. Please try again.", timestamp: Date.now() };
   }
 }
 

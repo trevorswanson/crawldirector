@@ -286,6 +286,12 @@ model Membership {
   campaignId String
   role       Role
 
+  // The CRAWLER entity this player controls (M7). Optional — a membership is
+  // assigned a crawler by the DM. SetNull so archiving the entity clears the
+  // link rather than orphaning it. Only meaningful for PLAYER memberships.
+  crawlerEntityId String?
+  crawlerEntity   Entity? @relation("PlayerCrawler", fields: [crawlerEntityId], references: [id], onDelete: SetNull)
+
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
@@ -293,6 +299,7 @@ model Membership {
 
   @@unique([userId, campaignId])
   @@index([campaignId])
+  @@index([crawlerEntityId])
 }
 
 // ───────────── Entity core ─────────────
@@ -329,6 +336,8 @@ model Entity {
   eventRoles     EventParticipant[]
   personas       PersonaSnapshot[]
   provenance     Provenance[]
+  // Player memberships that control this entity as their crawler (M7).
+  playerMemberships Membership[]     @relation("PlayerCrawler")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

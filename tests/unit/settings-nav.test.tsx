@@ -8,22 +8,33 @@ afterEach(() => cleanup());
 
 describe("SettingsNav", () => {
   it("renders with the 'ai' section active when activeId matches", () => {
-    render(<SettingsNav activeId="ai" />);
+    render(<SettingsNav activeId="ai" campaignId="c1" />);
 
-    // AI section is rendered as active.
+    // AI section is rendered as active, linking to the base settings route.
     const aiSpan = screen.getByText("AI Provider");
     expect(aiSpan.className).toContain("font-semibold");
-    expect(aiSpan.closest("[aria-current='page']")).toBeTruthy();
+    const aiLink = aiSpan.closest("a");
+    expect(aiLink?.getAttribute("aria-current")).toBe("page");
+    expect(aiLink?.getAttribute("href")).toBe("/campaigns/c1/settings");
 
-    // General & Crawlers are planned sections.
-    expect(screen.getAllByText("Planned")).toHaveLength(2);
+    // Crawlers is now a built section linking to its query-param route.
+    const crawlersLink = screen.getByText("Crawlers").closest("a");
+    expect(crawlersLink?.getAttribute("href")).toBe(
+      "/campaigns/c1/settings?section=crawlers",
+    );
+
+    // Only General remains planned.
+    expect(screen.getAllByText("Planned")).toHaveLength(1);
   });
 
-  it("renders with the 'ai' section inactive when activeId does not match", () => {
-    render(<SettingsNav activeId="general" />);
+  it("marks the crawlers section active when activeId matches", () => {
+    render(<SettingsNav activeId="crawlers" campaignId="c1" />);
 
-    // Since 'general' is a planned section, it's rendered as planned.
-    // The 'ai' section should now be inactive.
+    const crawlersSpan = screen.getByText("Crawlers");
+    expect(crawlersSpan.className).toContain("font-semibold");
+    expect(crawlersSpan.closest("[aria-current='page']")).toBeTruthy();
+
+    // AI is now inactive.
     const aiSpan = screen.getByText("AI Provider");
     expect(aiSpan.className).toContain("font-medium");
     expect(aiSpan.closest("[aria-current='page']")).toBeNull();

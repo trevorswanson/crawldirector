@@ -7,7 +7,12 @@ import { getCampaignForUser } from "@/server/services/campaigns";
 import { listAiKeys } from "@/server/services/ai-keys";
 import { getCampaignAiUsage } from "@/server/services/ai-usage";
 import { getActiveCampaignJob } from "@/server/services/jobs";
+import {
+  listAssignableCrawlers,
+  listPlayerMemberships,
+} from "@/server/services/crawlers";
 import { AiKeysPanel } from "@/components/settings/ai-keys-panel";
+import { CrawlerAssignmentPanel } from "@/components/settings/crawler-assignment-panel";
 import { SettingsNav } from "@/components/settings/settings-nav";
 import { UsagePanel } from "@/components/settings/usage-panel";
 import { BuildSemanticIndexButton } from "@/components/search/build-semantic-index-button";
@@ -22,16 +27,47 @@ import { Panel, PanelHeader } from "@/components/ui/panel";
 // service double-checks the role.
 export default async function CampaignSettingsPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ section?: string }>;
 }) {
   const { id } = await params;
+  const { section } = (await searchParams) ?? {};
   const user = await requireUser();
   const campaign = await getCampaignForUser(user.id, id);
   if (!campaign) notFound();
 
   const role = campaign.members[0]?.role;
   if (role !== "OWNER" && role !== "CO_DM") notFound();
+
+  // ── Crawlers section: DM-only player↔crawler assignment (M7) ──
+  if (section === "crawlers") {
+    const [players, crawlers] = await Promise.all([
+      listPlayerMemberships(user.id, id),
+      listAssignableCrawlers(user.id, id),
+    ]);
+    return (
+      <ConsoleScreen
+        rail={
+          <ScreenRail kicker="Settings" caption={campaign.name} bodyClassName="py-2">
+            <SettingsNav activeId="crawlers" campaignId={id} />
+          </ScreenRail>
+        }
+      >
+        <ScreenHeader kicker="Settings · Crawlers" title="Crawlers" />
+        <div className="min-h-0 flex-1 overflow-y-auto px-[26px] py-7">
+          <div className="max-w-[760px]">
+            <CrawlerAssignmentPanel
+              campaignId={id}
+              players={players}
+              crawlers={crawlers}
+            />
+          </div>
+        </div>
+      </ConsoleScreen>
+    );
+  }
 
   const [configured, usage] = await Promise.all([
     listAiKeys(user.id, id),
@@ -67,7 +103,7 @@ export default async function CampaignSettingsPage({
         // Mirrors the timeline descent rail / DM console nav: --bg-1 surface,
         // hairline right border, bordered header block.
         <ScreenRail kicker="Settings" caption={campaign.name} bodyClassName="py-2">
-          <SettingsNav activeId="ai" />
+          <SettingsNav activeId="ai" campaignId={id} />
         </ScreenRail>
       }
     >
