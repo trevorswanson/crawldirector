@@ -1,4 +1,4 @@
-import { EntityType, Role } from "@/generated/prisma/client";
+import { CanonStatus, EntityType, Role } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 
@@ -9,9 +9,9 @@ import { prisma } from "@/server/db";
 // world graph, so it does NOT route through the review pipeline — it mirrors
 // role assignment, a direct membership mutation. The link is also the read
 // grant for a player's own crawler sheet: `getMyCrawlerSheet` returns ONLY the
-// crawler bound to the caller's own membership, so a player can see their own
-// crawler's stats (even a DM_ONLY entity — it's their character) without ever
-// reaching anyone else's canon (invariant #5).
+// CANON crawler bound to the caller's own membership, so a player can see their
+// own crawler's stats (even a DM_ONLY entity — it's their character) without
+// ever reaching anyone else's canon or any non-CANON content (invariant #5).
 
 async function getMembership(userId: string, campaignId: string) {
   return prisma.membership.findUnique({
@@ -49,21 +49,29 @@ export async function listPlayerMemberships(userId: string, campaignId: string) 
     userId: m.userId,
     userName: m.user.name,
     userEmail: m.user.email,
-    // A linked-but-archived/deleted crawler surfaces as null via SetNull; a
-    // linked crawler that still exists surfaces its id + name.
+    // The relation surfaces the linked crawler whatever its canon status (the
+    // DM's own canon); it only becomes null if the entity row is hard-deleted
+    // (SetNull) — archiving is a status change, not a delete, so an archived
+    // crawler stays linked here and the DM can re-link it.
     crawler: m.crawlerEntity
       ? { id: m.crawlerEntity.id, name: m.crawlerEntity.name }
       : null,
   }));
 }
 
-// DM-only: the CRAWLER entities available to assign to a player. The DM sees
-// every crawler in the campaign regardless of visibility/status (it is their
-// canon), so the picker is not visibility-scoped.
+// DM-only: the CRAWLER entities available to assign to a player. Not
+// visibility-scoped (the DM sees all their own canon), but ARCHIVED (removed)
+// crawlers are excluded so the picker doesn't offer tombstones. A PENDING
+// crawler may still be linked ahead of approval — the player only ever sees it
+// once it is CANON (getMyCrawlerSheet gates on status).
 export async function listAssignableCrawlers(userId: string, campaignId: string) {
   await assertCampaignDm(userId, campaignId);
   return prisma.entity.findMany({
-    where: { campaignId, type: EntityType.CRAWLER },
+    where: {
+      campaignId,
+      type: EntityType.CRAWLER,
+      status: { not: CanonStatus.ARCHIVED },
+    },
     select: { id: true, name: true, status: true },
     orderBy: { name: "asc" },
   });
@@ -144,12 +152,17 @@ export async function getMyCrawlerSheet(
   if (!membership?.crawlerEntityId) return null;
 
   const entity = await prisma.entity.findFirst({
-    // Re-scope to the campaign + CRAWLER type defensively: the link should
-    // never point elsewhere, but the sheet must never render a non-crawler.
+    // Re-scope defensively: the link should never point elsewhere, but the
+    // sheet must never render a non-crawler, and must never surface non-CANON
+    // content to a player (invariant #5) — the DM can link a PENDING crawler
+    // ahead of approval, and archiving flips status to ARCHIVED without clearing
+    // the link. So gate on CANON (belt-and-suspenders, like the Known World);
+    // anything else shows the "no crawler linked yet" empty state.
     where: {
       id: membership.crawlerEntityId,
       campaignId,
       type: EntityType.CRAWLER,
+      status: CanonStatus.CANON,
     },
     select: {
       id: true,

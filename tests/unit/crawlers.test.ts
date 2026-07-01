@@ -195,9 +195,15 @@ describe("listPlayerMemberships / listAssignableCrawlers", () => {
     // Owner is not a PLAYER, so not listed.
     expect(players.some((p) => p.userId === owner.id)).toBe(false);
 
+    // An archived (removed) crawler is excluded from the picker.
+    const archived = await makeCrawler(campaign.id, "Gone", {
+      status: CanonStatus.ARCHIVED,
+    });
+
     const crawlers = await listAssignableCrawlers(owner.id, campaign.id);
     expect(crawlers.map((c) => c.id).sort()).toEqual([carl.id, donut.id].sort());
-    // Non-CANON crawlers are still assignable (the DM sees all their canon).
+    expect(crawlers.some((c) => c.id === archived.id)).toBe(false);
+    // A PENDING crawler is still assignable (linkable ahead of approval).
     expect(crawlers.find((c) => c.id === carl.id)?.status).toBe(
       CanonStatus.PENDING,
     );
@@ -263,6 +269,37 @@ describe("getMyCrawlerSheet", () => {
     const player2 = await makeUser("p10b@link.test");
     await addPlayer(player2.id, campaign.id);
     expect(await getMyCrawlerSheet(player2.id, campaign.id)).toBeNull();
+  });
+
+  it("does not surface a non-CANON linked crawler to the player (invariant #5)", async () => {
+    const owner = await makeUser("dm12@link.test");
+    const player = await makeUser("p12@link.test");
+    const campaign = await createCampaign(owner.id, { name: "Link12" });
+    const membership = await addPlayer(player.id, campaign.id);
+    // A PENDING crawler (e.g. an unapproved AI CREATE_ENTITY proposal) linked
+    // ahead of approval must not render — the player sees the empty state.
+    const pending = await makeCrawler(campaign.id, "Proposed Carl", {
+      status: CanonStatus.PENDING,
+    });
+    await setPlayerCrawler(owner.id, campaign.id, membership.id, pending.id);
+    expect(await getMyCrawlerSheet(player.id, campaign.id)).toBeNull();
+
+    // Archiving flips status to ARCHIVED without clearing the link (SetNull only
+    // fires on a hard delete), so the archived crawler must also stop rendering.
+    await prisma.entity.update({
+      where: { id: pending.id },
+      data: { status: CanonStatus.ARCHIVED },
+    });
+    expect(await getMyCrawlerSheet(player.id, campaign.id)).toBeNull();
+
+    // Once CANON, the player's own crawler renders.
+    await prisma.entity.update({
+      where: { id: pending.id },
+      data: { status: CanonStatus.CANON },
+    });
+    expect((await getMyCrawlerSheet(player.id, campaign.id))?.entityId).toBe(
+      pending.id,
+    );
   });
 
   it("drops non-numeric stat values so the sheet never shows garbage", async () => {

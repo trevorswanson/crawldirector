@@ -166,8 +166,11 @@ instead; adding max/stamina fields is a future follow-up.
       `listPlayerMemberships` (players + their linked crawler),
       `listAssignableCrawlers` (the campaign's CRAWLER entities), `setPlayerCrawler`
       (validates a PLAYER target + a CRAWLER-in-campaign, or null to unlink; not a
-      canon write); player-scoped `getMyCrawlerSheet` (own-membership crawler only;
-      numeric-only stat filtering).
+      canon write); player-scoped `getMyCrawlerSheet` (own-membership crawler only,
+      gated on `status: CANON` so a PENDING/archived link never leaks non-canon to
+      the player — invariant #5, belt-and-suspenders like the Known World;
+      numeric-only stat filtering). The assignable-crawler picker excludes ARCHIVED
+      tombstones but still allows linking a PENDING crawler ahead of approval.
 - [x] **DM UI** ([`crawler-assignment-panel.tsx`](../src/components/settings/crawler-assignment-panel.tsx),
       [`settings/page.tsx`](<../src/app/(dm)/campaigns/[id]/settings/page.tsx>),
       [`settings-nav.tsx`](../src/components/settings/settings-nav.tsx),
