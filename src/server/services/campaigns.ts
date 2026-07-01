@@ -48,6 +48,20 @@ export async function listCampaignsForUser(userId: string) {
   });
 }
 
+// The signed-in user's role in a campaign, or null if they aren't a member.
+// Drives role-based routing between the DM console and the player crawler
+// interface (a user may be DM of one campaign and a PLAYER of another).
+export async function getMembershipRole(
+  userId: string,
+  campaignId: string,
+): Promise<Role | null> {
+  const membership = await prisma.membership.findUnique({
+    where: { userId_campaignId: { userId, campaignId } },
+    select: { role: true },
+  });
+  return membership?.role ?? null;
+}
+
 // Returns the campaign only if the user is a member; otherwise null. The
 // caller treats null as not-found / not-authorized (never leak existence).
 export async function getCampaignForUser(userId: string, campaignId: string) {

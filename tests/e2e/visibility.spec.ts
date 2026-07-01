@@ -107,31 +107,37 @@ test("player sees only PLAYER_VISIBLE entities and non-secret events; review que
   // ── Insert PLAYER membership directly via DB ──────────────────────────────
   await addPlayerMembership(playerEmail, campaignId);
 
-  // ── Player session: open the campaign ────────────────────────────────────
+  // ── Player session: the DM console redirects players to their crawler
+  // interface (M7). A player reads canon only through the visibility projection
+  // and never touches the DM console — a player who lands on (or bookmarks) a DM
+  // campaign URL is bounced to /play/campaigns/[id]. ────────────────────────────
   await page.goto(`/campaigns/${campaignId}`);
+  await page.waitForURL(`**/play/campaigns/${campaignId}`);
 
-  // PLAYER_VISIBLE entity should be listed
+  // Known World: the PLAYER_VISIBLE entity is listed…
   await expect(page.getByRole("link", { name: playerVisibleName })).toBeVisible();
-
-  // DM_ONLY entity should NOT be listed
+  // …and the DM_ONLY entity is not.
   await expect(page.getByRole("link", { name: dmOnlyName })).not.toBeVisible();
 
-  // DM_ONLY entity should not be accessible by direct URL
+  // DM_ONLY entity is hidden by the player detail projection (getEntityForUser →
+  // null → notFound)…
+  await page.goto(`/play/campaigns/${campaignId}/entities/${dmEntityId}`);
+  await expect(page.getByText(dmOnlyName)).not.toBeVisible();
+  // …and the DM detail URL itself just redirects the player back to /play.
   await page.goto(`/campaigns/${campaignId}/entities/${dmEntityId}`);
-  // The entity detail page calls notFound() for unauthorized access — the
-  // entity name should not appear
   await expect(page.getByText(dmOnlyName)).not.toBeVisible();
 
-  // Navigate to the timeline
+  // DM-only console surfaces are not player surfaces yet: the gate redirects the
+  // player to their crawler interface, so the secret event never renders for a
+  // player. (Player-facing event visibility moves to the System-message feed in a
+  // later M7 slice; the service-level event projection is covered by unit tests.)
   await page.goto(`/campaigns/${campaignId}/timeline`);
-  // Normal (non-secret) event should be visible
-  await expect(page.getByText(normalEventTitle)).toBeVisible();
-  // Secret (DM-only) event should NOT be visible
+  await page.waitForURL(`**/play/campaigns/${campaignId}`);
   await expect(page.getByText(secretEventTitle)).not.toBeVisible();
 
   // ── Review Queue inaccessible to players ──────────────────────────────────
   await page.goto(`/campaigns/${campaignId}/review`);
-  // The review queue service throws for PLAYER role — expect the "Review Queue · N sets"
-  // header to be absent (either error page or redirect)
+  // The gate redirects the player away, so the "Review Queue · N sets" header
+  // never renders.
   await expect(page.getByText(/Review Queue · \d+ sets/)).not.toBeVisible();
 });

@@ -17,8 +17,11 @@ pitch and [`docs/`](./docs) for the full plan.
 🚧 **M0–M5.5 complete; M6 slices 1–6 complete (its "done when" bar met; remaining
 slices blocked on M10/M11); M7 game-progression complete (`GRANT_ACHIEVEMENT`
 event effect + the `BOX` `EntityType` with achievement→box `GRANTS_BOX` rewards and
-box→item `CONTAINS` contents).** The next M7 work is the
-visibility-projection-enforced player crawler interface.
+box→item `CONTAINS` contents); M7 player crawler interface under way — slice 1 (the
+player console shell at `/play`, role-based routing, and a projected read-only
+"Known World") shipped.** The next M7 work is the player↔crawler link + crawler
+sheet, then inventory/boxes, the System-message feed, scoped Ask, and player
+suggestions.
 M5.5 (data model hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
 seam, the `MIGRATE_ENTITY_DATA` job, reference-integrity badge + impact-aware
 archive, orphan report, the greenfield Faction satellite, and the Floor satellite
@@ -143,9 +146,15 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
   descriptor** (the ADR 0009 brand-new-`EntityType` proof) — plus the reward graph
   modeled with edges: an `ACHIEVEMENT` grants a `BOX` (`GRANTS_BOX`), and a `BOX`
   contains `ITEM`s (`CONTAINS`, extended to suggest `BOX → ITEM`), both routed
-  through the existing reviewable relationship pipeline (no new write path). Next:
-  the visibility-projection-enforced player crawler interface (crawler sheet,
-  inventory, System-message feed, scoped Ask, player suggestions).
+  through the existing reviewable relationship pipeline (no new write path). The
+  **player crawler interface** is now under way. Slice 1 shipped the foundation: a
+  dedicated player console at `/play/campaigns/[id]` (its own shell + nav, separate
+  from the DM console), role-based routing chokepoints (a `PLAYER` is redirected
+  out of the DM console; a DM/owner out of the player view; non-members 404), and a
+  projected, read-only **Known World** (only `PLAYER_VISIBLE` CANON entities + a
+  read-only entity detail) — invariant #5 made visible. Next: the player↔crawler
+  link + crawler sheet, inventory/loot boxes, the System-message feed, scoped Ask,
+  and player suggestions (which closes the milestone's "done when" bar).
 
 For per-slice detail (files, tests, decisions) see
 [`docs/PROGRESS.md`](./docs/PROGRESS.md) — its "Open backlog" section is the

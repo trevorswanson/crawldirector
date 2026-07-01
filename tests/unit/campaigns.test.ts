@@ -4,6 +4,7 @@ import { prisma } from "@/server/db";
 import {
   createCampaign,
   getCampaignForUser,
+  getMembershipRole,
   listCampaignsForUser,
   getCampaignCanonIntegrity,
   getCampaignHeaderStatus,
@@ -43,6 +44,20 @@ describe("createCampaign", () => {
       where: { campaignId: campaign.id, userId: user.id },
     });
     expect(membership?.role).toBe("OWNER");
+  });
+
+  it("returns the member's role (and null for a non-member) via getMembershipRole", async () => {
+    const owner = await makeUser("role-owner@test.com");
+    const player = await makeUser("role-player@test.com");
+    const outsider = await makeUser("role-outsider@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Roles" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+
+    expect(await getMembershipRole(owner.id, campaign.id)).toBe(Role.OWNER);
+    expect(await getMembershipRole(player.id, campaign.id)).toBe(Role.PLAYER);
+    expect(await getMembershipRole(outsider.id, campaign.id)).toBeNull();
   });
 
   it("persists a provided summary", async () => {

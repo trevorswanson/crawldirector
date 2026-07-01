@@ -32,7 +32,7 @@ import { Markdown } from "@/components/ui/markdown";
 import { SourceBadge } from "@/components/ui/source-badge";
 import { StatusPill } from "@/components/ui/status-pill";
 import { TypeDot } from "@/components/ui/type-dot";
-import { formatEntityType } from "@/lib/entities";
+import { formatEntityType, isAvatarImageType } from "@/lib/entities";
 import { kindFor } from "@/lib/entity-kinds";
 import { cn } from "@/lib/utils";
 import { requireUser } from "@/server/auth/session";
@@ -626,17 +626,6 @@ export default async function EntityPage({
   );
 }
 
-// Character-ish kinds read best as a round avatar; places/things/honors as a
-// wider illustration card. Mirrors the world-role grouping in entityTypeColor.
-const AVATAR_IMAGE_TYPES = new Set([
-  "CRAWLER",
-  "NPC",
-  "SYSTEM_AI",
-  "BOSS",
-  "MOB_TYPE",
-  "DEITY",
-]);
-
 // The entity's main image (M1 follow-up): an avatar for characters, an
 // illustration card for everything else. Read-view only — the edit form owns the
 // imageUrl input. Linked by URL and rendered with a plain <img> (no server-side
@@ -655,7 +644,7 @@ function EntityImageBlock({
   imageLocked: boolean;
 }) {
   if (!entity.imageUrl && !imageLocked) return null;
-  const avatar = AVATAR_IMAGE_TYPES.has(entity.type);
+  const avatar = isAvatarImageType(entity.type);
   return (
     <div className="mt-[14px] flex items-start gap-3">
       {entity.imageUrl ? (

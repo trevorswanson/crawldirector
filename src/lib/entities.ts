@@ -119,3 +119,19 @@ export function entityTypeColor(type: string): string {
       return "var(--ink-dim)";
   }
 }
+
+// Character-ish kinds read best as a round avatar; places/things/honors as a
+// wider illustration card. Mirrors the world-role grouping in entityTypeColor.
+// Shared by the DM and player entity-detail image blocks.
+const AVATAR_IMAGE_TYPES = new Set([
+  "CRAWLER",
+  "NPC",
+  "SYSTEM_AI",
+  "BOSS",
+  "MOB_TYPE",
+  "DEITY",
+]);
+
+export function isAvatarImageType(type: string): boolean {
+  return AVATAR_IMAGE_TYPES.has(type);
+}

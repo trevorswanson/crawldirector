@@ -92,9 +92,14 @@ lowest unblocked milestone work is M7. The **game-progression** sub-thread (no
 player-UI surface required yet) is now complete: the `GRANT_ACHIEVEMENT` event
 effect (✅ 2026-06-29) plus `BOX` as a new `EntityType` with achievement→box
 `GRANTS_BOX` rewards and box→item `CONTAINS` contents (✅ 2026-06-30) — both dated
-entries below. **Next up:** the visibility-projection-enforced **player crawler
-interface** (crawler sheet, inventory, System-message feed, scoped Ask, player
-suggestions) — the first M7 player-UI surface.
+entries below. The **player crawler interface** is now under way; its foundation
+slice — the player console shell, role-based routing, and a projected read-only
+"Known World" — shipped ✅ 2026-06-30 (dated entry below). **Next up (remaining M7
+player-UI slices):** (2) player↔crawler link + crawler sheet (HP/MP/stats/gold/
+floor), (3) inventory / loot boxes + achievements & titles, (4) System-message
+feed, (5) scoped Ask ("Ask the System"), (6) player **suggestions** → review
+pipeline — slice 6 closes the milestone's "done when" bar (a player can submit a
+suggestion).
 
 ### Scheduled roadmap additions (2026-06-19)
 
@@ -127,6 +132,79 @@ M6 remains the next milestone work. The detailed decisions live in
 
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
+
+## M7 — Player crawler interface: console shell + Known World (slice 1) ✅ (2026-06-30)
+
+**Goal:** the first M7 *player-UI* surface and the foundation every later player
+slice builds on — a dedicated player console (separate from the DM console),
+role-based routing that keeps players out of the DM tools and DMs out of the
+player view, and a projected, read-only **Known World** that renders only the
+canon a player is allowed to see. This is invariant #5 made visible: the entire
+surface is the visibility projection. No schema change (reuses the existing
+PLAYER-role-scoped service seams); the player↔crawler link + crawler sheet,
+inventory/boxes, System feed, scoped Ask, and suggestions are the remaining
+slices.
+
+**Decision (separate `(player)` route group at `/play`, gate at the layout
+chokepoint).** The DM console stays at `/campaigns/[id]`; the player crawler
+interface lives at `/play/campaigns/[id]` in a new `(player)` route group with
+its own console shell. Role enforcement is a single chokepoint per side: a new
+`(dm)/campaigns/[id]/layout.tsx` redirects a `PLAYER` to `/play/campaigns/[id]`
+(gating *all* DM campaign sub-pages at once), and `(player)/play/campaigns/[id]/
+layout.tsx` redirects a DM/OWNER back to the DM console (and 404s a non-member, so
+existence never leaks). The Known World forces `status: CANON` on top of the
+service's PLAYER visibility filter — belt-and-suspenders so a pending proposal can
+never reach a player even if a row were mis-flagged.
+
+- [x] **Role seam** ([`campaigns.ts`](../src/server/services/campaigns.ts)):
+      `getMembershipRole(userId, campaignId)` → `Role | null`, the single source
+      the routing gates read (a user may DM one campaign and play another).
+- [x] **Player console shell** ([`(player)/layout.tsx`](<../src/app/(player)/layout.tsx>),
+      [`player-nav.tsx`](../src/components/console/player-nav.tsx),
+      [`player-campaign-switcher.tsx`](../src/components/console/player-campaign-switcher.tsx)):
+      brand sidebar + `PlayerNav` (Known World built; Crawler Sheet / System Feed /
+      Ask the System / Suggestions shown disabled as **Planned**, so the nav doubles
+      as a roadmap with no stub pages) + a `/play`-scoped campaign switcher listing
+      only the user's `PLAYER` campaigns + the shared `UserMenu`.
+- [x] **Known World** ([`(player)/play/campaigns/[id]/page.tsx`](<../src/app/(player)/play/campaigns/[id]/page.tsx>)):
+      the in-fiction "THE SYSTEM" banner + a type-facet rail + a read-only grid of
+      `PLAYER_VISIBLE` CANON entities (via `listEntitiesForUser`, type-faceted,
+      unpaginated since a player's known slice is small); empty state explains the
+      DM hasn't revealed that part of the world yet.
+- [x] **Read-only entity detail** ([`(player)/play/campaigns/[id]/entities/[entityId]/page.tsx`](<../src/app/(player)/play/campaigns/[id]/entities/[entityId]/page.tsx>)):
+      projected via `getEntityForUser` (null → 404) — header, image (avatar vs.
+      illustration), summary, Markdown description, tags, and player-visible
+      `listConnectionsForEntity` edges linking to other revealed entities. No edit /
+      lock / AI / provenance affordances.
+- [x] **Routing gates** ([`(dm)/campaigns/[id]/layout.tsx`](<../src/app/(dm)/campaigns/[id]/layout.tsx>),
+      [`(player)/play/campaigns/[id]/layout.tsx`](<../src/app/(player)/play/campaigns/[id]/layout.tsx>),
+      [`(dm)/dashboard/page.tsx`](<../src/app/(dm)/dashboard/page.tsx>)): the two
+      role-gate layouts plus dashboard cards that link a `PLAYER` membership to
+      `/play/campaigns/[id]` and a DM/owner one to `/campaigns/[id]`.
+- [x] **Tests:** DB-backed `getMembershipRole` (owner/player/non-member) in
+      [`campaigns.test.ts`](../tests/unit/campaigns.test.ts); jsdom coverage for the
+      Known World page (forces CANON + player scope, banner, projected cards, type
+      filter, empty state, non-member 404) in
+      [`player-known-world-page.test.tsx`](../tests/unit/player-known-world-page.test.tsx);
+      the read-only detail (player-scoped seam, render, connections link to
+      `/play/...`, no edit/lock affordances, projection-null 404) in
+      [`player-entity-page.test.tsx`](../tests/unit/player-entity-page.test.tsx);
+      both role gates + dashboard role-linking in
+      [`player-campaign-layouts.test.tsx`](../tests/unit/player-campaign-layouts.test.tsx)
+      and [`dashboard-page.test.tsx`](../tests/unit/dashboard-page.test.tsx); the
+      nav + console shell in [`player-nav.test.tsx`](../tests/unit/player-nav.test.tsx)
+      and [`player-console-shell.test.tsx`](../tests/unit/player-console-shell.test.tsx).
+      The existing service-level "filters player reads to player-visible entities"
+      case already locks the projection invariant at the DB.
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors; pre-existing
+      settings-action warnings only), `npm run build` (the two `/play/...` routes
+      register), and the full coverage gate green (statements 95.3%, branches
+      88.86%, functions 96.45%, lines 96.91%). **In-browser** (reseeded `dcc` +
+      a `player@example.com` PLAYER membership with two entities revealed): signed
+      in as the player, the Known World rendered only the two `PLAYER_VISIBLE`
+      NPCs (the `DM_ONLY` third hidden), the read-only detail showed the Markdown
+      description with no edit controls, and hitting the DM URL `/campaigns/[id]`
+      server-redirected to `/play/campaigns/[id]`. No console errors.
 
 ## M7 — `BOX` entity type + reward/content graph ✅ (2026-06-30)
 
