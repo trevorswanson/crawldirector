@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { Role } from "@/generated/prisma/client";
 import { requireUser } from "@/server/auth/session";
 import { getMembershipRole } from "@/server/services/campaigns";
+import { campaignHomeHref } from "@/lib/campaign-routes";
 
 // Role gate for the whole player crawler interface. DMs/co-DMs/owners of this
 // campaign belong in the DM console — send them there so the player view is
@@ -20,7 +21,7 @@ export default async function PlayerCampaignLayout({
   const role = await getMembershipRole(user.id, id);
 
   if (!role) notFound();
-  if (role !== Role.PLAYER) redirect(`/campaigns/${id}`);
+  if (role !== Role.PLAYER) redirect(campaignHomeHref(role, id));
 
   return children;
 }

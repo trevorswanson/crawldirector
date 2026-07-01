@@ -20,18 +20,18 @@ export default async function PlayerEntityPage({
 }) {
   const { id, entityId } = await params;
   const user = await requireUser();
-  const [campaign, entity] = await Promise.all([
+  // All three reads are independent and player-scoped: getEntityForUser returns
+  // null unless the entity is PLAYER_VISIBLE canon for this role (invariant #5),
+  // and listConnectionsForEntity re-applies the projection per endpoint, so a
+  // player only sees edges to other PLAYER_VISIBLE entities.
+  const [campaign, entity, connections] = await Promise.all([
     getCampaignForUser(user.id, id),
-    // Player-scoped read: returns null unless the entity is PLAYER_VISIBLE canon
-    // for this user's role (invariant #5). Pending/DM-only/secret never resolve.
     getEntityForUser(user.id, id, entityId),
+    listConnectionsForEntity(user.id, id, entityId),
   ]);
 
   if (!campaign || !entity) notFound();
 
-  // listConnectionsForEntity re-applies the visibility projection per endpoint,
-  // so a player only ever sees edges to other PLAYER_VISIBLE entities.
-  const connections = await listConnectionsForEntity(user.id, id, entityId);
   const avatar = isAvatarImageType(entity.type);
 
   return (

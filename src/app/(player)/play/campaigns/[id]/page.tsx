@@ -23,7 +23,14 @@ export default async function KnownWorldPage({
   const { id } = await params;
   const filters = (await searchParams) ?? {};
   const user = await requireUser();
-  const campaign = await getCampaignForUser(user.id, id);
+  // The whole player surface is the visibility projection (invariant #5): only
+  // PLAYER_VISIBLE entities (enforced by the service for the PLAYER role) and
+  // only CANON (pending proposals never reach a player). The "known world" is
+  // a player's small, bounded slice of canon, so it loads unpaginated.
+  const [campaign, { entities }] = await Promise.all([
+    getCampaignForUser(user.id, id),
+    listEntitiesForUser(user.id, id, { status: "CANON", type: "ALL" }),
+  ]);
 
   // Not a member (or doesn't exist) -> 404, never leak existence.
   if (!campaign) notFound();
@@ -32,15 +39,6 @@ export default async function KnownWorldPage({
     filters.type && (entityTypeValues as readonly string[]).includes(filters.type)
       ? (filters.type as EntityType)
       : undefined;
-
-  // The whole player surface is the visibility projection (invariant #5): only
-  // PLAYER_VISIBLE entities (enforced by the service for the PLAYER role) and
-  // only CANON (pending proposals never reach a player). The "known world" is
-  // a player's small, bounded slice of canon, so it loads unpaginated.
-  const { entities } = await listEntitiesForUser(user.id, id, {
-    status: "CANON",
-    type: "ALL",
-  });
 
   const counts = new Map<EntityType, number>();
   for (const entity of entities) {
@@ -53,6 +51,10 @@ export default async function KnownWorldPage({
 
   const hrefForType = (type?: EntityType) =>
     type ? `/play/campaigns/${id}?type=${type}` : `/play/campaigns/${id}`;
+
+  const emptyNoun = activeType
+    ? formatEntityType(activeType).toLowerCase()
+    : "world";
 
   return (
     <ConsoleScreen
@@ -141,8 +143,7 @@ export default async function KnownWorldPage({
             <div>
               <Globe2 aria-hidden size={36} className="mx-auto opacity-40" />
               <p className="mt-3 text-sm">
-                Nothing here yet. Your DM hasn&apos;t revealed any{" "}
-                {activeType ? formatEntityType(activeType).toLowerCase() : "world"}{" "}
+                Nothing here yet. Your DM hasn&apos;t revealed any {emptyNoun}{" "}
                 details to your crawler.
               </p>
             </div>

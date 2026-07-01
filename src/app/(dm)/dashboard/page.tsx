@@ -13,6 +13,7 @@ import { HudTag } from "@/components/ui/hud-tag";
 import { PageContainer } from "@/components/console/page-container";
 import { CreateCampaignForm } from "@/components/campaigns/create-campaign-form";
 import { isLoreSeedDatasetAvailable } from "@/server/services/seeding";
+import { campaignHomeHref } from "@/lib/campaign-routes";
 
 export default async function DashboardPage() {
   const user = await requireUser();
@@ -52,10 +53,7 @@ export default async function DashboardPage() {
         <ul className="grid gap-4 sm:grid-cols-2">
           {campaigns.map((c) => {
             // Players open their crawler interface; DMs/owners the DM console.
-            const isPlayer = c.members[0]?.role === "PLAYER";
-            const href = isPlayer
-              ? `/play/campaigns/${c.id}`
-              : `/campaigns/${c.id}`;
+            const href = campaignHomeHref(c.members[0]?.role, c.id);
             return (
             <li key={c.id}>
               <Link href={href}>
