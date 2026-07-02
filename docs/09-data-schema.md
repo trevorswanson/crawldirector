@@ -82,9 +82,15 @@ model Membership {
   role        Role
   user        User     @relation(fields: [userId], references: [id])
   campaign    Campaign @relation(fields: [campaignId], references: [id])
-  crawlers    Entity[] @relation("PlayerCrawlers")   // player ↔ crawler links
+  // M7: the CRAWLER entity this player controls, set by the DM. Optional 1:1
+  // (a player controls one crawler); SetNull so archiving the entity clears the
+  // link. Only meaningful for PLAYER memberships. The link is also the read
+  // grant for the player's own crawler sheet (getMyCrawlerSheet).
+  crawlerEntityId String?
+  crawlerEntity   Entity? @relation("PlayerCrawler", fields: [crawlerEntityId], references: [id], onDelete: SetNull)
   @@unique([userId, campaignId])
   @@index([campaignId])
+  @@index([crawlerEntityId])
 }
 
 // ───────────── Entity core ─────────────

@@ -2,25 +2,35 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ServiceError } from "@/lib/errors";
 
-const { requireUser, setAiKey, deleteAiKey, testAiConnection, setCampaignSpendCap, revalidatePath } =
-  vi.hoisted(() => ({
-    requireUser: vi.fn(),
-    setAiKey: vi.fn(),
-    deleteAiKey: vi.fn(),
-    testAiConnection: vi.fn(),
-    setCampaignSpendCap: vi.fn(),
-    revalidatePath: vi.fn(),
-  }));
+const {
+  requireUser,
+  setAiKey,
+  deleteAiKey,
+  testAiConnection,
+  setCampaignSpendCap,
+  setPlayerCrawler,
+  revalidatePath,
+} = vi.hoisted(() => ({
+  requireUser: vi.fn(),
+  setAiKey: vi.fn(),
+  deleteAiKey: vi.fn(),
+  testAiConnection: vi.fn(),
+  setCampaignSpendCap: vi.fn(),
+  setPlayerCrawler: vi.fn(),
+  revalidatePath: vi.fn(),
+}));
 
 vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/ai-keys", () => ({ setAiKey, deleteAiKey }));
 vi.mock("@/server/services/ai-usage", () => ({ setCampaignSpendCap }));
+vi.mock("@/server/services/crawlers", () => ({ setPlayerCrawler }));
 vi.mock("@/server/ai", () => ({ testAiConnection }));
 vi.mock("next/cache", () => ({ revalidatePath }));
 
 import {
   deleteAiKeyAction,
   setAiKeyAction,
+  setPlayerCrawlerAction,
   setSpendCapAction,
   testAiConnectionAction,
 } from "@/app/(dm)/campaigns/[id]/settings/actions";
@@ -242,5 +252,60 @@ describe("testAiConnectionAction", () => {
     testAiConnection.mockRejectedValue(new Error("network down"));
     const result = await testAiConnectionAction("camp1", "openai", undefined, new FormData());
     expect(result?.error).toMatch(/Could not reach/);
+  });
+});
+
+describe("setPlayerCrawlerAction", () => {
+  it("links a crawler and returns a success message", async () => {
+    setPlayerCrawler.mockResolvedValue(undefined);
+    const result = await setPlayerCrawlerAction(
+      "camp1",
+      undefined,
+      formData({ membershipId: "m1", crawlerEntityId: "cr1" }),
+    );
+    expect(setPlayerCrawler).toHaveBeenCalledWith("dm1", "camp1", "m1", "cr1");
+    expect(result?.success).toBe("Crawler linked.");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/camp1/settings");
+  });
+
+  it("unlinks when the crawler field is empty", async () => {
+    setPlayerCrawler.mockResolvedValue(undefined);
+    const result = await setPlayerCrawlerAction(
+      "camp1",
+      undefined,
+      formData({ membershipId: "m1", crawlerEntityId: "" }),
+    );
+    expect(setPlayerCrawler).toHaveBeenCalledWith("dm1", "camp1", "m1", null);
+    expect(result?.success).toBe("Crawler unlinked.");
+  });
+
+  it("validates the membership id", async () => {
+    const result = await setPlayerCrawlerAction(
+      "camp1",
+      undefined,
+      formData({ membershipId: "", crawlerEntityId: "cr1" }),
+    );
+    expect(setPlayerCrawler).not.toHaveBeenCalled();
+    expect(result?.error).toBeTruthy();
+  });
+
+  it("surfaces a ServiceError message", async () => {
+    setPlayerCrawler.mockRejectedValue(new ServiceError("Only players control crawlers."));
+    const result = await setPlayerCrawlerAction(
+      "camp1",
+      undefined,
+      formData({ membershipId: "m1", crawlerEntityId: "cr1" }),
+    );
+    expect(result?.error).toMatch(/Only players control crawlers/);
+  });
+
+  it("returns a generic error for an unexpected failure", async () => {
+    setPlayerCrawler.mockRejectedValue(new Error("db down"));
+    const result = await setPlayerCrawlerAction(
+      "camp1",
+      undefined,
+      formData({ membershipId: "m1", crawlerEntityId: "cr1" }),
+    );
+    expect(result?.error).toMatch(/Could not update the link/);
   });
 });

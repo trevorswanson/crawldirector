@@ -461,6 +461,17 @@ export const setSpendCapSchema = z.object({
 });
 export type SetSpendCapInput = z.infer<typeof setSpendCapSchema>;
 
+// Link (or, with an empty crawlerEntityId, unlink) a player membership to the
+// CRAWLER entity they control (M7). Parsed from the Crawlers settings form.
+export const setPlayerCrawlerSchema = z.object({
+  membershipId: z.string().trim().min(1, "A player is required."),
+  crawlerEntityId: z.preprocess(
+    (v) => (typeof v === "string" && v.trim().length > 0 ? v.trim() : null),
+    z.string().nullable(),
+  ),
+});
+export type SetPlayerCrawlerInput = z.infer<typeof setPlayerCrawlerSchema>;
+
 // Event participant roles (docs/01-domain-model.md). Any-to-any, like
 // relationship types — every role is valid for any entity.
 export const eventParticipantRoleValues = [

@@ -9,6 +9,7 @@ const {
   getCampaignAiUsage,
   resolveCampaignEmbedder,
   getActiveCampaignJob,
+  usePathname,
   notFound,
 } = vi.hoisted(() => ({
   requireUser: vi.fn(),
@@ -17,6 +18,7 @@ const {
   getCampaignAiUsage: vi.fn(),
   resolveCampaignEmbedder: vi.fn(),
   getActiveCampaignJob: vi.fn(),
+  usePathname: vi.fn(() => "/campaigns/c1/settings"),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
@@ -28,7 +30,13 @@ vi.mock("@/server/services/ai-keys", () => ({ listAiKeys }));
 vi.mock("@/server/services/ai-usage", () => ({ getCampaignAiUsage }));
 vi.mock("@/server/ai", () => ({ resolveCampaignEmbedder }));
 vi.mock("@/server/services/jobs", () => ({ getActiveCampaignJob }));
-vi.mock("next/navigation", () => ({ notFound }));
+// The settings shell renders the real SettingsNav (client, usePathname + Link).
+vi.mock("next/navigation", () => ({ notFound, usePathname }));
+vi.mock("next/link", () => ({
+  default: ({ href, children }: { href: string; children: React.ReactNode }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
 vi.mock("@/components/settings/ai-keys-panel", () => ({
   AiKeysPanel: ({ campaignId, configured }: { campaignId: string; configured: unknown[] }) => (
     <div data-testid="ai-keys-panel">

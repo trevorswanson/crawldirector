@@ -8,18 +8,16 @@ import { listAiKeys } from "@/server/services/ai-keys";
 import { getCampaignAiUsage } from "@/server/services/ai-usage";
 import { getActiveCampaignJob } from "@/server/services/jobs";
 import { AiKeysPanel } from "@/components/settings/ai-keys-panel";
-import { SettingsNav } from "@/components/settings/settings-nav";
+import { SettingsShell } from "@/components/settings/settings-shell";
 import { UsagePanel } from "@/components/settings/usage-panel";
 import { BuildSemanticIndexButton } from "@/components/search/build-semantic-index-button";
-import { ConsoleScreen, ScreenHeader, ScreenRail } from "@/components/console/screen";
 import { Panel, PanelHeader } from "@/components/ui/panel";
 
-// Campaign settings — a two-pane layout: a section sub-nav (the middle pane of
-// the planned three-pane settings, docs/11-roadmap.md M9) beside the active
-// section's content. Only the AI Provider section is built today (BYO provider
-// keys, M4); General and Crawlers are shown disabled in the nav. DM/co-DM only —
-// players never reach this route (the World Browser is their surface), and the
-// service double-checks the role.
+// Campaign settings — the AI Provider section (the settings index, M4 BYO
+// provider keys). Sibling sections are their own route segments under settings/
+// (Crawlers = settings/crawlers, M7). DM/co-DM only — players never reach this
+// route (the World Browser is their surface), and the service double-checks the
+// role.
 export default async function CampaignSettingsPage({
   params,
 }: {
@@ -62,45 +60,34 @@ export default async function CampaignSettingsPage({
       : null;
 
   return (
-    <ConsoleScreen
-      rail={
-        // Mirrors the timeline descent rail / DM console nav: --bg-1 surface,
-        // hairline right border, bordered header block.
-        <ScreenRail kicker="Settings" caption={campaign.name} bodyClassName="py-2">
-          <SettingsNav activeId="ai" />
-        </ScreenRail>
-      }
+    <SettingsShell
+      campaignName={campaign.name}
+      kicker="Settings · AI Provider"
+      title="AI provider"
     >
-      {/* ── Active section: AI Provider ── */}
-      <ScreenHeader kicker="Settings · AI Provider" title="AI provider" />
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-[26px] py-7">
-        <div className="max-w-[760px]">
-          <p className="mb-6 max-w-[560px] text-[12.5px] leading-[1.5] text-[var(--ink-faint)]">
-            Configure how this crawl uses AI. Generation always produces
-            reviewable proposals — never silent canon.
-          </p>
-          <AiKeysPanel campaignId={id} configured={configured} />
-          <Panel className="mt-6">
-            <PanelHeader
-              kicker="Semantic search"
-              title="Build the semantic index"
-              sub="Embeds your canon so search ranks by meaning, not just keywords. It runs in the background as a job and powers hybrid search. Requires an embedding-capable provider key above — without one, search stays keyword-only."
-            />
-            <div className="px-[18px] py-4">
-              {canBuildSemanticIndex ? (
-                <BuildSemanticIndexButton campaignId={id} activeJob={activeSemanticJob} />
-              ) : (
-                <p className="text-[12px] text-[var(--ink-faint)]">
-                  Add an embedding-capable provider key above to enable semantic
-                  search.
-                </p>
-              )}
-            </div>
-          </Panel>
-          <UsagePanel campaignId={id} usage={usage} />
+      <p className="mb-6 max-w-[560px] text-[12.5px] leading-[1.5] text-[var(--ink-faint)]">
+        Configure how this crawl uses AI. Generation always produces reviewable
+        proposals — never silent canon.
+      </p>
+      <AiKeysPanel campaignId={id} configured={configured} />
+      <Panel className="mt-6">
+        <PanelHeader
+          kicker="Semantic search"
+          title="Build the semantic index"
+          sub="Embeds your canon so search ranks by meaning, not just keywords. It runs in the background as a job and powers hybrid search. Requires an embedding-capable provider key above — without one, search stays keyword-only."
+        />
+        <div className="px-[18px] py-4">
+          {canBuildSemanticIndex ? (
+            <BuildSemanticIndexButton campaignId={id} activeJob={activeSemanticJob} />
+          ) : (
+            <p className="text-[12px] text-[var(--ink-faint)]">
+              Add an embedding-capable provider key above to enable semantic
+              search.
+            </p>
+          )}
         </div>
-      </div>
-    </ConsoleScreen>
+      </Panel>
+      <UsagePanel campaignId={id} usage={usage} />
+    </SettingsShell>
   );
 }

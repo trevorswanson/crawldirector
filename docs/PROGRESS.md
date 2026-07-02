@@ -94,12 +94,12 @@ effect (✅ 2026-06-29) plus `BOX` as a new `EntityType` with achievement→box
 `GRANTS_BOX` rewards and box→item `CONTAINS` contents (✅ 2026-06-30) — both dated
 entries below. The **player crawler interface** is now under way; its foundation
 slice — the player console shell, role-based routing, and a projected read-only
-"Known World" — shipped ✅ 2026-06-30 (dated entry below). **Next up (remaining M7
-player-UI slices):** (2) player↔crawler link + crawler sheet (HP/MP/stats/gold/
-floor), (3) inventory / loot boxes + achievements & titles, (4) System-message
-feed, (5) scoped Ask ("Ask the System"), (6) player **suggestions** → review
-pipeline — slice 6 closes the milestone's "done when" bar (a player can submit a
-suggestion).
+"Known World" — shipped ✅ 2026-06-30 (dated entry below). Slice 2 — the
+player↔crawler link + read-only crawler sheet — shipped ✅ 2026-07-01 (dated entry
+below). **Next up (remaining M7 player-UI slices):** (3) inventory / loot boxes +
+achievements & titles, (4) System-message feed, (5) scoped Ask ("Ask the
+System"), (6) player **suggestions** → review pipeline — slice 6 closes the
+milestone's "done when" bar (a player can submit a suggestion).
 
 ### Scheduled roadmap additions (2026-06-19)
 
@@ -132,6 +132,83 @@ M6 remains the next milestone work. The detailed decisions live in
 
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
+
+## M7 — Player↔crawler link + crawler sheet (slice 2) ✅ (2026-07-01)
+
+**Goal:** the second M7 *player-UI* slice — let a DM link a player to the CRAWLER
+entity they control, and give that player a read-only **crawler sheet**
+(HP/MP/stats/gold/floor/level/kills/status). This is the "sees only shared/**own-
+crawler** data" half of the milestone's "done when" bar: a player may read *their
+own* crawler's stats — even a `DM_ONLY` entity — because the link is itself the
+read grant, while every other read still flows through the visibility projection
+(invariant #5).
+
+**Decision (link on `Membership`, not a graph edge; not canon).** The player↔
+crawler association is *membership metadata* (who plays whom), not part of the
+world graph, so it is a nullable `Membership.crawlerEntityId` FK to `Entity`
+(`onDelete: SetNull`) set by a **direct** membership mutation — it mirrors role
+assignment and does **not** route through the review pipeline (invariant #1 is
+about *canon* writes; this isn't one). The same link is the player's read grant:
+`getMyCrawlerSheet` returns **only** the crawler bound to the caller's *own*
+membership, so it can't leak another player's crawler or any unlinked DM-only
+canon. Inviting users / managing roles stays M9; this slice only assigns crawlers
+to whatever PLAYER memberships already exist. The `Crawler.stats` JSON has no
+write path yet (always `{}`), so the sheet renders the stat grid **only when
+populated** — no filler (AGENTS.md). The mockup's HP/MP/stamina *bars* need a
+max/stamina the data model doesn't carry, so vitals render as HUD stat readouts
+instead; adding max/stamina fields is a future follow-up.
+
+- [x] **Schema** ([`schema.prisma`](../prisma/schema.prisma), migration
+      `20260701010933_m7_player_crawler_link`): additive nullable
+      `Membership.crawlerEntityId` + `crawlerEntity`/`playerMemberships` relation
+      (`PlayerCrawler`, `SetNull`) + an index (drift gate clean).
+- [x] **Service** ([`crawlers.ts`](../src/server/services/crawlers.ts)): DM-only
+      `listPlayerMemberships` (players + their linked crawler),
+      `listAssignableCrawlers` (the campaign's CRAWLER entities), `setPlayerCrawler`
+      (validates a PLAYER target + a CRAWLER-in-campaign, or null to unlink; not a
+      canon write); player-scoped `getMyCrawlerSheet` (own-membership crawler only,
+      gated on `status: CANON` so a PENDING/archived link never leaks non-canon to
+      the player — invariant #5, belt-and-suspenders like the Known World;
+      numeric-only stat filtering). The assignable-crawler picker excludes ARCHIVED
+      tombstones but still allows linking a PENDING crawler ahead of approval.
+- [x] **DM UI** ([`crawler-assignment-panel.tsx`](../src/components/settings/crawler-assignment-panel.tsx),
+      [`settings/page.tsx`](<../src/app/(dm)/campaigns/[id]/settings/page.tsx>),
+      [`settings-nav.tsx`](../src/components/settings/settings-nav.tsx),
+      [`settings/actions.ts`](<../src/app/(dm)/campaigns/[id]/settings/actions.ts>)):
+      the Settings **Crawlers** section (`?section=crawlers`) is now built — a
+      per-player crawler `<select>` + Save (`setPlayerCrawlerAction`); the settings
+      sub-nav's items became active links, with only "General" still Planned (M9).
+- [x] **Player UI** ([`crawler-sheet.tsx`](../src/components/crawler/crawler-sheet.tsx),
+      [`sheet/page.tsx`](<../src/app/(player)/play/campaigns/[id]/sheet/page.tsx>),
+      [`player-nav.tsx`](../src/components/console/player-nav.tsx)): the **Crawler
+      Sheet** nav item is now built (was Planned) → `/play/campaigns/[id]/sheet`,
+      rendering the identity block + vitals + (conditional) stat grid + fame from
+      real fields, with a "no crawler linked yet" empty state. Loot boxes / titles /
+      suggestions stay later slices.
+- [x] **Validation** ([`validation.ts`](../src/lib/validation.ts)):
+      `setPlayerCrawlerSchema` (membershipId + crawlerEntityId, empty→null).
+- [x] **Tests:** DB-backed [`crawlers.test.ts`](../tests/unit/crawlers.test.ts)
+      (link/unlink; reject non-crawler, foreign crawler, player caller, non-PLAYER
+      or foreign target membership; list shapes; own-crawler read incl. DM_ONLY;
+      null for unlinked/non-member/other player; non-numeric stat drop); component
+      + page coverage in
+      [`crawler-sheet.test.tsx`](../tests/unit/crawler-sheet.test.tsx),
+      [`crawler-assignment-panel.test.tsx`](../tests/unit/crawler-assignment-panel.test.tsx),
+      [`player-crawler-sheet-page.test.tsx`](../tests/unit/player-crawler-sheet-page.test.tsx);
+      section routing in [`ai-keys-settings-page.test.tsx`](../tests/unit/ai-keys-settings-page.test.tsx),
+      the action in [`ai-keys-actions.test.ts`](../tests/unit/ai-keys-actions.test.ts),
+      and updated [`player-nav.test.tsx`](../tests/unit/player-nav.test.tsx) +
+      [`settings-nav.test.tsx`](../tests/unit/settings-nav.test.tsx).
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors; pre-existing
+      settings-action warnings only), `npm run build` (the `/play/campaigns/[id]/sheet`
+      route registers), and the full coverage gate green (137 files / **1829 tests**;
+      statements 95.32%, branches 88.92%, functions 96.49%, lines 96.94%).
+      **In-browser** (reseeded `dcc` + a `player@example.com` PLAYER membership
+      linked to a DM_ONLY "Carl" crawler): the player's Crawler Sheet rendered the
+      DM_ONLY crawler's real stats (LVL 9, HP 118, MP 24, 4,200 gold, Floor 9, the
+      6-stat grid, 37 kills, 1.84M watching), the DM's Settings → Crawlers section
+      linked/unlinked Carl with the success message flipping accordingly, and no
+      console errors on either side.
 
 ## M7 — Player crawler interface: console shell + Known World (slice 1) ✅ (2026-06-30)
 
