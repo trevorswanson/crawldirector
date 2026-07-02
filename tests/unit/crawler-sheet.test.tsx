@@ -22,7 +22,6 @@ const sheet = (over: Partial<CrawlerSheet> = {}): CrawlerSheet => ({
   isAlive: true,
   killCount: 5,
   followerCount: BigInt(1200),
-  viewCount: BigInt(0),
   stats: {},
   ...over,
 });

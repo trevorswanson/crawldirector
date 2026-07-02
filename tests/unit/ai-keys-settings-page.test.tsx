@@ -9,8 +9,7 @@ const {
   getCampaignAiUsage,
   resolveCampaignEmbedder,
   getActiveCampaignJob,
-  listPlayerMemberships,
-  listAssignableCrawlers,
+  usePathname,
   notFound,
 } = vi.hoisted(() => ({
   requireUser: vi.fn(),
@@ -19,8 +18,7 @@ const {
   getCampaignAiUsage: vi.fn(),
   resolveCampaignEmbedder: vi.fn(),
   getActiveCampaignJob: vi.fn(),
-  listPlayerMemberships: vi.fn(),
-  listAssignableCrawlers: vi.fn(),
+  usePathname: vi.fn(() => "/campaigns/c1/settings"),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
@@ -32,26 +30,13 @@ vi.mock("@/server/services/ai-keys", () => ({ listAiKeys }));
 vi.mock("@/server/services/ai-usage", () => ({ getCampaignAiUsage }));
 vi.mock("@/server/ai", () => ({ resolveCampaignEmbedder }));
 vi.mock("@/server/services/jobs", () => ({ getActiveCampaignJob }));
-vi.mock("@/server/services/crawlers", () => ({
-  listPlayerMemberships,
-  listAssignableCrawlers,
-}));
-vi.mock("@/components/settings/crawler-assignment-panel", () => ({
-  CrawlerAssignmentPanel: ({
-    campaignId,
-    players,
-    crawlers,
-  }: {
-    campaignId: string;
-    players: unknown[];
-    crawlers: unknown[];
-  }) => (
-    <div data-testid="crawler-assignment-panel">
-      crawlers:{campaignId}:{players.length}:{crawlers.length}
-    </div>
+// The settings shell renders the real SettingsNav (client, usePathname + Link).
+vi.mock("next/navigation", () => ({ notFound, usePathname }));
+vi.mock("next/link", () => ({
+  default: ({ href, children }: { href: string; children: React.ReactNode }) => (
+    <a href={href}>{children}</a>
   ),
 }));
-vi.mock("next/navigation", () => ({ notFound }));
 vi.mock("@/components/settings/ai-keys-panel", () => ({
   AiKeysPanel: ({ campaignId, configured }: { campaignId: string; configured: unknown[] }) => (
     <div data-testid="ai-keys-panel">
@@ -91,8 +76,6 @@ beforeEach(() => {
   });
   resolveCampaignEmbedder.mockResolvedValue(null);
   getActiveCampaignJob.mockResolvedValue(null);
-  listPlayerMemberships.mockResolvedValue([]);
-  listAssignableCrawlers.mockResolvedValue([]);
 });
 
 afterEach(() => cleanup());
@@ -164,38 +147,5 @@ describe("CampaignSettingsPage", () => {
       CampaignSettingsPage({ params: Promise.resolve({ id: "c1" }) }),
     ).rejects.toThrow("NEXT_NOT_FOUND");
     expect(listAiKeys).not.toHaveBeenCalled();
-  });
-
-  it("renders the Crawlers section (player↔crawler assignment) for a DM", async () => {
-    listPlayerMemberships.mockResolvedValue([{ membershipId: "m1" }]);
-    listAssignableCrawlers.mockResolvedValue([
-      { id: "cr1", name: "Carl", status: "CANON" },
-      { id: "cr2", name: "Donut", status: "CANON" },
-    ]);
-    render(
-      await CampaignSettingsPage({
-        params: Promise.resolve({ id: "c1" }),
-        searchParams: Promise.resolve({ section: "crawlers" }),
-      }),
-    );
-    expect(screen.getByRole("heading", { name: /^Crawlers$/ })).toBeTruthy();
-    expect(screen.getByTestId("crawler-assignment-panel").textContent).toBe(
-      "crawlers:c1:1:2",
-    );
-    expect(listPlayerMemberships).toHaveBeenCalledWith("u1", "c1");
-    expect(listAssignableCrawlers).toHaveBeenCalledWith("u1", "c1");
-    // The AI section's data is not loaded for the crawlers section.
-    expect(listAiKeys).not.toHaveBeenCalled();
-  });
-
-  it("404s a player on the Crawlers section too", async () => {
-    getCampaignForUser.mockResolvedValue({ id: "c1", name: "World One", members: [{ role: "PLAYER" }] });
-    await expect(
-      CampaignSettingsPage({
-        params: Promise.resolve({ id: "c1" }),
-        searchParams: Promise.resolve({ section: "crawlers" }),
-      }),
-    ).rejects.toThrow("NEXT_NOT_FOUND");
-    expect(listPlayerMemberships).not.toHaveBeenCalled();
   });
 });

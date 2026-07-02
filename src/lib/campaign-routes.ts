@@ -12,3 +12,10 @@ export function campaignHomeHref(
     ? `/play/campaigns/${campaignId}`
     : `/campaigns/${campaignId}`;
 }
+
+// The parsing twin of the hrefs above: pull the campaign id out of a DM-console
+// pathname (`/campaigns/[id]/...`), or null off-route. The route shape lives
+// here so nav/switcher components don't each hardcode the regex.
+export function campaignIdFromPathname(pathname: string): string | null {
+  return pathname.match(/^\/campaigns\/([^/]+)/)?.[1] ?? null;
+}

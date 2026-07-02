@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Eye, Globe2 } from "lucide-react";
+import { Globe2 } from "lucide-react";
 import type { EntityType } from "@/generated/prisma/client";
 
 import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
 import { listEntitiesForUser } from "@/server/services/entities";
 import { ConsoleScreen, ScreenRail } from "@/components/console/screen";
+import { PlayerSystemBanner } from "@/components/console/player-system-banner";
 import { Kicker } from "@/components/ui/kicker";
 import { TypeDot } from "@/components/ui/type-dot";
 import { formatEntityType } from "@/lib/entities";
@@ -116,26 +117,7 @@ export default async function KnownWorldPage({
         </ScreenRail>
       }
     >
-      {/* in-fiction System banner (mirrors the crawler-interface mockup) */}
-      <div
-        className="flex items-center gap-[14px] border-b border-[var(--line)] px-[26px] py-[14px]"
-        style={{
-          background:
-            "linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent)",
-        }}
-      >
-        <span className="live-dot" />
-        <span className="font-display text-[13px] font-bold tracking-[.18em] text-[var(--accent)]">
-          THE SYSTEM
-        </span>
-        <span className="font-mono text-[11px] text-[var(--ink-faint)]">
-          known world · what your crawler has seen
-        </span>
-        <span className="hud-tag ml-auto">
-          <Eye aria-hidden size={12} />
-          player view
-        </span>
-      </div>
+      <PlayerSystemBanner caption="known world · what your crawler has seen" />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-[22px] py-[18px]">
         {visible.length === 0 ? (

@@ -131,7 +131,6 @@ export type CrawlerSheet = {
   isAlive: boolean;
   killCount: number;
   followerCount: bigint;
-  viewCount: bigint;
   // Free-form stat block (STR/DEX/…). Currently has no write path, so it is
   // typically empty; rendered only when populated so we never show filler.
   stats: Record<string, number>;
@@ -145,49 +144,56 @@ export async function getMyCrawlerSheet(
   userId: string,
   campaignId: string,
 ): Promise<CrawlerSheet | null> {
+  // One round-trip: the crawler is a direct relation on the membership, so we
+  // read it inline instead of a second lookup by id.
   const membership = await prisma.membership.findUnique({
     where: { userId_campaignId: { userId, campaignId } },
-    select: { crawlerEntityId: true },
-  });
-  if (!membership?.crawlerEntityId) return null;
-
-  const entity = await prisma.entity.findFirst({
-    // Re-scope defensively: the link should never point elsewhere, but the
-    // sheet must never render a non-crawler, and must never surface non-CANON
-    // content to a player (invariant #5) — the DM can link a PENDING crawler
-    // ahead of approval, and archiving flips status to ARCHIVED without clearing
-    // the link. So gate on CANON (belt-and-suspenders, like the Known World);
-    // anything else shows the "no crawler linked yet" empty state.
-    where: {
-      id: membership.crawlerEntityId,
-      campaignId,
-      type: EntityType.CRAWLER,
-      status: CanonStatus.CANON,
-    },
     select: {
-      id: true,
-      name: true,
-      summary: true,
-      imageUrl: true,
-      crawler: {
+      crawlerEntity: {
         select: {
-          realName: true,
-          crawlerNo: true,
-          level: true,
-          hp: true,
-          mp: true,
-          gold: true,
-          currentFloor: true,
-          isAlive: true,
-          killCount: true,
-          followerCount: true,
-          viewCount: true,
-          stats: true,
+          id: true,
+          name: true,
+          summary: true,
+          imageUrl: true,
+          campaignId: true,
+          type: true,
+          status: true,
+          crawler: {
+            select: {
+              realName: true,
+              crawlerNo: true,
+              level: true,
+              hp: true,
+              mp: true,
+              gold: true,
+              currentFloor: true,
+              isAlive: true,
+              killCount: true,
+              followerCount: true,
+              stats: true,
+            },
+          },
         },
       },
     },
   });
-  if (!entity?.crawler) return null;
+
+  const entity = membership?.crawlerEntity;
+  // Gate in JS (a to-one relation can't be filtered in the nested select): the
+  // link should never point elsewhere, but the sheet must never render a
+  // non-crawler, and must never surface non-CANON content to a player
+  // (invariant #5) — the DM can link a PENDING crawler ahead of approval, and
+  // archiving flips status to ARCHIVED without clearing the link. So gate on
+  // CANON (belt-and-suspenders, like the Known World); anything else shows the
+  // "no crawler linked yet" empty state.
+  if (
+    !entity?.crawler ||
+    entity.campaignId !== campaignId ||
+    entity.type !== EntityType.CRAWLER ||
+    entity.status !== CanonStatus.CANON
+  ) {
+    return null;
+  }
 
   const c = entity.crawler;
   const rawStats = c.stats as unknown;
@@ -213,7 +219,6 @@ export async function getMyCrawlerSheet(
     isAlive: c.isAlive,
     killCount: c.killCount,
     followerCount: c.followerCount,
-    viewCount: c.viewCount,
     stats,
   };
 }

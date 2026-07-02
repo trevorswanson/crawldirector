@@ -64,7 +64,6 @@ describe("Crawler Sheet (player) page", () => {
       isAlive: true,
       killCount: 5,
       followerCount: BigInt(0),
-      viewCount: BigInt(0),
       stats: {},
     });
     await renderPage();

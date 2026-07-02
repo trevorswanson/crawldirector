@@ -1,10 +1,11 @@
 import { notFound } from "next/navigation";
-import { Eye, MonitorSmartphone } from "lucide-react";
+import { MonitorSmartphone } from "lucide-react";
 
 import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
 import { getMyCrawlerSheet } from "@/server/services/crawlers";
 import { ConsoleScreen } from "@/components/console/screen";
+import { PlayerSystemBanner } from "@/components/console/player-system-banner";
 import { CrawlerSheetPanel } from "@/components/crawler/crawler-sheet";
 
 export default async function CrawlerSheetPage({
@@ -24,26 +25,7 @@ export default async function CrawlerSheetPage({
 
   return (
     <ConsoleScreen>
-      {/* in-fiction System banner (mirrors the Known World + crawler mockup) */}
-      <div
-        className="flex items-center gap-[14px] border-b border-[var(--line)] px-[26px] py-[14px]"
-        style={{
-          background:
-            "linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent)",
-        }}
-      >
-        <span className="live-dot" />
-        <span className="font-display text-[13px] font-bold tracking-[.18em] text-[var(--accent)]">
-          THE SYSTEM
-        </span>
-        <span className="font-mono text-[11px] text-[var(--ink-faint)]">
-          crawler interface · your character sheet
-        </span>
-        <span className="hud-tag ml-auto">
-          <Eye aria-hidden size={12} />
-          player view
-        </span>
-      </div>
+      <PlayerSystemBanner caption="crawler interface · your character sheet" />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-[26px] py-[22px]">
         {sheet ? (
