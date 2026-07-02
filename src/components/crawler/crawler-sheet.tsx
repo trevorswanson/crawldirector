@@ -6,8 +6,9 @@ import { cn } from "@/lib/utils";
 // The player's own crawler sheet (M7). Renders only the fields the data model
 // actually carries — HP/MP/gold/floor/level/kills/status and the (currently
 // write-path-less) stat block, shown only when populated so the sheet never
-// displays filler. Loot boxes, titles/achievements, and bio-edit suggestions
-// are later M7 slices and deliberately absent here.
+// displays filler. Inventory / loot boxes / achievements / titles render
+// alongside this panel (CrawlerLoadoutPanel); bio-edit suggestions are a later
+// M7 slice.
 function StatTile({
   label,
   value,

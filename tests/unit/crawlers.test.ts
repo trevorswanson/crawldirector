@@ -8,8 +8,10 @@ import {
   Role,
   Visibility,
 } from "@/generated/prisma/client";
+import { RelationshipType } from "@/generated/prisma/client";
 import { createCampaign } from "@/server/services/campaigns";
 import {
+  getMyCrawlerLoadout,
   getMyCrawlerSheet,
   listAssignableCrawlers,
   listPlayerMemberships,
@@ -67,8 +69,45 @@ async function makeCrawler(
   });
 }
 
+async function makeEntity(
+  campaignId: string,
+  type: EntityType,
+  name: string,
+  overrides: { status?: CanonStatus; visibility?: Visibility } = {},
+) {
+  return prisma.entity.create({
+    data: {
+      campaignId,
+      type,
+      name,
+      status: overrides.status ?? CanonStatus.CANON,
+      visibility: overrides.visibility ?? Visibility.DM_ONLY,
+    },
+  });
+}
+
+async function link(
+  campaignId: string,
+  type: RelationshipType,
+  sourceId: string,
+  targetId: string,
+  overrides: { secret?: boolean; status?: CanonStatus } = {},
+) {
+  return prisma.relationship.create({
+    data: {
+      campaignId,
+      type,
+      sourceId,
+      targetId,
+      secret: overrides.secret ?? false,
+      status: overrides.status ?? CanonStatus.CANON,
+    },
+  });
+}
+
 beforeEach(async () => {
   await prisma.membership.deleteMany();
+  await prisma.relationship.deleteMany();
   await prisma.entity.deleteMany();
   await prisma.campaign.deleteMany();
   await prisma.user.deleteMany();
@@ -314,5 +353,127 @@ describe("getMyCrawlerSheet", () => {
 
     const sheet = await getMyCrawlerSheet(player.id, campaign.id);
     expect(sheet?.stats).toEqual({ STR: 55 });
+  });
+});
+
+describe("getMyCrawlerLoadout", () => {
+  async function setup() {
+    const owner = await makeUser(`dm-load-${Math.random()}@x.test`);
+    const player = await makeUser(`p-load-${Math.random()}@x.test`);
+    const campaign = await createCampaign(owner.id, { name: "Loadout" });
+    const membership = await addPlayer(player.id, campaign.id);
+    const crawler = await makeCrawler(campaign.id, "Carl");
+    await setPlayerCrawler(owner.id, campaign.id, membership.id, crawler.id);
+    return { owner, player, campaign, crawler };
+  }
+
+  it("returns inventory, achievements, titles, and the loot-box reward chain", async () => {
+    const { player, campaign, crawler } = await setup();
+
+    // Inventory (even a DM_ONLY item — the link is the read grant).
+    const sword = await makeEntity(campaign.id, EntityType.ITEM, "Vorpal Sword");
+    await link(campaign.id, RelationshipType.OWNS_ITEM, crawler.id, sword.id);
+
+    // Title.
+    const title = await makeEntity(campaign.id, EntityType.TITLE, "Goblin Slayer");
+    await link(campaign.id, RelationshipType.HOLDS_TITLE, crawler.id, title.id);
+
+    // Achievement → box → contained item (the reward chain).
+    const ach = await makeEntity(
+      campaign.id,
+      EntityType.ACHIEVEMENT,
+      "First Blood",
+    );
+    await link(campaign.id, RelationshipType.EARNED_ACHIEVEMENT, crawler.id, ach.id);
+    const box = await makeEntity(campaign.id, EntityType.BOX, "Bronze Box");
+    await link(campaign.id, RelationshipType.GRANTS_BOX, ach.id, box.id);
+    const potion = await makeEntity(campaign.id, EntityType.ITEM, "Health Potion");
+    await link(campaign.id, RelationshipType.CONTAINS, box.id, potion.id);
+
+    const loadout = await getMyCrawlerLoadout(player.id, campaign.id);
+    expect(loadout?.items.map((i) => i.name)).toEqual(["Vorpal Sword"]);
+    expect(loadout?.titles.map((t) => t.name)).toEqual(["Goblin Slayer"]);
+    expect(loadout?.achievements.map((a) => a.name)).toEqual(["First Blood"]);
+    expect(loadout?.lootBoxes).toHaveLength(1);
+    expect(loadout?.lootBoxes[0]).toMatchObject({
+      name: "Bronze Box",
+      type: EntityType.BOX,
+      fromAchievement: "First Blood",
+    });
+    expect(loadout?.lootBoxes[0].contents.map((c) => c.name)).toEqual([
+      "Health Potion",
+    ]);
+  });
+
+  it("hides secret edges and edges to non-CANON entities (invariant #5)", async () => {
+    const { player, campaign, crawler } = await setup();
+
+    // A secret OWNS_ITEM edge is DM-held knowledge — never on the player's sheet.
+    const cursed = await makeEntity(campaign.id, EntityType.ITEM, "Cursed Ring");
+    await link(campaign.id, RelationshipType.OWNS_ITEM, crawler.id, cursed.id, {
+      secret: true,
+    });
+    // A visible edge to a still-PENDING item must not leak the unapproved entity.
+    const pending = await makeEntity(campaign.id, EntityType.ITEM, "Proposed Loot", {
+      status: CanonStatus.PENDING,
+    });
+    await link(campaign.id, RelationshipType.OWNS_ITEM, crawler.id, pending.id);
+    // An archived edge is gone.
+    const dropped = await makeEntity(campaign.id, EntityType.ITEM, "Old Boot");
+    await link(campaign.id, RelationshipType.OWNS_ITEM, crawler.id, dropped.id, {
+      status: CanonStatus.ARCHIVED,
+    });
+    // A box behind a secret GRANTS_BOX edge is not revealed either.
+    const ach = await makeEntity(campaign.id, EntityType.ACHIEVEMENT, "Hidden");
+    await link(campaign.id, RelationshipType.EARNED_ACHIEVEMENT, crawler.id, ach.id);
+    const box = await makeEntity(campaign.id, EntityType.BOX, "Secret Box");
+    await link(campaign.id, RelationshipType.GRANTS_BOX, ach.id, box.id, {
+      secret: true,
+    });
+
+    const loadout = await getMyCrawlerLoadout(player.id, campaign.id);
+    expect(loadout?.items).toEqual([]);
+    expect(loadout?.achievements.map((a) => a.name)).toEqual(["Hidden"]);
+    expect(loadout?.lootBoxes).toEqual([]);
+  });
+
+  it("returns null for a non-member, an unlinked player, and another campaign's crawler", async () => {
+    const { campaign } = await setup();
+    const outsider = await makeUser("out-load@x.test");
+    expect(await getMyCrawlerLoadout(outsider.id, campaign.id)).toBeNull();
+
+    const owner2 = await makeUser("dm-load2@x.test");
+    const player2 = await makeUser("p-load2@x.test");
+    const campaign2 = await createCampaign(owner2.id, { name: "Loadout2" });
+    await addPlayer(player2.id, campaign2.id);
+    // A member with no crawler linked gets an empty loadout, not another's.
+    expect(await getMyCrawlerLoadout(player2.id, campaign2.id)).toBeNull();
+  });
+
+  it("returns null when the linked crawler is not CANON", async () => {
+    const owner = await makeUser("dm-load3@x.test");
+    const player = await makeUser("p-load3@x.test");
+    const campaign = await createCampaign(owner.id, { name: "Loadout3" });
+    const membership = await addPlayer(player.id, campaign.id);
+    const pending = await makeCrawler(campaign.id, "Proposed", {
+      status: CanonStatus.PENDING,
+    });
+    await setPlayerCrawler(owner.id, campaign.id, membership.id, pending.id);
+    expect(await getMyCrawlerLoadout(player.id, campaign.id)).toBeNull();
+  });
+
+  it("dedupes a box granted by two earned achievements", async () => {
+    const { player, campaign, crawler } = await setup();
+    const a1 = await makeEntity(campaign.id, EntityType.ACHIEVEMENT, "Alpha");
+    const a2 = await makeEntity(campaign.id, EntityType.ACHIEVEMENT, "Beta");
+    await link(campaign.id, RelationshipType.EARNED_ACHIEVEMENT, crawler.id, a1.id);
+    await link(campaign.id, RelationshipType.EARNED_ACHIEVEMENT, crawler.id, a2.id);
+    const box = await makeEntity(campaign.id, EntityType.BOX, "Shared Box");
+    await link(campaign.id, RelationshipType.GRANTS_BOX, a1.id, box.id);
+    await link(campaign.id, RelationshipType.GRANTS_BOX, a2.id, box.id);
+
+    const loadout = await getMyCrawlerLoadout(player.id, campaign.id);
+    expect(loadout?.lootBoxes).toHaveLength(1);
+    expect(loadout?.lootBoxes[0].fromAchievement).toBe("Alpha");
   });
 });

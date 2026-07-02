@@ -96,9 +96,10 @@ entries below. The **player crawler interface** is now under way; its foundation
 slice — the player console shell, role-based routing, and a projected read-only
 "Known World" — shipped ✅ 2026-06-30 (dated entry below). Slice 2 — the
 player↔crawler link + read-only crawler sheet — shipped ✅ 2026-07-01 (dated entry
-below). **Next up (remaining M7 player-UI slices):** (3) inventory / loot boxes +
-achievements & titles, (4) System-message feed, (5) scoped Ask ("Ask the
-System"), (6) player **suggestions** → review pipeline — slice 6 closes the
+below). Slice 3 — the crawler **loadout** (inventory / loot boxes / achievements /
+titles) alongside the sheet — shipped ✅ 2026-07-02 (dated entry below). **Next up
+(remaining M7 player-UI slices):** (4) System-message feed, (5) scoped Ask ("Ask
+the System"), (6) player **suggestions** → review pipeline — slice 6 closes the
 milestone's "done when" bar (a player can submit a suggestion).
 
 ### Scheduled roadmap additions (2026-06-19)
@@ -132,6 +133,69 @@ M6 remains the next milestone work. The detailed decisions live in
 
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
+
+## M7 — Crawler loadout: inventory / loot boxes / achievements / titles (slice 3) ✅ (2026-07-02)
+
+**Goal:** the third M7 *player-UI* slice — give the player's read-only crawler
+sheet the rest of their character's game state: **inventory** (items the crawler
+owns), **loot boxes** (the reward chain), **achievements** earned, and **titles**
+held. This realizes the milestone's "inventory/loot (supporting the `BOX` entity
+type containing items, with achievements rewarding boxes), achievements/titles"
+bullet on the player surface. No schema change — every relationship already
+exists (`OWNS_ITEM`, `EARNED_ACHIEVEMENT`, `HOLDS_TITLE`, `GRANTS_BOX`,
+`CONTAINS`); this is a new read projection over the crawler's own edges.
+
+**Decision (own-crawler read grant extends to the crawler's direct game edges;
+loot boxes are the earned-achievement reward chain).** Like the crawler sheet
+(slice 2), the caller's crawler link is the read grant, so the loadout shows the
+crawler's possessions/honors even when a linked item/achievement is a `DM_ONLY`
+entity — it's the player's own character. The projection stays bounded exactly as
+the sheet's: only the crawler on the caller's **own** membership, only when that
+crawler is live `CANON`, and — new to the edge reads — only **non-secret** edges
+(a `secret` edge is DM-held knowledge, e.g. a cursed item the crawler doesn't know
+about, so it stays hidden even on one's own sheet, matching
+`listConnectionsForEntity`'s player rule) to **live CANON** target entities (a
+pending/archived item never leaks). **Loot boxes** are derived, not a direct
+crawler edge: an earned achievement `GRANTS_BOX` a box, and a box `CONTAINS`
+items, so a box surfaces when the crawler earned an achievement that grants it
+(deduped across achievements; the first-earned achievement is credited). The read
+is a bounded 4 queries (membership → crawler edges → achievement→box →
+box→contents).
+
+- [x] **Service** ([`crawlers.ts`](../src/server/services/crawlers.ts)):
+      player-scoped `getMyCrawlerLoadout` returning `{ items, lootBoxes,
+      achievements, titles }` for the caller's own live-CANON crawler (else null),
+      with a shared `liveOutgoingEdges` helper (non-secret, non-archived, CANON
+      target) walking the reward chain. Types `CrawlerLoadout` / `CrawlerLootBox`
+      / `CrawlerLoadoutEntity` exported for the UI.
+- [x] **Player UI** ([`crawler-loadout.tsx`](../src/components/crawler/crawler-loadout.tsx),
+      [`sheet/page.tsx`](<../src/app/(player)/play/campaigns/[id]/sheet/page.tsx>)):
+      a `CrawlerLoadoutPanel` rendered alongside the sheet — Inventory / Loot Boxes
+      (each with its source achievement + contents) / Achievements / Titles, each
+      section shown only when non-empty (no filler — AGENTS.md), entity rows carrying
+      the `entityTypeColor` type dot, and a single honest note when the whole loadout
+      is empty. The sheet page fetches sheet + loadout in parallel and lays them out
+      side-by-side on wide screens.
+- [x] **Tests:** DB-backed `getMyCrawlerLoadout` cases in
+      [`crawlers.test.ts`](../tests/unit/crawlers.test.ts) (full inventory/title/
+      achievement + reward-chain read; secret + non-CANON + archived edges hidden;
+      non-member / unlinked / non-CANON crawler → null; box deduped across two
+      granting achievements); component coverage in
+      [`crawler-loadout.test.tsx`](../tests/unit/crawler-loadout.test.tsx) (empty
+      note, only-populated-sections, loot box with source + contents); the sheet
+      page now mocks + renders the loadout in
+      [`player-crawler-sheet-page.test.tsx`](../tests/unit/player-crawler-sheet-page.test.tsx).
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors; pre-existing
+      settings-action warnings only), `npm run build` (the `/play/campaigns/[id]/sheet`
+      route registers), and the full coverage gate green (140 files / **1843 tests**;
+      statements 95.35%, branches 88.91%, functions 96.47%, lines 96.95%;
+      `crawlers.ts` 100% stmts/funcs/lines). **In-browser** (reseeded `dcc` + a
+      `player@example.com` PLAYER membership linked to a DM_ONLY "Carl" crawler with
+      2 owned items, a title, an achievement granting a "Gold Loot Box" that contains
+      2 items): the player's Crawler Sheet rendered the stat panel plus all four
+      loadout sections — Inventory (2), Loot Boxes (1, "from Goblin Slayer" + its two
+      contents), Achievements (1), Titles (1) — with correct type-dot colors and no
+      console errors.
 
 ## M7 — Player↔crawler link + crawler sheet (slice 2) ✅ (2026-07-01)
 
