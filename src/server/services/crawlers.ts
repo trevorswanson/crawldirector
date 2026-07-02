@@ -1,4 +1,9 @@
-import { CanonStatus, EntityType, Role } from "@/generated/prisma/client";
+import {
+  CanonStatus,
+  EntityType,
+  RelationshipType,
+  Role,
+} from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 
@@ -220,5 +225,168 @@ export async function getMyCrawlerSheet(
     killCount: c.killCount,
     followerCount: c.followerCount,
     stats,
+  };
+}
+
+// ── Crawler loadout: inventory / loot boxes / achievements / titles (M7) ─────
+//
+// The player-facing companion to the crawler sheet. Like the sheet, this reads
+// the caller's OWN linked crawler as the read grant (invariant #5) — so a
+// player sees their own character's possessions and honors even when a linked
+// item/achievement is a DM_ONLY entity. The projection stays bounded:
+//   - only the crawler bound to the caller's own membership (never another
+//     player's), and only when that crawler is live CANON;
+//   - only NON-secret edges (a `secret` edge is DM-held knowledge — e.g. a
+//     cursed item the crawler doesn't know about — so it stays hidden even on
+//     one's own sheet, matching listConnectionsForEntity's player rule);
+//   - only edges to live CANON entities (a pending/archived item never leaks).
+// Loot boxes are the reward chain the domain model names: an earned achievement
+// GRANTS_BOX a box, and a box CONTAINS items — so a box surfaces here when the
+// crawler earned an achievement that grants it.
+
+export type CrawlerLoadoutEntity = {
+  entityId: string;
+  name: string;
+  type: string;
+  summary: string | null;
+};
+
+export type CrawlerLootBox = CrawlerLoadoutEntity & {
+  /** The earned achievement whose GRANTS_BOX reward yields this box. */
+  fromAchievement: string;
+  /** Items the box CONTAINS (live CANON, non-secret). */
+  contents: CrawlerLoadoutEntity[];
+};
+
+export type CrawlerLoadout = {
+  items: CrawlerLoadoutEntity[];
+  lootBoxes: CrawlerLootBox[];
+  achievements: CrawlerLoadoutEntity[];
+  titles: CrawlerLoadoutEntity[];
+};
+
+const loadoutOtherSelect = {
+  id: true,
+  name: true,
+  type: true,
+  summary: true,
+} as const;
+
+// Outgoing, non-secret, live edges of `sourceIds` of the given types whose
+// target is live CANON. Shared by every hop of the loadout read.
+async function liveOutgoingEdges(
+  campaignId: string,
+  sourceIds: string[],
+  types: RelationshipType[],
+) {
+  if (sourceIds.length === 0) return [];
+  return prisma.relationship.findMany({
+    where: {
+      campaignId,
+      sourceId: { in: sourceIds },
+      type: { in: types },
+      secret: false,
+      status: { not: CanonStatus.ARCHIVED },
+      targetEntity: { status: CanonStatus.CANON },
+    },
+    orderBy: { createdAt: "asc" },
+    select: {
+      sourceId: true,
+      type: true,
+      targetEntity: { select: loadoutOtherSelect },
+    },
+  });
+}
+
+function toLoadoutEntity(e: {
+  id: string;
+  name: string;
+  type: EntityType;
+  summary: string | null;
+}): CrawlerLoadoutEntity {
+  return { entityId: e.id, name: e.name, type: e.type, summary: e.summary };
+}
+
+// Player-scoped: the caller's own crawler loadout, or null if they have no
+// linked live-CANON crawler (non-member, unlinked, or a pending/archived link).
+export async function getMyCrawlerLoadout(
+  userId: string,
+  campaignId: string,
+): Promise<CrawlerLoadout | null> {
+  const membership = await prisma.membership.findUnique({
+    where: { userId_campaignId: { userId, campaignId } },
+    select: {
+      crawlerEntity: {
+        select: { id: true, campaignId: true, type: true, status: true },
+      },
+    },
+  });
+  const crawler = membership?.crawlerEntity;
+  // Same gate as getMyCrawlerSheet: own membership, in-campaign CRAWLER, CANON.
+  if (
+    !crawler ||
+    crawler.campaignId !== campaignId ||
+    crawler.type !== EntityType.CRAWLER ||
+    crawler.status !== CanonStatus.CANON
+  ) {
+    return null;
+  }
+
+  const direct = await liveOutgoingEdges(campaignId, [crawler.id], [
+    RelationshipType.OWNS_ITEM,
+    RelationshipType.EARNED_ACHIEVEMENT,
+    RelationshipType.HOLDS_TITLE,
+  ]);
+
+  const items: CrawlerLoadoutEntity[] = [];
+  const achievements: CrawlerLoadoutEntity[] = [];
+  const titles: CrawlerLoadoutEntity[] = [];
+  // achievement id → its name, to attribute each granted box to its source.
+  const achievementNames = new Map<string, string>();
+  for (const edge of direct) {
+    const entity = toLoadoutEntity(edge.targetEntity);
+    if (edge.type === RelationshipType.OWNS_ITEM) items.push(entity);
+    else if (edge.type === RelationshipType.HOLDS_TITLE) titles.push(entity);
+    else {
+      achievements.push(entity);
+      achievementNames.set(entity.entityId, entity.name);
+    }
+  }
+
+  // Reward chain: earned achievement --GRANTS_BOX--> box --CONTAINS--> items.
+  const boxEdges = await liveOutgoingEdges(
+    campaignId,
+    [...achievementNames.keys()],
+    [RelationshipType.GRANTS_BOX],
+  );
+  // Dedupe boxes by id (multiple achievements can grant the same box); the
+  // first-earned achievement is credited as the source.
+  const boxOrder: string[] = [];
+  const boxById = new Map<string, CrawlerLootBox>();
+  for (const edge of boxEdges) {
+    const box = edge.targetEntity;
+    if (boxById.has(box.id)) continue;
+    boxOrder.push(box.id);
+    boxById.set(box.id, {
+      ...toLoadoutEntity(box),
+      fromAchievement: achievementNames.get(edge.sourceId) ?? "",
+      contents: [],
+    });
+  }
+
+  const contentEdges = await liveOutgoingEdges(
+    campaignId,
+    boxOrder,
+    [RelationshipType.CONTAINS],
+  );
+  for (const edge of contentEdges) {
+    boxById.get(edge.sourceId)?.contents.push(toLoadoutEntity(edge.targetEntity));
+  }
+
+  return {
+    items,
+    lootBoxes: boxOrder.map((id) => boxById.get(id)!),
+    achievements,
+    titles,
   };
 }
