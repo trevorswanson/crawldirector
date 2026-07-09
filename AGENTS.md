@@ -20,10 +20,12 @@ event effect + the `BOX` `EntityType` with achievement→box `GRANTS_BOX` reward
 box→item `CONTAINS` contents); M7 player crawler interface under way — slice 1 (the
 player console shell at `/play`, role-based routing, and a projected read-only
 "Known World"), slice 2 (the DM-set player↔crawler link + a read-only crawler
-sheet at `/play/campaigns/[id]/sheet`), and slice 3 (the crawler **loadout** —
+sheet at `/play/campaigns/[id]/sheet`), slice 3 (the crawler **loadout** —
 inventory / loot boxes / achievements / titles read from the crawler's own graph
-edges, rendered alongside the sheet) shipped.** The next M7 work is the
-System-message feed, scoped Ask, and player suggestions.
+edges, rendered alongside the sheet), and slice 4 (the **System-message feed** at
+`/play/campaigns/[id]/system` — THE SYSTEM's in-fiction broadcasts, a
+visibility-scoped read over `SYSTEM_MESSAGE` entities) shipped.** The next M7 work
+is the scoped Ask and player suggestions.
 M5.5 (data model hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
 seam, the `MIGRATE_ENTITY_DATA` job, reference-integrity badge + impact-aware
 archive, orphan report, the greenfield Faction satellite, and the Floor satellite
@@ -165,8 +167,12 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
   loot boxes (the reward chain — an earned achievement `GRANTS_BOX` a box that
   `CONTAINS` items), achievements (`EARNED_ACHIEVEMENT`), and titles (`HOLDS_TITLE`),
   read from the crawler's own graph edges (same read grant; only non-secret edges to
-  live-CANON entities, so secret/DM-held and unapproved content never leaks). Next:
-  the System-message feed, scoped Ask, and player suggestions (which closes the
+  live-CANON entities, so secret/DM-held and unapproved content never leaks). Slice 4
+  added the **System-message feed** at `/play/campaigns/[id]/system`: THE SYSTEM's
+  in-fiction broadcasts to the crawlers, a campaign-wide visibility-scoped read over
+  `SYSTEM_MESSAGE` entities (only `PLAYER_VISIBLE`, live-CANON, newest first — DM-only
+  and pending messages never leak), each rendered as its real content with no invented
+  kind badge. Next: the scoped Ask and player suggestions (which closes the
   milestone's "done when" bar).
 
 For per-slice detail (files, tests, decisions) see

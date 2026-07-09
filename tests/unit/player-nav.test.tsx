@@ -44,14 +44,32 @@ describe("PlayerNav", () => {
     expect(link.getAttribute("href")).toBe("/play/campaigns/c1/sheet");
   });
 
+  it("links the built System Feed item to the active campaign", () => {
+    usePathname.mockReturnValue("/play/campaigns/c1");
+    render(<PlayerNav />);
+    const link = screen
+      .getByText("System Feed")
+      .closest("a") as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe("/play/campaigns/c1/system");
+  });
+
   it("marks unbuilt crawler-interface surfaces as Planned, not stub links", () => {
     usePathname.mockReturnValue("/play/campaigns/c1");
     render(<PlayerNav />);
-    for (const label of ["System Feed", "Ask the System", "Suggestions"]) {
+    for (const label of ["Ask the System", "Suggestions"]) {
       const row = screen.getByText(label).closest("[aria-disabled]");
       expect(row).not.toBeNull();
     }
-    expect(screen.getAllByText("Planned").length).toBe(3);
+    expect(screen.getAllByText("Planned").length).toBe(2);
+  });
+
+  it("highlights System Feed as active on the system route", () => {
+    usePathname.mockReturnValue("/play/campaigns/c1/system");
+    render(<PlayerNav />);
+    const feed = screen
+      .getByText("System Feed")
+      .closest("a") as HTMLAnchorElement;
+    expect(feed.className).toContain("border-[var(--accent)]");
   });
 
   it("highlights Known World as active on an entity detail route", () => {

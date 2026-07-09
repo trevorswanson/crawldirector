@@ -28,9 +28,10 @@ type PlayerNavItem = {
   planned?: string;
 };
 
-// Only the Known World is built today; the rest of the crawler interface ships
-// in later M7 slices and is shown disabled with its slice, so the nav doubles
-// as a roadmap without faking any pages. Keep in sync with docs/11-roadmap.md.
+// Known World, Crawler Sheet, and the System Feed are built; the remaining
+// crawler-interface items ship in later M7 slices and are shown disabled with
+// their slice, so the nav doubles as a roadmap without faking any pages. Keep
+// in sync with docs/11-roadmap.md.
 const NAV: PlayerNavItem[] = [
   {
     label: "Known World",
@@ -47,7 +48,13 @@ const NAV: PlayerNavItem[] = [
       campaignId ? `/play/campaigns/${campaignId}/sheet` : "/dashboard",
     match: (p) => /^\/play\/campaigns\/[^/]+\/sheet$/.test(p),
   },
-  { label: "System Feed", icon: Radio, planned: "M7 — System-message feed" },
+  {
+    label: "System Feed",
+    icon: Radio,
+    href: (campaignId) =>
+      campaignId ? `/play/campaigns/${campaignId}/system` : "/dashboard",
+    match: (p) => /^\/play\/campaigns\/[^/]+\/system$/.test(p),
+  },
   {
     label: "Ask the System",
     icon: MessageCircleQuestion,
