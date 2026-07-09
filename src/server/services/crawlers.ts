@@ -141,6 +141,21 @@ export type CrawlerSheet = {
   stats: Record<string, number>;
 };
 
+// The own-crawler read gate (invariant #5): the linked entity must be an
+// in-campaign, live-CANON CRAWLER. Shared by getMyCrawlerSheet and
+// getMyCrawlerLoadout so the two projections can never drift on what counts as
+// the caller's crawler. A type guard so callers narrow the entity to non-null.
+function isOwnLiveCrawler<
+  T extends { campaignId: string; type: EntityType; status: CanonStatus },
+>(entity: T | null | undefined, campaignId: string): entity is T {
+  return (
+    !!entity &&
+    entity.campaignId === campaignId &&
+    entity.type === EntityType.CRAWLER &&
+    entity.status === CanonStatus.CANON
+  );
+}
+
 // Player-scoped: the caller's own crawler sheet, or null if they are not a
 // member or have no crawler linked. Only ever returns the crawler bound to the
 // caller's OWN membership — this is the entire projection, so it cannot leak
@@ -191,12 +206,7 @@ export async function getMyCrawlerSheet(
   // archiving flips status to ARCHIVED without clearing the link. So gate on
   // CANON (belt-and-suspenders, like the Known World); anything else shows the
   // "no crawler linked yet" empty state.
-  if (
-    !entity?.crawler ||
-    entity.campaignId !== campaignId ||
-    entity.type !== EntityType.CRAWLER ||
-    entity.status !== CanonStatus.CANON
-  ) {
+  if (!isOwnLiveCrawler(entity, campaignId) || !entity.crawler) {
     return null;
   }
 
@@ -272,8 +282,10 @@ const loadoutOtherSelect = {
   summary: true,
 } as const;
 
-// Outgoing, non-secret, live edges of `sourceIds` of the given types whose
-// target is live CANON. Shared by every hop of the loadout read.
+// Outgoing, non-secret, CANON edges of `sourceIds` of the given types whose
+// target is live CANON. Shared by every hop of the loadout read. The edge
+// itself must be CANON (not merely non-archived): a still-PENDING proposal is
+// unapproved content and must never surface on a player's own loadout.
 async function liveOutgoingEdges(
   campaignId: string,
   sourceIds: string[],
@@ -286,7 +298,7 @@ async function liveOutgoingEdges(
       sourceId: { in: sourceIds },
       type: { in: types },
       secret: false,
-      status: { not: CanonStatus.ARCHIVED },
+      status: CanonStatus.CANON,
       targetEntity: { status: CanonStatus.CANON },
     },
     orderBy: { createdAt: "asc" },
@@ -323,12 +335,7 @@ export async function getMyCrawlerLoadout(
   });
   const crawler = membership?.crawlerEntity;
   // Same gate as getMyCrawlerSheet: own membership, in-campaign CRAWLER, CANON.
-  if (
-    !crawler ||
-    crawler.campaignId !== campaignId ||
-    crawler.type !== EntityType.CRAWLER ||
-    crawler.status !== CanonStatus.CANON
-  ) {
+  if (!isOwnLiveCrawler(crawler, campaignId)) {
     return null;
   }
 
@@ -342,8 +349,17 @@ export async function getMyCrawlerLoadout(
   const achievements: CrawlerLoadoutEntity[] = [];
   const titles: CrawlerLoadoutEntity[] = [];
   // achievement id → its name, to attribute each granted box to its source.
+  // Insertion order is earn order (direct edges come back createdAt-asc).
   const achievementNames = new Map<string, string>();
+  // Dedupe repeated edges to the same target — there is no DB uniqueness on
+  // (source, target, type), so a duplicate edge would otherwise render the
+  // entity twice (and collide React keys). Keyed by type so an entity linked
+  // two different ways can still appear in both sections.
+  const seenDirect = new Set<string>();
   for (const edge of direct) {
+    const key = `${edge.type}:${edge.targetEntity.id}`;
+    if (seenDirect.has(key)) continue;
+    seenDirect.add(key);
     const entity = toLoadoutEntity(edge.targetEntity);
     if (edge.type === RelationshipType.OWNS_ITEM) items.push(entity);
     else if (edge.type === RelationshipType.HOLDS_TITLE) titles.push(entity);
@@ -354,29 +370,30 @@ export async function getMyCrawlerLoadout(
   }
 
   // Reward chain: earned achievement --GRANTS_BOX--> box --CONTAINS--> items.
-  const boxEdges = await liveOutgoingEdges(
-    campaignId,
-    [...achievementNames.keys()],
-    [RelationshipType.GRANTS_BOX],
-  );
+  // Order grant edges by their source achievement's earn position so the
+  // earliest-earned achievement wins the credit when several grant one box.
+  const earnOrder = [...achievementNames.keys()];
+  const earnRank = new Map(earnOrder.map((id, i) => [id, i] as const));
+  const boxEdges = (
+    await liveOutgoingEdges(campaignId, earnOrder, [RelationshipType.GRANTS_BOX])
+  ).sort((a, b) => earnRank.get(a.sourceId)! - earnRank.get(b.sourceId)!);
   // Dedupe boxes by id (multiple achievements can grant the same box); the
-  // first-earned achievement is credited as the source.
-  const boxOrder: string[] = [];
+  // earliest-earned achievement is credited as the source. Map iteration
+  // preserves this insertion order, so it also fixes the returned box order.
   const boxById = new Map<string, CrawlerLootBox>();
   for (const edge of boxEdges) {
     const box = edge.targetEntity;
     if (boxById.has(box.id)) continue;
-    boxOrder.push(box.id);
     boxById.set(box.id, {
       ...toLoadoutEntity(box),
-      fromAchievement: achievementNames.get(edge.sourceId) ?? "",
+      fromAchievement: achievementNames.get(edge.sourceId)!,
       contents: [],
     });
   }
 
   const contentEdges = await liveOutgoingEdges(
     campaignId,
-    boxOrder,
+    [...boxById.keys()],
     [RelationshipType.CONTAINS],
   );
   for (const edge of contentEdges) {
@@ -385,7 +402,7 @@ export async function getMyCrawlerLoadout(
 
   return {
     items,
-    lootBoxes: boxOrder.map((id) => boxById.get(id)!),
+    lootBoxes: [...boxById.values()],
     achievements,
     titles,
   };

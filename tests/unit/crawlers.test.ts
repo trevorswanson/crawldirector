@@ -476,4 +476,46 @@ describe("getMyCrawlerLoadout", () => {
     expect(loadout?.lootBoxes).toHaveLength(1);
     expect(loadout?.lootBoxes[0].fromAchievement).toBe("Alpha");
   });
+
+  it("credits the earliest-earned achievement even when its grant edge is newer", async () => {
+    const { player, campaign, crawler } = await setup();
+    const a1 = await makeEntity(campaign.id, EntityType.ACHIEVEMENT, "Alpha");
+    const a2 = await makeEntity(campaign.id, EntityType.ACHIEVEMENT, "Beta");
+    // Earn Alpha first, then Beta.
+    await link(campaign.id, RelationshipType.EARNED_ACHIEVEMENT, crawler.id, a1.id);
+    await link(campaign.id, RelationshipType.EARNED_ACHIEVEMENT, crawler.id, a2.id);
+    const box = await makeEntity(campaign.id, EntityType.BOX, "Shared Box");
+    // Wire Beta's grant edge FIRST — credit must still follow earn order, not
+    // the order the GRANTS_BOX edges were created.
+    await link(campaign.id, RelationshipType.GRANTS_BOX, a2.id, box.id);
+    await link(campaign.id, RelationshipType.GRANTS_BOX, a1.id, box.id);
+
+    const loadout = await getMyCrawlerLoadout(player.id, campaign.id);
+    expect(loadout?.lootBoxes).toHaveLength(1);
+    expect(loadout?.lootBoxes[0].fromAchievement).toBe("Alpha");
+  });
+
+  it("dedupes duplicate edges to the same item (no double render)", async () => {
+    const { player, campaign, crawler } = await setup();
+    const sword = await makeEntity(campaign.id, EntityType.ITEM, "Vorpal Sword");
+    // Two OWNS_ITEM edges to the same item (no DB uniqueness prevents this).
+    await link(campaign.id, RelationshipType.OWNS_ITEM, crawler.id, sword.id);
+    await link(campaign.id, RelationshipType.OWNS_ITEM, crawler.id, sword.id);
+
+    const loadout = await getMyCrawlerLoadout(player.id, campaign.id);
+    expect(loadout?.items.map((i) => i.name)).toEqual(["Vorpal Sword"]);
+  });
+
+  it("hides a PENDING (unapproved) edge even to a CANON entity", async () => {
+    const { player, campaign, crawler } = await setup();
+    const item = await makeEntity(campaign.id, EntityType.ITEM, "Proposed Reward");
+    // The item is CANON, but the OWNS_ITEM edge itself is a pending proposal —
+    // unapproved content must not surface on the player's own loadout.
+    await link(campaign.id, RelationshipType.OWNS_ITEM, crawler.id, item.id, {
+      status: CanonStatus.PENDING,
+    });
+
+    const loadout = await getMyCrawlerLoadout(player.id, campaign.id);
+    expect(loadout?.items).toEqual([]);
+  });
 });
