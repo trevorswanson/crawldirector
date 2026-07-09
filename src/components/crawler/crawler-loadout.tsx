@@ -11,31 +11,54 @@ import type {
   CrawlerLoadoutEntity,
   CrawlerLootBox,
 } from "@/server/services/crawlers";
-import { entityTypeColor } from "@/lib/entities";
+import { TypeDot } from "@/components/ui/type-dot";
 
 // The player's own crawler loadout (M7): inventory, loot boxes, achievements,
 // and titles read through the own-crawler link (invariant #5). Each section
 // renders only when it has real entries — no filler (AGENTS.md) — and an empty
 // loadout shows a single honest note.
 
-function EntityRow({ entity }: { entity: CrawlerLoadoutEntity }) {
+// Shared row header: the entity type-dot, its name, and an optional subtitle
+// (an item's summary, or a box's source achievement). Used by both EntityRow
+// and LootBoxRow so the dot/name markup lives in one place.
+function EntityHeader({
+  type,
+  name,
+  subtitle,
+}: {
+  type: string;
+  name: string;
+  subtitle?: React.ReactNode;
+}) {
   return (
-    <div className="flex items-baseline gap-[8px] px-[12px] py-[9px]">
-      <span
-        aria-hidden
-        className="mt-[6px] h-[7px] w-[7px] shrink-0 rounded-full"
-        style={{ backgroundColor: entityTypeColor(entity.type) }}
-      />
+    <div className="flex items-baseline gap-[8px]">
+      <span className="mt-[6px] shrink-0">
+        <TypeDot type={type} size={7} />
+      </span>
       <div className="min-w-0">
         <div className="truncate text-[13px] font-medium text-[var(--ink)]">
-          {entity.name}
+          {name}
         </div>
-        {entity.summary ? (
-          <div className="truncate text-[11.5px] text-[var(--ink-dim)]">
-            {entity.summary}
-          </div>
-        ) : null}
+        {subtitle}
       </div>
+    </div>
+  );
+}
+
+function EntityRow({ entity }: { entity: CrawlerLoadoutEntity }) {
+  return (
+    <div className="px-[12px] py-[9px]">
+      <EntityHeader
+        type={entity.type}
+        name={entity.name}
+        subtitle={
+          entity.summary ? (
+            <div className="truncate text-[11.5px] text-[var(--ink-dim)]">
+              {entity.summary}
+            </div>
+          ) : null
+        }
+      />
     </div>
   );
 }
@@ -72,23 +95,15 @@ function Section({
 function LootBoxRow({ box }: { box: CrawlerLootBox }) {
   return (
     <div className="px-[12px] py-[9px]">
-      <div className="flex items-baseline gap-[8px]">
-        <span
-          aria-hidden
-          className="mt-[6px] h-[7px] w-[7px] shrink-0 rounded-full"
-          style={{ backgroundColor: entityTypeColor(box.type) }}
-        />
-        <div className="min-w-0">
-          <div className="truncate text-[13px] font-medium text-[var(--ink)]">
-            {box.name}
+      <EntityHeader
+        type={box.type}
+        name={box.name}
+        subtitle={
+          <div className="truncate font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-faint)]">
+            from {box.fromAchievement}
           </div>
-          {box.fromAchievement ? (
-            <div className="truncate font-mono text-[10px] uppercase tracking-[.08em] text-[var(--ink-faint)]">
-              from {box.fromAchievement}
-            </div>
-          ) : null}
-        </div>
-      </div>
+        }
+      />
       {box.contents.length > 0 ? (
         <ul className="mt-[6px] ml-[15px] border-l border-[var(--line)] pl-[10px]">
           {box.contents.map((item) => (
