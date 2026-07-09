@@ -2,19 +2,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
-const { requireUser, getCampaignForUser, getMyCrawlerSheet, notFound } =
-  vi.hoisted(() => ({
-    requireUser: vi.fn(),
-    getCampaignForUser: vi.fn(),
-    getMyCrawlerSheet: vi.fn(),
-    notFound: vi.fn(() => {
-      throw new Error("NEXT_NOT_FOUND");
-    }),
-  }));
+const {
+  requireUser,
+  getCampaignForUser,
+  getMyCrawlerSheet,
+  getMyCrawlerLoadout,
+  notFound,
+} = vi.hoisted(() => ({
+  requireUser: vi.fn(),
+  getCampaignForUser: vi.fn(),
+  getMyCrawlerSheet: vi.fn(),
+  getMyCrawlerLoadout: vi.fn(),
+  notFound: vi.fn(() => {
+    throw new Error("NEXT_NOT_FOUND");
+  }),
+}));
 
 vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/campaigns", () => ({ getCampaignForUser }));
-vi.mock("@/server/services/crawlers", () => ({ getMyCrawlerSheet }));
+vi.mock("@/server/services/crawlers", () => ({
+  getMyCrawlerSheet,
+  getMyCrawlerLoadout,
+}));
 vi.mock("next/navigation", () => ({ notFound }));
 
 import CrawlerSheetPage from "@/app/(player)/play/campaigns/[id]/sheet/page";
@@ -27,6 +36,7 @@ beforeEach(() => {
     name: "Dungeon",
     members: [{ role: "PLAYER" }],
   });
+  getMyCrawlerLoadout.mockResolvedValue(null);
 });
 
 afterEach(cleanup);
@@ -69,5 +79,34 @@ describe("Crawler Sheet (player) page", () => {
     await renderPage();
     expect(screen.getByText("Carl")).toBeTruthy();
     expect(screen.getByText("THE SYSTEM")).toBeTruthy();
+  });
+
+  it("renders the loadout alongside the sheet when present", async () => {
+    getMyCrawlerSheet.mockResolvedValue({
+      entityId: "e1",
+      name: "Carl",
+      summary: null,
+      imageUrl: null,
+      realName: null,
+      crawlerNo: null,
+      level: 7,
+      hp: 42,
+      mp: 12,
+      gold: 300,
+      currentFloor: 9,
+      isAlive: true,
+      killCount: 5,
+      followerCount: BigInt(0),
+      stats: {},
+    });
+    getMyCrawlerLoadout.mockResolvedValue({
+      items: [{ entityId: "i1", name: "Vorpal Sword", type: "ITEM", summary: null }],
+      lootBoxes: [],
+      achievements: [],
+      titles: [],
+    });
+    await renderPage();
+    expect(screen.getByText("Vorpal Sword")).toBeTruthy();
+    expect(screen.getByText("Inventory")).toBeTruthy();
   });
 });

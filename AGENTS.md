@@ -19,9 +19,11 @@ slices blocked on M10/M11); M7 game-progression complete (`GRANT_ACHIEVEMENT`
 event effect + the `BOX` `EntityType` with achievement→box `GRANTS_BOX` rewards and
 box→item `CONTAINS` contents); M7 player crawler interface under way — slice 1 (the
 player console shell at `/play`, role-based routing, and a projected read-only
-"Known World") and slice 2 (the DM-set player↔crawler link + a read-only crawler
-sheet at `/play/campaigns/[id]/sheet`) shipped.** The next M7 work is
-inventory/boxes, the System-message feed, scoped Ask, and player suggestions.
+"Known World"), slice 2 (the DM-set player↔crawler link + a read-only crawler
+sheet at `/play/campaigns/[id]/sheet`), and slice 3 (the crawler **loadout** —
+inventory / loot boxes / achievements / titles read from the crawler's own graph
+edges, rendered alongside the sheet) shipped.** The next M7 work is the
+System-message feed, scoped Ask, and player suggestions.
 M5.5 (data model hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
 seam, the `MIGRATE_ENTITY_DATA` job, reference-integrity badge + impact-aware
 archive, orphan report, the greenfield Faction satellite, and the Floor satellite
@@ -158,9 +160,14 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
   `/play/campaigns/[id]/sheet` where a player sees *their own* crawler's stats
   (HP/MP/gold/floor/level/…, even a `DM_ONLY` entity — the link is the read grant,
   so no other player's or unlinked canon leaks). The link is membership metadata,
-  not canon, so it's a direct mutation outside the review pipeline. Next: inventory/
-  loot boxes, the System-message feed, scoped Ask, and player suggestions (which
-  closes the milestone's "done when" bar).
+  not canon, so it's a direct mutation outside the review pipeline. Slice 3 added
+  the crawler **loadout** beside the sheet: the player's inventory (`OWNS_ITEM`),
+  loot boxes (the reward chain — an earned achievement `GRANTS_BOX` a box that
+  `CONTAINS` items), achievements (`EARNED_ACHIEVEMENT`), and titles (`HOLDS_TITLE`),
+  read from the crawler's own graph edges (same read grant; only non-secret edges to
+  live-CANON entities, so secret/DM-held and unapproved content never leaks). Next:
+  the System-message feed, scoped Ask, and player suggestions (which closes the
+  milestone's "done when" bar).
 
 For per-slice detail (files, tests, decisions) see
 [`docs/PROGRESS.md`](./docs/PROGRESS.md) — its "Open backlog" section is the
