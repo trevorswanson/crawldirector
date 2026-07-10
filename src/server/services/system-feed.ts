@@ -5,6 +5,7 @@ import {
   Visibility,
 } from "@/generated/prisma/client";
 import { prisma } from "@/server/db";
+import { getMembershipRole } from "@/server/services/campaigns";
 
 // ── Player System-message feed (M7) ─────────────────────────────────────────
 //
@@ -25,14 +26,6 @@ export type SystemFeedMessage = {
   /** When the System issued the broadcast (the entity's creation time). */
   broadcastAt: Date;
 };
-
-async function getMembershipRole(userId: string, campaignId: string) {
-  const membership = await prisma.membership.findUnique({
-    where: { userId_campaignId: { userId, campaignId } },
-    select: { role: true },
-  });
-  return membership?.role ?? null;
-}
 
 // Player-scoped: the campaign's System-message feed for the caller, or an empty
 // list if they are not a member. A PLAYER sees only PLAYER_VISIBLE messages;
