@@ -97,10 +97,12 @@ slice — the player console shell, role-based routing, and a projected read-onl
 "Known World" — shipped ✅ 2026-06-30 (dated entry below). Slice 2 — the
 player↔crawler link + read-only crawler sheet — shipped ✅ 2026-07-01 (dated entry
 below). Slice 3 — the crawler **loadout** (inventory / loot boxes / achievements /
-titles) alongside the sheet — shipped ✅ 2026-07-02 (dated entry below). **Next up
-(remaining M7 player-UI slices):** (4) System-message feed, (5) scoped Ask ("Ask
-the System"), (6) player **suggestions** → review pipeline — slice 6 closes the
-milestone's "done when" bar (a player can submit a suggestion).
+titles) alongside the sheet — shipped ✅ 2026-07-02 (dated entry below). Slice 4 —
+the **System-message feed** (THE SYSTEM's in-fiction broadcasts, visibility-scoped)
+— shipped ✅ 2026-07-09 (dated entry below). **Next up (remaining M7 player-UI
+slices):** (5) scoped Ask ("Ask the System"), (6) player **suggestions** → review
+pipeline — slice 6 closes the milestone's "done when" bar (a player can submit a
+suggestion).
 
 ### Scheduled roadmap additions (2026-06-19)
 
@@ -133,6 +135,68 @@ M6 remains the next milestone work. The detailed decisions live in
 
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
+
+## M7 — Player System-message feed (slice 4) ✅ (2026-07-09)
+
+**Goal:** the fourth M7 *player-UI* slice — give the player crawler interface the
+**System-message feed**: THE SYSTEM's in-fiction broadcasts to the crawlers (rule
+changes, announcements, floor warnings), the "System messages / notifications"
+bullet on the player surface ([`10-ui-ux.md`](./10-ui-ux.md)). No schema change —
+a System message is just a `SYSTEM_MESSAGE` entity, so the feed is a new read
+projection over that type. This is invariant #5 made visible again: a player sees
+only `PLAYER_VISIBLE`, live-CANON messages; DM-only and pending broadcasts never
+leak.
+
+**Decision (campaign-wide visibility-projected read, not crawler-scoped; no
+invented "kind").** Unlike the crawler sheet/loadout (slices 2–3), the feed is not
+scoped to the caller's crawler — every player sees the same broadcast feed the DM
+has published. So `getSystemMessageFeed` is a plain visibility-projected entity
+read (role → `PLAYER_VISIBLE` filter, plus a belt-and-suspenders `status: CANON`
+gate like the Known World), ordered newest broadcast first by the entity's
+`createdAt` (when the System issued it). The mockup's per-message kind badges
+(ANNOUNCEMENT / ALERT / PERSONAL / PATCH NOTE) are **not** modeled on the
+`SYSTEM_MESSAGE` entity, so — rather than ship a fake classification (AGENTS.md) —
+each card renders the message's real content only (headline + optional summary +
+Markdown body) under a neutral "System broadcast" label and its date. A tier/kind
+`data.*` field is a plausible future follow-up.
+
+- [x] **Service** ([`system-feed.ts`](../src/server/services/system-feed.ts)):
+      new player-scoped `getSystemMessageFeed(userId, campaignId)` returning
+      `SystemFeedMessage[]` (id / name / summary / description / tags /
+      `broadcastAt`) — CANON `SYSTEM_MESSAGE` entities, `PLAYER_VISIBLE` for a
+      PLAYER, newest first; `[]` for a non-member. `SystemFeedMessage` type
+      exported for the UI.
+- [x] **Player UI** ([`system-feed.tsx`](../src/components/crawler/system-feed.tsx),
+      [`system/page.tsx`](<../src/app/(player)/play/campaigns/[id]/system/page.tsx>)):
+      a `SystemFeed` component rendering each broadcast as a left-accent-bordered
+      card (headline + summary + Markdown body + date), with a single honest empty
+      state; the new `/play/campaigns/[id]/system` page (ConsoleScreen +
+      `PlayerSystemBanner` "live broadcast feed") fetches campaign + feed in
+      parallel and 404s a non-member.
+- [x] **Nav** ([`player-nav.tsx`](../src/components/console/player-nav.tsx)): the
+      **System Feed** item is now a built link (was Planned) → `/play/campaigns/[id]/system`,
+      with an active-highlight match; only Ask the System + Suggestions remain Planned.
+- [x] **Tests:** DB-backed `getSystemMessageFeed` cases in
+      [`system-feed.test.ts`](../tests/unit/system-feed.test.ts) (newest-first
+      player-visible read incl. summary/description/tags; DM-only + pending +
+      archived + non-`SYSTEM_MESSAGE` hidden; non-member → `[]`; DM sees all CANON
+      regardless of visibility); component coverage in
+      [`system-feed-panel.test.tsx`](../tests/unit/system-feed-panel.test.tsx)
+      (empty note, headline/summary/Markdown body, summary/body omitted when
+      absent, render order); the page in
+      [`player-system-feed-page.test.tsx`](../tests/unit/player-system-feed-page.test.tsx)
+      (non-member 404, empty state, projected feed); updated
+      [`player-nav.test.tsx`](../tests/unit/player-nav.test.tsx) for the newly-built item.
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors; pre-existing
+      settings-action warnings only), `npm run build` (the
+      `/play/campaigns/[id]/system` route registers), and the full coverage gate
+      green (143 files / **1859 tests**; statements 95.37%, branches 88.96%,
+      functions 96.49%, lines 96.96%; `system-feed.ts` fully covered). **In-browser**
+      (reseeded `dcc` + a `player@example.com` PLAYER membership; four seeded System
+      messages — two `PLAYER_VISIBLE` CANON, one `DM_ONLY`, one PENDING): the feed
+      rendered only the two visible broadcasts newest-first ("Floor 9 will collapse"
+      Jul 7 above "Welcome to the Dungeon" Jul 1), with Markdown emphasis/strong
+      rendered and the DM-only + pending messages absent; no console errors.
 
 ## M7 — Crawler loadout: inventory / loot boxes / achievements / titles (slice 3) ✅ (2026-07-02)
 
