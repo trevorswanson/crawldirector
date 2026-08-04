@@ -14,18 +14,23 @@ pitch and [`docs/`](./docs) for the full plan.
 
 ## Current status
 
-🚧 **M0–M5.5 complete; M6 slices 1–6 complete (its "done when" bar met; remaining
-slices blocked on M10/M11); M7 game-progression complete (`GRANT_ACHIEVEMENT`
+🚧 **M0–M7 complete.** M6 slices 1–6 complete (its "done when" bar met; remaining
+slices blocked on M10/M11). M7 complete: game-progression (`GRANT_ACHIEVEMENT`
 event effect + the `BOX` `EntityType` with achievement→box `GRANTS_BOX` rewards and
-box→item `CONTAINS` contents); M7 player crawler interface under way — slice 1 (the
+box→item `CONTAINS` contents) plus all six player crawler-interface slices — the
 player console shell at `/play`, role-based routing, and a projected read-only
-"Known World"), slice 2 (the DM-set player↔crawler link + a read-only crawler
-sheet at `/play/campaigns/[id]/sheet`), slice 3 (the crawler **loadout** —
+"Known World" (slice 1); the DM-set player↔crawler link + a read-only crawler
+sheet at `/play/campaigns/[id]/sheet` (slice 2); the crawler **loadout** —
 inventory / loot boxes / achievements / titles read from the crawler's own graph
-edges, rendered alongside the sheet), and slice 4 (the **System-message feed** at
+edges, rendered alongside the sheet (slice 3); the **System-message feed** at
 `/play/campaigns/[id]/system` — THE SYSTEM's in-fiction broadcasts, a
-visibility-scoped read over `SYSTEM_MESSAGE` entities) shipped.** The next M7 work
-is the scoped Ask and player suggestions.
+visibility-scoped read over `SYSTEM_MESSAGE` entities (slice 4); scoped **"Ask
+the System"** at `/play/campaigns/[id]/ask`, reusing the DM's role-scoped
+`askCampaign` service (slice 5); and player **Suggestions** at
+`/play/campaigns/[id]/suggestions` — a player proposes an edit to their own
+crawler's bio/notes, filed as a `PLAYER_SUGGESTION` change set through the
+existing review pipeline (slice 6), closing M7's "done when" bar. **Next up: M8 —
+live session mode & recaps.**
 M5.5 (data model hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
 seam, the `MIGRATE_ENTITY_DATA` job, reference-integrity badge + impact-aware
 archive, orphan report, the greenfield Faction satellite, and the Floor satellite
@@ -141,7 +146,7 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
   set-piece generator (waits on M10's generic operation aliases/dependencies) and
   broader actor-profile studio reuse for M11 — are blocked, so M6's "done when" bar
   is met and work has moved to M7.
-- **M7 — Player crawler interface + sharing 🚧.** The **game-progression**
+- **M7 — Player crawler interface + sharing ✅.** The **game-progression**
   sub-thread (no player-UI surface) is complete. Slice 1: the `GRANT_ACHIEVEMENT`
   event-effect kind — an event grants a crawler an `EARNED_ACHIEVEMENT` edge to an
   `ACHIEVEMENT` entity through the same reviewable `APPLY_EVENT_EFFECTS` path as the
@@ -177,8 +182,17 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
   same role-scoped `askCampaign` service and a route-agnostic `AskPanel` shared with
   the DM page (each route now passes its own bound server action). No new visibility
   logic needed — `askCampaign`'s retrieval was already scoped to the caller's
-  membership role. Next: player **suggestions** → review pipeline (closes the
-  milestone's "done when" bar).
+  membership role. Slice 6 added player **Suggestions** at
+  `/play/campaigns/[id]/suggestions`: a player proposes an edit to their own linked
+  crawler's bio (`summary`) and/or notes (`description`) — the only fields the
+  surface exposes — via a new `createPlayerSuggestion` service function (PLAYER-only,
+  own-crawler-only, allowlisted-fields-only) that files a PENDING
+  `source: PLAYER_SUGGESTION` `UPDATE_ENTITY` change set through the existing review
+  pipeline (invariant #1: never writes canon directly); a companion
+  `listMySuggestions` shows the player their own submission history/status. No new
+  DM-side work needed — the Review Queue's PLAYER filter/badge already existed. This
+  closes M7's "done when" bar (a player logs in, sees only shared/own-crawler data,
+  and can submit a suggestion); work moves to M8.
 
 For per-slice detail (files, tests, decisions) see
 [`docs/PROGRESS.md`](./docs/PROGRESS.md) — its "Open backlog" section is the

@@ -11,6 +11,7 @@ const sheet = (over: Partial<CrawlerSheet> = {}): CrawlerSheet => ({
   entityId: "e1",
   name: "Carl",
   summary: null,
+  description: null,
   imageUrl: null,
   realName: null,
   crawlerNo: "4,722,644,976",

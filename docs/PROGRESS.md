@@ -85,24 +85,27 @@ broader actor-profile studio reuse for M11. Keep the M6 work incremental.
 - [ ] **Later M6 slices.** The **encounter** set-piece generator (multi-entity),
       and broader actor-profile studio reuse for M11.
 
-**Now also active: M7 — Player crawler interface + sharing**
-([11-roadmap.md](./11-roadmap.md)). M6's "done when" bar is met and its remaining
-slices are *blocked* (encounter waits on M10, actor-profile reuse is M11), so the
-lowest unblocked milestone work is M7. The **game-progression** sub-thread (no
-player-UI surface required yet) is now complete: the `GRANT_ACHIEVEMENT` event
+**M7 — Player crawler interface + sharing — done ✅ (2026-08-04)**
+([11-roadmap.md](./11-roadmap.md)). M6's "done when" bar was met and its remaining
+slices are *blocked* (encounter waits on M10, actor-profile reuse is M11), so M7
+became the lowest unblocked milestone work. The **game-progression** sub-thread (no
+player-UI surface required yet) completed first: the `GRANT_ACHIEVEMENT` event
 effect (✅ 2026-06-29) plus `BOX` as a new `EntityType` with achievement→box
 `GRANTS_BOX` rewards and box→item `CONTAINS` contents (✅ 2026-06-30) — both dated
-entries below. The **player crawler interface** is now under way; its foundation
-slice — the player console shell, role-based routing, and a projected read-only
-"Known World" — shipped ✅ 2026-06-30 (dated entry below). Slice 2 — the
+entries below. The **player crawler interface** followed slice by slice: the
+foundation slice — the player console shell, role-based routing, and a projected
+read-only "Known World" — shipped ✅ 2026-06-30 (dated entry below). Slice 2 — the
 player↔crawler link + read-only crawler sheet — shipped ✅ 2026-07-01 (dated entry
 below). Slice 3 — the crawler **loadout** (inventory / loot boxes / achievements /
 titles) alongside the sheet — shipped ✅ 2026-07-02 (dated entry below). Slice 4 —
 the **System-message feed** (THE SYSTEM's in-fiction broadcasts, visibility-scoped)
 — shipped ✅ 2026-07-09 (dated entry below). Slice 5 — scoped **"Ask the System"**
 (reusing the M5 `askCampaign` service, already role-scoped) — shipped ✅ 2026-08-04
-(dated entry below). **Next up:** (6) player **suggestions** → review pipeline —
-closes the milestone's "done when" bar (a player can submit a suggestion).
+(dated entry below). Slice 6 — player **Suggestions** (bio/notes edits filed as
+`PLAYER_SUGGESTION` change sets through the existing review pipeline) — shipped
+✅ 2026-08-04 (dated entry below), closing the milestone's "done when" bar: a
+player logs in, sees only shared/own-crawler data, and can submit a suggestion.
+**Next up:** M8 — live session mode & recaps ([`08-session-mode.md`](./08-session-mode.md)).
 
 ### Scheduled roadmap additions (2026-06-19)
 
@@ -135,6 +138,102 @@ M6 remains the next milestone work. The detailed decisions live in
 
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
+
+## M7 — Player Suggestions (slice 6) ✅ (2026-08-04)
+
+**Goal:** the sixth and final M7 *player-UI* slice — let a player propose an edit
+to their own crawler and close the milestone's "done when" bar ("a player logs in,
+sees only shared/own-crawler data … and can submit a suggestion"). Per
+[`10-ui-ux.md`](./10-ui-ux.md): "a player can propose edits (e.g. bio, notes);
+these enter the review pipeline as `PLAYER_SUGGESTION`, never write canon
+directly." `ChangeSource.PLAYER_SUGGESTION` and the DM-side Review Queue
+PLAYER filter/badge already existed (since M2) — this slice is the missing
+player-authored submission path, not new review machinery.
+
+**Decision (a narrow, allowlisted sibling to `createPendingEntityChangeSet`, not
+a reuse of it).** Every existing change-set-creation entrypoint in `review.ts`
+requires a DM/co-DM membership (`assertCampaignDm`), so a `Role.PLAYER` caller
+can't reach `createPendingEntityChangeSet` directly — and even if it could, that
+function trusts the caller's own `operations` array verbatim, which would let a
+"suggestion" carry any field (`visibility`, `status`, `data.*`, …), not just the
+bio/notes the surface is meant to expose. `createPlayerSuggestion` is a new,
+narrow function instead: it asserts `Role.PLAYER`, resolves the caller's own
+linked live-CANON crawler (the same read/write grant `getMyCrawlerSheet` uses),
+and builds the patch itself from a hardcoded `summary`/`description` allowlist —
+so a player can never target another entity or another field, no matter what a
+compromised client sends. It reuses the shared `evaluateEntityOperationFlags`
+for lock/staleness flagging and always files `source: PLAYER_SUGGESTION`,
+`status: PENDING` — identical downstream handling to AI/import proposals
+(invariant #1: players never write canon directly). A companion
+`listMySuggestions` (scoped by `actorUserId`, no separate membership check
+needed) lets the player see their own submission history so submitting isn't a
+black hole. ADR 0012 already commits M10 to reusing this same `PLAYER_SUGGESTION`
+provenance value for non-admin-DM library edits — `createPlayerSuggestion`'s
+strict `Role.PLAYER` gate is this slice's concern only; M10 will add its own
+entrypoint for that actor, not repurpose this one.
+
+- [x] **Service** ([`review.ts`](../src/server/services/review.ts)):
+      `createPlayerSuggestion(userId, campaignId, { summary?, description? })` —
+      PLAYER-only, own-crawler-only, allowlisted-fields-only, PENDING
+      `PLAYER_SUGGESTION` `UPDATE_ENTITY` change set; rejects a no-op patch and a
+      caller with no crawler linked. `listMySuggestions(userId, campaignId)`
+      returns the caller's own suggestion history (title/status/reviewedAt/
+      reviewNotes), newest first. `crawlers.ts`'s `CrawlerSheet` (and
+      `getMyCrawlerSheet`) gained `description` (previously summary-only) so the
+      submit form can prefill both fields.
+- [x] **Validation** ([`validation.ts`](../src/lib/validation.ts)):
+      `playerSuggestionSchema` (`summary`/`description`, both optional, same
+      length caps as `entityCoreSchema`).
+- [x] **Player action** ([`(player)/actions.ts`](<../src/app/(player)/actions.ts>)):
+      `submitSuggestionAction` — parses the form, calls `createPlayerSuggestion`,
+      revalidates the suggestions page on success (unlike the read-only
+      `askCampaignAction`, this one writes).
+- [x] **Player UI** ([`suggestion-form.tsx`](../src/components/crawler/suggestion-form.tsx),
+      [`suggestion-list.tsx`](../src/components/crawler/suggestion-list.tsx),
+      [`suggestions/page.tsx`](<../src/app/(player)/play/campaigns/[id]/suggestions/page.tsx>)):
+      a `SuggestionForm` (Bio/Notes textareas prefilled from the crawler's
+      current values, route-agnostic like `AskPanel` — takes a bound action
+      prop) and a read-only `SuggestionList` history panel (status chip +
+      review notes when resolved); the new `/play/campaigns/[id]/suggestions`
+      page follows the Crawler Sheet's own-crawler gate (a "no crawler linked
+      yet" empty state when unset).
+- [x] **Nav** ([`player-nav.tsx`](../src/components/console/player-nav.tsx)): the
+      **Suggestions** item is now a built link (was Planned) →
+      `/play/campaigns/[id]/suggestions` — every M7 player crawler-interface nav
+      item is now built.
+- [x] **Tests:** DB-backed `createPlayerSuggestion`/`listMySuggestions` cases in
+      [`review.test.ts`](../tests/unit/review.test.ts) (files the PENDING
+      `PLAYER_SUGGESTION` set with the correct patch/target; rejects a
+      non-player, an unlinked player, and a no-op suggestion; flags
+      `blockedByLock` on a locked field; scopes history to the caller); schema
+      cases in [`validation.test.ts`](../tests/unit/validation.test.ts); component
+      coverage in
+      [`suggestion-form.test.tsx`](../tests/unit/suggestion-form.test.tsx) and
+      [`suggestion-list.test.tsx`](../tests/unit/suggestion-list.test.tsx); the
+      page in
+      [`player-suggestions-page.test.tsx`](../tests/unit/player-suggestions-page.test.tsx)
+      (404, empty state, prefilled form, history render); the action in
+      [`player-actions.test.ts`](../tests/unit/player-actions.test.ts); updated
+      [`player-nav.test.tsx`](../tests/unit/player-nav.test.tsx) for the
+      newly-built item (no Planned items remain) and the `CrawlerSheet`-shape
+      fixtures touched by the new `description` field in
+      [`crawler-sheet.test.tsx`](../tests/unit/crawler-sheet.test.tsx) and
+      [`player-crawler-sheet-page.test.tsx`](../tests/unit/player-crawler-sheet-page.test.tsx).
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors;
+      pre-existing settings-action warnings only), `npm run build` (the
+      `/play/campaigns/[id]/suggestions` route registers), and the full coverage
+      gate green (148 files / **1893 tests**; statements 95.4%, branches 88.93%,
+      functions 96.52%, lines 96.97%). **In-browser** (reseeded `dcc` + a scratch
+      script linking `player@example.com` to a CANON "Carl" crawler with a bio and
+      notes): as the player, `/play/campaigns/[id]/suggestions` showed the Bio/
+      Notes form prefilled from Carl's real summary/description and an empty
+      "you haven't submitted a suggestion yet" history; editing the bio and
+      submitting showed a success message and the new suggestion listed as
+      "Pending review." As the DM, the Review Queue's `ALL` tab (and the
+      `PLAYER` filter link) showed "Suggestion for Carl" with the `PLR` badge,
+      the pre-existing diff editor rendering the struck-through old bio → new
+      bio; accepting the field and approving the set showed "Committed to
+      canon." No console errors on either side.
 
 ## M7 — Player "Ask the System" (slice 5) ✅ (2026-08-04)
 
