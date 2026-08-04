@@ -15,42 +15,32 @@ vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/campaigns", () => ({ getCampaignForUser }));
 vi.mock("@/server/ai", () => ({ resolveCampaignProvider }));
 vi.mock("next/navigation", () => ({ notFound }));
-vi.mock("next/link", () => ({
-  default: ({ href, children }: { href: string; children: React.ReactNode }) => (
-    <a href={href}>{children}</a>
-  ),
-}));
-// The Ask form is a client component with its own test; here we only assert the
-// page's provider gating decides whether to render it.
+// The Ask form is a client component with its own test; here we only assert
+// the page's provider gating decides whether to render it.
 vi.mock("@/components/ask/ask-panel", () => ({
-  AskPanel: ({ initialQuestion }: { initialQuestion?: string }) => (
-    <div data-testid="ask-panel">{initialQuestion}</div>
-  ),
+  AskPanel: () => <div data-testid="ask-panel" />,
 }));
 // The page only needs a bindable reference — mocked so its real dependency
 // chain (auth composition, search/embeddings) never loads under Vitest.
-vi.mock("@/app/(dm)/actions", () => ({ askCampaignAction: vi.fn() }));
+vi.mock("@/app/(player)/actions", () => ({ askCampaignAction: vi.fn() }));
 
-import CampaignAskPage from "@/app/(dm)/campaigns/[id]/ask/page";
+import PlayerAskPage from "@/app/(player)/play/campaigns/[id]/ask/page";
 
-function renderPage(searchParams?: { q?: string }) {
-  return CampaignAskPage({
-    params: Promise.resolve({ id: "c1" }),
-    searchParams: Promise.resolve(searchParams ?? {}),
-  });
+function renderPage() {
+  return PlayerAskPage({ params: Promise.resolve({ id: "c1" }) });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   requireUser.mockResolvedValue({ id: "u1" });
-  getCampaignForUser.mockResolvedValue({ id: "c1", name: "World One", members: [{ role: "OWNER" }] });
+  getCampaignForUser.mockResolvedValue({ id: "c1", name: "Dungeon", members: [{ role: "PLAYER" }] });
   resolveCampaignProvider.mockResolvedValue({ id: "anthropic", model: "claude-opus-4-8" });
 });
 
 afterEach(() => cleanup());
 
-describe("CampaignAskPage", () => {
-  it("404s when the campaign is not visible to the user", async () => {
+describe("Ask the System (player) page", () => {
+  it("404s a non-member (never leaks existence)", async () => {
     getCampaignForUser.mockResolvedValue(null);
     await expect(renderPage()).rejects.toThrow("NEXT_NOT_FOUND");
     expect(notFound).toHaveBeenCalled();
@@ -59,20 +49,14 @@ describe("CampaignAskPage", () => {
   it("renders the Ask panel when a chat provider is configured", async () => {
     render(await renderPage());
     expect(screen.getByTestId("ask-panel")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: /Ask the Campaign/i })).toBeTruthy();
+    expect(screen.getByText("THE SYSTEM")).toBeTruthy();
   });
 
-  it("passes the search handoff question to the Ask panel", async () => {
-    render(await renderPage({ q: "Who knows Mordecai?" }));
-    expect(screen.getByTestId("ask-panel").textContent).toBe("Who knows Mordecai?");
-  });
-
-  it("shows a configure-a-key notice when no provider is configured", async () => {
+  it("shows a no-provider notice with no Settings link when unconfigured", async () => {
     resolveCampaignProvider.mockResolvedValue(null);
     render(await renderPage());
     expect(screen.queryByTestId("ask-panel")).toBeNull();
-    expect(screen.getByText(/No AI provider configured/i)).toBeTruthy();
-    const link = screen.getByRole("link", { name: /Configure AI in Settings/i });
-    expect(link.getAttribute("href")).toBe("/campaigns/c1/settings");
+    expect(screen.getByText(/not listening yet/i)).toBeTruthy();
+    expect(screen.queryByRole("link")).toBeNull();
   });
 });

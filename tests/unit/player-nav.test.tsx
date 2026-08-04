@@ -53,14 +53,23 @@ describe("PlayerNav", () => {
     expect(link.getAttribute("href")).toBe("/play/campaigns/c1/system");
   });
 
+  it("links the built Ask the System item to the active campaign", () => {
+    usePathname.mockReturnValue("/play/campaigns/c1");
+    render(<PlayerNav />);
+    const link = screen
+      .getByText("Ask the System")
+      .closest("a") as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe("/play/campaigns/c1/ask");
+  });
+
   it("marks unbuilt crawler-interface surfaces as Planned, not stub links", () => {
     usePathname.mockReturnValue("/play/campaigns/c1");
     render(<PlayerNav />);
-    for (const label of ["Ask the System", "Suggestions"]) {
+    for (const label of ["Suggestions"]) {
       const row = screen.getByText(label).closest("[aria-disabled]");
       expect(row).not.toBeNull();
     }
-    expect(screen.getAllByText("Planned").length).toBe(2);
+    expect(screen.getAllByText("Planned").length).toBe(1);
   });
 
   it("highlights System Feed as active on the system route", () => {
@@ -70,6 +79,15 @@ describe("PlayerNav", () => {
       .getByText("System Feed")
       .closest("a") as HTMLAnchorElement;
     expect(feed.className).toContain("border-[var(--accent)]");
+  });
+
+  it("highlights Ask the System as active on the ask route", () => {
+    usePathname.mockReturnValue("/play/campaigns/c1/ask");
+    render(<PlayerNav />);
+    const ask = screen
+      .getByText("Ask the System")
+      .closest("a") as HTMLAnchorElement;
+    expect(ask.className).toContain("border-[var(--accent)]");
   });
 
   it("highlights Known World as active on an entity detail route", () => {

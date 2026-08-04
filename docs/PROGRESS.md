@@ -99,10 +99,10 @@ player↔crawler link + read-only crawler sheet — shipped ✅ 2026-07-01 (date
 below). Slice 3 — the crawler **loadout** (inventory / loot boxes / achievements /
 titles) alongside the sheet — shipped ✅ 2026-07-02 (dated entry below). Slice 4 —
 the **System-message feed** (THE SYSTEM's in-fiction broadcasts, visibility-scoped)
-— shipped ✅ 2026-07-09 (dated entry below). **Next up (remaining M7 player-UI
-slices):** (5) scoped Ask ("Ask the System"), (6) player **suggestions** → review
-pipeline — slice 6 closes the milestone's "done when" bar (a player can submit a
-suggestion).
+— shipped ✅ 2026-07-09 (dated entry below). Slice 5 — scoped **"Ask the System"**
+(reusing the M5 `askCampaign` service, already role-scoped) — shipped ✅ 2026-08-04
+(dated entry below). **Next up:** (6) player **suggestions** → review pipeline —
+closes the milestone's "done when" bar (a player can submit a suggestion).
 
 ### Scheduled roadmap additions (2026-06-19)
 
@@ -135,6 +135,82 @@ M6 remains the next milestone work. The detailed decisions live in
 
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
+
+## M7 — Player "Ask the System" (slice 5) ✅ (2026-08-04)
+
+**Goal:** the fifth M7 *player-UI* slice — give the player crawler interface a
+scoped **"Ask the System"**: the same read-only, retrieval-augmented Q&A the DM's
+"Ask the Campaign" shipped in M5 slice 5, now reachable from the player console.
+No schema change and, notably, **no new visibility logic** — `askCampaign`
+(`src/server/services/ask.ts`) already checks only membership (any role) and
+retrieves via `searchCanon`, which is role-scoped for `PLAYER` the same way every
+other player read is (invariant #5). The M5 slice 5 test suite already proved a
+player's ask can never retrieve DM-only canon; this slice is pure UI wiring plus a
+player-side action.
+
+**Decision (route-agnostic `AskPanel`; a player action file, not a shared one).**
+The DM's `AskPanel` client component previously imported `askCampaignAction`
+directly from `(dm)/actions.ts` and bound it to `campaignId` internally, which
+would have meant either the player route importing the DM's action module (a
+DM/player layering smell) or duplicating the whole panel. Instead `AskPanel` now
+takes a pre-bound `action` prop (`(prevState, formData) => Promise<AskActionState>`),
+so it has no opinion on which route renders it — the DM page passes
+`askCampaignAction.bind(null, id)` from its own actions file, the new player page
+passes the same shape from a new `(player)/actions.ts`. `AskActionState` moved from
+`(dm)/actions.ts` to `ask.ts` (next to `AskResult`/`AskSource`) as the shared,
+service-owned shape both action files and the panel import. The player's own
+`askCampaignAction` in `(player)/actions.ts` is a thin wrapper calling the same
+`askCampaign` service — kept in a separate file (not reused from `(dm)/actions.ts`)
+so the two consoles' action surfaces stay independent, matching how their pages
+already don't share code beyond services/components. A player has no Settings
+access, so the no-provider state on the player page explains the DM hasn't
+configured a key yet, with no "Configure AI in Settings" link (unlike the DM page).
+- [x] **Service:** no change — `askCampaign` was already role-scoped (verified by
+      the existing M5 "never lets a player's ask retrieve DM-only canon (invariant
+      #5)" test in [`ask.test.ts`](../tests/unit/ask.test.ts)).
+- [x] **Shared type + panel** ([`ask.ts`](../src/server/services/ask.ts),
+      [`ask-panel.tsx`](../src/components/ask/ask-panel.tsx)): `AskActionState`
+      moved to `ask.ts`; `AskPanel` takes an `action` prop instead of a
+      `campaignId` + an internal DM-actions import/bind.
+- [x] **DM page** ([`(dm)/campaigns/[id]/ask/page.tsx`](<../src/app/(dm)/campaigns/[id]/ask/page.tsx>)):
+      now binds and passes `askCampaignAction` itself (`AskActionState` re-imported
+      from `ask.ts`); behavior unchanged.
+- [x] **Player action + page** ([`(player)/actions.ts`](<../src/app/(player)/actions.ts>),
+      [`(player)/play/campaigns/[id]/ask/page.tsx`](<../src/app/(player)/play/campaigns/[id]/ask/page.tsx>)):
+      a player-scoped `askCampaignAction` wrapping `askCampaign`; the new
+      `ConsoleScreen` + `PlayerSystemBanner` page (mirrors the DM Ask page's copy
+      and provider gating, minus the Settings link) 404s a non-member and renders
+      the shared `AskPanel`.
+- [x] **Nav** ([`player-nav.tsx`](../src/components/console/player-nav.tsx)): the
+      **Ask the System** item is now a built link (was Planned) →
+      `/play/campaigns/[id]/ask`, with an active-highlight match; only Suggestions
+      remains Planned.
+- [x] **Tests:** the `AskPanel` refactor's own coverage
+      ([`ask-panel.test.tsx`](../tests/unit/ask-panel.test.tsx)) now injects a
+      mock `action` prop directly (no more mocking `(dm)/actions`); the DM
+      [`ask-page.test.tsx`](../tests/unit/ask-page.test.tsx) mocks `(dm)/actions`
+      so its real dependency chain (auth composition, search/embeddings) never
+      loads under Vitest, same pattern applied to the new
+      [`player-ask-page.test.tsx`](../tests/unit/player-ask-page.test.tsx) (404,
+      panel-when-configured, no-link no-provider notice) mocking `(player)/actions`;
+      the player action itself in
+      [`player-actions.test.ts`](../tests/unit/player-actions.test.ts) (passes the
+      question, returns answer/sources, `ServiceError` + generic fallback); updated
+      [`player-nav.test.tsx`](../tests/unit/player-nav.test.tsx) for the newly-built
+      item.
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors; pre-existing
+      settings-action warnings only), `npm run build` (the
+      `/play/campaigns/[id]/ask` route registers), and the full coverage gate green
+      (145 files / **1866 tests**; statements 95.38%, branches 88.92%, functions
+      96.5%, lines 96.96%). **In-browser** (reseeded `dcc` + `scripts/seed-world.ts`
+      + a scratch script adding a `player@example.com` PLAYER membership and a
+      placeholder Anthropic key): as the player, "Ask the System" rendered with the
+      panel (provider configured), and asking "Who is Princess Donut?" retrieved
+      canon and called the provider, which failed to a safe "The provider rejected
+      the key (authentication failed)" alert — no key/raw text in the DOM
+      (invariant #6), the same boundary the DM Ask page verification stopped at. As
+      the DM, `/campaigns/[id]/ask` still rendered and worked identically after the
+      shared `AskPanel` refactor. No console errors on either side.
 
 ## M7 — Player System-message feed (slice 4) ✅ (2026-07-09)
 

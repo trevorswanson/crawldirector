@@ -79,7 +79,7 @@ import {
   updatePersonaSnapshot,
 } from "@/server/services/persona";
 import { dungeonContentInputSchema, personaSnapshotInputSchema } from "@/lib/validation";
-import { askCampaign, type AskSource } from "@/server/services/ask";
+import { askCampaign, type AskActionState } from "@/server/services/ask";
 import {
   searchEntityCandidates,
   searchCanon,
@@ -633,17 +633,6 @@ export async function generateDungeonContentAction(
     return { error: "Generation failed. Please try again.", timestamp: Date.now() };
   }
 }
-
-export type AskActionState =
-  | {
-      answer?: string;
-      grounded?: boolean;
-      sources?: AskSource[];
-      model?: string | null;
-      error?: string;
-      timestamp?: number;
-    }
-  | undefined;
 
 // Ask the Campaign: a read-only, retrieval-augmented answer with citations
 // (M5 slice 5 — docs/07-search-retrieval.md). Never writes canon (invariant #1),
