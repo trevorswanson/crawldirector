@@ -790,3 +790,39 @@ export async function restoreEntity(
   });
   return { id: entityId };
 }
+
+// Broad reveal (M8 live session mode, docs/08): flip an entity's campaign-wide
+// visibility to PLAYER_VISIBLE — the "everyone can see this now" counterpart to
+// a private KnowledgeGrant. Reuses the review pipeline for provenance/audit
+// exactly like archiveEntity/restoreEntity, patching only `visibility` rather
+// than requiring the full `UpdateEntityInput` form shape. A no-op when already
+// player-visible, so a DM can reveal freely without an error on the second try.
+export async function revealEntityBroadly(
+  userId: string,
+  campaignId: string,
+  entityId: string,
+): Promise<{ id: string; alreadyVisible: boolean }> {
+  await assertCampaignDm(userId, campaignId);
+
+  const existing = await prisma.entity.findFirst({
+    where: { id: entityId, campaignId, status: { not: CanonStatus.ARCHIVED } },
+    select: { id: true, name: true, visibility: true, version: true },
+  });
+  if (!existing) throw new ServiceError("Entity not found.");
+  if (existing.visibility === Visibility.PLAYER_VISIBLE) {
+    return { id: entityId, alreadyVisible: true };
+  }
+
+  await applyAutoApprovedEntityChangeSet(userId, campaignId, {
+    title: `Reveal ${existing.name} to players`,
+    operations: [{
+      op: OpKind.UPDATE_ENTITY,
+      targetId: entityId,
+      patch: {
+        _baseVersion: { to: existing.version },
+        visibility: { from: existing.visibility, to: Visibility.PLAYER_VISIBLE },
+      },
+    }],
+  });
+  return { id: entityId, alreadyVisible: false };
+}

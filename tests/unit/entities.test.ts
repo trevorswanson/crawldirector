@@ -16,6 +16,7 @@ import {
   listEntitiesForUser,
   listFleshCandidates,
   restoreEntity,
+  revealEntityBroadly,
   updateEntity,
 } from "@/server/services/entities";
 import {
@@ -996,6 +997,81 @@ describe("entity service", () => {
     });
     expect(provenance.at(-1)?.changeSet.title).toBe("Restore Dungeon Crawler World");
     expect(provenance.at(-1)?.source).toBe("DM");
+  });
+
+  it("reveals an entity broadly (flips visibility to PLAYER_VISIBLE) through an audited change set", async () => {
+    const owner = await makeUser("reveal-broadly@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Mordecai",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+
+    const result = await revealEntityBroadly(owner.id, campaign.id, entity.id);
+
+    expect(result).toEqual({ id: entity.id, alreadyVisible: false });
+    const stored = await prisma.entity.findUniqueOrThrow({ where: { id: entity.id } });
+    expect(stored.visibility).toBe("PLAYER_VISIBLE");
+    expect(stored.version).toBe(2);
+
+    const provenance = await prisma.provenance.findMany({
+      where: { entityId: entity.id, field: "visibility" },
+      orderBy: { createdAt: "asc" },
+      include: { changeSet: { select: { title: true } } },
+    });
+    expect(provenance.at(-1)?.changeSet.title).toBe("Reveal Mordecai to players");
+    expect(provenance.at(-1)?.source).toBe("DM");
+  });
+
+  it("is a no-op when already player-visible", async () => {
+    const owner = await makeUser("reveal-noop@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Zev",
+      summary: "",
+      description: "",
+      visibility: "PLAYER_VISIBLE",
+      tags: [],
+    });
+
+    const result = await revealEntityBroadly(owner.id, campaign.id, entity.id);
+
+    expect(result).toEqual({ id: entity.id, alreadyVisible: true });
+    const stored = await prisma.entity.findUniqueOrThrow({ where: { id: entity.id } });
+    expect(stored.version).toBe(1); // no change set applied
+  });
+
+  it("is blocked by a lock on visibility, and rejects a missing/player caller", async () => {
+    const owner = await makeUser("reveal-locked@test.com");
+    const player = await makeUser("reveal-locked-player@test.com");
+    const campaign = await createCampaign(owner.id, { name: "Dungeon" });
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const entity = await createGenericEntity(owner.id, campaign.id, {
+      type: "NPC",
+      name: "Carl",
+      summary: "",
+      description: "",
+      visibility: "DM_ONLY",
+      tags: [],
+    });
+    await setEntityLock(owner.id, campaign.id, entity.id, { lockedFields: ["visibility"] });
+
+    await expect(revealEntityBroadly(owner.id, campaign.id, entity.id)).rejects.toThrow(
+      ServiceError,
+    );
+    await expect(
+      revealEntityBroadly(player.id, campaign.id, entity.id),
+    ).rejects.toThrow(ServiceError);
+    await expect(
+      revealEntityBroadly(owner.id, campaign.id, "missing-id"),
+    ).rejects.toThrow("Entity not found.");
   });
 
   it("is a no-op when an update changes nothing", async () => {

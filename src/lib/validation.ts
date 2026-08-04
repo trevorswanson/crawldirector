@@ -519,6 +519,34 @@ export const promoteSessionLogEntrySchema = z.object({
 });
 export type PromoteSessionLogEntryInput = z.infer<typeof promoteSessionLogEntrySchema>;
 
+// Live reveal, broad half (docs/08-session-mode.md "Live reveal"): flip an
+// entity's visibility campaign-wide. One field — the entity to reveal.
+export const revealEntityBroadlySchema = z.object({
+  entityId: z.string().trim().min(1, "Pick an entity."),
+});
+export type RevealEntityBroadlyInput = z.infer<typeof revealEntityBroadlySchema>;
+
+// Live reveal, private half: reveal one entity to a single recipient, who is
+// either another actor entity (NPC/party/…, like grantKnowledgeSchema) or a
+// specific player's Membership row — the two recipient kinds need different
+// id fields, so a discriminated union on `recipientKind` gives each branch its
+// own required id and narrows cleanly for the caller.
+export const sessionRevealSchema = z.discriminatedUnion("recipientKind", [
+  z.object({
+    targetEntityId: z.string().trim().min(1, "Pick what's being revealed."),
+    recipientKind: z.literal("ENTITY"),
+    recipientEntityId: z.string().trim().min(1, "Pick who learns this."),
+    notes: optionalText(500),
+  }),
+  z.object({
+    targetEntityId: z.string().trim().min(1, "Pick what's being revealed."),
+    recipientKind: z.literal("MEMBERSHIP"),
+    membershipId: z.string().trim().min(1, "Pick who learns this."),
+    notes: optionalText(500),
+  }),
+]);
+export type SessionRevealInput = z.infer<typeof sessionRevealSchema>;
+
 // Event participant roles (docs/01-domain-model.md). Any-to-any, like
 // relationship types — every role is valid for any entity.
 export const eventParticipantRoleValues = [

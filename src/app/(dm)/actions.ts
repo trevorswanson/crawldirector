@@ -23,7 +23,9 @@ import {
   grantKnowledgeSchema,
   lockFieldSchema,
   promoteSessionLogEntrySchema,
+  revealEntityBroadlySchema,
   reviewEditValueKindSchema,
+  sessionRevealSchema,
   updateEntitySchema,
   updateEventSchema,
   updateRelationshipSchema,
@@ -61,10 +63,12 @@ import {
   createGenericEntity,
   getEntityForUser,
   restoreEntity,
+  revealEntityBroadly,
   updateEntity,
 } from "@/server/services/entities";
 import {
   grantEntityKnowledge,
+  grantMembershipKnowledge,
   revokeKnowledge,
 } from "@/server/services/knowledge";
 import {
@@ -1408,6 +1412,105 @@ export async function promoteSessionLogEntryAction(
   revalidatePath(`/campaigns/${campaignId}/sessions/${sessionId}`);
   revalidatePath(`/campaigns/${campaignId}/timeline`);
   return undefined;
+}
+
+// Live reveal (M8 slice 3, docs/08-session-mode.md "Live reveal"), reachable
+// from the session screen. Broad reveal flips an entity's visibility
+// campaign-wide; private reveal grants one recipient (an actor entity or a
+// specific player) knowledge of it without changing campaign-wide visibility.
+// Both return a `success` message (unlike the entity-console knowledge panel's
+// list-refresh-only convention) since neither action has a persistent
+// confirmation surface of its own on this screen.
+export type RevealActionState =
+  | { error?: string; success?: string; timestamp?: number }
+  | undefined;
+
+export async function revealEntityBroadlyAction(
+  campaignId: string,
+  sessionId: string,
+  _prev: RevealActionState,
+  formData: FormData,
+): Promise<RevealActionState> {
+  const user = await requireUser();
+  const parsed = revealEntityBroadlySchema.safeParse({
+    entityId: formData.get("entityId"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input.", timestamp: Date.now() };
+  }
+
+  let alreadyVisible: boolean;
+  try {
+    const result = await revealEntityBroadly(user.id, campaignId, parsed.data.entityId);
+    alreadyVisible = result.alreadyVisible;
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    logActionError("Reveal entity broadly action failed", error);
+    return { error: "Could not reveal this entity. Please try again.", timestamp: Date.now() };
+  }
+
+  revalidatePath(`/campaigns/${campaignId}`);
+  revalidatePath(`/campaigns/${campaignId}/entities/${parsed.data.entityId}`);
+  revalidatePath(`/campaigns/${campaignId}/sessions/${sessionId}`);
+  return {
+    success: alreadyVisible ? "Already visible to all players." : "Revealed to all players.",
+    timestamp: Date.now(),
+  };
+}
+
+export async function revealSessionKnowledgeAction(
+  campaignId: string,
+  sessionId: string,
+  _prev: RevealActionState,
+  formData: FormData,
+): Promise<RevealActionState> {
+  const user = await requireUser();
+  const parsed = sessionRevealSchema.safeParse({
+    targetEntityId: formData.get("targetEntityId"),
+    recipientKind: formData.get("recipientKind"),
+    recipientEntityId: formData.get("recipientEntityId") || undefined,
+    membershipId: formData.get("membershipId") || undefined,
+    notes: formData.get("notes"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input.", timestamp: Date.now() };
+  }
+
+  try {
+    if (parsed.data.recipientKind === "ENTITY") {
+      await grantEntityKnowledge(user.id, campaignId, {
+        targetEntityId: parsed.data.targetEntityId,
+        recipientEntityId: parsed.data.recipientEntityId,
+        notes: parsed.data.notes,
+        sourceEventId: sessionId,
+      });
+    } else {
+      await grantMembershipKnowledge(user.id, campaignId, {
+        targetEntityId: parsed.data.targetEntityId,
+        membershipId: parsed.data.membershipId,
+        notes: parsed.data.notes,
+        sourceEventId: sessionId,
+      });
+    }
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    logActionError("Reveal session knowledge action failed", error);
+    return { error: "Could not record the reveal. Please try again.", timestamp: Date.now() };
+  }
+
+  revalidatePath(`/campaigns/${campaignId}/sessions/${sessionId}`);
+  revalidatePath(`/campaigns/${campaignId}/entities/${parsed.data.targetEntityId}`);
+  return { success: "Revealed.", timestamp: Date.now() };
+}
+
+export async function revokeSessionRevealAction(
+  campaignId: string,
+  sessionId: string,
+  grantId: string,
+): Promise<void> {
+  const user = await requireUser();
+  await revokeKnowledge(user.id, campaignId, grantId);
+  revalidatePath(`/campaigns/${campaignId}/sessions/${sessionId}`);
 }
 
 export type EventActionState = { error?: string } | undefined;

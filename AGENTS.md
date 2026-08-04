@@ -43,8 +43,14 @@ become ACTOR participants, filed through `createEvent`'s existing
 auto-approved DM change set (`source: DM`, fully provenanced) so the low-
 friction capture flow stays low-friction on the way to canon. A promoted
 entry's `promotedEventId` swaps the button for a "Promoted → view event" deep
-link to the Timeline. **Next up:** live reveal (building on M3's
-`KnowledgeGrant` foundation) and recap generation.
+link to the Timeline. Slice 3 added **live reveal**: a "Live reveal" panel on
+the session screen lets the DM broadly reveal an entity (flips visibility to
+`PLAYER_VISIBLE` through the review pipeline via a new `revealEntityBroadly`)
+or privately reveal it to one recipient — another actor entity, or now a
+specific player's `Membership` via a new `grantMembershipKnowledge` — creating
+a `KnowledgeGrant` linked back to the session (`sourceEventId`), building on
+M3's fog-of-war foundation; a "Revealed this session" history list supports
+revoke/undo. **Next up:** recap generation.
 M5.5 (data model hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
 seam, the `MIGRATE_ENTITY_DATA` job, reference-integrity badge + impact-aware
 archive, orphan report, the greenfield Faction satellite, and the Floor satellite
