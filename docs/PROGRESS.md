@@ -107,6 +107,15 @@ the **System-message feed** (THE SYSTEM's in-fiction broadcasts, visibility-scop
 player logs in, sees only shared/own-crawler data, and can submit a suggestion.
 **Next up:** M8 — live session mode & recaps ([`08-session-mode.md`](./08-session-mode.md)).
 
+**Active: M8 — Live session mode & recaps**
+([08-session-mode.md](./08-session-mode.md)). Slice 1 — session capture — shipped
+✅ 2026-08-04 (dated entry below): the `GameSession`/`SessionLogEntry` data model,
+a DM-only Sessions screen to start a session and jot a running freeform log
+during play, optionally tagged to existing entities via a typeahead picker.
+**Next up:** promoting a log entry to a canonical `Event` through the review
+pipeline, then live reveal (building on M3's `KnowledgeGrant` foundation) and
+recap generation.
+
 ### Scheduled roadmap additions (2026-06-19)
 
 These are accepted as roadmap/backlog design, not active implementation work;
@@ -138,6 +147,106 @@ M6 remains the next milestone work. The detailed decisions live in
 
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
+
+## M8 — Live session capture (slice 1) ✅ (2026-08-04)
+
+**Goal:** the first M8 slice — a DM starting a play session and jotting a
+running, timestamped log during the game, per
+[`08-session-mode.md`](./08-session-mode.md)'s "capture" workflow: quick,
+freeform entries the DM can optionally tag to existing entities, kept as
+scratch (never canon) until a later slice promotes them. This is the
+foundation the rest of M8 (promote-to-Event, live reveal, recaps) builds on.
+
+**Decision (direct DM mutation, like `KnowledgeGrant` — not the review
+pipeline; entity tags picked, not `@`/`#` parsed).** A session and its log
+entries are explicitly *not* canon (docs/08: "Capture is not canon"), so
+`createSession`/`addSessionLogEntry` are DM-only direct mutations mirroring
+`knowledge.ts`'s pattern — invariant #1 governs canon writes, and this isn't
+one. The schema names the model `GameSession` rather than docs' `Session` to
+avoid colliding with NextAuth's own `Session` model already in
+`schema.prisma`; `docs/09-data-schema.md` is updated to match. docs/08
+describes entries "optionally tagged to existing entities (`@Carl`,
+`#Floor7`)"; rather than parse `@`/`#` mentions out of freeform text — fragile
+for multi-word entity names, and this repo has no existing mention-parsing
+infra — the DM picks entities from the same search-as-you-type
+`EntityTypeahead` used elsewhere, building a chip list that submits as
+repeated `taggedIds` form values. No dedicated `screen-*` mockup exists for
+Sessions, so the UI is built from the console screen-shell primitives
+(`ConsoleScreen`/`ScreenHeader`) per AGENTS.md, matching the Jobs/Settings
+pattern.
+
+- [x] **Schema** ([`schema.prisma`](../prisma/schema.prisma), migration
+      `20260804171928_m8_session_capture`): additive `GameSession` (title,
+      `playedAt`, `focus`, `notes`, `campaignId` cascade) and `SessionLogEntry`
+      (`sessionId` cascade, `at`, `text`, `taggedIds: String[]`,
+      `promotedEventId` — unused until the promote slice).
+- [x] **Service** ([`sessions.ts`](../src/server/services/sessions.ts)):
+      DM-only `createSession`, `listSessions` (newest-played-first, with a
+      per-session entry count), `getSession` (entries oldest-first, tagged ids
+      resolved to live `{id, name, type}` refs in one bulk lookup), and
+      `addSessionLogEntry` (silently drops any tagged id that isn't a real
+      entity in the campaign, so a stale/foreign id can never render as a
+      broken link).
+- [x] **Validation** ([`validation.ts`](../src/lib/validation.ts)):
+      `createSessionSchema` (title required; `playedAt`/`focus`/`notes`
+      optional, `playedAt` validated as a parseable date string) and
+      `addSessionLogEntrySchema` (text required, ≤2000 chars; `taggedIds`
+      optional, capped at 20).
+- [x] **DM actions** ([`(dm)/actions.ts`](<../src/app/(dm)/actions.ts>)):
+      `createSessionAction` (validates, creates, redirects to the new
+      session's log) and `addSessionLogEntryAction` (validates, appends,
+      revalidates the session page).
+- [x] **UI** ([`create-session-form.tsx`](../src/components/sessions/create-session-form.tsx),
+      [`session-list.tsx`](../src/components/sessions/session-list.tsx),
+      [`session-log-composer.tsx`](../src/components/sessions/session-log-composer.tsx),
+      [`session-tag-picker.tsx`](../src/components/sessions/session-tag-picker.tsx),
+      [`session-log-list.tsx`](../src/components/sessions/session-log-list.tsx),
+      [`sessions/page.tsx`](<../src/app/(dm)/campaigns/[id]/sessions/page.tsx>),
+      [`sessions/[sessionId]/page.tsx`](<../src/app/(dm)/campaigns/[id]/sessions/[sessionId]/page.tsx>)):
+      a Sessions index (create form + list) and a session detail screen (log
+      composer + the running log, oldest-first like a transcript). The
+      composer keeps its textarea controlled (not left to React 19's
+      automatic uncontrolled-field reset on any completed form action) so a
+      rejected submit never silently drops the DM's typed entry; a successful
+      submit clears the text and remounts the tag picker.
+- [x] **Nav** ([`dm-nav.tsx`](../src/components/console/dm-nav.tsx)): a new,
+      live **Sessions** item (`NotebookPen`) between Timeline and Settings.
+- [x] **Docs:** [`09-data-schema.md`](./09-data-schema.md)'s `Session` model
+      renamed to `GameSession` with an explanatory note, matching the schema.
+- [x] **Tests:** DB-backed service cases in
+      [`sessions.test.ts`](../tests/unit/sessions.test.ts) (create/list/log/read,
+      permission checks, foreign/unknown tagged ids dropped, unknown session
+      rejected); schema cases in
+      [`validation.test.ts`](../tests/unit/validation.test.ts); the two new DM
+      actions in [`dm-actions.test.ts`](../tests/unit/dm-actions.test.ts);
+      component coverage in
+      [`create-session-form.test.tsx`](../tests/unit/create-session-form.test.tsx),
+      [`session-list.test.tsx`](../tests/unit/session-list.test.tsx),
+      [`session-log-list.test.tsx`](../tests/unit/session-log-list.test.tsx),
+      [`session-tag-picker.test.tsx`](../tests/unit/session-tag-picker.test.tsx),
+      and [`session-log-composer.test.tsx`](../tests/unit/session-log-composer.test.tsx);
+      page tests in
+      [`sessions-page.test.tsx`](../tests/unit/sessions-page.test.tsx) and
+      [`session-detail-page.test.tsx`](../tests/unit/session-detail-page.test.tsx)
+      (both DM-only role gates, 404s).
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors; only
+      pre-existing unrelated warnings), `npm run build` (the two
+      `/campaigns/[id]/sessions` routes register), and the full coverage gate
+      green (156 files / **1939 tests**; statements 95.43%, branches 88.95%,
+      functions 96.52%, lines 97.02%). **In-browser** (reseeded `dcc`,
+      `dm@example.com`) caught and fixed a real bug: `playedAt` is parsed from
+      a bare `<input type="date">` value as UTC midnight, so formatting it with
+      the viewer's local timezone rolled the displayed date back a day in a
+      negative-UTC-offset zone (Aug 4 showed as Aug 3). Fixed by rendering
+      `playedAt` with `timeZone: "UTC"` in both `session-list.tsx` and the
+      session detail page. After the fix: starting "Session 12: Floor 9
+      Breach" (dated Aug 4, focus "Floor 9") showed the correct date on both
+      the Sessions list and detail screens; typing in the tag picker found a
+      real NPC ("Carl") and added it as a chip; submitting a log entry cleared
+      the composer, remounted the tag picker (Carl became pickable again), and
+      appended the entry with its timestamp and a "Carl · NPC" chip linking to
+      `/campaigns/[id]/entities/[id]`; the Sessions list then showed "1 entry".
+      No console errors throughout.
 
 ## M7 — Player Suggestions (slice 6) ✅ (2026-08-04)
 

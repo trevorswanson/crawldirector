@@ -14,23 +14,30 @@ pitch and [`docs/`](./docs) for the full plan.
 
 ## Current status
 
-🚧 **M0–M7 complete.** M6 slices 1–6 complete (its "done when" bar met; remaining
-slices blocked on M10/M11). M7 complete: game-progression (`GRANT_ACHIEVEMENT`
-event effect + the `BOX` `EntityType` with achievement→box `GRANTS_BOX` rewards and
-box→item `CONTAINS` contents) plus all six player crawler-interface slices — the
-player console shell at `/play`, role-based routing, and a projected read-only
-"Known World" (slice 1); the DM-set player↔crawler link + a read-only crawler
-sheet at `/play/campaigns/[id]/sheet` (slice 2); the crawler **loadout** —
-inventory / loot boxes / achievements / titles read from the crawler's own graph
-edges, rendered alongside the sheet (slice 3); the **System-message feed** at
-`/play/campaigns/[id]/system` — THE SYSTEM's in-fiction broadcasts, a
-visibility-scoped read over `SYSTEM_MESSAGE` entities (slice 4); scoped **"Ask
-the System"** at `/play/campaigns/[id]/ask`, reusing the DM's role-scoped
-`askCampaign` service (slice 5); and player **Suggestions** at
-`/play/campaigns/[id]/suggestions` — a player proposes an edit to their own
-crawler's bio/notes, filed as a `PLAYER_SUGGESTION` change set through the
-existing review pipeline (slice 6), closing M7's "done when" bar. **Next up: M8 —
-live session mode & recaps.**
+🚧 **M0–M7 complete, M8 underway.** M6 slices 1–6 complete (its "done when" bar
+met; remaining slices blocked on M10/M11). M7 complete: game-progression
+(`GRANT_ACHIEVEMENT` event effect + the `BOX` `EntityType` with achievement→box
+`GRANTS_BOX` rewards and box→item `CONTAINS` contents) plus all six player
+crawler-interface slices — the player console shell at `/play`, role-based
+routing, and a projected read-only "Known World" (slice 1); the DM-set
+player↔crawler link + a read-only crawler sheet at `/play/campaigns/[id]/sheet`
+(slice 2); the crawler **loadout** — inventory / loot boxes / achievements /
+titles read from the crawler's own graph edges, rendered alongside the sheet
+(slice 3); the **System-message feed** at `/play/campaigns/[id]/system` — THE
+SYSTEM's in-fiction broadcasts, a visibility-scoped read over `SYSTEM_MESSAGE`
+entities (slice 4); scoped **"Ask the System"** at `/play/campaigns/[id]/ask`,
+reusing the DM's role-scoped `askCampaign` service (slice 5); and player
+**Suggestions** at `/play/campaigns/[id]/suggestions` — a player proposes an
+edit to their own crawler's bio/notes, filed as a `PLAYER_SUGGESTION` change set
+through the existing review pipeline (slice 6), closing M7's "done when" bar.
+**M8 — live session mode & recaps 🚧.** Slice 1 added **session capture**: a
+DM-only `/campaigns/[id]/sessions` screen to start a play session and jot a
+running, timestamped, freeform log during the game — optionally tagged to
+existing entities via a typeahead picker — backed by a new `GameSession`/
+`SessionLogEntry` data model. Entries are scratch, not canon, created by a
+direct DM mutation (like `KnowledgeGrant`), never the review pipeline. **Next
+up:** promoting a log entry to a canonical Event, then live reveal and recap
+generation.
 M5.5 (data model hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
 seam, the `MIGRATE_ENTITY_DATA` job, reference-integrity badge + impact-aware
 archive, orphan report, the greenfield Faction satellite, and the Floor satellite

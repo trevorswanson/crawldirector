@@ -42,6 +42,8 @@ const {
   cancelJob,
   grantEntityKnowledge,
   revokeKnowledge,
+  createSession,
+  addSessionLogEntry,
   fleshOutEntity,
   fleshOutEntities,
   inferRelationshipsForEntity,
@@ -103,6 +105,8 @@ const {
   cancelJob: vi.fn(),
   grantEntityKnowledge: vi.fn(),
   revokeKnowledge: vi.fn(),
+  createSession: vi.fn(),
+  addSessionLogEntry: vi.fn(),
   fleshOutEntity: vi.fn(),
   fleshOutEntities: vi.fn(),
   inferRelationshipsForEntity: vi.fn(),
@@ -178,6 +182,10 @@ vi.mock("@/server/services/events", () => ({
 vi.mock("@/server/services/knowledge", () => ({
   grantEntityKnowledge,
   revokeKnowledge,
+}));
+vi.mock("@/server/services/sessions", () => ({
+  createSession,
+  addSessionLogEntry,
 }));
 vi.mock("@/server/services/generation", () => ({
   fleshOutEntity,
@@ -259,6 +267,8 @@ import {
   grantEntityKnownToAction,
   grantEntityKnowsAboutAction,
   revokeKnowledgeAction,
+  createSessionAction,
+  addSessionLogEntryAction,
   fleshOutEntityAction,
   fleshOutEntitiesAction,
   enqueueBulkFleshAction,
@@ -2314,6 +2324,81 @@ describe("revokeKnowledgeAction", () => {
     expect(revokeKnowledge).toHaveBeenCalledWith("u1", "c1", "k1");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/viewed");
     expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/entities/actor");
+  });
+});
+
+describe("createSessionAction", () => {
+  it("validates input before creating", async () => {
+    const result = await createSessionAction("c1", undefined, form({ title: "" }));
+    expect(result?.error).toBeTruthy();
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("creates a session and redirects to its log", async () => {
+    createSession.mockResolvedValue({ id: "s1" });
+
+    await expect(
+      createSessionAction(
+        "c1",
+        undefined,
+        form({ title: "Session 12", playedAt: "2026-08-04", focus: "Floor 9", notes: "prep" }),
+      ),
+    ).rejects.toThrow("NEXT_REDIRECT");
+
+    expect(createSession).toHaveBeenCalledWith("u1", "c1", {
+      title: "Session 12",
+      playedAt: "2026-08-04",
+      focus: "Floor 9",
+      notes: "prep",
+    });
+    expect(redirect).toHaveBeenCalledWith("/campaigns/c1/sessions/s1");
+  });
+
+  it("surfaces a ServiceError message and a generic fallback", async () => {
+    createSession.mockRejectedValueOnce(new ServiceError("nope"));
+    expect((await createSessionAction("c1", undefined, form({ title: "S" })))?.error).toBe("nope");
+
+    createSession.mockRejectedValueOnce(new Error("boom"));
+    expect((await createSessionAction("c1", undefined, form({ title: "S" })))?.error).toBe(
+      "Could not create the session. Please try again.",
+    );
+  });
+});
+
+describe("addSessionLogEntryAction", () => {
+  it("validates input before saving", async () => {
+    const result = await addSessionLogEntryAction("c1", "s1", undefined, form({ text: "" }));
+    expect(result?.error).toBeTruthy();
+    expect(addSessionLogEntry).not.toHaveBeenCalled();
+  });
+
+  it("saves a log entry with tagged entity ids and revalidates the session page", async () => {
+    addSessionLogEntry.mockResolvedValue({ id: "e1" });
+
+    const fd = form({ text: "Donut insulted the Maestro" });
+    fd.append("taggedIds", "ent1");
+    fd.append("taggedIds", "ent2");
+
+    const result = await addSessionLogEntryAction("c1", "s1", undefined, fd);
+
+    expect(result).toBeUndefined();
+    expect(addSessionLogEntry).toHaveBeenCalledWith("u1", "c1", "s1", {
+      text: "Donut insulted the Maestro",
+      taggedIds: ["ent1", "ent2"],
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/sessions/s1");
+  });
+
+  it("surfaces a ServiceError message and a generic fallback", async () => {
+    addSessionLogEntry.mockRejectedValueOnce(new ServiceError("Session not found."));
+    expect(
+      (await addSessionLogEntryAction("c1", "s1", undefined, form({ text: "x" })))?.error,
+    ).toBe("Session not found.");
+
+    addSessionLogEntry.mockRejectedValueOnce(new Error("boom"));
+    expect(
+      (await addSessionLogEntryAction("c1", "s1", undefined, form({ text: "x" })))?.error,
+    ).toBe("Could not save the log entry. Please try again.");
   });
 });
 

@@ -522,13 +522,16 @@ model KnowledgeGrant {
 }
 
 // ───────────── Live session mode (doc 08) ─────────────
-model Session {
+// Named `GameSession`, not `Session` — NextAuth already owns that model name
+// for its own session-token table above.
+model GameSession {
   id          String   @id @default(cuid())
   campaignId  String
   title       String
   playedAt    DateTime?
   focus       String?               // floor/area in focus
   notes       String?               // prep + freeform
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   entries     SessionLogEntry[]
   createdAt   DateTime @default(now())
   @@index([campaignId, playedAt])
@@ -539,9 +542,9 @@ model SessionLogEntry {             // real-time capture; NOT canon until promot
   sessionId   String
   at          DateTime @default(now())
   text        String
-  taggedIds   String[] @default([])  // referenced entity ids (@Carl, #Floor7)
+  taggedIds   String[] @default([])  // referenced entity ids, picked via typeahead
   promotedEventId String?            // -> Event, once promoted via review pipeline
-  session     Session  @relation(fields: [sessionId], references: [id])
+  session     GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   @@index([sessionId, at])
 }
 // Reveals (flipping visibility to players during a session) are recorded as

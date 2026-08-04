@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  addSessionLogEntrySchema,
   createCampaignSchema,
   createCrawlerSchema,
   createEventSchema,
   createGenericEntitySchema,
   createRelationshipSchema,
+  createSessionSchema,
   lockFieldSchema,
   playerSuggestionSchema,
   sanitizeImageUrl,
@@ -286,6 +288,76 @@ describe("playerSuggestionSchema", () => {
       playerSuggestionSchema.safeParse({ description: "a".repeat(10001) })
         .success,
     ).toBe(false);
+  });
+});
+
+describe("createSessionSchema", () => {
+  it("requires a title", () => {
+    expect(createSessionSchema.safeParse({ title: "" }).success).toBe(false);
+    expect(createSessionSchema.safeParse({ title: "  " }).success).toBe(false);
+  });
+
+  it("accepts a title alone, with playedAt/focus/notes all optional", () => {
+    const parsed = createSessionSchema.safeParse({ title: "Session 12" });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.title).toBe("Session 12");
+      expect(parsed.data.playedAt).toBeUndefined();
+    }
+  });
+
+  it("accepts a valid date string for playedAt and rejects an invalid one", () => {
+    expect(
+      createSessionSchema.safeParse({ title: "S", playedAt: "2026-08-04" }).success,
+    ).toBe(true);
+    expect(
+      createSessionSchema.safeParse({ title: "S", playedAt: "not-a-date" }).success,
+    ).toBe(false);
+  });
+
+  it("treats an empty playedAt string as unset", () => {
+    const parsed = createSessionSchema.safeParse({ title: "S", playedAt: "" });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.playedAt).toBeUndefined();
+  });
+
+  it("rejects an overlong title", () => {
+    expect(createSessionSchema.safeParse({ title: "a".repeat(201) }).success).toBe(false);
+  });
+});
+
+describe("addSessionLogEntrySchema", () => {
+  it("requires non-empty text", () => {
+    expect(addSessionLogEntrySchema.safeParse({ text: "" }).success).toBe(false);
+    expect(addSessionLogEntrySchema.safeParse({ text: "  " }).success).toBe(false);
+  });
+
+  it("trims text and defaults taggedIds to an empty array", () => {
+    const parsed = addSessionLogEntrySchema.safeParse({ text: "  Donut vs the Maestro  " });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.text).toBe("Donut vs the Maestro");
+      expect(parsed.data.taggedIds).toEqual([]);
+    }
+  });
+
+  it("accepts tagged entity ids", () => {
+    const parsed = addSessionLogEntrySchema.safeParse({
+      text: "Tagged entry",
+      taggedIds: ["e1", "e2"],
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.taggedIds).toEqual(["e1", "e2"]);
+  });
+
+  it("rejects too many tagged entities or overlong text", () => {
+    expect(
+      addSessionLogEntrySchema.safeParse({
+        text: "x",
+        taggedIds: Array.from({ length: 21 }, (_, i) => `e${i}`),
+      }).success,
+    ).toBe(false);
+    expect(addSessionLogEntrySchema.safeParse({ text: "a".repeat(2001) }).success).toBe(false);
   });
 });
 
