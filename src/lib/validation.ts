@@ -510,6 +510,15 @@ export const addSessionLogEntrySchema = z.object({
 });
 export type AddSessionLogEntryInput = z.infer<typeof addSessionLogEntrySchema>;
 
+// Promoting a log entry to a canonical Event (docs/08-session-mode.md): the DM
+// supplies only a title — the event's summary is the entry's own text, and its
+// participants are the entry's tagged entities (still live canon), so the
+// low-friction promote stays a one-field form.
+export const promoteSessionLogEntrySchema = z.object({
+  title: z.string().trim().min(1, "Event title is required.").max(200),
+});
+export type PromoteSessionLogEntryInput = z.infer<typeof promoteSessionLogEntrySchema>;
+
 // Event participant roles (docs/01-domain-model.md). Any-to-any, like
 // relationship types — every role is valid for any entity.
 export const eventParticipantRoleValues = [

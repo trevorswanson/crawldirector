@@ -22,6 +22,7 @@ import {
   eventParticipantRoleValues,
   grantKnowledgeSchema,
   lockFieldSchema,
+  promoteSessionLogEntrySchema,
   reviewEditValueKindSchema,
   updateEntitySchema,
   updateEventSchema,
@@ -69,6 +70,7 @@ import {
 import {
   addSessionLogEntry,
   createSession,
+  promoteSessionLogEntryToEvent,
 } from "@/server/services/sessions";
 import {
   fleshOutEntities,
@@ -1375,6 +1377,36 @@ export async function addSessionLogEntryAction(
   }
 
   revalidatePath(`/campaigns/${campaignId}/sessions/${sessionId}`);
+  return undefined;
+}
+
+export type PromoteSessionLogEntryActionState = { error?: string } | undefined;
+
+export async function promoteSessionLogEntryAction(
+  campaignId: string,
+  sessionId: string,
+  entryId: string,
+  _prev: PromoteSessionLogEntryActionState,
+  formData: FormData,
+): Promise<PromoteSessionLogEntryActionState> {
+  const user = await requireUser();
+  const parsed = promoteSessionLogEntrySchema.safeParse({
+    title: formData.get("title"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  try {
+    await promoteSessionLogEntryToEvent(user.id, campaignId, sessionId, entryId, parsed.data);
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    logActionError("Promote session log entry action failed", error);
+    return { error: "Could not promote this entry. Please try again." };
+  }
+
+  revalidatePath(`/campaigns/${campaignId}/sessions/${sessionId}`);
+  revalidatePath(`/campaigns/${campaignId}/timeline`);
   return undefined;
 }
 

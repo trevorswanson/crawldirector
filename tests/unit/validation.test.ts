@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   addSessionLogEntrySchema,
+  promoteSessionLogEntrySchema,
   createCampaignSchema,
   createCrawlerSchema,
   createEventSchema,
@@ -358,6 +359,23 @@ describe("addSessionLogEntrySchema", () => {
       }).success,
     ).toBe(false);
     expect(addSessionLogEntrySchema.safeParse({ text: "a".repeat(2001) }).success).toBe(false);
+  });
+});
+
+describe("promoteSessionLogEntrySchema", () => {
+  it("requires a non-empty title", () => {
+    expect(promoteSessionLogEntrySchema.safeParse({ title: "" }).success).toBe(false);
+    expect(promoteSessionLogEntrySchema.safeParse({ title: "   " }).success).toBe(false);
+  });
+
+  it("trims the title", () => {
+    const parsed = promoteSessionLogEntrySchema.safeParse({ title: "  Maestro incident  " });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.title).toBe("Maestro incident");
+  });
+
+  it("rejects an overlong title", () => {
+    expect(promoteSessionLogEntrySchema.safeParse({ title: "a".repeat(201) }).success).toBe(false);
   });
 });
 

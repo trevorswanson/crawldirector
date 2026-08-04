@@ -35,9 +35,16 @@ DM-only `/campaigns/[id]/sessions` screen to start a play session and jot a
 running, timestamped, freeform log during the game — optionally tagged to
 existing entities via a typeahead picker — backed by a new `GameSession`/
 `SessionLogEntry` data model. Entries are scratch, not canon, created by a
-direct DM mutation (like `KnowledgeGrant`), never the review pipeline. **Next
-up:** promoting a log entry to a canonical Event, then live reveal and recap
-generation.
+direct DM mutation (like `KnowledgeGrant`), never the review pipeline. Slice 2
+added **promote to Event**: each unpromoted log entry gets an inline
+"Promote to event" affordance — the DM supplies only a title, and the entry's
+own text becomes the Event's summary while its still-live tagged entities
+become ACTOR participants, filed through `createEvent`'s existing
+auto-approved DM change set (`source: DM`, fully provenanced) so the low-
+friction capture flow stays low-friction on the way to canon. A promoted
+entry's `promotedEventId` swaps the button for a "Promoted → view event" deep
+link to the Timeline. **Next up:** live reveal (building on M3's
+`KnowledgeGrant` foundation) and recap generation.
 M5.5 (data model hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
 seam, the `MIGRATE_ENTITY_DATA` job, reference-integrity badge + impact-aware
 archive, orphan report, the greenfield Faction satellite, and the Floor satellite

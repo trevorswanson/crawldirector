@@ -9,6 +9,7 @@ const {
   listEntitiesForUser,
   notFound,
   addSessionLogEntryAction,
+  promoteSessionLogEntryAction,
   searchEntityCandidatesAction,
 } = vi.hoisted(() => ({
   requireUser: vi.fn(),
@@ -19,6 +20,7 @@ const {
     throw new Error("NEXT_NOT_FOUND");
   }),
   addSessionLogEntryAction: vi.fn(),
+  promoteSessionLogEntryAction: vi.fn(),
   searchEntityCandidatesAction: vi.fn(),
 }));
 
@@ -26,7 +28,11 @@ vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/campaigns", () => ({ getCampaignForUser }));
 vi.mock("@/server/services/sessions", () => ({ getSession }));
 vi.mock("@/server/services/entities", () => ({ listEntitiesForUser }));
-vi.mock("@/app/(dm)/actions", () => ({ addSessionLogEntryAction, searchEntityCandidatesAction }));
+vi.mock("@/app/(dm)/actions", () => ({
+  addSessionLogEntryAction,
+  promoteSessionLogEntryAction,
+  searchEntityCandidatesAction,
+}));
 vi.mock("next/navigation", () => ({ notFound }));
 
 import CampaignSessionDetailPage from "@/app/(dm)/campaigns/[id]/sessions/[sessionId]/page";

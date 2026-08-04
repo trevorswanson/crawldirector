@@ -71,7 +71,7 @@ export default async function CampaignSessionDetailPage({
             />
           </div>
 
-          <SessionLogList campaignId={id} entries={session.entries} />
+          <SessionLogList campaignId={id} sessionId={sessionId} entries={session.entries} />
         </div>
       </div>
     </ConsoleScreen>
