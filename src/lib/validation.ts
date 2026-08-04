@@ -221,6 +221,15 @@ export const createCrawlerSchema = entityCoreSchema.extend({
 });
 export type CreateCrawlerInput = z.infer<typeof createCrawlerSchema>;
 
+// The M7 player "Suggestions" surface: a player can propose only their
+// crawler's bio/notes (docs/10-ui-ux.md), matching entityCoreSchema's own
+// summary/description limits.
+export const playerSuggestionSchema = z.object({
+  summary: optionalText(500),
+  description: optionalText(10000),
+});
+export type PlayerSuggestionInput = z.infer<typeof playerSuggestionSchema>;
+
 export const updateEntitySchema = entityCoreSchema.extend({
   ...allKindDataShape(),
   type: z.enum(entityTypeValues),
@@ -471,6 +480,35 @@ export const setPlayerCrawlerSchema = z.object({
   ),
 });
 export type SetPlayerCrawlerInput = z.infer<typeof setPlayerCrawlerSchema>;
+
+// Live session capture (M8 — docs/08-session-mode.md). A session and its log
+// entries are scratch, not canon — created by a direct DM mutation, not the
+// review pipeline (like KnowledgeGrant), so there's no ChangeSet shape here.
+export const createSessionSchema = z.object({
+  title: z.string().trim().min(1, "Session title is required.").max(200),
+  playedAt: z.preprocess(
+    (value) => (value === "" || value == null ? undefined : value),
+    z
+      .string()
+      .refine((value) => !Number.isNaN(Date.parse(value)), "Enter a valid date.")
+      .optional(),
+  ),
+  focus: optionalText(200),
+  notes: optionalText(4000),
+});
+export type CreateSessionInput = z.infer<typeof createSessionSchema>;
+
+// A log entry's freeform text plus optional tagged entity ids (picked via the
+// entity typeahead, not parsed from `@`/`#` text — see PROGRESS.md).
+export const addSessionLogEntrySchema = z.object({
+  text: z.string().trim().min(1, "Log entry text is required.").max(2000),
+  taggedIds: z
+    .array(z.string().trim().min(1))
+    .max(20, "Too many tagged entities.")
+    .optional()
+    .default([]),
+});
+export type AddSessionLogEntryInput = z.infer<typeof addSessionLogEntrySchema>;
 
 // Event participant roles (docs/01-domain-model.md). Any-to-any, like
 // relationship types — every role is valid for any entity.

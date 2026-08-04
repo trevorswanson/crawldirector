@@ -85,24 +85,36 @@ broader actor-profile studio reuse for M11. Keep the M6 work incremental.
 - [ ] **Later M6 slices.** The **encounter** set-piece generator (multi-entity),
       and broader actor-profile studio reuse for M11.
 
-**Now also active: M7 — Player crawler interface + sharing**
-([11-roadmap.md](./11-roadmap.md)). M6's "done when" bar is met and its remaining
-slices are *blocked* (encounter waits on M10, actor-profile reuse is M11), so the
-lowest unblocked milestone work is M7. The **game-progression** sub-thread (no
-player-UI surface required yet) is now complete: the `GRANT_ACHIEVEMENT` event
+**M7 — Player crawler interface + sharing — done ✅ (2026-08-04)**
+([11-roadmap.md](./11-roadmap.md)). M6's "done when" bar was met and its remaining
+slices are *blocked* (encounter waits on M10, actor-profile reuse is M11), so M7
+became the lowest unblocked milestone work. The **game-progression** sub-thread (no
+player-UI surface required yet) completed first: the `GRANT_ACHIEVEMENT` event
 effect (✅ 2026-06-29) plus `BOX` as a new `EntityType` with achievement→box
 `GRANTS_BOX` rewards and box→item `CONTAINS` contents (✅ 2026-06-30) — both dated
-entries below. The **player crawler interface** is now under way; its foundation
-slice — the player console shell, role-based routing, and a projected read-only
-"Known World" — shipped ✅ 2026-06-30 (dated entry below). Slice 2 — the
+entries below. The **player crawler interface** followed slice by slice: the
+foundation slice — the player console shell, role-based routing, and a projected
+read-only "Known World" — shipped ✅ 2026-06-30 (dated entry below). Slice 2 — the
 player↔crawler link + read-only crawler sheet — shipped ✅ 2026-07-01 (dated entry
 below). Slice 3 — the crawler **loadout** (inventory / loot boxes / achievements /
 titles) alongside the sheet — shipped ✅ 2026-07-02 (dated entry below). Slice 4 —
 the **System-message feed** (THE SYSTEM's in-fiction broadcasts, visibility-scoped)
-— shipped ✅ 2026-07-09 (dated entry below). **Next up (remaining M7 player-UI
-slices):** (5) scoped Ask ("Ask the System"), (6) player **suggestions** → review
-pipeline — slice 6 closes the milestone's "done when" bar (a player can submit a
-suggestion).
+— shipped ✅ 2026-07-09 (dated entry below). Slice 5 — scoped **"Ask the System"**
+(reusing the M5 `askCampaign` service, already role-scoped) — shipped ✅ 2026-08-04
+(dated entry below). Slice 6 — player **Suggestions** (bio/notes edits filed as
+`PLAYER_SUGGESTION` change sets through the existing review pipeline) — shipped
+✅ 2026-08-04 (dated entry below), closing the milestone's "done when" bar: a
+player logs in, sees only shared/own-crawler data, and can submit a suggestion.
+**Next up:** M8 — live session mode & recaps ([`08-session-mode.md`](./08-session-mode.md)).
+
+**Active: M8 — Live session mode & recaps**
+([08-session-mode.md](./08-session-mode.md)). Slice 1 — session capture — shipped
+✅ 2026-08-04 (dated entry below): the `GameSession`/`SessionLogEntry` data model,
+a DM-only Sessions screen to start a session and jot a running freeform log
+during play, optionally tagged to existing entities via a typeahead picker.
+**Next up:** promoting a log entry to a canonical `Event` through the review
+pipeline, then live reveal (building on M3's `KnowledgeGrant` foundation) and
+recap generation.
 
 ### Scheduled roadmap additions (2026-06-19)
 
@@ -135,6 +147,278 @@ M6 remains the next milestone work. The detailed decisions live in
 
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
+
+## M8 — Live session capture (slice 1) ✅ (2026-08-04)
+
+**Goal:** the first M8 slice — a DM starting a play session and jotting a
+running, timestamped log during the game, per
+[`08-session-mode.md`](./08-session-mode.md)'s "capture" workflow: quick,
+freeform entries the DM can optionally tag to existing entities, kept as
+scratch (never canon) until a later slice promotes them. This is the
+foundation the rest of M8 (promote-to-Event, live reveal, recaps) builds on.
+
+**Decision (direct DM mutation, like `KnowledgeGrant` — not the review
+pipeline; entity tags picked, not `@`/`#` parsed).** A session and its log
+entries are explicitly *not* canon (docs/08: "Capture is not canon"), so
+`createSession`/`addSessionLogEntry` are DM-only direct mutations mirroring
+`knowledge.ts`'s pattern — invariant #1 governs canon writes, and this isn't
+one. The schema names the model `GameSession` rather than docs' `Session` to
+avoid colliding with NextAuth's own `Session` model already in
+`schema.prisma`; `docs/09-data-schema.md` is updated to match. docs/08
+describes entries "optionally tagged to existing entities (`@Carl`,
+`#Floor7`)"; rather than parse `@`/`#` mentions out of freeform text — fragile
+for multi-word entity names, and this repo has no existing mention-parsing
+infra — the DM picks entities from the same search-as-you-type
+`EntityTypeahead` used elsewhere, building a chip list that submits as
+repeated `taggedIds` form values. No dedicated `screen-*` mockup exists for
+Sessions, so the UI is built from the console screen-shell primitives
+(`ConsoleScreen`/`ScreenHeader`) per AGENTS.md, matching the Jobs/Settings
+pattern.
+
+- [x] **Schema** ([`schema.prisma`](../prisma/schema.prisma), migration
+      `20260804171928_m8_session_capture`): additive `GameSession` (title,
+      `playedAt`, `focus`, `notes`, `campaignId` cascade) and `SessionLogEntry`
+      (`sessionId` cascade, `at`, `text`, `taggedIds: String[]`,
+      `promotedEventId` — unused until the promote slice).
+- [x] **Service** ([`sessions.ts`](../src/server/services/sessions.ts)):
+      DM-only `createSession`, `listSessions` (newest-played-first, with a
+      per-session entry count), `getSession` (entries oldest-first, tagged ids
+      resolved to live `{id, name, type}` refs in one bulk lookup), and
+      `addSessionLogEntry` (silently drops any tagged id that isn't a real
+      entity in the campaign, so a stale/foreign id can never render as a
+      broken link).
+- [x] **Validation** ([`validation.ts`](../src/lib/validation.ts)):
+      `createSessionSchema` (title required; `playedAt`/`focus`/`notes`
+      optional, `playedAt` validated as a parseable date string) and
+      `addSessionLogEntrySchema` (text required, ≤2000 chars; `taggedIds`
+      optional, capped at 20).
+- [x] **DM actions** ([`(dm)/actions.ts`](<../src/app/(dm)/actions.ts>)):
+      `createSessionAction` (validates, creates, redirects to the new
+      session's log) and `addSessionLogEntryAction` (validates, appends,
+      revalidates the session page).
+- [x] **UI** ([`create-session-form.tsx`](../src/components/sessions/create-session-form.tsx),
+      [`session-list.tsx`](../src/components/sessions/session-list.tsx),
+      [`session-log-composer.tsx`](../src/components/sessions/session-log-composer.tsx),
+      [`session-tag-picker.tsx`](../src/components/sessions/session-tag-picker.tsx),
+      [`session-log-list.tsx`](../src/components/sessions/session-log-list.tsx),
+      [`sessions/page.tsx`](<../src/app/(dm)/campaigns/[id]/sessions/page.tsx>),
+      [`sessions/[sessionId]/page.tsx`](<../src/app/(dm)/campaigns/[id]/sessions/[sessionId]/page.tsx>)):
+      a Sessions index (create form + list) and a session detail screen (log
+      composer + the running log, oldest-first like a transcript). The
+      composer keeps its textarea controlled (not left to React 19's
+      automatic uncontrolled-field reset on any completed form action) so a
+      rejected submit never silently drops the DM's typed entry; a successful
+      submit clears the text and remounts the tag picker.
+- [x] **Nav** ([`dm-nav.tsx`](../src/components/console/dm-nav.tsx)): a new,
+      live **Sessions** item (`NotebookPen`) between Timeline and Settings.
+- [x] **Docs:** [`09-data-schema.md`](./09-data-schema.md)'s `Session` model
+      renamed to `GameSession` with an explanatory note, matching the schema.
+- [x] **Tests:** DB-backed service cases in
+      [`sessions.test.ts`](../tests/unit/sessions.test.ts) (create/list/log/read,
+      permission checks, foreign/unknown tagged ids dropped, unknown session
+      rejected); schema cases in
+      [`validation.test.ts`](../tests/unit/validation.test.ts); the two new DM
+      actions in [`dm-actions.test.ts`](../tests/unit/dm-actions.test.ts);
+      component coverage in
+      [`create-session-form.test.tsx`](../tests/unit/create-session-form.test.tsx),
+      [`session-list.test.tsx`](../tests/unit/session-list.test.tsx),
+      [`session-log-list.test.tsx`](../tests/unit/session-log-list.test.tsx),
+      [`session-tag-picker.test.tsx`](../tests/unit/session-tag-picker.test.tsx),
+      and [`session-log-composer.test.tsx`](../tests/unit/session-log-composer.test.tsx);
+      page tests in
+      [`sessions-page.test.tsx`](../tests/unit/sessions-page.test.tsx) and
+      [`session-detail-page.test.tsx`](../tests/unit/session-detail-page.test.tsx)
+      (both DM-only role gates, 404s).
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors; only
+      pre-existing unrelated warnings), `npm run build` (the two
+      `/campaigns/[id]/sessions` routes register), and the full coverage gate
+      green (156 files / **1939 tests**; statements 95.43%, branches 88.95%,
+      functions 96.52%, lines 97.02%). **In-browser** (reseeded `dcc`,
+      `dm@example.com`) caught and fixed a real bug: `playedAt` is parsed from
+      a bare `<input type="date">` value as UTC midnight, so formatting it with
+      the viewer's local timezone rolled the displayed date back a day in a
+      negative-UTC-offset zone (Aug 4 showed as Aug 3). Fixed by rendering
+      `playedAt` with `timeZone: "UTC"` in both `session-list.tsx` and the
+      session detail page. After the fix: starting "Session 12: Floor 9
+      Breach" (dated Aug 4, focus "Floor 9") showed the correct date on both
+      the Sessions list and detail screens; typing in the tag picker found a
+      real NPC ("Carl") and added it as a chip; submitting a log entry cleared
+      the composer, remounted the tag picker (Carl became pickable again), and
+      appended the entry with its timestamp and a "Carl · NPC" chip linking to
+      `/campaigns/[id]/entities/[id]`; the Sessions list then showed "1 entry".
+      No console errors throughout.
+
+## M7 — Player Suggestions (slice 6) ✅ (2026-08-04)
+
+**Goal:** the sixth and final M7 *player-UI* slice — let a player propose an edit
+to their own crawler and close the milestone's "done when" bar ("a player logs in,
+sees only shared/own-crawler data … and can submit a suggestion"). Per
+[`10-ui-ux.md`](./10-ui-ux.md): "a player can propose edits (e.g. bio, notes);
+these enter the review pipeline as `PLAYER_SUGGESTION`, never write canon
+directly." `ChangeSource.PLAYER_SUGGESTION` and the DM-side Review Queue
+PLAYER filter/badge already existed (since M2) — this slice is the missing
+player-authored submission path, not new review machinery.
+
+**Decision (a narrow, allowlisted sibling to `createPendingEntityChangeSet`, not
+a reuse of it).** Every existing change-set-creation entrypoint in `review.ts`
+requires a DM/co-DM membership (`assertCampaignDm`), so a `Role.PLAYER` caller
+can't reach `createPendingEntityChangeSet` directly — and even if it could, that
+function trusts the caller's own `operations` array verbatim, which would let a
+"suggestion" carry any field (`visibility`, `status`, `data.*`, …), not just the
+bio/notes the surface is meant to expose. `createPlayerSuggestion` is a new,
+narrow function instead: it asserts `Role.PLAYER`, resolves the caller's own
+linked live-CANON crawler (the same read/write grant `getMyCrawlerSheet` uses),
+and builds the patch itself from a hardcoded `summary`/`description` allowlist —
+so a player can never target another entity or another field, no matter what a
+compromised client sends. It reuses the shared `evaluateEntityOperationFlags`
+for lock/staleness flagging and always files `source: PLAYER_SUGGESTION`,
+`status: PENDING` — identical downstream handling to AI/import proposals
+(invariant #1: players never write canon directly). A companion
+`listMySuggestions` (scoped by `actorUserId`, no separate membership check
+needed) lets the player see their own submission history so submitting isn't a
+black hole. ADR 0012 already commits M10 to reusing this same `PLAYER_SUGGESTION`
+provenance value for non-admin-DM library edits — `createPlayerSuggestion`'s
+strict `Role.PLAYER` gate is this slice's concern only; M10 will add its own
+entrypoint for that actor, not repurpose this one.
+
+- [x] **Service** ([`review.ts`](../src/server/services/review.ts)):
+      `createPlayerSuggestion(userId, campaignId, { summary?, description? })` —
+      PLAYER-only, own-crawler-only, allowlisted-fields-only, PENDING
+      `PLAYER_SUGGESTION` `UPDATE_ENTITY` change set; rejects a no-op patch and a
+      caller with no crawler linked. `listMySuggestions(userId, campaignId)`
+      returns the caller's own suggestion history (title/status/reviewedAt/
+      reviewNotes), newest first. `crawlers.ts`'s `CrawlerSheet` (and
+      `getMyCrawlerSheet`) gained `description` (previously summary-only) so the
+      submit form can prefill both fields.
+- [x] **Validation** ([`validation.ts`](../src/lib/validation.ts)):
+      `playerSuggestionSchema` (`summary`/`description`, both optional, same
+      length caps as `entityCoreSchema`).
+- [x] **Player action** ([`(player)/actions.ts`](<../src/app/(player)/actions.ts>)):
+      `submitSuggestionAction` — parses the form, calls `createPlayerSuggestion`,
+      revalidates the suggestions page on success (unlike the read-only
+      `askCampaignAction`, this one writes).
+- [x] **Player UI** ([`suggestion-form.tsx`](../src/components/crawler/suggestion-form.tsx),
+      [`suggestion-list.tsx`](../src/components/crawler/suggestion-list.tsx),
+      [`suggestions/page.tsx`](<../src/app/(player)/play/campaigns/[id]/suggestions/page.tsx>)):
+      a `SuggestionForm` (Bio/Notes textareas prefilled from the crawler's
+      current values, route-agnostic like `AskPanel` — takes a bound action
+      prop) and a read-only `SuggestionList` history panel (status chip +
+      review notes when resolved); the new `/play/campaigns/[id]/suggestions`
+      page follows the Crawler Sheet's own-crawler gate (a "no crawler linked
+      yet" empty state when unset).
+- [x] **Nav** ([`player-nav.tsx`](../src/components/console/player-nav.tsx)): the
+      **Suggestions** item is now a built link (was Planned) →
+      `/play/campaigns/[id]/suggestions` — every M7 player crawler-interface nav
+      item is now built.
+- [x] **Tests:** DB-backed `createPlayerSuggestion`/`listMySuggestions` cases in
+      [`review.test.ts`](../tests/unit/review.test.ts) (files the PENDING
+      `PLAYER_SUGGESTION` set with the correct patch/target; rejects a
+      non-player, an unlinked player, and a no-op suggestion; flags
+      `blockedByLock` on a locked field; scopes history to the caller); schema
+      cases in [`validation.test.ts`](../tests/unit/validation.test.ts); component
+      coverage in
+      [`suggestion-form.test.tsx`](../tests/unit/suggestion-form.test.tsx) and
+      [`suggestion-list.test.tsx`](../tests/unit/suggestion-list.test.tsx); the
+      page in
+      [`player-suggestions-page.test.tsx`](../tests/unit/player-suggestions-page.test.tsx)
+      (404, empty state, prefilled form, history render); the action in
+      [`player-actions.test.ts`](../tests/unit/player-actions.test.ts); updated
+      [`player-nav.test.tsx`](../tests/unit/player-nav.test.tsx) for the
+      newly-built item (no Planned items remain) and the `CrawlerSheet`-shape
+      fixtures touched by the new `description` field in
+      [`crawler-sheet.test.tsx`](../tests/unit/crawler-sheet.test.tsx) and
+      [`player-crawler-sheet-page.test.tsx`](../tests/unit/player-crawler-sheet-page.test.tsx).
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors;
+      pre-existing settings-action warnings only), `npm run build` (the
+      `/play/campaigns/[id]/suggestions` route registers), and the full coverage
+      gate green (148 files / **1893 tests**; statements 95.4%, branches 88.93%,
+      functions 96.52%, lines 96.97%). **In-browser** (reseeded `dcc` + a scratch
+      script linking `player@example.com` to a CANON "Carl" crawler with a bio and
+      notes): as the player, `/play/campaigns/[id]/suggestions` showed the Bio/
+      Notes form prefilled from Carl's real summary/description and an empty
+      "you haven't submitted a suggestion yet" history; editing the bio and
+      submitting showed a success message and the new suggestion listed as
+      "Pending review." As the DM, the Review Queue's `ALL` tab (and the
+      `PLAYER` filter link) showed "Suggestion for Carl" with the `PLR` badge,
+      the pre-existing diff editor rendering the struck-through old bio → new
+      bio; accepting the field and approving the set showed "Committed to
+      canon." No console errors on either side.
+
+## M7 — Player "Ask the System" (slice 5) ✅ (2026-08-04)
+
+**Goal:** the fifth M7 *player-UI* slice — give the player crawler interface a
+scoped **"Ask the System"**: the same read-only, retrieval-augmented Q&A the DM's
+"Ask the Campaign" shipped in M5 slice 5, now reachable from the player console.
+No schema change and, notably, **no new visibility logic** — `askCampaign`
+(`src/server/services/ask.ts`) already checks only membership (any role) and
+retrieves via `searchCanon`, which is role-scoped for `PLAYER` the same way every
+other player read is (invariant #5). The M5 slice 5 test suite already proved a
+player's ask can never retrieve DM-only canon; this slice is pure UI wiring plus a
+player-side action.
+
+**Decision (route-agnostic `AskPanel`; a player action file, not a shared one).**
+The DM's `AskPanel` client component previously imported `askCampaignAction`
+directly from `(dm)/actions.ts` and bound it to `campaignId` internally, which
+would have meant either the player route importing the DM's action module (a
+DM/player layering smell) or duplicating the whole panel. Instead `AskPanel` now
+takes a pre-bound `action` prop (`(prevState, formData) => Promise<AskActionState>`),
+so it has no opinion on which route renders it — the DM page passes
+`askCampaignAction.bind(null, id)` from its own actions file, the new player page
+passes the same shape from a new `(player)/actions.ts`. `AskActionState` moved from
+`(dm)/actions.ts` to `ask.ts` (next to `AskResult`/`AskSource`) as the shared,
+service-owned shape both action files and the panel import. The player's own
+`askCampaignAction` in `(player)/actions.ts` is a thin wrapper calling the same
+`askCampaign` service — kept in a separate file (not reused from `(dm)/actions.ts`)
+so the two consoles' action surfaces stay independent, matching how their pages
+already don't share code beyond services/components. A player has no Settings
+access, so the no-provider state on the player page explains the DM hasn't
+configured a key yet, with no "Configure AI in Settings" link (unlike the DM page).
+- [x] **Service:** no change — `askCampaign` was already role-scoped (verified by
+      the existing M5 "never lets a player's ask retrieve DM-only canon (invariant
+      #5)" test in [`ask.test.ts`](../tests/unit/ask.test.ts)).
+- [x] **Shared type + panel** ([`ask.ts`](../src/server/services/ask.ts),
+      [`ask-panel.tsx`](../src/components/ask/ask-panel.tsx)): `AskActionState`
+      moved to `ask.ts`; `AskPanel` takes an `action` prop instead of a
+      `campaignId` + an internal DM-actions import/bind.
+- [x] **DM page** ([`(dm)/campaigns/[id]/ask/page.tsx`](<../src/app/(dm)/campaigns/[id]/ask/page.tsx>)):
+      now binds and passes `askCampaignAction` itself (`AskActionState` re-imported
+      from `ask.ts`); behavior unchanged.
+- [x] **Player action + page** ([`(player)/actions.ts`](<../src/app/(player)/actions.ts>),
+      [`(player)/play/campaigns/[id]/ask/page.tsx`](<../src/app/(player)/play/campaigns/[id]/ask/page.tsx>)):
+      a player-scoped `askCampaignAction` wrapping `askCampaign`; the new
+      `ConsoleScreen` + `PlayerSystemBanner` page (mirrors the DM Ask page's copy
+      and provider gating, minus the Settings link) 404s a non-member and renders
+      the shared `AskPanel`.
+- [x] **Nav** ([`player-nav.tsx`](../src/components/console/player-nav.tsx)): the
+      **Ask the System** item is now a built link (was Planned) →
+      `/play/campaigns/[id]/ask`, with an active-highlight match; only Suggestions
+      remains Planned.
+- [x] **Tests:** the `AskPanel` refactor's own coverage
+      ([`ask-panel.test.tsx`](../tests/unit/ask-panel.test.tsx)) now injects a
+      mock `action` prop directly (no more mocking `(dm)/actions`); the DM
+      [`ask-page.test.tsx`](../tests/unit/ask-page.test.tsx) mocks `(dm)/actions`
+      so its real dependency chain (auth composition, search/embeddings) never
+      loads under Vitest, same pattern applied to the new
+      [`player-ask-page.test.tsx`](../tests/unit/player-ask-page.test.tsx) (404,
+      panel-when-configured, no-link no-provider notice) mocking `(player)/actions`;
+      the player action itself in
+      [`player-actions.test.ts`](../tests/unit/player-actions.test.ts) (passes the
+      question, returns answer/sources, `ServiceError` + generic fallback); updated
+      [`player-nav.test.tsx`](../tests/unit/player-nav.test.tsx) for the newly-built
+      item.
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors; pre-existing
+      settings-action warnings only), `npm run build` (the
+      `/play/campaigns/[id]/ask` route registers), and the full coverage gate green
+      (145 files / **1866 tests**; statements 95.38%, branches 88.92%, functions
+      96.5%, lines 96.96%). **In-browser** (reseeded `dcc` + `scripts/seed-world.ts`
+      + a scratch script adding a `player@example.com` PLAYER membership and a
+      placeholder Anthropic key): as the player, "Ask the System" rendered with the
+      panel (provider configured), and asking "Who is Princess Donut?" retrieved
+      canon and called the provider, which failed to a safe "The provider rejected
+      the key (authentication failed)" alert — no key/raw text in the DOM
+      (invariant #6), the same boundary the DM Ask page verification stopped at. As
+      the DM, `/campaigns/[id]/ask` still rendered and worked identically after the
+      shared `AskPanel` refactor. No console errors on either side.
 
 ## M7 — Player System-message feed (slice 4) ✅ (2026-07-09)
 

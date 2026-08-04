@@ -273,6 +273,7 @@ model Campaign {
   aiKeys           AiKey[]
   aiUsage          AiUsage[]
   jobs             Job[]
+  sessions         GameSession[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -726,6 +727,44 @@ model KnowledgeGrant {
 
   @@index([campaignId, recipientType, recipientId])
   @@index([campaignId, targetType, targetId])
+}
+
+// ───────────── Live session mode (M8 — docs/08-session-mode.md) ─────────────
+// A play session: date, floor/area in focus, freeform prep notes, and its
+// running capture log. Named `GameSession` (not `Session`, docs/09's name) to
+// avoid colliding with NextAuth's own `Session` model above. Sessions and their
+// log entries are scratch, not canon — created/edited by a direct DM mutation,
+// not the review pipeline (invariant #1 is about canon writes; this isn't one),
+// mirroring how KnowledgeGrant is a direct DM action.
+model GameSession {
+  id         String    @id @default(cuid())
+  campaignId String
+  title      String
+  playedAt   DateTime?
+  focus      String? // floor/area in focus
+  notes      String? // prep + freeform
+
+  campaign Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  entries  SessionLogEntry[]
+
+  createdAt DateTime @default(now())
+
+  @@index([campaignId, playedAt])
+}
+
+// Real-time capture; NOT canon until promoted (a later M8 slice) to an Event
+// via the review pipeline.
+model SessionLogEntry {
+  id              String   @id @default(cuid())
+  sessionId       String
+  at              DateTime @default(now())
+  text            String
+  taggedIds       String[] @default([]) // referenced Entity ids
+  promotedEventId String? // -> Event.id, once promoted
+
+  session GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, at])
 }
 
 // ───────────── Async job queue (M4 — docs/04-ai-integration.md §"Async / batching") ─────────────

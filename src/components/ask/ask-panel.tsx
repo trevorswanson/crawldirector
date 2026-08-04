@@ -12,15 +12,19 @@ import Link from "next/link";
 import { useFormStatus } from "react-dom";
 import { CalendarClock, Layers, Share2, Sparkles, type LucideIcon } from "lucide-react";
 
-import { askCampaignAction, type AskActionState } from "@/app/(dm)/actions";
-import type { AskSource } from "@/server/services/ask";
+import type { AskActionState, AskSource } from "@/server/services/ask";
 
-// "Ask the Campaign" panel (M5 slice 5 — docs/07-search-retrieval.md). A
-// read-only, retrieval-augmented Q&A: the DM (or, when the player interface
-// lands in M7, a scoped player) asks a natural-language question and gets a
-// grounded answer whose inline [n] citations link back to the source canon for
-// verification. The answer is never canon — it is a synthesized view, so the
-// panel says so and offers no "save" affordance.
+// "Ask" panel (M5 slice 5 — docs/07-search-retrieval.md; scoped to players in
+// M7 slice 5). A read-only, retrieval-augmented Q&A: the caller asks a
+// natural-language question and gets a grounded answer whose inline [n]
+// citations link back to the source canon for verification. The answer is
+// never canon — it is a synthesized view, so the panel says so and offers no
+// "save" affordance. Route-agnostic: the DM and player ask pages each pass
+// their own campaign-bound server action (`askCampaign` is role-scoped in the
+// service, not the route), so this component has no opinion on which route
+// it's rendered from.
+
+type AskFormAction = (prevState: AskActionState, formData: FormData) => Promise<AskActionState>;
 
 const SOURCE_ICON: Record<AskSource["targetType"], LucideIcon> = {
   ENTITY: Layers,
@@ -99,16 +103,14 @@ function SourceRow({ source }: { source: AskSource }) {
 }
 
 export function AskPanel({
-  campaignId,
+  action: submitAction,
   initialQuestion = "",
 }: {
-  campaignId: string;
+  /** The route's campaign-bound "ask" server action, e.g. `askCampaignAction.bind(null, campaignId)`. */
+  action: AskFormAction;
   initialQuestion?: string;
 }) {
-  const [state, action] = useActionState<AskActionState, FormData>(
-    askCampaignAction.bind(null, campaignId),
-    undefined,
-  );
+  const [state, action] = useActionState<AskActionState, FormData>(submitAction, undefined);
   const [questionDraft, setQuestionDraft] = useState(() => ({
     source: initialQuestion,
     value: initialQuestion,

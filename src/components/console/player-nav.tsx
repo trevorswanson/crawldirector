@@ -28,10 +28,8 @@ type PlayerNavItem = {
   planned?: string;
 };
 
-// Known World, Crawler Sheet, and the System Feed are built; the remaining
-// crawler-interface items ship in later M7 slices and are shown disabled with
-// their slice, so the nav doubles as a roadmap without faking any pages. Keep
-// in sync with docs/11-roadmap.md.
+// Every M7 player crawler-interface item is now built. Keep in sync with
+// docs/11-roadmap.md.
 const NAV: PlayerNavItem[] = [
   {
     label: "Known World",
@@ -58,9 +56,17 @@ const NAV: PlayerNavItem[] = [
   {
     label: "Ask the System",
     icon: MessageCircleQuestion,
-    planned: "M7 — scoped Ask",
+    href: (campaignId) =>
+      campaignId ? `/play/campaigns/${campaignId}/ask` : "/dashboard",
+    match: (p) => /^\/play\/campaigns\/[^/]+\/ask$/.test(p),
   },
-  { label: "Suggestions", icon: Lightbulb, planned: "M7 — player suggestions" },
+  {
+    label: "Suggestions",
+    icon: Lightbulb,
+    href: (campaignId) =>
+      campaignId ? `/play/campaigns/${campaignId}/suggestions` : "/dashboard",
+    match: (p) => /^\/play\/campaigns\/[^/]+\/suggestions$/.test(p),
+  },
 ];
 
 export function PlayerNav() {

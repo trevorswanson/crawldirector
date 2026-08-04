@@ -8,6 +8,7 @@ import { getCampaignForUser } from "@/server/services/campaigns";
 import { PageContainer } from "@/components/console/page-container";
 import { AskPanel } from "@/components/ask/ask-panel";
 import { Kicker } from "@/components/ui/kicker";
+import { askCampaignAction } from "@/app/(dm)/actions";
 
 // "Ask the Campaign" page (M5 slice 5 — docs/07-search-retrieval.md). A
 // read-only, retrieval-augmented Q&A over scoped canon with citations. Unlike
@@ -49,7 +50,7 @@ export default async function CampaignAskPage({
       </p>
 
       {providerConfigured ? (
-        <AskPanel campaignId={id} initialQuestion={query} />
+        <AskPanel action={askCampaignAction.bind(null, id)} initialQuestion={query} />
       ) : (
         <div className="panel flex flex-col items-start gap-3 p-[18px]">
           <div className="flex items-center gap-[9px]">

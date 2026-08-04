@@ -12,6 +12,7 @@ import {
   Network,
   CalendarClock,
   MonitorSmartphone,
+  NotebookPen,
   Settings,
   ShieldAlert,
   type LucideIcon,
@@ -82,6 +83,14 @@ const NAV: NavItem[] = [
     href: (campaignId) =>
       campaignId ? `/campaigns/${campaignId}/timeline` : "/dashboard",
     match: (p) => /^\/campaigns\/[^/]+\/timeline/.test(p),
+  },
+  {
+    label: "Sessions",
+    icon: NotebookPen,
+    group: "dm",
+    href: (campaignId) =>
+      campaignId ? `/campaigns/${campaignId}/sessions` : "/dashboard",
+    match: (p) => /^\/campaigns\/[^/]+\/sessions/.test(p),
   },
   {
     label: "Settings",
