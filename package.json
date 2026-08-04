@@ -45,7 +45,7 @@
   },
   "overrides": {
     "postcss": "8.5.15",
-    "hono": "^4.12.25"
+    "hono": "^4.13.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
