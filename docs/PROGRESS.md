@@ -112,9 +112,12 @@ player logs in, sees only shared/own-crawler data, and can submit a suggestion.
 ✅ 2026-08-04 (dated entry below): the `GameSession`/`SessionLogEntry` data model,
 a DM-only Sessions screen to start a session and jot a running freeform log
 during play, optionally tagged to existing entities via a typeahead picker.
-**Next up:** promoting a log entry to a canonical `Event` through the review
-pipeline, then live reveal (building on M3's `KnowledgeGrant` foundation) and
-recap generation.
+Slice 2 — promote to Event — shipped ✅ 2026-08-04 (dated entry below): each
+unpromoted log entry can be promoted to a canonical `Event` through the review
+pipeline (`source: DM`, auto-approved, fully provenanced), reusing the entry's
+own text as the Event summary and its live tagged entities as ACTOR
+participants. **Next up:** live reveal (building on M3's `KnowledgeGrant`
+foundation) and recap generation.
 
 ### Scheduled roadmap additions (2026-06-19)
 
@@ -147,6 +150,91 @@ M6 remains the next milestone work. The detailed decisions live in
 
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
+
+## M8 — Promote a log entry to a canonical Event (slice 2) ✅ (2026-08-04)
+
+**Goal:** the second M8 slice — let the DM turn a scratch session log entry into
+a canonical `Event`, per [`08-session-mode.md`](./08-session-mode.md): "the DM
+turns a log entry (or several) into a canonical Event … through the normal
+review pipeline — `source: DM`, auto-approved but fully provenanced." This is
+the bridge from slice 1's capture-only log to canon; causal links and effects
+stay a DM follow-up on the Timeline (unchanged from how event editing already
+works), not part of this slice.
+
+**Decision (title-only promote form; text → summary, tags → participants,
+server-side).** A full event-creation form (participants picker, time-anchor
+fields, effects rows) would fight the "capture fast, reconcile later"
+philosophy the whole session-log feature is built on. Instead
+`promoteSessionLogEntryToEvent` derives everything it can: the entry's own
+`text` becomes the Event's `summary` verbatim (no retyping), and its still-live
+tagged entities (already resolved once at log time) become `ACTOR`
+participants — a tag that's since gone non-canon is silently dropped, same
+policy as `getSession`'s own tag resolution. The DM supplies only a `title`
+(prefilled client-side from the entry's first line, editable before
+submitting). The created Event carries no in-game-time anchor
+(`UNSCHEDULED`) and no effects; the DM adds those afterward from the Timeline
+like any other event — reusing `createEvent`'s existing auto-approved DM
+change set means the promoted Event gets full provenance for free, and an
+entry's `promotedEventId` is a one-way pointer (rejects re-promoting).
+`SessionLogList` stays a Server Component; only the small per-entry promote
+affordance (`PromoteEntryForm`) is a client island, and it relies on the
+existing `revalidatePath`-driven refresh (same pattern as the log composer) to
+swap itself for a static "Promoted → view event" Timeline deep-link
+(`?event=<id>`, the same query param the Timeline already supports for
+causality-navigation deep-links) once the parent page's server data reflects
+the promotion — no local "just promoted" state to manage.
+
+- [x] **Validation** ([`validation.ts`](../src/lib/validation.ts)):
+      `promoteSessionLogEntrySchema` (title required, ≤200 chars — the only
+      field the form exposes).
+- [x] **Service** ([`sessions.ts`](../src/server/services/sessions.ts)):
+      `promoteSessionLogEntryToEvent(userId, campaignId, sessionId, entryId,
+      { title })` — DM-only, rejects an unknown entry or one already promoted,
+      filters tagged ids down to still-live-CANON entities before building
+      `ACTOR` participants, calls the existing `createEvent` (auto-approved DM
+      change set, `source: DM`), then stamps the entry's `promotedEventId`.
+- [x] **DM action** ([`(dm)/actions.ts`](<../src/app/(dm)/actions.ts>)):
+      `promoteSessionLogEntryAction` — validates, calls the service,
+      revalidates both the session page and the Timeline.
+- [x] **UI** ([`promote-entry-form.tsx`](../src/components/sessions/promote-entry-form.tsx),
+      [`session-log-list.tsx`](../src/components/sessions/session-log-list.tsx)):
+      a collapsed "Promote to event" button per unpromoted entry that expands
+      to a one-field title form (prefilled from the entry's first line, capped
+      at 80 chars for the default); a promoted entry instead renders a static
+      "Promoted → view event" link to `/campaigns/[id]/timeline?event=<id>`.
+- [x] **Tests:** DB-backed `promoteSessionLogEntryToEvent` cases in
+      [`sessions.test.ts`](../tests/unit/sessions.test.ts) (creates the Event
+      with the entry's text as summary + live tagged entities as ACTOR
+      participants; empty participants when untagged; drops a since-archived
+      tag; rejects a double-promote, an empty title, an unknown entry, and a
+      player caller); schema cases in
+      [`validation.test.ts`](../tests/unit/validation.test.ts); the action in
+      [`dm-actions.test.ts`](../tests/unit/dm-actions.test.ts); component
+      coverage in
+      [`promote-entry-form.test.tsx`](../tests/unit/promote-entry-form.test.tsx)
+      (collapsed → expanded, prefilled/edited title submission, returned-error
+      handling, cancel) and updated
+      [`session-log-list.test.tsx`](../tests/unit/session-log-list.test.tsx)
+      (promote affordance vs. promoted-link rendering); updated
+      [`session-detail-page.test.tsx`](../tests/unit/session-detail-page.test.tsx)
+      for the new action import.
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors;
+      pre-existing settings-action warnings only), `npm run build` (routes
+      unchanged, no new route), and the full coverage gate green (157 files /
+      **1958 tests**; statements 95.44%, branches 88.94%, functions 96.53%,
+      lines 96.97%). **In-browser** (reseeded `dcc`, re-signed-in as
+      `dm@example.com` after the reseed to pick up a fresh JWT — the prior
+      session's user id had gone stale and briefly 500'd a campaign-create
+      attempt, per the known reseed-then-relogin gotcha; created a scratch
+      "Demo Campaign" NPC "Carl" and a session): logging "Carl insulted the
+      Maestro on air during the Floor 9 breach" tagged to Carl showed a
+      "Promote to event" button; clicking it expanded a title field prefilled
+      with the entry's full text (under 80 chars) which was edited to "Maestro
+      on-air incident" and submitted; the row flipped to "Promoted → view
+      event" (green) with no page reload; following the link landed on the
+      Timeline with the new Event highlighted — title "Maestro on-air
+      incident", the entry's text as its summary, a `DM` provenance badge, and
+      Carl listed as the sole `ACTOR` participant. No console errors.
 
 ## M8 — Live session capture (slice 1) ✅ (2026-08-04)
 

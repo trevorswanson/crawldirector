@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
-import { EntityType, Role } from "@/generated/prisma/client";
+import { CanonStatus, EntityType, Role } from "@/generated/prisma/client";
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
 import {
@@ -8,6 +8,7 @@ import {
   createSession,
   getSession,
   listSessions,
+  promoteSessionLogEntryToEvent,
 } from "@/server/services/sessions";
 
 // Service-layer tests against a real Postgres (see campaigns.test.ts). Sessions
@@ -183,5 +184,127 @@ describe("addSessionLogEntry + getSession", () => {
     const owner = await makeUser("dm@log5.test");
     const campaign = await createCampaign(owner.id, { name: "Log" });
     expect(await getSession(owner.id, campaign.id, "nope")).toBeNull();
+  });
+});
+
+describe("promoteSessionLogEntryToEvent", () => {
+  it("creates a canonical Event from the entry's text, with tagged live entities as ACTOR participants", async () => {
+    const owner = await makeUser("dm@promote.test");
+    const campaign = await createCampaign(owner.id, { name: "Promote" });
+    const session = await createSession(owner.id, campaign.id, { title: "S" });
+    const npc = await makeEntity(campaign.id, "Carl");
+    const entry = await addSessionLogEntry(owner.id, campaign.id, session.id, {
+      text: "Carl insulted the Maestro on air",
+      taggedIds: [npc.id],
+    });
+
+    const result = await promoteSessionLogEntryToEvent(owner.id, campaign.id, session.id, entry.id, {
+      title: "Maestro incident",
+    });
+
+    const event = await prisma.event.findUniqueOrThrow({
+      where: { id: result.id },
+      include: { participants: true },
+    });
+    expect(event.title).toBe("Maestro incident");
+    expect(event.summary).toBe("Carl insulted the Maestro on air");
+    expect(event.status).toBe(CanonStatus.CANON);
+    expect(event.source).toBe("DM");
+    expect(event.participants).toHaveLength(1);
+    expect(event.participants[0]).toMatchObject({ entityId: npc.id, role: "ACTOR" });
+
+    const updatedEntry = await prisma.sessionLogEntry.findUniqueOrThrow({ where: { id: entry.id } });
+    expect(updatedEntry.promotedEventId).toBe(result.id);
+  });
+
+  it("creates an Event with no participants when the entry has no tags", async () => {
+    const owner = await makeUser("dm@promote2.test");
+    const campaign = await createCampaign(owner.id, { name: "Promote" });
+    const session = await createSession(owner.id, campaign.id, { title: "S" });
+    const entry = await addSessionLogEntry(owner.id, campaign.id, session.id, {
+      text: "A quiet moment",
+    });
+
+    const result = await promoteSessionLogEntryToEvent(owner.id, campaign.id, session.id, entry.id, {
+      title: "Quiet moment",
+    });
+
+    const event = await prisma.event.findUniqueOrThrow({
+      where: { id: result.id },
+      include: { participants: true },
+    });
+    expect(event.participants).toHaveLength(0);
+  });
+
+  it("drops a tagged entity that is no longer live canon", async () => {
+    const owner = await makeUser("dm@promote3.test");
+    const campaign = await createCampaign(owner.id, { name: "Promote" });
+    const session = await createSession(owner.id, campaign.id, { title: "S" });
+    const npc = await makeEntity(campaign.id, "Carl");
+    const entry = await addSessionLogEntry(owner.id, campaign.id, session.id, {
+      text: "Carl vanishes",
+      taggedIds: [npc.id],
+    });
+    await prisma.entity.update({ where: { id: npc.id }, data: { status: CanonStatus.ARCHIVED } });
+
+    const result = await promoteSessionLogEntryToEvent(owner.id, campaign.id, session.id, entry.id, {
+      title: "Disappearance",
+    });
+
+    const event = await prisma.event.findUniqueOrThrow({
+      where: { id: result.id },
+      include: { participants: true },
+    });
+    expect(event.participants).toHaveLength(0);
+  });
+
+  it("rejects promoting an entry that has already been promoted", async () => {
+    const owner = await makeUser("dm@promote4.test");
+    const campaign = await createCampaign(owner.id, { name: "Promote" });
+    const session = await createSession(owner.id, campaign.id, { title: "S" });
+    const entry = await addSessionLogEntry(owner.id, campaign.id, session.id, { text: "Once" });
+    await promoteSessionLogEntryToEvent(owner.id, campaign.id, session.id, entry.id, {
+      title: "First",
+    });
+
+    await expect(
+      promoteSessionLogEntryToEvent(owner.id, campaign.id, session.id, entry.id, {
+        title: "Again",
+      }),
+    ).rejects.toThrow("This entry has already been promoted to an event.");
+  });
+
+  it("rejects an empty title", async () => {
+    const owner = await makeUser("dm@promote5.test");
+    const campaign = await createCampaign(owner.id, { name: "Promote" });
+    const session = await createSession(owner.id, campaign.id, { title: "S" });
+    const entry = await addSessionLogEntry(owner.id, campaign.id, session.id, { text: "Once" });
+
+    await expect(
+      promoteSessionLogEntryToEvent(owner.id, campaign.id, session.id, entry.id, { title: "   " }),
+    ).rejects.toThrow("Event title is required.");
+  });
+
+  it("rejects an unknown entry id", async () => {
+    const owner = await makeUser("dm@promote6.test");
+    const campaign = await createCampaign(owner.id, { name: "Promote" });
+    const session = await createSession(owner.id, campaign.id, { title: "S" });
+
+    await expect(
+      promoteSessionLogEntryToEvent(owner.id, campaign.id, session.id, "nope", { title: "T" }),
+    ).rejects.toThrow("Log entry not found.");
+  });
+
+  it("rejects a player caller", async () => {
+    const owner = await makeUser("dm@promote7.test");
+    const player = await makeUser("player@promote7.test");
+    const campaign = await createCampaign(owner.id, { name: "Promote" });
+    await addPlayer(player.id, campaign.id);
+    const session = await createSession(owner.id, campaign.id, { title: "S" });
+    const entry = await addSessionLogEntry(owner.id, campaign.id, session.id, { text: "Once" });
+
+    await expect(
+      promoteSessionLogEntryToEvent(player.id, campaign.id, session.id, entry.id, { title: "T" }),
+    ).rejects.toThrow("You do not have permission to edit this campaign.");
   });
 });

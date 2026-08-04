@@ -1,15 +1,19 @@
-import { Role } from "@/generated/prisma/client";
+import { CanonStatus, Role } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
+import { createEvent } from "@/server/services/events";
 
 // Live session capture (M8 slice 1 — docs/08-session-mode.md). A `GameSession`
 // (renamed from docs' `Session` to avoid colliding with NextAuth's own Session
 // model) is the DM's play-session log: title, date, floor/area focus, prep
 // notes, and a running `SessionLogEntry` capture log. Both are scratch, not
 // canon — created by a direct DM mutation, not the review pipeline (invariant
-// #1 is about canon writes; this isn't one), mirroring knowledge.ts. Promoting
-// a log entry to a canonical Event is a later M8 slice (`promotedEventId`
-// stays null until then).
+// #1 is about canon writes; this isn't one), mirroring knowledge.ts.
+//
+// Promoting a log entry to a canonical Event (M8 slice 2) *does* route through
+// the review pipeline — via `createEvent`'s existing auto-approved DM change
+// set — so the promoted Event carries full provenance even though the log
+// entry it came from doesn't.
 
 async function getMembership(userId: string, campaignId: string) {
   return prisma.membership.findUnique({
@@ -200,4 +204,59 @@ export async function addSessionLogEntry(
     data: { sessionId, text, taggedIds },
     select: { id: true },
   });
+}
+
+/**
+ * Promote a log entry to a canonical Event through the normal review pipeline
+ * (docs/08: "source: DM, auto-approved but fully provenanced"). The DM
+ * supplies only a title; the entry's own text becomes the event's summary and
+ * its still-live tagged entities become ACTOR participants, so the low-
+ * friction capture flow stays low-friction on the way to canon too. Causal
+ * links and effects aren't set here — the DM adds those afterward from the
+ * Timeline like any other event. An already-promoted entry can't be promoted
+ * again (`promotedEventId` is a one-way pointer).
+ */
+export async function promoteSessionLogEntryToEvent(
+  userId: string,
+  campaignId: string,
+  sessionId: string,
+  entryId: string,
+  input: { title: string },
+): Promise<{ id: string }> {
+  await assertCampaignDm(userId, campaignId);
+
+  const title = input.title.trim();
+  if (!title) throw new ServiceError("Event title is required.");
+
+  const entry = await prisma.sessionLogEntry.findFirst({
+    where: { id: entryId, sessionId, session: { campaignId } },
+    select: { id: true, text: true, taggedIds: true, promotedEventId: true },
+  });
+  if (!entry) throw new ServiceError("Log entry not found.");
+  if (entry.promotedEventId) {
+    throw new ServiceError("This entry has already been promoted to an event.");
+  }
+
+  let participants: { entityId: string; role: "ACTOR" }[] = [];
+  if (entry.taggedIds.length > 0) {
+    const live = await prisma.entity.findMany({
+      where: { id: { in: entry.taggedIds }, campaignId, status: CanonStatus.CANON },
+      select: { id: true },
+    });
+    participants = live.map((live) => ({ entityId: live.id, role: "ACTOR" as const }));
+  }
+
+  const event = await createEvent(userId, campaignId, {
+    title,
+    summary: entry.text,
+    secret: false,
+    participants,
+  });
+
+  await prisma.sessionLogEntry.update({
+    where: { id: entryId },
+    data: { promotedEventId: event.id },
+  });
+
+  return { id: event.id };
 }

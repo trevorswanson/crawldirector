@@ -44,6 +44,7 @@ const {
   revokeKnowledge,
   createSession,
   addSessionLogEntry,
+  promoteSessionLogEntryToEvent,
   fleshOutEntity,
   fleshOutEntities,
   inferRelationshipsForEntity,
@@ -107,6 +108,7 @@ const {
   revokeKnowledge: vi.fn(),
   createSession: vi.fn(),
   addSessionLogEntry: vi.fn(),
+  promoteSessionLogEntryToEvent: vi.fn(),
   fleshOutEntity: vi.fn(),
   fleshOutEntities: vi.fn(),
   inferRelationshipsForEntity: vi.fn(),
@@ -186,6 +188,7 @@ vi.mock("@/server/services/knowledge", () => ({
 vi.mock("@/server/services/sessions", () => ({
   createSession,
   addSessionLogEntry,
+  promoteSessionLogEntryToEvent,
 }));
 vi.mock("@/server/services/generation", () => ({
   fleshOutEntity,
@@ -269,6 +272,7 @@ import {
   revokeKnowledgeAction,
   createSessionAction,
   addSessionLogEntryAction,
+  promoteSessionLogEntryAction,
   fleshOutEntityAction,
   fleshOutEntitiesAction,
   enqueueBulkFleshAction,
@@ -2399,6 +2403,55 @@ describe("addSessionLogEntryAction", () => {
     expect(
       (await addSessionLogEntryAction("c1", "s1", undefined, form({ text: "x" })))?.error,
     ).toBe("Could not save the log entry. Please try again.");
+  });
+});
+
+describe("promoteSessionLogEntryAction", () => {
+  it("validates input before promoting", async () => {
+    const result = await promoteSessionLogEntryAction(
+      "c1",
+      "s1",
+      "e1",
+      undefined,
+      form({ title: "" }),
+    );
+    expect(result?.error).toBeTruthy();
+    expect(promoteSessionLogEntryToEvent).not.toHaveBeenCalled();
+  });
+
+  it("promotes the entry and revalidates the session + timeline pages", async () => {
+    promoteSessionLogEntryToEvent.mockResolvedValue({ id: "ev1" });
+
+    const result = await promoteSessionLogEntryAction(
+      "c1",
+      "s1",
+      "e1",
+      undefined,
+      form({ title: "Floor 9 Breach" }),
+    );
+
+    expect(result).toBeUndefined();
+    expect(promoteSessionLogEntryToEvent).toHaveBeenCalledWith("u1", "c1", "s1", "e1", {
+      title: "Floor 9 Breach",
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/sessions/s1");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/timeline");
+  });
+
+  it("surfaces a ServiceError message and a generic fallback", async () => {
+    promoteSessionLogEntryToEvent.mockRejectedValueOnce(
+      new ServiceError("This entry has already been promoted to an event."),
+    );
+    expect(
+      (await promoteSessionLogEntryAction("c1", "s1", "e1", undefined, form({ title: "T" })))
+        ?.error,
+    ).toBe("This entry has already been promoted to an event.");
+
+    promoteSessionLogEntryToEvent.mockRejectedValueOnce(new Error("boom"));
+    expect(
+      (await promoteSessionLogEntryAction("c1", "s1", "e1", undefined, form({ title: "T" })))
+        ?.error,
+    ).toBe("Could not promote this entry. Please try again.");
   });
 });
 

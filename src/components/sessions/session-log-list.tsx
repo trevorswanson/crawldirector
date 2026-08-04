@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { promoteSessionLogEntryAction } from "@/app/(dm)/actions";
+import { PromoteEntryForm } from "@/components/sessions/promote-entry-form";
 import { TypeDot } from "@/components/ui/type-dot";
 import { formatEntityType } from "@/lib/entities";
 import type { SessionLogEntryView } from "@/server/services/sessions";
@@ -13,14 +15,25 @@ function formatEntryTime(at: Date) {
   });
 }
 
-/** Read-only running log — oldest first, like a transcript. Unpromoted entries
- * are scratch, never canon (docs/08-session-mode.md); a later M8 slice adds
- * "promote to Event". */
+// A sensible default event title from the entry's own text — its first line,
+// capped so it fits the timeline. The DM can edit before promoting.
+function deriveDefaultTitle(text: string) {
+  const firstLine = text.split("\n")[0]?.trim() ?? "";
+  if (!firstLine) return "Session event";
+  return firstLine.length > 80 ? `${firstLine.slice(0, 79)}…` : firstLine;
+}
+
+/** The running log — oldest first, like a transcript. Unpromoted entries are
+ * scratch, never canon (docs/08-session-mode.md); each can be promoted to a
+ * canonical Event through the review pipeline, after which it links to its
+ * Event on the Timeline instead. */
 export function SessionLogList({
   campaignId,
+  sessionId,
   entries,
 }: {
   campaignId: string;
+  sessionId: string;
   entries: SessionLogEntryView[];
 }) {
   if (entries.length === 0) {
@@ -62,6 +75,19 @@ export function SessionLogList({
                 </Link>
               ))}
             </div>
+          )}
+          {entry.promotedEventId ? (
+            <Link
+              href={`/campaigns/${campaignId}/timeline?event=${entry.promotedEventId}`}
+              className="inline-flex w-fit items-center gap-[5px] font-mono text-[9.5px] uppercase tracking-[.08em] text-[var(--ok)] transition-colors hover:brightness-110"
+            >
+              Promoted → view event
+            </Link>
+          ) : (
+            <PromoteEntryForm
+              defaultTitle={deriveDefaultTitle(entry.text)}
+              action={promoteSessionLogEntryAction.bind(null, campaignId, sessionId, entry.id)}
+            />
           )}
         </li>
       ))}
