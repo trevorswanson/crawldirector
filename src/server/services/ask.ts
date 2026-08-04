@@ -50,6 +50,20 @@ export type AskSource = {
   href: string;
 };
 
+// Server-action result shape shared by every route's "Ask" action (DM and
+// player alike — the underlying `askCampaign` call is role-scoped, not
+// route-specific) and consumed by the shared `AskPanel` UI.
+export type AskActionState =
+  | {
+      answer?: string;
+      grounded?: boolean;
+      sources?: AskSource[];
+      model?: string | null;
+      error?: string;
+      timestamp?: number;
+    }
+  | undefined;
+
 export type AskResult = {
   role: Role;
   question: string;

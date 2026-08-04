@@ -172,7 +172,12 @@ Auth.js, with full CI + security/quality gates (CodeQL, dependency review,
   in-fiction broadcasts to the crawlers, a campaign-wide visibility-scoped read over
   `SYSTEM_MESSAGE` entities (only `PLAYER_VISIBLE`, live-CANON, newest first — DM-only
   and pending messages never leak), each rendered as its real content with no invented
-  kind badge. Next: the scoped Ask and player suggestions (which closes the
+  kind badge. Slice 5 added **"Ask the System"** at `/play/campaigns/[id]/ask`: the
+  player-scoped counterpart to the DM's "Ask the Campaign" (M5 slice 5), reusing the
+  same role-scoped `askCampaign` service and a route-agnostic `AskPanel` shared with
+  the DM page (each route now passes its own bound server action). No new visibility
+  logic needed — `askCampaign`'s retrieval was already scoped to the caller's
+  membership role. Next: player **suggestions** → review pipeline (closes the
   milestone's "done when" bar).
 
 For per-slice detail (files, tests, decisions) see
