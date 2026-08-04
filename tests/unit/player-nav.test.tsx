@@ -62,14 +62,19 @@ describe("PlayerNav", () => {
     expect(link.getAttribute("href")).toBe("/play/campaigns/c1/ask");
   });
 
-  it("marks unbuilt crawler-interface surfaces as Planned, not stub links", () => {
+  it("links the built Suggestions item to the active campaign", () => {
     usePathname.mockReturnValue("/play/campaigns/c1");
     render(<PlayerNav />);
-    for (const label of ["Suggestions"]) {
-      const row = screen.getByText(label).closest("[aria-disabled]");
-      expect(row).not.toBeNull();
-    }
-    expect(screen.getAllByText("Planned").length).toBe(1);
+    const link = screen
+      .getByText("Suggestions")
+      .closest("a") as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe("/play/campaigns/c1/suggestions");
+  });
+
+  it("has no remaining Planned crawler-interface surfaces (M7 fully built)", () => {
+    usePathname.mockReturnValue("/play/campaigns/c1");
+    render(<PlayerNav />);
+    expect(screen.queryByText("Planned")).toBeNull();
   });
 
   it("highlights System Feed as active on the system route", () => {
@@ -88,6 +93,15 @@ describe("PlayerNav", () => {
       .getByText("Ask the System")
       .closest("a") as HTMLAnchorElement;
     expect(ask.className).toContain("border-[var(--accent)]");
+  });
+
+  it("highlights Suggestions as active on the suggestions route", () => {
+    usePathname.mockReturnValue("/play/campaigns/c1/suggestions");
+    render(<PlayerNav />);
+    const suggestions = screen
+      .getByText("Suggestions")
+      .closest("a") as HTMLAnchorElement;
+    expect(suggestions.className).toContain("border-[var(--accent)]");
   });
 
   it("highlights Known World as active on an entity detail route", () => {

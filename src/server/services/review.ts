@@ -787,6 +787,164 @@ export async function createPendingEntityChangeSet(
   });
 }
 
+// The only fields the M7 player surface lets a player suggest — their
+// crawler's bio (`summary`) and notes (`description`), per docs/10-ui-ux.md.
+// Kept out of the generic patch machinery deliberately: unlike
+// createPendingEntityChangeSet (which trusts the caller's own operations
+// array), a player-authored patch must never be able to touch fields like
+// `visibility`/`status`/`tags`/type data, so the allowlist lives at the
+// call site instead of a shared builder.
+function suggestionPatchValue(value: string | undefined) {
+  return value && value.length > 0 ? value : null;
+}
+
+function addSuggestionPatch(
+  patch: ReviewPatch,
+  field: string,
+  from: string | null,
+  to: string | null,
+) {
+  if (from === to) return;
+  patch[field] = { from, to };
+}
+
+export type MySuggestion = {
+  id: string;
+  title: string;
+  status: ChangeSetStatus;
+  createdAt: Date;
+  reviewedAt: Date | null;
+  reviewNotes: string | null;
+};
+
+// Player-scoped: propose an edit to the caller's OWN linked crawler's bio
+// and/or notes. Like every AI/import proposal it lands as a PENDING
+// `UPDATE_ENTITY` change set with `source: PLAYER_SUGGESTION` — the DM
+// reviews/accepts/edits/rejects it exactly like AI output (invariant #1:
+// players never write canon directly). The caller's own linked, live-CANON
+// crawler (the same read grant as getMyCrawlerSheet) is the only writable
+// target, so a player can never propose a change to anyone else's entity or
+// to fields beyond summary/description.
+export async function createPlayerSuggestion(
+  userId: string,
+  campaignId: string,
+  input: { summary?: string; description?: string },
+) {
+  const membership = await getMembership(userId, campaignId);
+  if (!membership || membership.role !== Role.PLAYER) {
+    throw new ServiceError("Only players can submit suggestions.");
+  }
+
+  const link = await prisma.membership.findUnique({
+    where: { userId_campaignId: { userId, campaignId } },
+    select: {
+      crawlerEntity: {
+        select: {
+          id: true,
+          name: true,
+          campaignId: true,
+          type: true,
+          status: true,
+          version: true,
+          summary: true,
+          description: true,
+        },
+      },
+    },
+  });
+  const crawler = link?.crawlerEntity;
+  if (
+    !crawler ||
+    crawler.campaignId !== campaignId ||
+    crawler.type !== EntityType.CRAWLER ||
+    crawler.status !== CanonStatus.CANON
+  ) {
+    throw new ServiceError("You have no crawler linked yet.");
+  }
+
+  const patch: ReviewPatch = { _baseVersion: { to: crawler.version } };
+  if (input.summary !== undefined) {
+    addSuggestionPatch(
+      patch,
+      "summary",
+      crawler.summary,
+      suggestionPatchValue(input.summary),
+    );
+  }
+  if (input.description !== undefined) {
+    addSuggestionPatch(
+      patch,
+      "description",
+      crawler.description,
+      suggestionPatchValue(input.description),
+    );
+  }
+  if (Object.keys(patch).length === 1) {
+    throw new ServiceError("Suggest a change to your bio or notes before submitting.");
+  }
+
+  const baseVersions = { [crawler.id]: crawler.version };
+
+  return prisma.$transaction(async (tx) => {
+    const { blockedByLock, isStale } = await evaluateEntityOperationFlags(
+      tx,
+      { op: OpKind.UPDATE_ENTITY, targetId: crawler.id, patch },
+      campaignId,
+      baseVersions,
+    );
+
+    return tx.changeSet.create({
+      data: {
+        campaignId,
+        source: ChangeSource.PLAYER_SUGGESTION,
+        title: `Suggestion for ${crawler.name}`,
+        summary: "Player-submitted crawler update — review before it becomes canon.",
+        actorUserId: userId,
+        baseVersions,
+        operations: {
+          create: [
+            {
+              op: OpKind.UPDATE_ENTITY,
+              targetType: "ENTITY",
+              targetId: crawler.id,
+              patch: patch as Prisma.InputJsonValue,
+              blockedByLock,
+              isStale,
+            },
+          ],
+        },
+      },
+      select: { id: true, title: true, status: true },
+    });
+  });
+}
+
+// Player-scoped: the caller's own PLAYER_SUGGESTION change sets in this
+// campaign, newest first, so a player can see whether their suggestion is
+// still pending or how the DM resolved it. Scoped by actorUserId, so no
+// membership assertion is needed — a non-member simply has none.
+export async function listMySuggestions(
+  userId: string,
+  campaignId: string,
+): Promise<MySuggestion[]> {
+  return prisma.changeSet.findMany({
+    where: {
+      campaignId,
+      source: ChangeSource.PLAYER_SUGGESTION,
+      actorUserId: userId,
+    },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      createdAt: true,
+      reviewedAt: true,
+      reviewNotes: true,
+    },
+  });
+}
+
 export async function applyAutoApprovedEntityChangeSet(
   userId: string,
   campaignId: string,

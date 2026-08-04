@@ -7,6 +7,7 @@ import {
   createGenericEntitySchema,
   createRelationshipSchema,
   lockFieldSchema,
+  playerSuggestionSchema,
   sanitizeImageUrl,
   signInSchema,
   signUpSchema,
@@ -257,6 +258,34 @@ describe("lockFieldSchema", () => {
 
   it("rejects an unknown field", () => {
     expect(lockFieldSchema.safeParse("bogus").success).toBe(false);
+  });
+});
+
+describe("playerSuggestionSchema", () => {
+  it("accepts trimmed summary/description, both optional", () => {
+    const parsed = playerSuggestionSchema.safeParse({
+      summary: "  New bio  ",
+      description: "  New notes  ",
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.summary).toBe("New bio");
+      expect(parsed.data.description).toBe("New notes");
+    }
+  });
+
+  it("accepts an empty object (both fields absent)", () => {
+    expect(playerSuggestionSchema.safeParse({}).success).toBe(true);
+  });
+
+  it("rejects an overlong summary or description", () => {
+    expect(
+      playerSuggestionSchema.safeParse({ summary: "a".repeat(501) }).success,
+    ).toBe(false);
+    expect(
+      playerSuggestionSchema.safeParse({ description: "a".repeat(10001) })
+        .success,
+    ).toBe(false);
   });
 });
 

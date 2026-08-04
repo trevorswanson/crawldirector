@@ -125,6 +125,9 @@ export type CrawlerSheet = {
   entityId: string;
   name: string;
   summary: string | null;
+  // Not rendered on the sheet itself — read here so the Suggestions form
+  // (M7) can prefill the player's "notes" field with the current value.
+  description: string | null;
   imageUrl: string | null;
   realName: string | null;
   crawlerNo: string | null;
@@ -174,6 +177,7 @@ export async function getMyCrawlerSheet(
           id: true,
           name: true,
           summary: true,
+          description: true,
           imageUrl: true,
           campaignId: true,
           type: true,
@@ -223,6 +227,7 @@ export async function getMyCrawlerSheet(
     entityId: entity.id,
     name: entity.name,
     summary: entity.summary,
+    description: entity.description,
     imageUrl: entity.imageUrl,
     realName: c.realName,
     crawlerNo: c.crawlerNo,

@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  CanonStatus,
   EntityType,
   EventParticipantRole,
   RelationshipType,
@@ -17,9 +18,11 @@ import {
   approveChangeSet,
   createPendingEntityChangeSet,
   createPendingEventChangeSet,
+  createPlayerSuggestion,
   getEntityProvenance,
   getReviewChangeSetForUser,
   listClosedChangeSetsForUser,
+  listMySuggestions,
   listPendingChangeSetsForUser,
   rejectChangeSet,
   reopenChangeSet,
@@ -905,6 +908,149 @@ describe("review service — closed change sets", () => {
       "Approved history",
     ]);
     expect(closed.map((item) => item.status)).toEqual(["REJECTED", "APPROVED"]);
+  });
+});
+
+async function addLinkedPlayer(
+  campaignId: string,
+  overrides: {
+    summary?: string | null;
+    description?: string | null;
+    locked?: boolean;
+    lockedFields?: string[];
+  } = {},
+) {
+  const user = await makeUser(`player-${Date.now()}-${Math.random()}@test.com`);
+  const crawler = await prisma.entity.create({
+    data: {
+      campaignId,
+      type: EntityType.CRAWLER,
+      name: "Carl",
+      status: CanonStatus.CANON,
+      summary: overrides.summary ?? "Old bio",
+      description: overrides.description ?? "Old notes",
+      locked: overrides.locked ?? false,
+      lockedFields: overrides.lockedFields ?? [],
+    },
+  });
+  await prisma.membership.create({
+    data: {
+      userId: user.id,
+      campaignId,
+      role: Role.PLAYER,
+      crawlerEntityId: crawler.id,
+    },
+  });
+  return { playerId: user.id, crawlerId: crawler.id };
+}
+
+describe("review service — createPlayerSuggestion", () => {
+  it("files a PENDING PLAYER_SUGGESTION change set proposing the caller's own crawler bio/notes", async () => {
+    const { campaignId } = await seed();
+    const { playerId, crawlerId } = await addLinkedPlayer(campaignId);
+
+    const changeSet = await createPlayerSuggestion(playerId, campaignId, {
+      summary: "New bio",
+      description: "Old notes",
+    });
+
+    expect(changeSet.status).toBe("PENDING");
+    expect(changeSet.title).toContain("Carl");
+
+    const stored = await prisma.changeSet.findUniqueOrThrow({
+      where: { id: changeSet.id },
+      include: { operations: true },
+    });
+    expect(stored.source).toBe("PLAYER_SUGGESTION");
+    expect(stored.actorUserId).toBe(playerId);
+    expect(stored.operations).toHaveLength(1);
+    const operation = stored.operations[0];
+    expect(operation.op).toBe("UPDATE_ENTITY");
+    expect(operation.targetId).toBe(crawlerId);
+    expect(operation.blockedByLock).toBe(false);
+    expect(operation.patch).toMatchObject({
+      summary: { from: "Old bio", to: "New bio" },
+    });
+    // description was unchanged (same as current), so it's not in the patch.
+    expect(operation.patch).not.toHaveProperty("description");
+  });
+
+  it("rejects a non-player caller", async () => {
+    const { dmId, campaignId } = await seed();
+    await expect(
+      createPlayerSuggestion(dmId, campaignId, { summary: "New bio" }),
+    ).rejects.toThrow(/only players can submit suggestions/i);
+  });
+
+  it("rejects a player with no crawler linked", async () => {
+    const { campaignId } = await seed();
+    const player = await makeUser("unlinked@test.com");
+    await prisma.membership.create({
+      data: { userId: player.id, campaignId, role: Role.PLAYER },
+    });
+    await expect(
+      createPlayerSuggestion(player.id, campaignId, { summary: "New bio" }),
+    ).rejects.toThrow(/no crawler linked/i);
+  });
+
+  it("rejects a suggestion that proposes no actual change", async () => {
+    const { campaignId } = await seed();
+    const { playerId } = await addLinkedPlayer(campaignId, {
+      summary: "Old bio",
+      description: "Old notes",
+    });
+    await expect(
+      createPlayerSuggestion(playerId, campaignId, {
+        summary: "Old bio",
+        description: "Old notes",
+      }),
+    ).rejects.toThrow(/suggest a change/i);
+  });
+
+  it("flags the operation blockedByLock when the field is locked", async () => {
+    const { campaignId } = await seed();
+    const { playerId } = await addLinkedPlayer(campaignId, {
+      locked: false,
+      lockedFields: ["summary"],
+    });
+
+    const changeSet = await createPlayerSuggestion(playerId, campaignId, {
+      summary: "New bio",
+    });
+
+    const operation = await prisma.changeOperation.findFirstOrThrow({
+      where: { changeSetId: changeSet.id },
+    });
+    expect(operation.blockedByLock).toBe(true);
+  });
+});
+
+describe("review service — listMySuggestions", () => {
+  it("returns only the caller's own PLAYER_SUGGESTION change sets, newest first", async () => {
+    const { campaignId } = await seed();
+    const { playerId } = await addLinkedPlayer(campaignId);
+    const { playerId: otherPlayerId } = await addLinkedPlayer(campaignId);
+
+    const first = await createPlayerSuggestion(playerId, campaignId, {
+      summary: "First suggestion",
+    });
+    const second = await createPlayerSuggestion(playerId, campaignId, {
+      description: "Second suggestion notes",
+    });
+    await createPlayerSuggestion(otherPlayerId, campaignId, {
+      summary: "Someone else's suggestion",
+    });
+
+    const mine = await listMySuggestions(playerId, campaignId);
+
+    expect(mine.map((s) => s.id)).toEqual([second.id, first.id]);
+    expect(mine.every((s) => s.status === "PENDING")).toBe(true);
+  });
+
+  it("returns an empty array when the caller has no suggestions", async () => {
+    const { campaignId } = await seed();
+    const { playerId } = await addLinkedPlayer(campaignId);
+    expect(await listMySuggestions(playerId, campaignId)).toEqual([]);
   });
 });
 

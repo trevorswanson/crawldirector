@@ -221,6 +221,15 @@ export const createCrawlerSchema = entityCoreSchema.extend({
 });
 export type CreateCrawlerInput = z.infer<typeof createCrawlerSchema>;
 
+// The M7 player "Suggestions" surface: a player can propose only their
+// crawler's bio/notes (docs/10-ui-ux.md), matching entityCoreSchema's own
+// summary/description limits.
+export const playerSuggestionSchema = z.object({
+  summary: optionalText(500),
+  description: optionalText(10000),
+});
+export type PlayerSuggestionInput = z.infer<typeof playerSuggestionSchema>;
+
 export const updateEntitySchema = entityCoreSchema.extend({
   ...allKindDataShape(),
   type: z.enum(entityTypeValues),

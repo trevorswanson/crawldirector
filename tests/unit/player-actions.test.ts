@@ -1,14 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { requireUser, askCampaign } = vi.hoisted(() => ({
+const { requireUser, askCampaign, createPlayerSuggestion, revalidatePath } = vi.hoisted(() => ({
   requireUser: vi.fn(),
   askCampaign: vi.fn(),
+  createPlayerSuggestion: vi.fn(),
+  revalidatePath: vi.fn(),
 }));
 
 vi.mock("@/server/auth/session", () => ({ requireUser }));
 vi.mock("@/server/services/ask", () => ({ askCampaign }));
+vi.mock("@/server/services/review", () => ({ createPlayerSuggestion }));
+vi.mock("next/cache", () => ({ revalidatePath }));
 
-import { askCampaignAction } from "@/app/(player)/actions";
+import { askCampaignAction, submitSuggestionAction } from "@/app/(player)/actions";
 import { ServiceError } from "@/lib/errors";
 
 function form(fields: Record<string, string>): FormData {
@@ -65,5 +69,47 @@ describe("askCampaignAction (player)", () => {
     expect((await askCampaignAction("c1", undefined, form({ question: "x" })))?.error).toBe(
       "The System couldn't answer that. Please try again.",
     );
+  });
+});
+
+describe("submitSuggestionAction (player)", () => {
+  it("parses the form, submits the suggestion, and revalidates", async () => {
+    createPlayerSuggestion.mockResolvedValue({ id: "cs1", title: "Suggestion for Carl", status: "PENDING" });
+
+    const result = await submitSuggestionAction(
+      "c1",
+      undefined,
+      form({ summary: "New bio", description: "New notes" }),
+    );
+
+    expect(createPlayerSuggestion).toHaveBeenCalledWith("u1", "c1", {
+      summary: "New bio",
+      description: "New notes",
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/play/campaigns/c1/suggestions");
+    expect(result?.success).toMatch(/submitted/i);
+    expect(result?.error).toBeUndefined();
+  });
+
+  it("rejects an overlong field before calling the service", async () => {
+    const result = await submitSuggestionAction(
+      "c1",
+      undefined,
+      form({ summary: "a".repeat(501) }),
+    );
+    expect(createPlayerSuggestion).not.toHaveBeenCalled();
+    expect(result?.error).toBeTruthy();
+  });
+
+  it("surfaces a ServiceError message and a generic fallback", async () => {
+    createPlayerSuggestion.mockRejectedValueOnce(new ServiceError("You have no crawler linked yet."));
+    expect(
+      (await submitSuggestionAction("c1", undefined, form({ summary: "x" })))?.error,
+    ).toBe("You have no crawler linked yet.");
+
+    createPlayerSuggestion.mockRejectedValueOnce(new Error("boom"));
+    expect(
+      (await submitSuggestionAction("c1", undefined, form({ summary: "x" })))?.error,
+    ).toBe("Could not submit your suggestion. Please try again.");
   });
 });

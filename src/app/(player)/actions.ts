@@ -1,9 +1,13 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
+
 import { requireUser } from "@/server/auth/session";
 import { ServiceError } from "@/lib/errors";
+import { playerSuggestionSchema } from "@/lib/validation";
 import { logActionError } from "@/server/log";
 import { askCampaign, type AskActionState } from "@/server/services/ask";
+import { createPlayerSuggestion } from "@/server/services/review";
 
 // Player-side server actions for the `(player)` route group. Kept separate
 // from `(dm)/actions.ts` so the two consoles' action surfaces stay independent
@@ -36,5 +40,40 @@ export async function askCampaignAction(
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
     logActionError("Player ask campaign action failed", error);
     return { error: "The System couldn't answer that. Please try again.", timestamp: Date.now() };
+  }
+}
+
+export type SuggestionActionState =
+  | { error?: string; success?: string; timestamp?: number }
+  | undefined;
+
+// Submit a suggestion (M7 slice 6 — docs/PROGRESS.md). Unlike the read-only
+// ask action, this writes a PENDING `PLAYER_SUGGESTION` change set (never
+// canon directly — invariant #1), so a successful submit revalidates the
+// suggestions page to refresh the caller's own history list.
+export async function submitSuggestionAction(
+  campaignId: string,
+  _prev: SuggestionActionState,
+  formData: FormData,
+): Promise<SuggestionActionState> {
+  void _prev;
+  const user = await requireUser();
+
+  const parsed = playerSuggestionSchema.safeParse({
+    summary: formData.get("summary") ?? undefined,
+    description: formData.get("description") ?? undefined,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input.", timestamp: Date.now() };
+  }
+
+  try {
+    await createPlayerSuggestion(user.id, campaignId, parsed.data);
+    revalidatePath(`/play/campaigns/${campaignId}/suggestions`);
+    return { success: "Suggestion submitted — your DM will review it.", timestamp: Date.now() };
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    logActionError("Player submit suggestion action failed", error);
+    return { error: "Could not submit your suggestion. Please try again.", timestamp: Date.now() };
   }
 }
