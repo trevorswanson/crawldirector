@@ -134,6 +134,7 @@ function PrivateRevealForm({
     players.length > 0 ? "MEMBERSHIP" : "ENTITY",
   );
   const [recipientEntity, setRecipientEntity] = useState<EntityCandidate | null>(null);
+  const [membershipId, setMembershipId] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
@@ -141,11 +142,12 @@ function PrivateRevealForm({
       formRef.current.reset();
       setTarget(null);
       setRecipientEntity(null);
+      setMembershipId("");
     }
   }, [state]);
 
   const canSubmitEntity = recipientKind === "ENTITY" ? Boolean(recipientEntity) : true;
-  const canSubmitMembership = recipientKind === "MEMBERSHIP" ? players.length > 0 : true;
+  const canSubmitMembership = recipientKind === "MEMBERSHIP" ? Boolean(membershipId) : true;
   const disabled = !target || !canSubmitEntity || !canSubmitMembership;
 
   const recipientCandidates = candidates.filter((c) => c.id !== target?.id);
@@ -184,7 +186,8 @@ function PrivateRevealForm({
         ) : (
           <select
             name="membershipId"
-            defaultValue=""
+            value={membershipId}
+            onChange={(e) => setMembershipId(e.target.value)}
             aria-label="Reveal to player"
             className="h-9 border border-[var(--line-strong)] bg-[var(--bg)] px-[10px] text-[13px] text-[var(--ink)] outline-none focus:border-[var(--accent)]"
           >

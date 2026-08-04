@@ -478,12 +478,23 @@ describe("listSessionReveals", () => {
       sourceEventId: session.id,
     });
 
-    // Archive the entity recipient and remove the player's membership.
+    // Archive the target, archive the entity recipient, and remove the
+    // player's membership — covers both the "target no longer canon" and
+    // "recipient no longer canon/removed" drop paths.
+    await archiveEntity(dm.id, campaign.id, target.id);
     await archiveEntity(dm.id, campaign.id, npc.id);
     await prisma.membership.delete({ where: { id: membership.id } });
 
     expect(await listSessionReveals(dm.id, campaign.id, session.id)).toHaveLength(0);
     expect(await listSessionReveals(player.id, campaign.id, session.id)).toEqual([]);
     expect(await listSessionReveals(stranger.id, campaign.id, session.id)).toEqual([]);
+  });
+
+  it("returns [] for a session with no reveals recorded", async () => {
+    const dm = await makeUser("dm@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    const session = await createSession(dm.id, campaign.id, { title: "Session 1" });
+
+    expect(await listSessionReveals(dm.id, campaign.id, session.id)).toEqual([]);
   });
 });

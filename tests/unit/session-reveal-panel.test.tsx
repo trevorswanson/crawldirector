@@ -105,11 +105,37 @@ describe("SessionRevealPanel", () => {
     expect(screen.getAllByText("Alice").length).toBeGreaterThan(0);
   });
 
+  it("falls back to email for a MEMBERSHIP history row and the player select when userName is unset", () => {
+    renderPanel({
+      players: [{ membershipId: "m2", userName: null, userEmail: "bob@test" }],
+      reveals: [
+        reveal({
+          recipient: { kind: "MEMBERSHIP", membershipId: "m2", userName: null, userEmail: "bob@test" },
+        }),
+      ],
+    });
+    expect(screen.getAllByText("bob@test").length).toBeGreaterThan(0);
+  });
+
   it("surfaces a broad-reveal error from action state", () => {
     // BroadRevealForm calls useActionState first (render order).
     mockUseActionState.mockReturnValueOnce([{ error: "Already locked." }, vi.fn()]);
     renderPanel();
     expect(screen.getByText("Already locked.")).toBeDefined();
+  });
+
+  it("surfaces a broad-reveal success message and resets the form", () => {
+    mockUseActionState.mockReturnValueOnce([{ success: "Revealed to all players." }, vi.fn()]);
+    renderPanel();
+    expect(screen.getByText("Revealed to all players.")).toBeDefined();
+  });
+
+  it("surfaces a private-reveal success message and resets the form", () => {
+    // BroadRevealForm's own useActionState call comes first; PrivateRevealForm's second.
+    mockUseActionState.mockReturnValueOnce([undefined, vi.fn()]);
+    mockUseActionState.mockReturnValueOnce([{ success: "Revealed." }, vi.fn()]);
+    renderPanel();
+    expect(screen.getByText("Revealed.")).toBeDefined();
   });
 
   it("disables the broad-reveal submit button until an entity is picked", () => {
@@ -125,6 +151,33 @@ describe("SessionRevealPanel", () => {
     // The broad-reveal dropdown's own match is first in the DOM (its form
     // renders before the private-reveal form's own, always-open, typeahead).
     fireEvent.click(screen.getAllByText("Mordecai")[0]);
+    expect(button.disabled).toBe(false);
+  });
+
+  it("disables the private-reveal submit button until target + recipient are chosen (both kinds)", () => {
+    renderPanel();
+    const button = screen.getByRole("button", { name: "Reveal privately" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+
+    // Pick the target — still disabled: MEMBERSHIP is the default kind and no
+    // player is selected in the <select> yet (picking one is required, not
+    // just the campaign having players).
+    fireEvent.change(screen.getByPlaceholderText("What's revealed…"), {
+      target: { value: "Hidden Vault" },
+    });
+    fireEvent.click(screen.getAllByText("The Hidden Vault").at(-1)!);
+    expect(button.disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText("Reveal to player"), { target: { value: "m1" } });
+    expect(button.disabled).toBe(false);
+
+    // Switch to Entity: disabled again until a recipient entity is picked.
+    fireEvent.click(screen.getByRole("button", { name: "Entity" }));
+    expect(button.disabled).toBe(true);
+    fireEvent.change(screen.getByPlaceholderText("Who learns this…"), {
+      target: { value: "Mordecai" },
+    });
+    fireEvent.click(screen.getAllByText("Mordecai").at(-1)!);
     expect(button.disabled).toBe(false);
   });
 
