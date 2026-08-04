@@ -116,8 +116,13 @@ Slice 2 — promote to Event — shipped ✅ 2026-08-04 (dated entry below): eac
 unpromoted log entry can be promoted to a canonical `Event` through the review
 pipeline (`source: DM`, auto-approved, fully provenanced), reusing the entry's
 own text as the Event summary and its live tagged entities as ACTOR
-participants. **Next up:** live reveal (building on M3's `KnowledgeGrant`
-foundation) and recap generation.
+participants. Slice 3 — live reveal — shipped ✅ 2026-08-04 (dated entry below):
+a "Live reveal" panel on the session screen lets the DM broadly reveal an
+entity (flip campaign-wide visibility to `PLAYER_VISIBLE`, through the review
+pipeline) or privately reveal it to one recipient — another actor entity, or
+now a specific player's `Membership` — creating a session-linked
+`KnowledgeGrant`, building on M3's fog-of-war foundation. **Next up:** recap
+generation.
 
 ### Scheduled roadmap additions (2026-06-19)
 
@@ -150,6 +155,123 @@ M6 remains the next milestone work. The detailed decisions live in
 
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
+
+## M8 — Live reveal (slice 3) ✅ (2026-08-04)
+
+**Goal:** the third M8 slice — let the DM **reveal** something at the table
+right now, per [`08-session-mode.md`](./08-session-mode.md)'s "Live reveal":
+"the DM can reveal an entity or fact either broadly or to specific
+recipients … a broad reveal updates the campaign-wide visibility … a private
+reveal creates `KnowledgeGrant` rows … without making the fact visible to
+everyone." This is the write-side half of M3's fog-of-war foundation
+(`KnowledgeGrant`, `Visibility`) finally getting a live-session entry point;
+the player-facing "known world" reader that consumes these grants stays
+tracked as open backlog (unchanged from before this slice — see "Knowledge /
+reveal grants" below).
+
+**Decision (a narrow visibility-flip function, not the full entity-edit form;
+`sourceEventId` doubles as the session link).** `updateEntity`'s patch-building
+diffs *every* core/kind field unconditionally — feeding it just a `visibility`
+value would silently wipe the other 10+ fields, since omitted form fields
+default to null/false rather than "leave alone." So broad reveal gets its own
+`revealEntityBroadly`, modeled directly on `archiveEntity`/`restoreEntity`: a
+two-key `ReviewPatch` (`_baseVersion` + `visibility`) through the existing
+`applyAutoApprovedEntityChangeSet` — the underlying `UPDATE_ENTITY` apply path
+was already a true partial patch (every field gated behind `"<field>" in
+patch"`), so this needed no change below `entities.ts`. It's a no-op (not an
+error) when the entity is already `PLAYER_VISIBLE`, so re-revealing is always
+safe. Private reveal reuses `KnowledgeGrant`'s already-designed-for-this
+`sourceEventId` column (the schema comment already called it "optional
+event/session context") to link a grant back to the `GameSession` it was made
+in — a plain string, not FK-checked, matching `targetId`/`recipientId`'s
+existing polymorphic pattern. `grantEntityKnowledge` gained an optional
+`sourceEventId` param (backward compatible); the new sibling
+`grantMembershipKnowledge` is the `MEMBERSHIP`-recipient counterpart the M3
+schema always supported but never had a writer for — kept as a separate
+function rather than widening `grantEntityKnowledge` further, since a
+membership recipient has a different existence check (a live `Role.PLAYER`
+membership, not a live-canon entity) and no natural counterpart-entity id for
+the existing ENTITY→ENTITY dedup/audit shape. `listSessionReveals` is a new
+DM-facing read projecting both recipient kinds for one session, dropping a
+grant whose target/entity-recipient is no longer live canon or whose
+membership was removed (same belt-and-suspenders precedent as
+`listKnowledgeOfEntity`).
+
+- [x] **Schema:** none — `KnowledgeRecipientType.MEMBERSHIP` and
+      `KnowledgeGrant.sourceEventId` already existed from M3; this slice is
+      the first writer/reader for both.
+- [x] **Service** ([`entities.ts`](../src/server/services/entities.ts)):
+      `revealEntityBroadly(userId, campaignId, entityId)` — DM-only, flips
+      `DM_ONLY → PLAYER_VISIBLE` through an audited auto-approved change set;
+      a no-op (`alreadyVisible: true`) when already player-visible; respects
+      field locks and staleness like any other `UPDATE_ENTITY` patch.
+- [x] **Service** ([`knowledge.ts`](../src/server/services/knowledge.ts)):
+      `grantEntityKnowledge` gained an optional `sourceEventId`;
+      `grantMembershipKnowledge(userId, campaignId, { targetEntityId,
+      membershipId, notes?, sourceEventId? })` — DM-only, the target must be
+      live canon and the membership a live `Role.PLAYER` in the campaign,
+      idempotent (identical active grant is a no-op), writes a `REVEAL`
+      `AuditLog` row; `listSessionReveals(userId, campaignId, sessionId)`
+      projects active `sourceEventId`-matched grants (both recipient kinds) to
+      `SessionRevealView[]`, DM-only (`[]` for a player/non-member).
+- [x] **Validation** ([`validation.ts`](../src/lib/validation.ts)):
+      `revealEntityBroadlySchema` (one `entityId` field) and
+      `sessionRevealSchema` — a `recipientKind`-discriminated union so an
+      `ENTITY` recipient requires `recipientEntityId` and a `MEMBERSHIP`
+      recipient requires `membershipId`, both sharing `targetEntityId` +
+      optional `notes`.
+- [x] **DM actions** ([`(dm)/actions.ts`](<../src/app/(dm)/actions.ts>)):
+      `revealEntityBroadlyAction`, `revealSessionKnowledgeAction` (dispatches
+      to `grantEntityKnowledge`/`grantMembershipKnowledge` by recipient kind,
+      stamping `sourceEventId: sessionId`), `revokeSessionRevealAction` — a new
+      `RevealActionState` (`{error?, success?, timestamp?}`) since neither
+      reveal action has its own persistent confirmation surface, unlike the
+      entity-console knowledge panel's list-refresh-only convention.
+- [x] **UI** ([`session-reveal-panel.tsx`](../src/components/sessions/session-reveal-panel.tsx)):
+      a `SessionRevealPanel` on the session detail screen — a broad-reveal
+      mini-form (entity typeahead + submit), a private-reveal mini-form
+      (target entity typeahead + a Player/Entity recipient-kind toggle +
+      either a player `<select>` sourced from `listPlayerMemberships` or a
+      recipient entity typeahead + notes), and a "Revealed this session"
+      history list (target → recipient, notes, a revoke button) reading
+      `listSessionReveals`. The recipient-kind toggle defaults to Player when
+      the campaign has players, else Entity.
+- [x] **Page** ([`sessions/[sessionId]/page.tsx`](<../src/app/(dm)/campaigns/[id]/sessions/[sessionId]/page.tsx>)):
+      fetches `listPlayerMemberships` + `listSessionReveals` alongside the
+      existing session/candidate fetches and renders `SessionRevealPanel`
+      below the log.
+- [x] **Tests:** DB-backed `revealEntityBroadly` cases (flips visibility with
+      provenance, no-op when already visible, blocked by a `visibility` lock,
+      denies a player, missing entity) in
+      [`entities.test.ts`](../tests/unit/entities.test.ts);
+      `grantMembershipKnowledge`/`listSessionReveals` cases (reveal + audit,
+      idempotent, blank ids, non-canon target, foreign/non-player membership,
+      player-caller denial, both recipient kinds newest-first, dropped
+      archived/removed counterparts, `[]` for player/non-member) in
+      [`knowledge.test.ts`](../tests/unit/knowledge.test.ts); schema cases in
+      [`validation.test.ts`](../tests/unit/validation.test.ts); the three new
+      actions in [`dm-actions.test.ts`](../tests/unit/dm-actions.test.ts);
+      component coverage in
+      [`session-reveal-panel.test.tsx`](../tests/unit/session-reveal-panel.test.tsx)
+      (both forms, history rendering incl. a MEMBERSHIP row, submit-button
+      gating, recipient-kind toggle, revoke); updated
+      [`session-detail-page.test.tsx`](../tests/unit/session-detail-page.test.tsx)
+      for the new fetches/panel.
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors;
+      pre-existing settings-action warnings only), `npm run build` (routes
+      unchanged, no new route), and the full coverage gate green (158 files /
+      **1993 tests**; statements 95.43%, branches 88.84%, functions 96.58%,
+      lines 96.94%). **In-browser** (reseeded `dcc` + `seed-world.ts` + a
+      scratch script adding a `player@example.com` PLAYER membership to Demo
+      Campaign): started a session "Floor 9 Breach"; broadly revealing an
+      already-`PLAYER_VISIBLE` entity showed "Already visible to all
+      players." with no DB write, and broadly revealing the `DM_ONLY` "Skull
+      Empire" showed "Revealed to all players." and flipped its stored
+      `visibility` to `PLAYER_VISIBLE` (DB-confirmed); privately revealing
+      "The Grull Legion" to the player with a note showed "Revealed." and
+      added a "The Grull Legion → Test Player" row (with the note) under
+      "Revealed this session · 1"; clicking its revoke button dropped the
+      count back to 0 with the empty-state note. No console errors throughout.
 
 ## M8 — Promote a log entry to a canonical Event (slice 2) ✅ (2026-08-04)
 
@@ -1485,10 +1607,14 @@ prompt. Branch: `codex/m6-persona-foundation`. Schema change.
       ships now; upload stays a later slice. The doc-09/doc-01 `imageUrl`/
       `attachments[]` sketches predate this; `attachments[]` (multi-image) is
       still unbuilt.
-- [ ] **Knowledge / reveal grants.** Extend beyond ENTITY→ENTITY to
-      field/relationship/event/FACT targets and MEMBERSHIP recipients; wire the
-      M7 player "known world" projection and M11 agent fog-of-war context; add a
-      reveal undo affordance and source-event linking for M8 session reveals.
+- [ ] **Knowledge / reveal grants.** M8 slice 3 (✅ 2026-08-04, dated entry
+      above) added `MEMBERSHIP` recipients, `sourceEventId` session linking, and
+      a revoke/undo affordance (all reachable from the session screen's Live
+      reveal panel) — still open: `ENTITY_FIELD`/`RELATIONSHIP`/`EVENT`/`FACT`
+      targets (today only `ENTITY` targets are written), and wiring these
+      grants into the M7 player "known world" projection and M11 agent
+      fog-of-war context (there is still no reader beyond the DM-facing
+      Knowledge panel and session history).
 - [ ] **Event effects ergonomics.** Design compensating change sets for
       undo/revert of already-applied effects. Deep-linking pending timeline
       effect badges to Review Queue proposals is complete.

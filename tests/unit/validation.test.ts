@@ -11,7 +11,9 @@ import {
   createSessionSchema,
   lockFieldSchema,
   playerSuggestionSchema,
+  revealEntityBroadlySchema,
   sanitizeImageUrl,
+  sessionRevealSchema,
   signInSchema,
   signUpSchema,
   updateEntitySchema,
@@ -376,6 +378,82 @@ describe("promoteSessionLogEntrySchema", () => {
 
   it("rejects an overlong title", () => {
     expect(promoteSessionLogEntrySchema.safeParse({ title: "a".repeat(201) }).success).toBe(false);
+  });
+});
+
+describe("revealEntityBroadlySchema", () => {
+  it("requires a non-empty entity id", () => {
+    expect(revealEntityBroadlySchema.safeParse({ entityId: "" }).success).toBe(false);
+    expect(revealEntityBroadlySchema.safeParse({ entityId: "  " }).success).toBe(false);
+  });
+
+  it("accepts and trims a picked entity id", () => {
+    const parsed = revealEntityBroadlySchema.safeParse({ entityId: "  e1  " });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.entityId).toBe("e1");
+  });
+});
+
+describe("sessionRevealSchema", () => {
+  it("accepts an ENTITY recipient with a targetEntityId + recipientEntityId", () => {
+    const parsed = sessionRevealSchema.safeParse({
+      targetEntityId: "target1",
+      recipientKind: "ENTITY",
+      recipientEntityId: "npc1",
+      notes: "  overheard  ",
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success && parsed.data.recipientKind === "ENTITY") {
+      expect(parsed.data.recipientEntityId).toBe("npc1");
+      expect(parsed.data.notes).toBe("overheard");
+    }
+  });
+
+  it("accepts a MEMBERSHIP recipient with a targetEntityId + membershipId", () => {
+    const parsed = sessionRevealSchema.safeParse({
+      targetEntityId: "target1",
+      recipientKind: "MEMBERSHIP",
+      membershipId: "m1",
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success && parsed.data.recipientKind === "MEMBERSHIP") {
+      expect(parsed.data.membershipId).toBe("m1");
+    }
+  });
+
+  it("rejects an ENTITY recipient missing recipientEntityId", () => {
+    expect(
+      sessionRevealSchema.safeParse({
+        targetEntityId: "target1",
+        recipientKind: "ENTITY",
+        recipientEntityId: "",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a MEMBERSHIP recipient missing membershipId", () => {
+    expect(
+      sessionRevealSchema.safeParse({
+        targetEntityId: "target1",
+        recipientKind: "MEMBERSHIP",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a blank targetEntityId and an unknown recipientKind", () => {
+    expect(
+      sessionRevealSchema.safeParse({
+        targetEntityId: "",
+        recipientKind: "ENTITY",
+        recipientEntityId: "npc1",
+      }).success,
+    ).toBe(false);
+    expect(
+      sessionRevealSchema.safeParse({
+        targetEntityId: "target1",
+        recipientKind: "SOMETHING_ELSE",
+      }).success,
+    ).toBe(false);
   });
 });
 

@@ -5,10 +5,13 @@ import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
 import { archiveEntity, createGenericEntity } from "@/server/services/entities";
+import { createSession } from "@/server/services/sessions";
 import {
   grantEntityKnowledge,
+  grantMembershipKnowledge,
   listKnowledgeHeldByEntity,
   listKnowledgeOfEntity,
+  listSessionReveals,
   revokeKnowledge,
 } from "@/server/services/knowledge";
 
@@ -274,5 +277,213 @@ describe("active-grant projection", () => {
     expect(await listKnowledgeOfEntity(dm.id, campaign.id, target.id)).toHaveLength(1);
     await prisma.entity.update({ where: { id: recipient.id }, data: { status: "PENDING" } });
     expect(await listKnowledgeOfEntity(dm.id, campaign.id, target.id)).toHaveLength(0);
+  });
+});
+
+describe("grantMembershipKnowledge", () => {
+  it("reveals an entity to a player membership, writes a REVEAL audit row", async () => {
+    const dm = await makeUser("dm@test.com");
+    const player = await makeUser("player@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    const membership = await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const secret = await makeEntity(dm.id, campaign.id, "The Hidden Vault");
+
+    const result = await grantMembershipKnowledge(dm.id, campaign.id, {
+      targetEntityId: secret.id,
+      membershipId: membership.id,
+      notes: "Told them at the table.",
+    });
+    expect(result.created).toBe(true);
+
+    const audit = await prisma.auditLog.findFirst({
+      where: { campaignId: campaign.id, action: "REVEAL", targetType: "KNOWLEDGE_GRANT" },
+    });
+    expect((audit?.detail as { recipientType?: string; recipientId?: string }).recipientType).toBe(
+      "MEMBERSHIP",
+    );
+    expect((audit?.detail as { recipientId?: string }).recipientId).toBe(membership.id);
+
+    const row = await prisma.knowledgeGrant.findUnique({ where: { id: result.id } });
+    expect(row?.recipientType).toBe("MEMBERSHIP");
+    expect(row?.recipientId).toBe(membership.id);
+    expect(row?.notes).toBe("Told them at the table.");
+  });
+
+  it("is idempotent — an identical active grant is a no-op without a second audit row", async () => {
+    const dm = await makeUser("dm@test.com");
+    const player = await makeUser("player@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    const membership = await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const target = await makeEntity(dm.id, campaign.id, "A");
+
+    const first = await grantMembershipKnowledge(dm.id, campaign.id, {
+      targetEntityId: target.id,
+      membershipId: membership.id,
+    });
+    const second = await grantMembershipKnowledge(dm.id, campaign.id, {
+      targetEntityId: target.id,
+      membershipId: membership.id,
+    });
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.id).toBe(first.id);
+    expect(await prisma.knowledgeGrant.count()).toBe(1);
+  });
+
+  it("rejects a blank entity or membership id", async () => {
+    const dm = await makeUser("dm@test.com");
+    const player = await makeUser("player@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    const membership = await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const target = await makeEntity(dm.id, campaign.id, "A");
+
+    await expect(
+      grantMembershipKnowledge(dm.id, campaign.id, { targetEntityId: "  ", membershipId: membership.id }),
+    ).rejects.toThrow(ServiceError);
+    await expect(
+      grantMembershipKnowledge(dm.id, campaign.id, { targetEntityId: target.id, membershipId: "  " }),
+    ).rejects.toThrow(ServiceError);
+  });
+
+  it("rejects a non-canon target and a membership that isn't a player of this campaign", async () => {
+    const dm = await makeUser("dm@test.com");
+    const player = await makeUser("player@test.com");
+    const otherPlayer = await makeUser("other@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    const otherCampaign = await createCampaign(dm.id, { name: "Other Crawl" });
+    const membership = await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const foreignMembership = await prisma.membership.create({
+      data: { userId: otherPlayer.id, campaignId: otherCampaign.id, role: Role.PLAYER },
+    });
+    const coDmMembership = await prisma.membership.create({
+      data: { userId: otherPlayer.id, campaignId: campaign.id, role: Role.CO_DM },
+    });
+    const pending = await makeEntity(dm.id, campaign.id, "Pending");
+    await prisma.entity.update({ where: { id: pending.id }, data: { status: "PENDING" } });
+    const target = await makeEntity(dm.id, campaign.id, "Live");
+
+    await expect(
+      grantMembershipKnowledge(dm.id, campaign.id, {
+        targetEntityId: pending.id,
+        membershipId: membership.id,
+      }),
+    ).rejects.toThrow(ServiceError);
+    await expect(
+      grantMembershipKnowledge(dm.id, campaign.id, {
+        targetEntityId: target.id,
+        membershipId: foreignMembership.id,
+      }),
+    ).rejects.toThrow(ServiceError);
+    // A CO_DM membership isn't a "player" recipient for this feature.
+    await expect(
+      grantMembershipKnowledge(dm.id, campaign.id, {
+        targetEntityId: target.id,
+        membershipId: coDmMembership.id,
+      }),
+    ).rejects.toThrow(ServiceError);
+  });
+
+  it("denies a player caller", async () => {
+    const dm = await makeUser("dm@test.com");
+    const player = await makeUser("player@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    const membership = await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const target = await makeEntity(dm.id, campaign.id, "A");
+
+    await expect(
+      grantMembershipKnowledge(player.id, campaign.id, {
+        targetEntityId: target.id,
+        membershipId: membership.id,
+      }),
+    ).rejects.toThrow(ServiceError);
+  });
+});
+
+describe("listSessionReveals", () => {
+  it("lists both ENTITY- and MEMBERSHIP-recipient reveals tied to a session, newest first", async () => {
+    const dm = await makeUser("dm@test.com");
+    const player = await makeUser("player@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    const membership = await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const session = await createSession(dm.id, campaign.id, { title: "Session 1" });
+    const target = await makeEntity(dm.id, campaign.id, "Vault");
+    const npc = await makeEntity(dm.id, campaign.id, "Spy");
+
+    await grantEntityKnowledge(dm.id, campaign.id, {
+      targetEntityId: target.id,
+      recipientEntityId: npc.id,
+      notes: "NPC overhears",
+      sourceEventId: session.id,
+    });
+    await grantMembershipKnowledge(dm.id, campaign.id, {
+      targetEntityId: target.id,
+      membershipId: membership.id,
+      notes: "Told the player",
+      sourceEventId: session.id,
+    });
+    // Not tied to this session — must not appear.
+    const otherSession = await createSession(dm.id, campaign.id, { title: "Session 2" });
+    await grantEntityKnowledge(dm.id, campaign.id, {
+      targetEntityId: target.id,
+      recipientEntityId: npc.id,
+      sourceEventId: otherSession.id,
+    });
+
+    const reveals = await listSessionReveals(dm.id, campaign.id, session.id);
+    expect(reveals).toHaveLength(2);
+    const membershipReveal = reveals.find((r) => r.recipient.kind === "MEMBERSHIP");
+    expect(membershipReveal?.notes).toBe("Told the player");
+    if (membershipReveal?.recipient.kind === "MEMBERSHIP") {
+      expect(membershipReveal.recipient.userEmail).toBe("player@test.com");
+    }
+    const entityReveal = reveals.find((r) => r.recipient.kind === "ENTITY");
+    expect(entityReveal?.notes).toBe("NPC overhears");
+    if (entityReveal?.recipient.kind === "ENTITY") {
+      expect(entityReveal.recipient.entity.id).toBe(npc.id);
+    }
+  });
+
+  it("drops a reveal whose target/entity-recipient is no longer live canon or whose membership was removed, and returns [] for a player/non-member", async () => {
+    const dm = await makeUser("dm@test.com");
+    const player = await makeUser("player@test.com");
+    const stranger = await makeUser("stranger@test.com");
+    const campaign = await createCampaign(dm.id, { name: "Crawl" });
+    const membership = await prisma.membership.create({
+      data: { userId: player.id, campaignId: campaign.id, role: Role.PLAYER },
+    });
+    const session = await createSession(dm.id, campaign.id, { title: "Session 1" });
+    const target = await makeEntity(dm.id, campaign.id, "Vault");
+    const npc = await makeEntity(dm.id, campaign.id, "Spy");
+
+    await grantEntityKnowledge(dm.id, campaign.id, {
+      targetEntityId: target.id,
+      recipientEntityId: npc.id,
+      sourceEventId: session.id,
+    });
+    await grantMembershipKnowledge(dm.id, campaign.id, {
+      targetEntityId: target.id,
+      membershipId: membership.id,
+      sourceEventId: session.id,
+    });
+
+    // Archive the entity recipient and remove the player's membership.
+    await archiveEntity(dm.id, campaign.id, npc.id);
+    await prisma.membership.delete({ where: { id: membership.id } });
+
+    expect(await listSessionReveals(dm.id, campaign.id, session.id)).toHaveLength(0);
+    expect(await listSessionReveals(player.id, campaign.id, session.id)).toEqual([]);
+    expect(await listSessionReveals(stranger.id, campaign.id, session.id)).toEqual([]);
   });
 });

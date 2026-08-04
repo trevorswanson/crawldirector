@@ -5,10 +5,13 @@ import { requireUser } from "@/server/auth/session";
 import { getCampaignForUser } from "@/server/services/campaigns";
 import { getSession } from "@/server/services/sessions";
 import { listEntitiesForUser } from "@/server/services/entities";
+import { listPlayerMemberships } from "@/server/services/crawlers";
+import { listSessionReveals } from "@/server/services/knowledge";
 import { addSessionLogEntryAction } from "@/app/(dm)/actions";
 import { ConsoleScreen, ScreenHeader } from "@/components/console/screen";
 import { SessionLogComposer } from "@/components/sessions/session-log-composer";
 import { SessionLogList } from "@/components/sessions/session-log-list";
+import { SessionRevealPanel } from "@/components/sessions/session-reveal-panel";
 
 // playedAt is a bare calendar date (parsed as UTC midnight from a date-only
 // `<input type="date">`), so it renders in UTC too — see session-list.tsx.
@@ -36,9 +39,11 @@ export default async function CampaignSessionDetailPage({
   const role = campaign.members[0]?.role;
   if (role !== Role.OWNER && role !== Role.CO_DM) notFound();
 
-  const [session, candidateList] = await Promise.all([
+  const [session, candidateList, players, reveals] = await Promise.all([
     getSession(user.id, id, sessionId),
     listEntitiesForUser(user.id, id),
+    listPlayerMemberships(user.id, id),
+    listSessionReveals(user.id, id, sessionId),
   ]);
   if (!session) notFound();
 
@@ -72,6 +77,16 @@ export default async function CampaignSessionDetailPage({
           </div>
 
           <SessionLogList campaignId={id} sessionId={sessionId} entries={session.entries} />
+
+          <div className="mt-8 border-t border-[var(--line)] pt-7">
+            <SessionRevealPanel
+              campaignId={id}
+              sessionId={sessionId}
+              candidates={candidates}
+              players={players}
+              reveals={reveals}
+            />
+          </div>
         </div>
       </div>
     </ConsoleScreen>
