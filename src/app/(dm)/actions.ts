@@ -9,11 +9,13 @@ import { requireUser } from "@/server/auth/session";
 import { ServiceError } from "@/lib/errors";
 import { createCampaign, setCampaignCurrentFloor } from "@/server/services/campaigns";
 import {
+  addSessionLogEntrySchema,
   createCampaignSchema,
   createCrawlerSchema,
   createEventSchema,
   createGenericEntitySchema,
   createRelationshipSchema,
+  createSessionSchema,
   changeOperationDecisionSchema,
   entityTypeValues,
   eventEffectSchema,
@@ -64,6 +66,10 @@ import {
   grantEntityKnowledge,
   revokeKnowledge,
 } from "@/server/services/knowledge";
+import {
+  addSessionLogEntry,
+  createSession,
+} from "@/server/services/sessions";
 import {
   fleshOutEntities,
   fleshOutEntity,
@@ -1309,6 +1315,67 @@ export async function revokeKnowledgeAction(
   for (const endpointId of endpointIds) {
     revalidatePath(`/campaigns/${campaignId}/entities/${endpointId}`);
   }
+}
+
+// Live session capture (M8 slice 1). Sessions/log entries are scratch, not
+// canon (a direct DM mutation, not the review pipeline — see sessions.ts).
+export type SessionActionState = { error?: string } | undefined;
+export type SessionLogEntryActionState = { error?: string } | undefined;
+
+export async function createSessionAction(
+  campaignId: string,
+  _prev: SessionActionState,
+  formData: FormData,
+): Promise<SessionActionState> {
+  const user = await requireUser();
+  const parsed = createSessionSchema.safeParse({
+    title: formData.get("title"),
+    playedAt: formData.get("playedAt"),
+    focus: formData.get("focus"),
+    notes: formData.get("notes"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  let sessionId: string;
+  try {
+    const session = await createSession(user.id, campaignId, parsed.data);
+    sessionId = session.id;
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    logActionError("Create session action failed", error);
+    return { error: "Could not create the session. Please try again." };
+  }
+
+  redirect(`/campaigns/${campaignId}/sessions/${sessionId}`);
+}
+
+export async function addSessionLogEntryAction(
+  campaignId: string,
+  sessionId: string,
+  _prev: SessionLogEntryActionState,
+  formData: FormData,
+): Promise<SessionLogEntryActionState> {
+  const user = await requireUser();
+  const parsed = addSessionLogEntrySchema.safeParse({
+    text: formData.get("text"),
+    taggedIds: formData.getAll("taggedIds").filter((v): v is string => typeof v === "string" && v.length > 0),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  try {
+    await addSessionLogEntry(user.id, campaignId, sessionId, parsed.data);
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message };
+    logActionError("Add session log entry action failed", error);
+    return { error: "Could not save the log entry. Please try again." };
+  }
+
+  revalidatePath(`/campaigns/${campaignId}/sessions/${sessionId}`);
+  return undefined;
 }
 
 export type EventActionState = { error?: string } | undefined;
