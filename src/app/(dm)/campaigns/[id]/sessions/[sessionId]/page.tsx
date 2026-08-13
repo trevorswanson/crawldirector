@@ -7,7 +7,11 @@ import { getSession } from "@/server/services/sessions";
 import { listEntitiesForUser } from "@/server/services/entities";
 import { listPlayerMemberships } from "@/server/services/crawlers";
 import { listSessionReveals } from "@/server/services/knowledge";
-import { addSessionLogEntryAction, generateSessionRecapAction } from "@/app/(dm)/actions";
+import {
+  addSessionLogEntryAction,
+  generateSessionRecapAction,
+  publishSessionRecapAction,
+} from "@/app/(dm)/actions";
 import { ConsoleScreen, ScreenHeader } from "@/components/console/screen";
 import { SessionLogComposer } from "@/components/sessions/session-log-composer";
 import { SessionLogList } from "@/components/sessions/session-log-list";
@@ -80,7 +84,12 @@ export default async function CampaignSessionDetailPage({
           <SessionLogList campaignId={id} sessionId={sessionId} entries={session.entries} />
 
           <div className="mt-8 border-t border-[var(--line)] pt-7">
-            <SessionRecapPanel action={generateSessionRecapAction.bind(null, id, sessionId)} />
+            <SessionRecapPanel
+              action={generateSessionRecapAction.bind(null, id, sessionId)}
+              publishAction={publishSessionRecapAction.bind(null, id, sessionId)}
+              campaignId={id}
+              defaultPublishTitle={`Previously on Dungeon Crawler World: ${session.title}`}
+            />
           </div>
 
           <div className="mt-8 border-t border-[var(--line)] pt-7">

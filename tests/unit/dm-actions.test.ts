@@ -48,6 +48,7 @@ const {
   addSessionLogEntry,
   promoteSessionLogEntryToEvent,
   generateSessionRecap,
+  publishSessionRecap,
   fleshOutEntity,
   fleshOutEntities,
   inferRelationshipsForEntity,
@@ -115,6 +116,7 @@ const {
   addSessionLogEntry: vi.fn(),
   promoteSessionLogEntryToEvent: vi.fn(),
   generateSessionRecap: vi.fn(),
+  publishSessionRecap: vi.fn(),
   fleshOutEntity: vi.fn(),
   fleshOutEntities: vi.fn(),
   inferRelationshipsForEntity: vi.fn(),
@@ -198,6 +200,7 @@ vi.mock("@/server/services/sessions", () => ({
   addSessionLogEntry,
   promoteSessionLogEntryToEvent,
   generateSessionRecap,
+  publishSessionRecap,
 }));
 vi.mock("@/server/services/generation", () => ({
   fleshOutEntity,
@@ -283,6 +286,7 @@ import {
   addSessionLogEntryAction,
   promoteSessionLogEntryAction,
   generateSessionRecapAction,
+  publishSessionRecapAction,
   revealEntityBroadlyAction,
   revealSessionKnowledgeAction,
   revokeSessionRevealAction,
@@ -2871,6 +2875,64 @@ describe("generateSessionRecapAction", () => {
     expect((await generateSessionRecapAction("c1", "s1", undefined))?.error).toBe(
       "Could not generate a recap. Please try again.",
     );
+  });
+});
+
+describe("publishSessionRecapAction", () => {
+  it("publishes the recap, revalidates the session page, and returns the entity id", async () => {
+    publishSessionRecap.mockResolvedValue({ id: "msg-1" });
+
+    const result = await publishSessionRecapAction(
+      "c1",
+      "s1",
+      undefined,
+      form({ title: "Previously on Dungeon Crawler World", recap: "Chaos ensued." }),
+    );
+
+    expect(publishSessionRecap).toHaveBeenCalledWith("u1", "c1", "s1", {
+      title: "Previously on Dungeon Crawler World",
+      recap: "Chaos ensued.",
+    });
+    expect(result?.entityId).toBe("msg-1");
+    expect(result?.success).toBe("Published to players.");
+    expect(revalidatePath).toHaveBeenCalledWith("/campaigns/c1/sessions/s1");
+  });
+
+  it("rejects invalid input without calling the service", async () => {
+    const result = await publishSessionRecapAction(
+      "c1",
+      "s1",
+      undefined,
+      form({ title: "", recap: "Chaos ensued." }),
+    );
+    expect(result?.error).toBe("Recap title is required.");
+    expect(publishSessionRecap).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a ServiceError message and a generic fallback", async () => {
+    publishSessionRecap.mockRejectedValueOnce(new ServiceError("Session not found."));
+    expect(
+      (
+        await publishSessionRecapAction(
+          "c1",
+          "s1",
+          undefined,
+          form({ title: "T", recap: "Text" }),
+        )
+      )?.error,
+    ).toBe("Session not found.");
+
+    publishSessionRecap.mockRejectedValueOnce(new Error("boom"));
+    expect(
+      (
+        await publishSessionRecapAction(
+          "c1",
+          "s1",
+          undefined,
+          form({ title: "T", recap: "Text" }),
+        )
+      )?.error,
+    ).toBe("Could not publish the recap. Please try again.");
   });
 });
 

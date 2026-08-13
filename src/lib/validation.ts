@@ -519,6 +519,17 @@ export const promoteSessionLogEntrySchema = z.object({
 });
 export type PromoteSessionLogEntryInput = z.infer<typeof promoteSessionLogEntrySchema>;
 
+// Publishing a session recap to players (docs/08-session-mode.md "Recaps &
+// broadcasts"): the DM supplies a headline; `recap` is the already-generated
+// text carried from the client exactly as shown (never regenerated
+// server-side), capped generously above `SESSION_RECAP_MAX_TOKENS`' typical
+// output.
+export const publishSessionRecapSchema = z.object({
+  title: z.string().trim().min(1, "Recap title is required.").max(200),
+  recap: z.string().trim().min(1, "Recap text is required.").max(4000),
+});
+export type PublishSessionRecapInput = z.infer<typeof publishSessionRecapSchema>;
+
 // Live reveal, broad half (docs/08-session-mode.md "Live reveal"): flip an
 // entity's visibility campaign-wide. One field — the entity to reveal.
 export const revealEntityBroadlySchema = z.object({

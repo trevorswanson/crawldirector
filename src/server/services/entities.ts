@@ -286,6 +286,27 @@ export function buildContentCreatePatch(
   });
 }
 
+// Build a CREATE_ENTITY patch for a broadcast published straight to canon as
+// PLAYER_VISIBLE — unlike buildStubCreatePatch/buildContentCreatePatch (both
+// DM_ONLY, since they're proposals a DM still reviews), this is a direct DM
+// action whose whole point is "show players now," mirroring how
+// revealEntityBroadly flips visibility on DM action, just at creation time
+// instead of after the fact. First used by session-recap publishing (M8).
+export function buildBroadcastCreatePatch(
+  userId: string,
+  campaignId: string,
+  spec: { type: EntityType; name: string; description: string; tags?: string[] },
+): ReviewPatch {
+  return entityCreatePatch(userId, campaignId, spec.type, {
+    name: spec.name,
+    summary: "",
+    description: spec.description,
+    visibility: Visibility.PLAYER_VISIBLE,
+    tags: spec.tags ?? [],
+    isStub: false,
+  });
+}
+
 async function entityResult(entityId: string) {
   const entity = await prisma.entity.findUnique({
     where: { id: entityId },

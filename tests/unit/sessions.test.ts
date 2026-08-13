@@ -23,6 +23,7 @@ import {
   getSession,
   listSessions,
   promoteSessionLogEntryToEvent,
+  publishSessionRecap,
 } from "@/server/services/sessions";
 
 const SAMPLE_USAGE = {
@@ -465,5 +466,68 @@ describe("generateSessionRecap", () => {
     await expect(generateSessionRecap(owner.id, campaign.id, session.id)).rejects.toThrow(
       "The model did not return a usable recap.",
     );
+  });
+});
+
+describe("publishSessionRecap", () => {
+  it("creates a player-visible SYSTEM_MESSAGE from the recap text, source DM", async () => {
+    const owner = await makeUser("dm@publish.test");
+    const campaign = await createCampaign(owner.id, { name: "Publish" });
+    const session = await createSession(owner.id, campaign.id, { title: "S" });
+
+    const result = await publishSessionRecap(owner.id, campaign.id, session.id, {
+      title: "Previously on Dungeon Crawler World: Session 1",
+      recap: "Donut insulted the Maestro live on air.",
+    });
+
+    const entity = await prisma.entity.findUniqueOrThrow({ where: { id: result.id } });
+    expect(entity.type).toBe(EntityType.SYSTEM_MESSAGE);
+    expect(entity.name).toBe("Previously on Dungeon Crawler World: Session 1");
+    expect(entity.description).toBe("Donut insulted the Maestro live on air.");
+    expect(entity.visibility).toBe("PLAYER_VISIBLE");
+    expect(entity.status).toBe(CanonStatus.CANON);
+    expect(entity.source).toBe("DM");
+    expect(entity.tags).toEqual(["recap"]);
+  });
+
+  it("rejects a blank title", async () => {
+    const owner = await makeUser("dm@publish2.test");
+    const campaign = await createCampaign(owner.id, { name: "Publish" });
+    const session = await createSession(owner.id, campaign.id, { title: "S" });
+
+    await expect(
+      publishSessionRecap(owner.id, campaign.id, session.id, { title: "   ", recap: "Text" }),
+    ).rejects.toThrow("Recap title is required.");
+  });
+
+  it("rejects blank recap text", async () => {
+    const owner = await makeUser("dm@publish3.test");
+    const campaign = await createCampaign(owner.id, { name: "Publish" });
+    const session = await createSession(owner.id, campaign.id, { title: "S" });
+
+    await expect(
+      publishSessionRecap(owner.id, campaign.id, session.id, { title: "T", recap: "   " }),
+    ).rejects.toThrow("Recap text is required.");
+  });
+
+  it("rejects an unknown session", async () => {
+    const owner = await makeUser("dm@publish4.test");
+    const campaign = await createCampaign(owner.id, { name: "Publish" });
+
+    await expect(
+      publishSessionRecap(owner.id, campaign.id, "nope", { title: "T", recap: "Text" }),
+    ).rejects.toThrow("Session not found.");
+  });
+
+  it("rejects a player caller", async () => {
+    const owner = await makeUser("dm@publish5.test");
+    const player = await makeUser("player@publish5.test");
+    const campaign = await createCampaign(owner.id, { name: "Publish" });
+    await addPlayer(player.id, campaign.id);
+    const session = await createSession(owner.id, campaign.id, { title: "S" });
+
+    await expect(
+      publishSessionRecap(player.id, campaign.id, session.id, { title: "T", recap: "Text" }),
+    ).rejects.toThrow("You do not have permission to edit this campaign.");
   });
 });

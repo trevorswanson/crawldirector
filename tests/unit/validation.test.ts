@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   addSessionLogEntrySchema,
   promoteSessionLogEntrySchema,
+  publishSessionRecapSchema,
   createCampaignSchema,
   createCrawlerSchema,
   createEventSchema,
@@ -378,6 +379,34 @@ describe("promoteSessionLogEntrySchema", () => {
 
   it("rejects an overlong title", () => {
     expect(promoteSessionLogEntrySchema.safeParse({ title: "a".repeat(201) }).success).toBe(false);
+  });
+});
+
+describe("publishSessionRecapSchema", () => {
+  it("requires a non-empty title and recap", () => {
+    expect(publishSessionRecapSchema.safeParse({ title: "", recap: "Text" }).success).toBe(false);
+    expect(publishSessionRecapSchema.safeParse({ title: "T", recap: "   " }).success).toBe(false);
+  });
+
+  it("trims title and recap", () => {
+    const parsed = publishSessionRecapSchema.safeParse({
+      title: "  Previously on…  ",
+      recap: "  chaos ensued  ",
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.title).toBe("Previously on…");
+      expect(parsed.data.recap).toBe("chaos ensued");
+    }
+  });
+
+  it("rejects an overlong title or recap", () => {
+    expect(
+      publishSessionRecapSchema.safeParse({ title: "a".repeat(201), recap: "Text" }).success,
+    ).toBe(false);
+    expect(
+      publishSessionRecapSchema.safeParse({ title: "T", recap: "a".repeat(4001) }).success,
+    ).toBe(false);
   });
 });
 
