@@ -1,15 +1,48 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Mock the chat-provider seam only for `generateSessionRecap` (mirrors
+// ask.test.ts) — everything else in this file runs against the real Postgres
+// service layer.
+const { resolveCampaignProvider } = vi.hoisted(() => ({
+  resolveCampaignProvider: vi.fn(),
+}));
+
+vi.mock("@/server/ai", async (importActual) => {
+  const actual = await importActual<typeof import("@/server/ai")>();
+  return { ...actual, resolveCampaignProvider };
+});
 
 import { CanonStatus, EntityType, Role } from "@/generated/prisma/client";
+import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 import { createCampaign } from "@/server/services/campaigns";
 import {
   addSessionLogEntry,
   createSession,
+  generateSessionRecap,
   getSession,
   listSessions,
   promoteSessionLogEntryToEvent,
 } from "@/server/services/sessions";
+
+const SAMPLE_USAGE = {
+  inputTokens: 1000,
+  outputTokens: 200,
+  cacheReadTokens: 0,
+  cacheCreationTokens: 0,
+};
+
+function fakeProvider(text: string, over: { id?: string; model?: string } = {}) {
+  const model = over.model ?? "claude-opus-4-8";
+  const providerId = over.id ?? "anthropic";
+  return {
+    id: providerId,
+    model,
+    generate: vi.fn().mockResolvedValue({ text, usage: SAMPLE_USAGE, model, providerId }),
+    generateStructured: vi.fn(),
+    embed: vi.fn(),
+  };
+}
 
 // Service-layer tests against a real Postgres (see campaigns.test.ts). Sessions
 // and their log entries are scratch, not canon, so they're created by a direct
@@ -30,6 +63,8 @@ function makeEntity(campaignId: string, name: string) {
 }
 
 beforeEach(async () => {
+  resolveCampaignProvider.mockReset();
+  await prisma.aiUsage.deleteMany();
   await prisma.sessionLogEntry.deleteMany();
   await prisma.gameSession.deleteMany();
   await prisma.membership.deleteMany();
@@ -306,5 +341,129 @@ describe("promoteSessionLogEntryToEvent", () => {
     await expect(
       promoteSessionLogEntryToEvent(player.id, campaign.id, session.id, entry.id, { title: "T" }),
     ).rejects.toThrow("You do not have permission to edit this campaign.");
+  });
+});
+
+describe("generateSessionRecap", () => {
+  it("generates a recap from the log and records usage", async () => {
+    const owner = await makeUser("dm@recap.test");
+    const campaign = await createCampaign(owner.id, { name: "Recap" });
+    const session = await createSession(owner.id, campaign.id, { title: "Session 1" });
+    await addSessionLogEntry(owner.id, campaign.id, session.id, { text: "Donut insulted the Maestro" });
+
+    const provider = fakeProvider("Previously on Dungeon Crawler World: chaos ensued.");
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    const result = await generateSessionRecap(owner.id, campaign.id, session.id);
+
+    expect(result.recap).toBe("Previously on Dungeon Crawler World: chaos ensued.");
+    expect(result.model).toBe("claude-opus-4-8");
+
+    const userMsg = provider.generate.mock.calls[0][0].messages[0].content;
+    expect(userMsg).toContain("Donut insulted the Maestro");
+
+    const usage = await prisma.aiUsage.findMany({
+      where: { campaignId: campaign.id, generatorId: "session-recap" },
+    });
+    expect(usage).toHaveLength(1);
+    expect(usage[0].outputTokens).toBe(SAMPLE_USAGE.outputTokens);
+  });
+
+  it("includes promoted events (with participants) as context alongside the raw log", async () => {
+    const owner = await makeUser("dm@recap2.test");
+    const campaign = await createCampaign(owner.id, { name: "Recap" });
+    const session = await createSession(owner.id, campaign.id, { title: "Session 1" });
+    const npc = await makeEntity(campaign.id, "Carl");
+    const entry = await addSessionLogEntry(owner.id, campaign.id, session.id, {
+      text: "Carl insulted the Maestro on air",
+      taggedIds: [npc.id],
+    });
+    await promoteSessionLogEntryToEvent(owner.id, campaign.id, session.id, entry.id, {
+      title: "Maestro incident",
+    });
+    await addSessionLogEntry(owner.id, campaign.id, session.id, { text: "A quiet aftermath" });
+
+    const provider = fakeProvider("Recap text.");
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    await generateSessionRecap(owner.id, campaign.id, session.id);
+
+    const userMsg = provider.generate.mock.calls[0][0].messages[0].content;
+    expect(userMsg).toContain("Maestro incident");
+    expect(userMsg).toContain("Carl");
+    expect(userMsg).toContain("A quiet aftermath");
+  });
+
+  it("rejects a session with no log entries", async () => {
+    const owner = await makeUser("dm@recap3.test");
+    const campaign = await createCampaign(owner.id, { name: "Recap" });
+    const session = await createSession(owner.id, campaign.id, { title: "Empty" });
+
+    await expect(generateSessionRecap(owner.id, campaign.id, session.id)).rejects.toThrow(
+      "Add a log entry before generating a recap.",
+    );
+  });
+
+  it("rejects an unknown session id", async () => {
+    const owner = await makeUser("dm@recap4.test");
+    const campaign = await createCampaign(owner.id, { name: "Recap" });
+
+    await expect(generateSessionRecap(owner.id, campaign.id, "nope")).rejects.toThrow(
+      "Session not found.",
+    );
+  });
+
+  it("rejects a player caller", async () => {
+    const owner = await makeUser("dm@recap5.test");
+    const player = await makeUser("player@recap5.test");
+    const campaign = await createCampaign(owner.id, { name: "Recap" });
+    await addPlayer(player.id, campaign.id);
+    const session = await createSession(owner.id, campaign.id, { title: "S" });
+    await addSessionLogEntry(owner.id, campaign.id, session.id, { text: "Once" });
+
+    await expect(generateSessionRecap(player.id, campaign.id, session.id)).rejects.toThrow(
+      "You do not have permission to edit this campaign.",
+    );
+  });
+
+  it("throws a safe error when no provider is configured", async () => {
+    const owner = await makeUser("dm@recap6.test");
+    const campaign = await createCampaign(owner.id, { name: "Recap" });
+    const session = await createSession(owner.id, campaign.id, { title: "S" });
+    await addSessionLogEntry(owner.id, campaign.id, session.id, { text: "Once" });
+    resolveCampaignProvider.mockResolvedValue(null);
+
+    await expect(generateSessionRecap(owner.id, campaign.id, session.id)).rejects.toThrow(
+      ServiceError,
+    );
+  });
+
+  it("turns a provider failure into a safe ServiceError (invariant #6)", async () => {
+    const owner = await makeUser("dm@recap7.test");
+    const campaign = await createCampaign(owner.id, { name: "Recap" });
+    const session = await createSession(owner.id, campaign.id, { title: "S" });
+    await addSessionLogEntry(owner.id, campaign.id, session.id, { text: "Once" });
+    const provider = fakeProvider("unused");
+    provider.generate.mockRejectedValue({ status: 401, message: "x-api-key: sk-leak" });
+    resolveCampaignProvider.mockResolvedValue(provider);
+
+    await expect(generateSessionRecap(owner.id, campaign.id, session.id)).rejects.toThrow(
+      ServiceError,
+    );
+    await expect(generateSessionRecap(owner.id, campaign.id, session.id)).rejects.not.toThrow(
+      /sk-leak/,
+    );
+  });
+
+  it("rejects when the model returns an empty recap", async () => {
+    const owner = await makeUser("dm@recap8.test");
+    const campaign = await createCampaign(owner.id, { name: "Recap" });
+    const session = await createSession(owner.id, campaign.id, { title: "S" });
+    await addSessionLogEntry(owner.id, campaign.id, session.id, { text: "Once" });
+    resolveCampaignProvider.mockResolvedValue(fakeProvider("   "));
+
+    await expect(generateSessionRecap(owner.id, campaign.id, session.id)).rejects.toThrow(
+      "The model did not return a usable recap.",
+    );
   });
 });
