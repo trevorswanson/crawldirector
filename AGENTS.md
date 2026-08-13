@@ -50,7 +50,12 @@ or privately reveal it to one recipient — another actor entity, or now a
 specific player's `Membership` via a new `grantMembershipKnowledge` — creating
 a `KnowledgeGrant` linked back to the session (`sourceEventId`), building on
 M3's fog-of-war foundation; a "Revealed this session" history list supports
-revoke/undo. **Next up:** recap generation.
+revoke/undo. Slice 4 added **session recap generation**: a one-button,
+ephemeral "previously on Dungeon Crawler World" recap synthesized from the
+session's raw log plus the events it promoted that session — read-only like
+"Ask the Campaign" (never a change set, never persisted; the DM regenerates on
+demand). **Next up:** per-crawler recaps, an in-fiction/persona-voiced
+broadcast, and publishing a recap as a player-facing `SYSTEM_MESSAGE`.
 M5.5 (data model hardening — ADR 0011) shipped all five slices: `data` versioning + `readKindData`
 seam, the `MIGRATE_ENTITY_DATA` job, reference-integrity badge + impact-aware
 archive, orphan report, the greenfield Faction satellite, and the Floor satellite

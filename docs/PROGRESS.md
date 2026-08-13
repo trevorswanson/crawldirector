@@ -121,8 +121,13 @@ a "Live reveal" panel on the session screen lets the DM broadly reveal an
 entity (flip campaign-wide visibility to `PLAYER_VISIBLE`, through the review
 pipeline) or privately reveal it to one recipient — another actor entity, or
 now a specific player's `Membership` — creating a session-linked
-`KnowledgeGrant`, building on M3's fog-of-war foundation. **Next up:** recap
-generation.
+`KnowledgeGrant`, building on M3's fog-of-war foundation. Slice 4 — session
+recap generation — shipped ✅ 2026-08-13 (dated entry below): a one-button,
+ephemeral "previously on Dungeon Crawler World" recap synthesized from the
+session's raw log + the events it promoted, read-only like "Ask" (M5 slice 5)
+and never persisted. **Next up:** per-crawler recaps, in-fiction/persona-voiced
+broadcast, and publishing a recap as a player-facing `SYSTEM_MESSAGE` — the
+remaining bullets under "Recaps & broadcasts."
 
 ### Scheduled roadmap additions (2026-06-19)
 
@@ -155,6 +160,98 @@ M6 remains the next milestone work. The detailed decisions live in
 
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
+
+## M8 — Session recap generation (slice 4) ✅ (2026-08-13)
+
+**Goal:** the fourth M8 slice — the "Session recap" bullet of
+[`08-session-mode.md`](./08-session-mode.md)'s "Recaps & broadcasts": "generate
+a 'previously on Dungeon Crawler World' summary from the session log + the
+events promoted that session." This is DCC-flavored narration over material
+the DM already captured, not new capability over canon.
+
+**Decision (ephemeral read-only synthesis, modeled directly on "Ask the
+Campaign" — not a change set, not persisted).** Docs/08 is explicit that
+"a DM can keep [recaps] ephemeral, publish them to players … or both," so this
+slice ships the ephemeral half only: `generateSessionRecap` never writes canon
+(invariant #1) and is never stored — the DM regenerates on demand, exactly
+like `askCampaign` (M5 slice 5). It takes no user text input (unlike "Ask"),
+so `generateSessionRecapAction`/`SessionRecapPanel` drop the question
+field/textarea entirely — a session detail page already knows its own
+`sessionId`, so the whole UI is a single "Generate recap" button. Context is
+built from two sources per the doc: the session's full raw log (chronological,
+with each entry's still-live tagged entity names) and the events that session
+promoted to canon (title + summary + `ACTOR` participant names, refetched live
+rather than trusted from the log so a since-edited or since-archived promoted
+event can't leak stale/removed text into the prompt). A new
+`src/server/ai/generators/session-recap.ts` (pure prompt-building, mirroring
+`ask-campaign.ts`) frames the system prompt in the show's "previously on…"
+promo voice while forbidding invented details; usage is recorded under
+generator id `session-recap` on the `AiUsage` table for cost tracking, the
+same non-canon usage-only trail "Ask" already established (no
+review-pipeline provenance, since there's no change set to attach it to).
+Persona voice (the doc's separate "In-fiction broadcast" bullet), a
+per-crawler spotlight recap, and publishing a recap as a player-facing
+`SYSTEM_MESSAGE` through the review pipeline are explicitly deferred to later
+M8 slices — each is its own vertical slice of new capability, unlike this
+one's synthesis-only scope.
+
+- [x] **Schema:** none — ephemeral, nothing persisted.
+- [x] **Generator** ([`session-recap.ts`](../src/server/ai/generators/session-recap.ts)):
+      `SESSION_RECAP_GENERATOR` id/version, `SESSION_RECAP_MAX_TOKENS` (768 —
+      a tight TV-recap read, not a full transcript), and pure
+      `buildSessionRecapPrompt` (cacheable framing + style guide; volatile
+      per-session log/promoted-events content).
+- [x] **Service** ([`sessions.ts`](../src/server/services/sessions.ts)):
+      `generateSessionRecap(userId, campaignId, sessionId)` — DM-only, loads
+      the session's entries (with tagged names resolved the same way
+      `getSession` does) and its live promoted `Event` rows, requires a
+      configured provider and available spend cap, calls `provider.generate`
+      (plain text, not structured — there's no proposal shape to validate
+      against), records usage best-effort, and returns the trimmed recap +
+      model. Rejects an empty session (no log entries at all), an unknown
+      session, a non-DM caller, no provider, a reached spend cap, a provider
+      failure (safe message — invariant #6), and an empty model response.
+- [x] **DM action** ([`(dm)/actions.ts`](<../src/app/(dm)/actions.ts>)):
+      `generateSessionRecapAction` — no form fields to parse; calls the
+      service and returns `{ recap, model }` or a safe error. No
+      `revalidatePath` (read-only, mirrors `askCampaignAction`).
+- [x] **UI** ([`session-recap-panel.tsx`](../src/components/sessions/session-recap-panel.tsx)):
+      a `SessionRecapPanel` — a single "Generate recap" button (no inputs),
+      an honest empty-state note before the first generation, the rendered
+      recap + model tag on success (styled like Ask's answer panel), and a
+      safe error message on failure. Rendered on the session detail page
+      between the log and the Live Reveal panel.
+- [x] **Tests:** DB-backed `generateSessionRecap` cases (generates from the raw
+      log and records an `AiUsage` row; folds in promoted-event titles/
+      participants alongside the raw log; rejects an empty session, an unknown
+      session, a player caller, no configured provider, an empty model
+      response; turns a provider failure into a safe `ServiceError` that never
+      echoes the raw error text) in
+      [`sessions.test.ts`](../tests/unit/sessions.test.ts) (provider mocked,
+      mirroring `ask.test.ts`); the action in
+      [`dm-actions.test.ts`](../tests/unit/dm-actions.test.ts) (passes through
+      the recap/model, no revalidate, safe error + generic fallback);
+      component coverage in
+      [`session-recap-panel.test.tsx`](../tests/unit/session-recap-panel.test.tsx)
+      (button + empty note, rendered recap + model, error state); updated
+      [`session-detail-page.test.tsx`](../tests/unit/session-detail-page.test.tsx)
+      for the new action mock and panel render.
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors;
+      pre-existing settings-action warnings only), `npm run build` (no new
+      route — the existing `/campaigns/[id]/sessions/[sessionId]` route is
+      unchanged), and the full coverage gate green (159 files / **2006
+      tests**; statements 95.42%, branches 88.81%, functions 96.6%, lines
+      96.95%). **In-browser** (reseeded `dcc`, `dm@example.com`, a fresh
+      "Floor 9 Breach" session): with no AI key configured, clicking "Generate
+      recap" on a session with one log entry showed "Add an AI provider key in
+      Settings to generate a session recap." with no provider call; after
+      saving a placeholder Anthropic key in Settings, the same click showed
+      "The provider rejected the key (authentication failed)." — the same
+      safe-failure boundary the Ask/dungeon-content verifications stopped at,
+      confirming the button → action → service → provider → UI wiring end to
+      end with no raw key/provider text in the DOM (invariant #6). A second,
+      empty session showed "Add a log entry before generating a recap." on
+      click, with no provider call. No console errors throughout.
 
 ## M8 — Live reveal (slice 3) ✅ (2026-08-04)
 

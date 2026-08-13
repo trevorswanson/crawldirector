@@ -1,6 +1,17 @@
 import { CanonStatus, Role } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
+import { describeProviderError, resolveCampaignProvider } from "@/server/ai";
+import { ProviderError, type LLMUsage } from "@/server/ai/types";
+import {
+  SESSION_RECAP_GENERATOR,
+  SESSION_RECAP_MAX_TOKENS,
+  buildSessionRecapPrompt,
+  type SessionRecapLogEntry,
+  type SessionRecapPromotedEvent,
+} from "@/server/ai/generators/session-recap";
+import { logActionError } from "@/server/log";
+import { assertWithinSpendCap, recordAiUsage } from "@/server/services/ai-usage";
 import { createEvent } from "@/server/services/events";
 
 // Live session capture (M8 slice 1 — docs/08-session-mode.md). A `GameSession`
@@ -259,4 +270,142 @@ export async function promoteSessionLogEntryToEvent(
   });
 
   return { id: event.id };
+}
+
+export type SessionRecapResult = {
+  recap: string;
+  model: string;
+  providerId: string;
+};
+
+/**
+ * Generate a "previously on Dungeon Crawler World" recap for one session, from
+ * its raw log entries plus the events it promoted to canon
+ * (docs/08-session-mode.md "Session recap"). Read-only synthesis, like "Ask"
+ * (`ask.ts`) — never writes canon (invariant #1) and is never persisted; the DM
+ * regenerates on demand. Persona voice, per-crawler spotlights, and publishing
+ * a recap as a player-facing SYSTEM_MESSAGE stay later M8 slices. DM-only.
+ * Throws a `ServiceError` (safe message — invariant #6) for a non-DM caller, an
+ * unknown session, an empty session, no configured provider, a reached spend
+ * cap, or a provider failure.
+ */
+export async function generateSessionRecap(
+  userId: string,
+  campaignId: string,
+  sessionId: string,
+): Promise<SessionRecapResult> {
+  await assertCampaignDm(userId, campaignId);
+
+  const [campaign, session] = await Promise.all([
+    prisma.campaign.findUnique({
+      where: { id: campaignId },
+      select: { name: true, styleGuide: true },
+    }),
+    prisma.gameSession.findFirst({
+      where: { id: sessionId, campaignId },
+      select: {
+        title: true,
+        playedAt: true,
+        focus: true,
+        entries: {
+          orderBy: { at: "asc" },
+          select: { text: true, taggedIds: true, promotedEventId: true },
+        },
+      },
+    }),
+  ]);
+  if (!campaign) throw new ServiceError("Campaign not found.");
+  if (!session) throw new ServiceError("Session not found.");
+  if (session.entries.length === 0) {
+    throw new ServiceError("Add a log entry before generating a recap.");
+  }
+
+  const byId = await resolveTaggedEntities(campaignId, session.entries);
+  const entries: SessionRecapLogEntry[] = session.entries.map((entry) => ({
+    text: entry.text,
+    taggedNames: entry.taggedIds
+      .map((id) => byId.get(id)?.name)
+      .filter((name): name is string => Boolean(name)),
+  }));
+
+  const promotedEventIds = session.entries
+    .map((entry) => entry.promotedEventId)
+    .filter((id): id is string => Boolean(id));
+  const eventRows =
+    promotedEventIds.length === 0
+      ? []
+      : await prisma.event.findMany({
+          where: { id: { in: promotedEventIds }, campaignId, status: CanonStatus.CANON },
+          select: {
+            title: true,
+            summary: true,
+            participants: { select: { entity: { select: { name: true } } } },
+          },
+        });
+  const promotedEvents: SessionRecapPromotedEvent[] = eventRows.map((event) => ({
+    title: event.title,
+    summary: event.summary,
+    participantNames: event.participants.map((p) => p.entity.name),
+  }));
+
+  const provider = await resolveCampaignProvider(campaignId);
+  if (!provider) {
+    throw new ServiceError("Add an AI provider key in Settings to generate a session recap.");
+  }
+
+  await assertWithinSpendCap(campaignId);
+
+  const { system, messages } = buildSessionRecapPrompt({
+    campaignName: campaign.name,
+    styleGuide: campaign.styleGuide,
+    sessionTitle: session.title,
+    playedAt: session.playedAt ? session.playedAt.toISOString().slice(0, 10) : null,
+    focus: session.focus,
+    entries,
+    promotedEvents,
+  });
+
+  let recap: string;
+  let usage: LLMUsage;
+  let usageModel: string;
+  let usageProviderId: string;
+  try {
+    const result = await provider.generate({
+      system,
+      messages,
+      maxTokens: SESSION_RECAP_MAX_TOKENS,
+    });
+    recap = result.text.trim();
+    usage = result.usage;
+    usageModel = result.model;
+    usageProviderId = result.providerId;
+  } catch (error) {
+    logActionError(
+      `Session-recap generation failed (provider=${provider.id})`,
+      error,
+      provider.redactSecrets,
+    );
+    const message = error instanceof ProviderError ? error.message : describeProviderError(error);
+    throw new ServiceError(message);
+  }
+
+  if (!recap) {
+    throw new ServiceError("The model did not return a usable recap.");
+  }
+
+  // Best-effort: never lose a paid recap over a usage-tracking write (mirrors askCampaign).
+  try {
+    await recordAiUsage({
+      campaignId,
+      userId,
+      providerId: usageProviderId,
+      model: usageModel,
+      generatorId: SESSION_RECAP_GENERATOR.id,
+      usage,
+    });
+  } catch {
+    // usage tracking is non-critical
+  }
+
+  return { recap, model: usageModel, providerId: usageProviderId };
 }

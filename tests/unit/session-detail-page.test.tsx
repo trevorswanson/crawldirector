@@ -12,6 +12,7 @@ const {
   notFound,
   addSessionLogEntryAction,
   promoteSessionLogEntryAction,
+  generateSessionRecapAction,
   searchEntityCandidatesAction,
   revealEntityBroadlyAction,
   revealSessionKnowledgeAction,
@@ -28,6 +29,7 @@ const {
   }),
   addSessionLogEntryAction: vi.fn(),
   promoteSessionLogEntryAction: vi.fn(),
+  generateSessionRecapAction: vi.fn(),
   searchEntityCandidatesAction: vi.fn(),
   revealEntityBroadlyAction: vi.fn(),
   revealSessionKnowledgeAction: vi.fn(),
@@ -43,6 +45,7 @@ vi.mock("@/server/services/knowledge", () => ({ listSessionReveals }));
 vi.mock("@/app/(dm)/actions", () => ({
   addSessionLogEntryAction,
   promoteSessionLogEntryAction,
+  generateSessionRecapAction,
   searchEntityCandidatesAction,
   revealEntityBroadlyAction,
   revealSessionKnowledgeAction,
@@ -101,6 +104,7 @@ describe("CampaignSessionDetailPage", () => {
     expect(screen.getByText("Bring snacks")).toBeTruthy();
     expect(screen.getByLabelText("Log entry")).toBeTruthy();
     expect(screen.getByText("Donut insulted the Maestro")).toBeTruthy();
+    expect(screen.getByText(/Session recap/)).toBeTruthy();
     expect(screen.getByText("Live reveal")).toBeTruthy();
     expect(getSession).toHaveBeenCalledWith("u1", "c1", "s1");
     expect(listPlayerMemberships).toHaveBeenCalledWith("u1", "c1");

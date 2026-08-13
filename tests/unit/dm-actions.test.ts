@@ -47,6 +47,7 @@ const {
   createSession,
   addSessionLogEntry,
   promoteSessionLogEntryToEvent,
+  generateSessionRecap,
   fleshOutEntity,
   fleshOutEntities,
   inferRelationshipsForEntity,
@@ -113,6 +114,7 @@ const {
   createSession: vi.fn(),
   addSessionLogEntry: vi.fn(),
   promoteSessionLogEntryToEvent: vi.fn(),
+  generateSessionRecap: vi.fn(),
   fleshOutEntity: vi.fn(),
   fleshOutEntities: vi.fn(),
   inferRelationshipsForEntity: vi.fn(),
@@ -195,6 +197,7 @@ vi.mock("@/server/services/sessions", () => ({
   createSession,
   addSessionLogEntry,
   promoteSessionLogEntryToEvent,
+  generateSessionRecap,
 }));
 vi.mock("@/server/services/generation", () => ({
   fleshOutEntity,
@@ -279,6 +282,7 @@ import {
   createSessionAction,
   addSessionLogEntryAction,
   promoteSessionLogEntryAction,
+  generateSessionRecapAction,
   revealEntityBroadlyAction,
   revealSessionKnowledgeAction,
   revokeSessionRevealAction,
@@ -2836,6 +2840,36 @@ describe("askCampaignAction", () => {
     askCampaign.mockRejectedValueOnce(new Error("boom"));
     expect((await askCampaignAction("c1", undefined, form({ question: "x" })))?.error).toBe(
       "The campaign couldn't answer that. Please try again.",
+    );
+  });
+});
+
+describe("generateSessionRecapAction", () => {
+  it("returns the generated recap + model (no revalidate — read-only, never persisted)", async () => {
+    generateSessionRecap.mockResolvedValue({
+      recap: "Donut insulted the Maestro live on air.",
+      model: "claude-opus-4-8",
+      providerId: "anthropic",
+    });
+
+    const result = await generateSessionRecapAction("c1", "s1", undefined);
+
+    expect(generateSessionRecap).toHaveBeenCalledWith("u1", "c1", "s1");
+    expect(result?.recap).toBe("Donut insulted the Maestro live on air.");
+    expect(result?.model).toBe("claude-opus-4-8");
+    expect(result?.error).toBeUndefined();
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a ServiceError message and a generic fallback", async () => {
+    generateSessionRecap.mockRejectedValueOnce(new ServiceError("Add an AI provider key in Settings."));
+    expect((await generateSessionRecapAction("c1", "s1", undefined))?.error).toBe(
+      "Add an AI provider key in Settings.",
+    );
+
+    generateSessionRecap.mockRejectedValueOnce(new Error("boom"));
+    expect((await generateSessionRecapAction("c1", "s1", undefined))?.error).toBe(
+      "Could not generate a recap. Please try again.",
     );
   });
 });

@@ -74,6 +74,7 @@ import {
 import {
   addSessionLogEntry,
   createSession,
+  generateSessionRecap,
   promoteSessionLogEntryToEvent,
 } from "@/server/services/sessions";
 import {
@@ -1511,6 +1512,32 @@ export async function revokeSessionRevealAction(
   const user = await requireUser();
   await revokeKnowledge(user.id, campaignId, grantId);
   revalidatePath(`/campaigns/${campaignId}/sessions/${sessionId}`);
+}
+
+// Session recap (M8 slice 4, docs/08-session-mode.md "Recaps & broadcasts").
+// Read-only synthesis over the session's own log + promoted events — never
+// writes canon (invariant #1) and is never persisted, so no revalidate (mirrors
+// askCampaignAction). Errors are safe messages (no key/raw provider text —
+// invariant #6).
+export type SessionRecapActionState =
+  | { recap?: string; model?: string; error?: string; timestamp?: number }
+  | undefined;
+
+export async function generateSessionRecapAction(
+  campaignId: string,
+  sessionId: string,
+  _prev: SessionRecapActionState,
+): Promise<SessionRecapActionState> {
+  void _prev;
+  const user = await requireUser();
+  try {
+    const result = await generateSessionRecap(user.id, campaignId, sessionId);
+    return { recap: result.recap, model: result.model, timestamp: Date.now() };
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    logActionError("Generate session recap action failed", error);
+    return { error: "Could not generate a recap. Please try again.", timestamp: Date.now() };
+  }
 }
 
 export type EventActionState = { error?: string } | undefined;
