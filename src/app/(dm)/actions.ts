@@ -23,6 +23,7 @@ import {
   grantKnowledgeSchema,
   lockFieldSchema,
   promoteSessionLogEntrySchema,
+  publishSessionRecapSchema,
   revealEntityBroadlySchema,
   reviewEditValueKindSchema,
   sessionRevealSchema,
@@ -76,6 +77,7 @@ import {
   createSession,
   generateSessionRecap,
   promoteSessionLogEntryToEvent,
+  publishSessionRecap,
 } from "@/server/services/sessions";
 import {
   fleshOutEntities,
@@ -1537,6 +1539,40 @@ export async function generateSessionRecapAction(
     if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
     logActionError("Generate session recap action failed", error);
     return { error: "Could not generate a recap. Please try again.", timestamp: Date.now() };
+  }
+}
+
+// Publish a generated recap to players as a SYSTEM_MESSAGE (docs/08-session-mode.md
+// "Recaps & broadcasts"). Unlike generateSessionRecapAction this writes canon,
+// so it revalidates the session page (a fresh SYSTEM_MESSAGE now exists) and
+// returns the new entity's id so the panel can link to it.
+export type PublishSessionRecapActionState =
+  | { success?: string; entityId?: string; error?: string; timestamp?: number }
+  | undefined;
+
+export async function publishSessionRecapAction(
+  campaignId: string,
+  sessionId: string,
+  _prev: PublishSessionRecapActionState,
+  formData: FormData,
+): Promise<PublishSessionRecapActionState> {
+  const user = await requireUser();
+  const parsed = publishSessionRecapSchema.safeParse({
+    title: formData.get("title"),
+    recap: formData.get("recap"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input.", timestamp: Date.now() };
+  }
+
+  try {
+    const result = await publishSessionRecap(user.id, campaignId, sessionId, parsed.data);
+    revalidatePath(`/campaigns/${campaignId}/sessions/${sessionId}`);
+    return { success: "Published to players.", entityId: result.id, timestamp: Date.now() };
+  } catch (error) {
+    if (error instanceof ServiceError) return { error: error.message, timestamp: Date.now() };
+    logActionError("Publish session recap action failed", error);
+    return { error: "Could not publish the recap. Please try again.", timestamp: Date.now() };
   }
 }
 

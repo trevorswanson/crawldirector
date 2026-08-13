@@ -1,4 +1,4 @@
-import { CanonStatus, Role } from "@/generated/prisma/client";
+import { CanonStatus, EntityType, OpKind, Role } from "@/generated/prisma/client";
 import { ServiceError } from "@/lib/errors";
 import { prisma } from "@/server/db";
 import { describeProviderError, resolveCampaignProvider } from "@/server/ai";
@@ -12,7 +12,9 @@ import {
 } from "@/server/ai/generators/session-recap";
 import { logActionError } from "@/server/log";
 import { assertWithinSpendCap, recordAiUsage } from "@/server/services/ai-usage";
+import { buildBroadcastCreatePatch } from "@/server/services/entities";
 import { createEvent } from "@/server/services/events";
+import { applyAutoApprovedEntityChangeSet } from "@/server/services/review";
 
 // Live session capture (M8 slice 1 — docs/08-session-mode.md). A `GameSession`
 // (renamed from docs' `Session` to avoid colliding with NextAuth's own Session
@@ -283,8 +285,9 @@ export type SessionRecapResult = {
  * its raw log entries plus the events it promoted to canon
  * (docs/08-session-mode.md "Session recap"). Read-only synthesis, like "Ask"
  * (`ask.ts`) — never writes canon (invariant #1) and is never persisted; the DM
- * regenerates on demand. Persona voice, per-crawler spotlights, and publishing
- * a recap as a player-facing SYSTEM_MESSAGE stay later M8 slices. DM-only.
+ * regenerates on demand. Publishing the result is a separate step — see
+ * `publishSessionRecap` below. Persona voice and per-crawler spotlights stay
+ * later M8 follow-ups. DM-only.
  * Throws a `ServiceError` (safe message — invariant #6) for a non-DM caller, an
  * unknown session, an empty session, no configured provider, a reached spend
  * cap, or a provider failure.
@@ -408,4 +411,58 @@ export async function generateSessionRecap(
   }
 
   return { recap, model: usageModel, providerId: usageProviderId };
+}
+
+export type PublishSessionRecapResult = { id: string };
+
+/**
+ * Publish an already-generated session recap to players as a `SYSTEM_MESSAGE`
+ * entity (docs/08-session-mode.md "Recaps & broadcasts": recaps "can [be]
+ * ephemeral, publish[ed] to players … as a SYSTEM_MESSAGE/Show artifact via
+ * the review pipeline, or both"). Unlike `generateSessionRecap` this *does*
+ * write canon — an auto-approved DM `CREATE_ENTITY` change set (source: DM,
+ * fully provenanced), the same direct-write shape `promoteSessionLogEntryToEvent`
+ * uses. The recap text is carried from the client exactly as displayed, never
+ * regenerated here: a DM can already create any entity with any content
+ * through the ordinary create-entity form, so trusting DM-submitted text isn't
+ * a new privilege. Created `PLAYER_VISIBLE` immediately (via
+ * `buildBroadcastCreatePatch`) — publishing *is* the deliberate reveal, not a
+ * proposal to review further. DM-only; rejects a blank title/recap or an
+ * unknown session.
+ */
+export async function publishSessionRecap(
+  userId: string,
+  campaignId: string,
+  sessionId: string,
+  input: { title: string; recap: string },
+): Promise<PublishSessionRecapResult> {
+  await assertCampaignDm(userId, campaignId);
+
+  const title = input.title.trim();
+  if (!title) throw new ServiceError("Recap title is required.");
+  const recap = input.recap.trim();
+  if (!recap) throw new ServiceError("Recap text is required.");
+
+  const session = await prisma.gameSession.findFirst({
+    where: { id: sessionId, campaignId },
+    select: { id: true },
+  });
+  if (!session) throw new ServiceError("Session not found.");
+
+  const result = await applyAutoApprovedEntityChangeSet(userId, campaignId, {
+    title: `Publish recap: ${title}`,
+    operations: [
+      {
+        op: OpKind.CREATE_ENTITY,
+        patch: buildBroadcastCreatePatch(userId, campaignId, {
+          type: EntityType.SYSTEM_MESSAGE,
+          name: title,
+          description: recap,
+          tags: ["recap"],
+        }),
+      },
+    ],
+  });
+
+  return { id: result.targetIds[0] };
 }

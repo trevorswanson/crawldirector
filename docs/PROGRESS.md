@@ -107,7 +107,7 @@ the **System-message feed** (THE SYSTEM's in-fiction broadcasts, visibility-scop
 player logs in, sees only shared/own-crawler data, and can submit a suggestion.
 **Next up:** M8 — live session mode & recaps ([`08-session-mode.md`](./08-session-mode.md)).
 
-**Active: M8 — Live session mode & recaps**
+**M8 — Live session mode & recaps — done ✅ (2026-08-13)**
 ([08-session-mode.md](./08-session-mode.md)). Slice 1 — session capture — shipped
 ✅ 2026-08-04 (dated entry below): the `GameSession`/`SessionLogEntry` data model,
 a DM-only Sessions screen to start a session and jot a running freeform log
@@ -125,17 +125,37 @@ now a specific player's `Membership` — creating a session-linked
 recap generation — shipped ✅ 2026-08-13 (dated entry below): a one-button,
 ephemeral "previously on Dungeon Crawler World" recap synthesized from the
 session's raw log + the events it promoted, read-only like "Ask" (M5 slice 5)
-and never persisted. **Next up:** per-crawler recaps, in-fiction/persona-voiced
-broadcast, and publishing a recap as a player-facing `SYSTEM_MESSAGE` — the
-remaining bullets under "Recaps & broadcasts."
+and never persisted. Slice 5 — publish recap — shipped ✅ 2026-08-13 (dated
+entry below): a "Publish to players" step on the recap panel turns the
+currently-shown recap into a `PLAYER_VISIBLE` `SYSTEM_MESSAGE`, created
+directly (an auto-approved DM `CREATE_ENTITY` change set, fully provenanced) —
+this closes the roadmap's M8 "done when" bar ("a DM can capture a session
+live, reveal facts to players, promote moments to Events, and publish
+recaps"). Per-crawler recap spotlights and an in-fiction/persona-voiced recap
+narration (the other two "Recaps & broadcasts" bullets) remain as non-blocking
+follow-ups — see "Open backlog" below. **Next up:** M9 — hardening, deploy &
+data portability.
 
 ### Scheduled roadmap additions (2026-06-19)
 
 These are accepted as roadmap/backlog design, not active implementation work;
-M6 remains the next milestone work. The detailed decisions live in
+M9 is now the next milestone work (M6–M8 are done, with M6's encounter
+generator and M11 actor-profile reuse as their own tracked backlog items). The
+detailed decisions live in
 [ADR 0012](./adr/0012-shared-canon-library-and-import.md) and
 [ADR 0013](./adr/0013-job-priorities-and-idle-maintenance.md).
 
+- [ ] **M8 (follow-up, non-blocking) — Per-crawler recap + in-fiction/persona-
+      voiced recap narration.** The two remaining bullets under
+      [`08-session-mode.md`](./08-session-mode.md)'s "Recaps & broadcasts":
+      (1) a spotlight recap scoped to what one player's crawler actually
+      experienced (visibility-respecting, for absent players/immersion), and
+      (2) rendering a recap in the active System AI persona's voice (or a
+      host's), reusing the M6 persona-prompt seam the way the dungeon-content
+      generator does. M8's roadmap "done when" bar (capture, reveal, promote,
+      publish) is already met by slices 1–5 — these are enhancements to the
+      existing `generateSessionRecap`/`publishSessionRecap` pair, not
+      blockers.
 - [ ] **M9/M10 — Global admin + shared canon library.** Add a global
       super-admin and guarded `/admin` shell; create a singleton admin-owned
       shared-library campaign. Permit read-only library browsing only through an
@@ -160,6 +180,104 @@ M6 remains the next milestone work. The detailed decisions live in
 
 (Open, non-milestone-blocking follow-ups and deferrals live in the subsections
 below.)
+
+## M8 — Publish session recap (slice 5) ✅ (2026-08-13)
+
+**Goal:** the fifth and final M8 slice — the "publish them to players … as a
+`SYSTEM_MESSAGE`/Show artifact via the review pipeline" half of
+[`08-session-mode.md`](./08-session-mode.md)'s "Recaps & broadcasts" note.
+Slice 4 shipped the ephemeral generate-only half; this slice adds the other
+option the doc calls out ("ephemeral … publish … or both"), and with it closes
+the roadmap's M8 "done when" bar: "a DM can capture a session live, reveal
+facts to players, promote moments to Events, and publish recaps."
+
+**Decision (publish the client-shown text verbatim, as a direct
+`PLAYER_VISIBLE` create — not a re-generation, not a DM_ONLY proposal to
+review further).** `generateSessionRecap` never persists its output (M8 slice
+4's deliberate ephemeral design), so publishing can't re-run the generator —
+it has nothing stored to re-run from — and re-generating would risk a
+different recap than the one the DM actually read and chose to publish. So
+`publishSessionRecap` takes the recap text straight from the client exactly as
+displayed (a hidden form field carries it from the already-rendered panel) and
+never touches the provider. This isn't a new privilege: a DM can already
+create any entity with any content through the ordinary create-entity form, so
+trusting DM-submitted text here is no different. Unlike the dungeon-content
+generator's `buildContentCreatePatch` (`DM_ONLY`, because that's an AI
+proposal a DM still reviews), publishing needs a new `buildBroadcastCreatePatch`
+(`entities.ts`) that creates `PLAYER_VISIBLE` immediately — clicking "Publish
+to players" *is* the deliberate reveal action, the same logic
+`revealEntityBroadly` already uses for an existing entity, just applied at
+creation time. The write itself reuses the ordinary auto-approved
+`CREATE_ENTITY` change-set path (`applyAutoApprovedEntityChangeSet`,
+`source: DM`), the same direct-write shape `promoteSessionLogEntryToEvent`
+already established for turning session-scratch content into canon, so the
+published message is fully provenanced. The UI (`PublishRecapForm`, a
+sub-component of `SessionRecapPanel`) mirrors `PromoteEntryForm`'s
+collapsed-button → title-field → static-confirmation-link shape; it's `key`d
+on the parent generate call's timestamp so clicking "Generate recap" again
+always resets it to collapsed, instead of showing a stale confirmation for a
+since-replaced recap.
+
+- [x] **Service** ([`entities.ts`](../src/server/services/entities.ts)):
+      `buildBroadcastCreatePatch(userId, campaignId, { type, name,
+      description, tags? })` — a `CREATE_ENTITY` patch builder like
+      `buildStubCreatePatch`/`buildContentCreatePatch`, but `PLAYER_VISIBLE`
+      instead of `DM_ONLY`.
+- [x] **Service** ([`sessions.ts`](../src/server/services/sessions.ts)):
+      `publishSessionRecap(userId, campaignId, sessionId, { title, recap })` —
+      DM-only, rejects a blank title/recap or an unknown session, files an
+      auto-approved DM `CREATE_ENTITY` change set for a `SYSTEM_MESSAGE`
+      (`PLAYER_VISIBLE`, `tags: ["recap"]`) via `buildBroadcastCreatePatch`.
+- [x] **Validation** ([`validation.ts`](../src/lib/validation.ts)):
+      `publishSessionRecapSchema` (`title` ≤200 chars, `recap` ≤4000 chars,
+      both required).
+- [x] **DM action** ([`(dm)/actions.ts`](<../src/app/(dm)/actions.ts>)):
+      `publishSessionRecapAction` — parses the form, calls the service,
+      revalidates the session page (unlike the read-only
+      `generateSessionRecapAction`, this one writes canon), returns the new
+      entity id so the panel can link to it.
+- [x] **UI** ([`session-recap-panel.tsx`](../src/components/sessions/session-recap-panel.tsx)):
+      a `PublishRecapForm` under the shown recap — a collapsed "Publish to
+      players" button expands to a headline field (prefilled
+      `Previously on Dungeon Crawler World: <session title>`, editable) with
+      the recap text carried as a hidden field; on success it swaps to a
+      static "Published to players · view message" link to the new entity's
+      World Browser detail page.
+- [x] **Tests:** DB-backed `publishSessionRecap` cases (creates a
+      CANON/`PLAYER_VISIBLE`/`source: DM` `SYSTEM_MESSAGE` with the given
+      title/recap and a `recap` tag; rejects a blank title, blank recap, an
+      unknown session, and a player caller) in
+      [`sessions.test.ts`](../tests/unit/sessions.test.ts); schema cases in
+      [`validation.test.ts`](../tests/unit/validation.test.ts); the action in
+      [`dm-actions.test.ts`](../tests/unit/dm-actions.test.ts) (publishes +
+      revalidates + returns the entity id, rejects invalid input without
+      calling the service, safe error + generic fallback); component coverage
+      in
+      [`session-recap-panel.test.tsx`](../tests/unit/session-recap-panel.test.tsx)
+      (collapsed affordance appears once a recap is shown, expands with the
+      recap carried as a hidden field, renders the confirmation link once the
+      action returns an entity id); updated
+      [`session-detail-page.test.tsx`](../tests/unit/session-detail-page.test.tsx)
+      for the new action mock.
+- [x] **Verification:** `npm run typecheck`, `npm run lint` (0 errors;
+      pre-existing settings-action warnings only), `npm run build` (routes
+      unchanged, no new route), and the full coverage gate green (159 files /
+      **2019 tests**; statements 95.42%, branches 88.77%, functions 96.52%,
+      lines 96.94%). **In-browser** (reseeded `dcc`, `dm@example.com`, a fresh
+      "Floor 9 Breach" session with one log entry): "Generate recap" hit the
+      same no-provider safe error slice 4 stopped at (no AI key configured in
+      this campaign), so the direct write path was verified instead —
+      calling `publishSessionRecap` for the session produced a
+      `CANON`/`PLAYER_VISIBLE`/`source: DM` `SYSTEM_MESSAGE` entity tagged
+      `recap`, confirmed both on its own World Browser detail page (visibility
+      toggle showing "player visible", `RECAP` tag, `DM` provenance origin)
+      and — scoped through a `player@example.com` membership added for the
+      check — in `getSystemMessageFeed`'s output, proving the publish path
+      lands somewhere a player's System-message feed actually reads from. No
+      console errors. The panel's own generate → publish click-through (title
+      prefill, hidden recap field, collapse-to-link) is covered by
+      `session-recap-panel.test.tsx`'s mocked-state tests, the same boundary
+      slice 4's AI-gated verification stopped at.
 
 ## M8 — Session recap generation (slice 4) ✅ (2026-08-13)
 
